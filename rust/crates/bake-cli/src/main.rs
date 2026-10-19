@@ -55,6 +55,16 @@ Usage:
                               Enable an installed package for new sessions
   bake-rs plugin disable <id> Disable a plugin, clearing a recorded failure
   bake-rs plugin list         List the enabled plugins and their state
+  bake-rs auth check --provider <name> [--model <id>] [--json]
+                              [--credentials] [--no-refresh]
+                              Report whether a provider is ready to send
+  bake-rs auth print-api-key --provider <name> [--model <id>]
+                              Print a provider's API key on standard output
+  bake-rs auth print-bearer-token --provider <name> [--model <id>]
+                              [--min-expiry <duration>]
+                              Print an OAuth bearer token; bake-rs has no
+                              OAuth provider, so this always fails
+  bake-rs auth                Show the auth commands' help
 
 Options:
   -p, --print               Send the prompts, print the final answer, and exit
@@ -148,6 +158,11 @@ directory up to its git repository root.
 The preview shows sample content only and does not connect to a model.
 Ctrl+C twice quits it.
 
+The auth commands read the Bake home's models.json, auth.json, and
+settings.json, reach no network, and write nothing. A key reaches standard
+output only from 'auth print-api-key' and 'auth check --credentials', whose
+purpose is to print it.
+
 Run 'bake-rs docs' for the documentation: the Bake home, settings, models,
 permissions, sessions, plugins, context files, skills, MCP servers, and the
 command line.
@@ -165,6 +180,8 @@ enum Command {
     PluginCheck(PathBuf, Option<plugin_check::Call>),
     /// `bake-rs plugin install | enable | disable | list`.
     PluginManage(plugin_manage::Manage),
+    /// `bake-rs auth <command>`: the arguments from `auth` on.
+    Auth(Vec<String>),
     Agent(Vec<String>),
 }
 
@@ -227,6 +244,7 @@ fn parse(args: &[OsString]) -> Result<Command, String> {
         ["plugin", "list", extra, ..] => {
             Err(format!("unexpected argument '{extra}' for 'plugin list'"))
         }
+        ["auth", ..] => Ok(Command::Auth(args)),
         _ => Ok(Command::Agent(args)),
     }
 }
@@ -271,6 +289,7 @@ fn main() -> ExitCode {
         Ok(Command::SelfCheck) => run_self_check(),
         Ok(Command::PluginCheck(dir, call)) => plugin_check::run(&dir, call.as_ref()),
         Ok(Command::PluginManage(command)) => plugin_manage::run(&command),
+        Ok(Command::Auth(args)) => run_auth(&args),
         // Without arguments, a terminal opens a session; a pipe gets help.
         Ok(Command::Agent(args))
             if args.is_empty() && !(io::stdin().is_terminal() && io::stdout().is_terminal()) =>
@@ -286,6 +305,29 @@ fn main() -> ExitCode {
             ExitCode::from(2)
         }
     }
+}
+
+/// `bake-rs auth <command>`: Pi's `runAuthCommand` over the Bake home,
+/// reading its files and reaching no network. The Bake 0.3 route is
+/// imported as a run imports it (D25), so a provider it contributes is
+/// checked too.
+fn run_auth(args: &[String]) -> ExitCode {
+    let stdout: SharedWriter = Arc::new(Mutex::new(io::stdout()));
+    let stderr: SharedWriter = Arc::new(Mutex::new(io::stderr()));
+    let home = bake_coding_agent::home::bake_home();
+    let imported = match &home {
+        Some(home) => cli::import_startup(home, &|name| std::env::var_os(name)),
+        None => cli::ImportedStartup::default(),
+    };
+    let code = cli::auth_command::run_auth_command(
+        args,
+        home.as_deref(),
+        imported.providers,
+        &stdout,
+        &stderr,
+    );
+    // `parse` sends only `auth` commands here.
+    exit_code(code.unwrap_or(1))
 }
 
 fn exit_code(code: i32) -> ExitCode {

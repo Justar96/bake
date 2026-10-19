@@ -65,6 +65,7 @@
 //! tools, and the missing-session-cwd prompt.
 
 pub mod args;
+pub mod auth_command;
 pub mod export;
 pub mod file_processor;
 pub mod list_models;

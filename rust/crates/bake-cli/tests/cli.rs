@@ -187,15 +187,28 @@ fn external_command_examples_do_not_hide_agent_flags() {
     );
 }
 
+/// The options of `bake-rs auth`, which parses its own command line
+/// ([`bake_coding_agent::cli::auth_command`]) rather than the agent's, so
+/// the agent's parser does not accept them. `--help` still names them.
+const AUTH_OPTIONS: &[&str] = &["--json", "--credentials", "--no-refresh", "--min-expiry"];
+
 #[test]
 fn flags_named_in_the_docs_are_accepted() {
     // Whole words, so `-c` does not pass inside `--continue`.
-    let help = documented_flags(&text(&run(&["--help"]).stdout));
+    let help_text = text(&run(&["--help"]).stdout);
+    let help = documented_flags(&help_text);
     let mut checked = 0;
     for topic in listed_topics() {
         let page = text(&run(&["docs", &topic]).stdout);
         for flag in documented_flags(&page) {
             checked += 1;
+            if AUTH_OPTIONS.contains(&flag.as_str()) {
+                assert!(
+                    help_text.contains(&flag),
+                    "{topic} names {flag}, which --help omits"
+                );
+                continue;
+            }
             assert!(
                 help.contains(&flag),
                 "{topic} names {flag}, which --help omits"
@@ -297,4 +310,103 @@ fn export_writes_one_page_and_exits() {
         text(&out.stderr),
         format!("Error: File not found: {}\n", missing.display())
     );
+}
+
+/// Pi's `runAuthCommand` branch of `main.ts`: the commands read the Bake
+/// home's files, print one line, and exit with Pi's status. The key is in
+/// the output of `print-api-key` and of `check --credentials`, whose
+/// purpose is to print it, and in nothing else.
+#[test]
+fn auth_commands_report_a_provider_and_print_its_key() {
+    let root = TempDir::new("auth");
+    let home = root.0.join("home");
+    std::fs::create_dir_all(&home).expect("home");
+    std::fs::write(
+        home.join("models.json"),
+        concat!(
+            r#"{"providers":{"faux":{"baseUrl":"https://example.invalid","api":"openai-completions","#,
+            r#""models":[{"id":"faux-1","contextWindow":1000}]},"#,
+            r#""keyless":{"baseUrl":"https://example.invalid","api":"openai-completions","#,
+            r#""models":[{"id":"keyless-1","contextWindow":1000}]}}}"#,
+        ),
+    )
+    .expect("models");
+    std::fs::write(
+        home.join("auth.json"),
+        r#"{"faux":{"type":"api_key","key":"sk-faux-stored"}}"#,
+    )
+    .expect("auth");
+    let auth = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_bake-rs"))
+            .args(args)
+            .env("BAKE_HOME", &home)
+            .env_remove("DSH_HOME")
+            .current_dir(&root.0)
+            .stdin(Stdio::null())
+            .output()
+            .expect("bake-rs runs")
+    };
+    let ready = auth(&["auth", "check", "--provider", "faux"]);
+    assert_eq!(ready.status.code(), Some(0));
+    assert_eq!(text(&ready.stdout), "ready\n");
+    assert!(!text(&ready.stdout).contains("sk-faux-stored"));
+
+    let json = auth(&["auth", "check", "--provider", "faux", "--json"]);
+    assert_eq!(json.status.code(), Some(0));
+    assert_eq!(
+        text(&json.stdout),
+        "{\"status\":\"ready\",\"provider\":\"faux\",\"authType\":\"api_key\"}\n"
+    );
+    assert!(!text(&json.stdout).contains("sk-faux-stored"));
+
+    let with_key = auth(&[
+        "auth",
+        "check",
+        "--provider",
+        "faux",
+        "--credentials",
+        "--no-refresh",
+    ]);
+    assert_eq!(with_key.status.code(), Some(0));
+    assert_eq!(text(&with_key.stdout), "sk-faux-stored\n");
+
+    let printed = auth(&["auth", "print-api-key", "--provider", "faux"]);
+    assert_eq!(printed.status.code(), Some(0));
+    assert_eq!(text(&printed.stdout), "sk-faux-stored\n");
+
+    // Pi's statuses: a provider with no key is 1, a bad argument to a check
+    // is 2, and a credential that cannot be printed is 1.
+    let not_ready = auth(&["auth", "check", "--provider", "keyless"]);
+    assert_eq!(not_ready.status.code(), Some(1));
+    assert_eq!(text(&not_ready.stdout), "not_ready\n");
+    let missing_argument = auth(&["auth", "check"]);
+    assert_eq!(missing_argument.status.code(), Some(2));
+    assert!(missing_argument.stdout.is_empty());
+    let unknown_flag = auth(&["auth", "check", "--provider", "faux", "--theme", "dark"]);
+    assert_eq!(unknown_flag.status.code(), Some(1));
+    let stderr = text(&unknown_flag.stderr);
+    assert!(
+        stderr.contains("Unknown option --theme for \"auth check\"."),
+        "{stderr}"
+    );
+    assert!(stderr.contains("bake-rs auth check --provider"), "{stderr}");
+
+    // No OAuth provider is ported, so there is no bearer token to print,
+    // and the key is not offered in its place.
+    let bearer = auth(&[
+        "auth",
+        "print-bearer-token",
+        "--provider",
+        "faux",
+        "--min-expiry",
+        "30m",
+    ]);
+    assert_eq!(bearer.status.code(), Some(1));
+    assert!(bearer.stdout.is_empty());
+    assert!(
+        text(&bearer.stderr).contains("not configured with an OAuth bearer token"),
+        "{}",
+        text(&bearer.stderr)
+    );
+    assert!(!text(&bearer.stderr).contains("sk-faux-stored"));
 }

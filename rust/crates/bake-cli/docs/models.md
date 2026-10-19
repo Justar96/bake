@@ -66,6 +66,20 @@ In an interactive session, `/login` signs in to a CLIProxyAPI proxy. It asks for
 - `/logout` sets the route to `null` and removes the key. A signed-out home no longer imports the route Bake 0.3 saved.
 - `--api-key` still comes first for requests and for `/refresh-models`.
 
+## Checking and printing credentials
+
+```sh
+bake-rs auth check --provider cliproxyapi          # ready, not_ready, or invalid
+bake-rs auth check --provider cliproxyapi --json   # the same as one JSON line
+bake-rs auth print-api-key --provider cliproxyapi  # the key, on standard output
+```
+
+- `bake-rs auth check` prints one word: `ready` when the provider exists and a key is configured for it, `not_ready` when the provider is missing or has no key, and `invalid` when `models.json` could not be composed. It exits 0, 1, and 2 to match. `--json` prints `{"status":…,"provider":…}` with `reason` or `authType` instead, and `--credentials` prints the key itself, or includes it as `credentials` in the JSON.
+- `bake-rs auth print-api-key` prints a provider's API key on standard output. With `--provider` it names the provider; with `--model` alone it searches the providers that have a key in `auth.json` for one whose model that names exactly. More than one match, or none, is an error naming `--provider`.
+- `bake-rs auth print-bearer-token` has no token to print: bake-rs has no OAuth provider, so it always fails with the reason. `--min-expiry <30m|1h|…>` is checked and then unused.
+- `--no-refresh` is accepted and changes nothing: nothing to refresh, and these commands never write. All three read `models.json`, `auth.json`, and `settings.json` only, reach no network, and accept no flag but `--provider` and `--model`; `--api-key` is refused. `bake-rs auth` prints their help.
+- A key is printed only by `print-api-key` and by `check --credentials`, whose purpose is to print it; no error message or status line carries one.
+
 ## The route Bake 0.3 saved
 
 While `settings.json` has no `cliproxyapi` member, a CLIProxyAPI route that Bake 0.3's login saved becomes the `cliproxyapi` provider with the models saved with it. Its key is `CLIPROXYAPI_API_KEY` when that environment variable is set and not empty, else the key in `.credentials.yaml`. Signing in replaces it; the 0.3 files are never changed. `bake-rs docs home` lists what else bake-rs imports.
