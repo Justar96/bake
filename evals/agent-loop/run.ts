@@ -41,7 +41,7 @@ import { createHash } from 'node:crypto'
 import YAML from 'yaml'
 import { reconcile } from './accounting.ts'
 import { compositionCheck, ROSTERS, systemPromptOf, type Roster } from './composition.ts'
-import { bakeCommand, bakeOverlay, mergeSettings, NATIVE_PERMISSIONS, nativeCommand, nativeSettings, nativeStaleWriter, parseArms, strayContextFiles, type Arm, type NativePermission } from './arms.ts'
+import { bakeCommand, bakeOverlay, mergeSettings, NATIVE_PERMISSIONS, nativeCommand, nativeSettings, nativeStaleWriter, parseArms, requestedTools, strayContextFiles, type Arm, type NativePermission } from './arms.ts'
 import {
   backgroundCompactions, backgroundStarts, compactions, contextMasking, editCheckSplits, excessRequests, jsonModeCompactions, nativeReadBatches, nativeSummaryUsage, nestedCalls, normalizeBake, normalizePi, orientationCalls, ranCheck,
   requestsOverFloor, routingDecisions, runawayAbort, shellEdits, skillLoads, verifiedBeforeFinal,
@@ -370,6 +370,8 @@ async function run(route: Route, scenario: string, trial: number, variant: strin
         index: wire.length, path: suffix, api, model: payload.model,
         requestBytes: Buffer.byteLength(body), systemChars: JSON.stringify(payload.system ?? payload.instructions ?? '').length,
         toolSchemaChars: JSON.stringify(payload.tools ?? []).length,
+        // The tools the first request offers, checked against what the arm asked for.
+        ...wire.length === 0 ? { toolNames: (Array.isArray(payload.tools) ? payload.tools : []).map((tool: any) => tool?.name ?? tool?.function?.name).filter((name: unknown) => typeof name === 'string') } : {},
         inputChars: JSON.stringify(payload.input ?? payload.messages ?? []).length,
         requestHash: hash(body), usage: [],
         // Non-secret routing headers, so a gateway that treats two agents differently shows why.
@@ -612,6 +614,10 @@ async function run(route: Route, scenario: string, trial: number, variant: strin
       contextMasking: nativeRoute === undefined ? null : contextMasking(events),
       nativeReadBatches: nativeRoute === undefined ? null : nativeReadBatches(events),
       nestedCalls: jsonMode ? nestedCalls(events) : null,
+      missingTools: (() => {
+        const requested = nativeConfig === null ? undefined : requestedTools(nativeConfig)
+        return requested === undefined || wire[0] === undefined ? null : requested.filter(name => !wire[0].toolNames.includes(name))
+      })(),
       runawayAbort: runawayAbort([
         stderr, final,
         ...events.filter(event => event.type === 'unparsed').map(event => event.text),
@@ -704,6 +710,8 @@ for (const route of routes) {
         pair.push(sample)
         // A Bake prompt that is not the shipped composition invalidates every sample after it; stop before spending more.
         if (sample.composition?.ok === false) throw new Error(`${sample.label}: the rendered system prompt is not the shipped composition (${JSON.stringify(sample.composition)}); partial results retained`)
+        // A binary built before a tool existed drops its name silently, which would measure every later sample without it.
+        if (sample.missingTools?.length > 0) throw new Error(`${sample.label}: the agent did not offer the model ${sample.missingTools.join(', ')}, which the arm's defaultTools names; is the binary older than the tool? Partial results retained`)
       }
       if (scenario === 'no_tools' && pair.every(sample => !sample.success && (sample.requests === 0 || sample.rawProviderUsage.some((request: any) => request.status !== 200)))) {
         const error = pair.flatMap(sample => sample.requestMetrics).find((request: any) => request.error !== undefined)?.error

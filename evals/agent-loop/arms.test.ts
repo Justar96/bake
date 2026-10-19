@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto'
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
-import { builtExecutable, mergeSettings, nativeCommand, nativeSessionMode, nativeSettings, nativeStaleWriter, parseArms, strayContextFiles } from './arms.ts'
+import { builtExecutable, mergeSettings, nativeCommand, nativeSessionMode, nativeSettings, nativeStaleWriter, parseArms, requestedTools, strayContextFiles } from './arms.ts'
 
 const root = mkdtempSync(join(tmpdir(), 'bake-eval-arms-'))
 afterAll(() => rmSync(root, { recursive: true, force: true }))
@@ -38,6 +38,17 @@ describe('native arms', () => {
     })
     expect(mergeSettings({ nested: { keep: 1, replace: [1, 2] } }, { nested: { replace: [3] } }))
       .toEqual({ nested: { keep: 1, replace: [3] } })
+  })
+
+  test('the tools a native arm asks for are its plain default tools, or codemode alone when it presents the rest', () => {
+    expect(requestedTools({})).toBeUndefined()
+    expect(requestedTools({ defaultTools: [] })).toBeUndefined()
+    expect(requestedTools({ defaultTools: ['+grep', '-write'] })).toBeUndefined()
+    expect(requestedTools({ defaultTools: ['read', '+grep'] })).toBeUndefined()
+    expect(requestedTools({ defaultTools: ['read', 'bash', 'read', 'codemode'] })).toEqual(['read', 'bash', 'codemode'])
+    expect(requestedTools({ defaultTools: ['read', 'codemode'], codemode: { mode: 'on' } })).toEqual(['read', 'codemode'])
+    expect(requestedTools({ defaultTools: ['read', 'codemode'], codemode: { mode: 'only' } })).toEqual(['codemode'])
+    expect(requestedTools({ defaultTools: ['read'], codemode: { mode: 'only' } })).toEqual(['read'])
   })
 
   test('native settings reject nonobjects and changes to evaluator-owned controls', () => {

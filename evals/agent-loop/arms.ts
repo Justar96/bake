@@ -207,6 +207,21 @@ export function nativeSettings(text: string, provider: string, model: string,
   return mergeSettings(extra, fixed)
 }
 
+/**
+ * The tools a native sample's settings ask the model to be offered: the plain
+ * names of `defaultTools`, or only `codemode` when `codemode.mode` is `only`,
+ * which presents the others through it. Undefined when `defaultTools` is unset
+ * or uses `+`/`-` modifiers on bake-rs's own defaults. bake-rs, as pi does,
+ * drops a name it does not register without a word, so a binary built before a
+ * tool existed would measure an arm without it.
+ */
+export function requestedTools(settings: Record<string, unknown>): string[] | undefined {
+  const entries = settings.defaultTools
+  if (!Array.isArray(entries) || entries.length === 0 || !entries.every(entry => typeof entry === 'string' && !/^[+-]/.test(entry))) return undefined
+  const codemode = plainObject(settings.codemode) ? settings.codemode : {}
+  return entries.includes('codemode') && codemode.mode === 'only' ? ['codemode'] : [...new Set(entries as string[])]
+}
+
 /** Cordis rows for one Bake sample, retaining the arm's whole-row configuration. */
 export function bakeOverlay(arm: Pick<Arm, 'composition' | 'extra'>, scenario: string,
   paths: { sessions: string; staleWriter: string }): unknown[] {
