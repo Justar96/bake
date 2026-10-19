@@ -621,11 +621,14 @@ fn record_start(records: &Records, call: &QueuedCall) -> usize {
 }
 
 /// Waits for one started nested call, recorded at `index`, and answers the
-/// script.
+/// script. A failed call is `cancelled` when its own `signal` or the
+/// script's aborted: on Esc the call also stops on the script's signal,
+/// and may settle before the script aborts its controller.
 async fn settle_nested_call(
     outcome: BoxFuture<'static, AgentToolCallOutcome>,
     call: StartedCall,
     signal: AbortSignal,
+    script_signal: Option<AbortSignal>,
     handle: RunHandle,
     records: Records,
 ) {
@@ -642,7 +645,9 @@ async fn settle_nested_call(
             record.id = outcome.tool_call.id.clone();
             record.duration_ms = Some(started.elapsed().as_secs_f64() * 1000.0);
             if outcome.is_error {
-                record.status = if signal.aborted() {
+                record.status = if signal.aborted()
+                    || script_signal.as_ref().is_some_and(AbortSignal::aborted)
+                {
                     CodemodeNestedCallStatus::Cancelled
                 } else {
                     CodemodeNestedCallStatus::Error
@@ -795,6 +800,7 @@ async fn run_script(
                     started,
                 },
                 controller.signal(),
+                signal.cloned(),
                 handle.clone(),
                 records.clone(),
             ));
@@ -820,6 +826,11 @@ async fn run_script(
             () = &mut cancelled, if !stopping => {
                 stopping = true;
                 run.abort_with(CODEMODE_ABORT_MESSAGE);
+                // Pi's `finish()`: every running call is cancelled with the
+                // script, not after it.
+                for controller in &controllers {
+                    controller.abort();
+                }
             }
             Some(_) = running.join_next(), if !running.is_empty() => {}
         }

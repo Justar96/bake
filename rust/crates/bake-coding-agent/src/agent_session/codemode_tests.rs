@@ -6,6 +6,7 @@
 //! and a resume, and a script cannot call `codemode` itself.
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use bake_agent::AgentToolResult;
@@ -1007,6 +1008,88 @@ async fn an_abort_mid_script_cancels_and_reaps_a_nested_bash() {
     let alive = process_exists(pid);
     assert!(!alive, "the nested bash {pid} survived the abort");
     assert!(!fx.ws().join("late").exists());
+}
+
+/// A tool that counts its starts and waits for its signal, then fails as
+/// aborted at once.
+fn waiting(started: &Arc<AtomicUsize>) -> AgentTool {
+    let started = Arc::clone(started);
+    AgentTool::new(
+        "wait",
+        "Wait",
+        "Wait until aborted",
+        json!({ "type": "object", "properties": {} }),
+        move |_id, _args, signal, _update, _ctx| {
+            let started = Arc::clone(&started);
+            Box::pin(async move {
+                started.fetch_add(1, Ordering::SeqCst);
+                if let Some(signal) = signal {
+                    signal.cancelled().await;
+                }
+                Err("Operation aborted".to_owned())
+            })
+        },
+    )
+}
+
+/// Runs the prompt, aborts it once `count` waiting calls have started, and
+/// returns the codemode result.
+async fn abort_after_starts(
+    session: Arc<AgentSession>,
+    started: &AtomicUsize,
+    count: usize,
+) -> bake_ai::ToolResultMessage {
+    let running = tokio::spawn({
+        let session = Arc::clone(&session);
+        async move { session.prompt("go", Vec::new()).await }
+    });
+    let deadline = std::time::Instant::now() + WAIT;
+    while started.load(Ordering::SeqCst) < count {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the calls never started"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    session.abort().await;
+    let _ = tokio::time::timeout(WAIT, running)
+        .await
+        .expect("prompt settles");
+    let result = codemode_result(&session);
+    session.shutdown().await;
+    result
+}
+
+/// Esc cancels every running nested call at once, so a call that ends on
+/// the abort before the script does is reported `cancelled`, not `error`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_abort_reports_running_nested_calls_cancelled() {
+    let fx = Fixture::new("codemode-abort-cancelled");
+    let started = Arc::new(AtomicUsize::new(0));
+    let session = Arc::new(
+        fx.session(vec![waiting(&started)], &["wait", "codemode"])
+            .await,
+    );
+    fx.script(
+        "await Promise.all([tools.wait({}), tools.wait({}), tools.wait({})]);",
+        "c1",
+    );
+    let result = abort_after_starts(session, &started, 3).await;
+    let text = result_text(&result);
+    assert!(
+        text.ends_with(
+            "Tool calls made before the failure (they are not undone): wait (cancelled), wait (cancelled), wait (cancelled)"
+        ),
+        "{text}"
+    );
+    assert_eq!(
+        calls(&result),
+        ["c1/1", "c1/2", "c1/3"].map(|id| (
+            id.to_owned(),
+            "wait".to_owned(),
+            "cancelled".to_owned()
+        ))
+    );
 }
 
 /// Whether process `pid` exists, through `kill -0`.
