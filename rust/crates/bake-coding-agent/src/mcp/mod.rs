@@ -69,7 +69,7 @@
 //! any other: each tool declares Pi's `CallToolResult` output schema
 //! (`tools::mcp_result_schema`), so a script receives the result as the
 //! server sent it, and its server is its namespace
-//! ([`McpServers::tool_namespace`]).
+//! (`McpServers::tool_namespace`).
 //!
 //! Not implemented: Streamable HTTP servers, OAuth, reconnecting a closed
 //! server (its tools are withdrawn instead), resources and their tools,

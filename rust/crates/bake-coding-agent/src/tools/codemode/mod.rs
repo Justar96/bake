@@ -145,7 +145,7 @@ pub trait CodemodeHost: Send + Sync {
     fn work(&self) -> Option<WorkGate>;
 }
 
-/// The status of a nested call in [`CodemodeToolDetails`].
+/// The status of a nested call in a result's details ([`codemode_details`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CodemodeNestedCallStatus {
     /// Still running.
