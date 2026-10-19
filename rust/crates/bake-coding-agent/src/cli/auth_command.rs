@@ -40,7 +40,7 @@ use crate::model_registry::resolver::{find_exact_model_reference_match, resolve_
 use crate::model_registry::{ModelRegistry, auth_path};
 use crate::print_mode::{SharedWriter, write_out};
 
-use super::args::{Args, DiagnosticKind, parse_args, unknown_flags_message};
+use super::args::{Args, DiagnosticKind, parse_args};
 
 /// Pi's default `--min-expiry` for a bearer token: 30 minutes.
 pub const DEFAULT_BEARER_TOKEN_MIN_EXPIRY_MS: u64 = 30 * 60_000;
@@ -363,18 +363,12 @@ pub fn resolve_credential_for_print(
     let mut providers: Vec<String> = Vec::new();
     match &cli_provider {
         Some(cli_provider) => {
-            let provider = registry
-                .models()
-                .into_iter()
-                .map(|model| model.provider)
-                .find(|id| id == cli_provider)
-                .filter(|id| registry.has_provider(id))
-                .or_else(|| registry.has_provider(cli_provider).then(|| cli_provider.clone()))
-                .ok_or_else(|| {
-                    format!(
-                        "Unknown provider \"{cli_provider}\". Use --list-models to see available providers."
-                    )
-                })?;
+            if !registry.has_provider(cli_provider) {
+                return Err(format!(
+                    "Unknown provider \"{cli_provider}\". Use --list-models to see available providers."
+                ));
+            }
+            let provider = cli_provider.clone();
             if let Some(cli_model) = &cli_model {
                 let resolved = resolve_cli_model(Some(&provider), Some(cli_model), None, registry);
                 if resolved.model.is_none() {
@@ -482,10 +476,9 @@ pub fn run_auth_command(
         Err(message) => return Some(fail(stderr, &message, 1)),
     };
     let parsed = parse_args(&command.args);
-    if let Some(message) = unknown_flags_message(&parsed.unknown_flags) {
-        // Pi names the command and its usage, not the general message.
-        let _ = message;
-        let (name, _) = parsed.unknown_flags.first()?;
+    // Pi names the command and its usage, not the agent's general
+    // unknown-option message.
+    if let Some((name, _)) = parsed.unknown_flags.first() {
         write_out(
             stderr,
             &format!(
