@@ -1192,7 +1192,7 @@ fn panic_message(payload: Box<dyn Any + Send>) -> String {
 }
 
 /// A future whose panic becomes an `Err` with the panic's message.
-struct CatchUnwind<'a, T>(BoxFuture<'a, T>);
+pub(crate) struct CatchUnwind<'a, T>(pub(crate) BoxFuture<'a, T>);
 
 impl<T> Future for CatchUnwind<'_, T> {
     type Output = Result<T, String>;

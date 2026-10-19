@@ -35,6 +35,8 @@
 //!   finalizes the caller's result; if the loop is dropped instead, the
 //!   tasks are ended at once. A nested call also stops when the caller's
 //!   signal aborts, and an aborted call ends before `before_tool_call`.
+//!   A panic in a call's pipeline, outside its tool (whose panic is its
+//!   error result), ends the call with an error naming the panic.
 //! - A call's own [`NestedToolCallOptions::signal`] adds to the caller's
 //!   signal instead of replacing it: Pi's call follows the calling tool's
 //!   signal only by default.
@@ -68,7 +70,7 @@ use tokio::sync::{OnceCell, mpsc, oneshot, watch};
 use tokio::task::JoinSet;
 
 use crate::agent_loop::{
-    ToolCallHooks, create_error_tool_result, elapsed_ms, find_tool, run_tool_call_in,
+    CatchUnwind, ToolCallHooks, create_error_tool_result, elapsed_ms, find_tool, run_tool_call_in,
 };
 use crate::types::{
     AfterToolCall, AgentContext, AgentEvent, AgentEventSink, AgentTool, AgentToolCallOutcome,
@@ -588,9 +590,22 @@ impl NestedToolExecutor {
             options,
             record,
         };
+        let panic_call = ToolCall {
+            id: id.clone(),
+            name: name.to_owned(),
+            ..ToolCall::default()
+        };
         bound.scope.spawn(runtime, async move {
             let _running = running;
-            let _ = sender.send(call.run().await);
+            // A panic in the pipeline itself (a tool's own panic is already
+            // its error result) reports the panic instead of an abort.
+            let outcome = match CatchUnwind(Box::pin(call.run())).await {
+                Ok(outcome) => outcome,
+                Err(message) => {
+                    immediate(panic_call, &format!("Nested tool call failed: {message}"))
+                }
+            };
+            let _ = sender.send(outcome);
         });
         // No outcome when the task was aborted before it settled.
         outcome.await.unwrap_or_else(|_| {

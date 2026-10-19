@@ -374,7 +374,9 @@ pub type PrepareArguments = Arc<dyn Fn(Value) -> Result<Value, String> + Send + 
 pub enum ToolReplay {
     /// Never replay.
     Never,
-    /// Safe to replay.
+    /// Safe to replay. A recovered run reruns the call with a detached
+    /// [`ToolContext`], whose executor refuses every nested call, so a
+    /// `Safe` tool must not use [`ToolContext::nested`].
     Safe,
 }
 

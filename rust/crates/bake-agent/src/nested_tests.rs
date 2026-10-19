@@ -733,3 +733,42 @@ async fn a_tool_not_nested_callable_is_neither_listed_nor_run() {
     assert_eq!(text(&outcome), "Tool script not found");
     assert_eq!(ran.load(Ordering::SeqCst), 0);
 }
+
+/// A panic in the nested pipeline itself, here the event sink, reports the
+/// panic as the call's error instead of an abort.
+#[tokio::test]
+async fn a_panicking_pipeline_reports_the_panic() {
+    let sink: AgentEventSink = Arc::new(|event| {
+        if matches!(event, AgentEvent::ToolExecutionStart { .. }) {
+            panic!("the sink broke");
+        }
+        Box::pin(async {})
+    });
+    let (requests, _) = mpsc::unbounded_channel();
+    let pipeline = NestedPipeline::new(
+        requests,
+        None,
+        None,
+        sink,
+        ToolExecutionMode::Parallel,
+        None,
+    );
+    let context = AgentContext {
+        messages: Vec::new(),
+        tools: vec![Arc::new(tool("echo", |_id, _update, _ctx| empty()))],
+    };
+    let _ = pipeline
+        .site
+        .set(CallSiteSnapshot::new(&context, &faux_assistant_message("")));
+    let runner = NestedToolCallRunner::new(pipeline);
+    let outcome = runner
+        .executor("call", None)
+        .execute("echo", json!({}), NestedToolCallOptions::default())
+        .await;
+    assert!(outcome.is_error);
+    assert_eq!(outcome.tool_call.id, "call/1");
+    assert_eq!(
+        text_of(&outcome.result),
+        "Nested tool call failed: the sink broke"
+    );
+}
