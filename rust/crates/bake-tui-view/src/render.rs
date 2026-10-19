@@ -853,7 +853,8 @@ fn approval_detail(app: &State, width: u16) -> Vec<String> {
 
 /// The approval panel for the displayed request, as the TypeScript
 /// `ApprovalView` orders it: what is asked (the tool and its exact call
-/// id, with the queue's length when others wait), its detail, scrolled to
+/// id, with the queue's length when others wait and the codemode call it
+/// came from when that fits), its detail, scrolled to
 /// [`State::approval_scroll`] with a row that says where while it does not
 /// all fit, then the keys. Records which request it showed whole: its
 /// title, at least one detail row, and its keys.
@@ -874,18 +875,24 @@ fn render_approval(app: &mut State, area: Rect, buf: &mut Buffer) {
         ),
         Span::styled(format!("  {}", clean(&approval.call_id)), dim()),
     ];
+    if app.approvals.len() > 1 {
+        head.push(Span::styled(format!("  1/{}", app.approvals.len()), dim()));
+    }
+    // The codemode call it came from comes last, and only whole: the
+    // call's own id already holds it, so it gives way to the queue count.
     if let Some(parent) = &approval.parent_call_id {
-        head.push(Span::styled(
+        let from = Span::styled(
             format!(
                 "  {} {}",
                 copy::APPROVAL_FROM_CODEMODE,
                 short_id(&clean(parent))
             ),
             dim(),
-        ));
-    }
-    if app.approvals.len() > 1 {
-        head.push(Span::styled(format!("  1/{}", app.approvals.len()), dim()));
+        );
+        let used: usize = head.iter().map(Span::width).sum();
+        if used + from.width() <= usize::from(area.width) {
+            head.push(from);
+        }
     }
     line(
         buf,
@@ -4276,6 +4283,32 @@ mod tests {
         assert!(
             screen.contains("call_abcdefghijklmnop/2  from codemode call_abcdef…"),
             "{screen}"
+        );
+        // With others queued at 80 columns, a provider's 30-character id
+        // keeps the queue count, and the label that no longer fits whole
+        // gives way.
+        let id = "toolu_01abcdefghijklmnopqrstuv";
+        assert_eq!(id.chars().count(), 30);
+        update(
+            &mut app,
+            Msg::Runtime(crate::runtime::RuntimeUpdate::Approvals(vec![
+                approval(id),
+                approval("call_2"),
+            ])),
+        );
+        let (rows, _) = draw(&mut app, 80, 24);
+        let head = &rows[row_index(&rows, "Approval required")];
+        assert!(
+            head.contains(&format!("Approval required: bash  {id}/2  1/2")),
+            "{head}"
+        );
+        assert!(!head.contains(copy::APPROVAL_FROM_CODEMODE), "{head}");
+        // Where the label fits, it follows the count.
+        let (rows, _) = draw(&mut app, 120, 24);
+        let head = &rows[row_index(&rows, "Approval required")];
+        assert!(
+            head.contains(&format!("{id}/2  1/2  from codemode toolu_01abc…")),
+            "{head}"
         );
     }
 
