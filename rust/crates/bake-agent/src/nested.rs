@@ -15,7 +15,8 @@
 //! (bounded by [`NESTED_CALL_LIMITS`]), and their usage is added to its
 //! `usage`.
 //!
-//! Nothing here runs until a tool calls [`NestedToolExecutor::execute`].
+//! Nothing here runs until a tool calls [`NestedToolExecutor::start`] or
+//! [`NestedToolExecutor::execute`].
 //!
 //! Differences from Pi:
 //!
@@ -230,7 +231,7 @@ impl NestedCallRecorder {
     }
 }
 
-/// Options of [`NestedToolExecutor::execute`], Pi's `ExecuteToolOptions`.
+/// Options of [`NestedToolExecutor::start`], Pi's `ExecuteToolOptions`.
 #[derive(Debug, Clone, Default)]
 pub struct NestedToolCallOptions {
     /// Cancels the nested call, besides the calling tool's signal, which
@@ -519,7 +520,7 @@ impl NestedToolExecutor {
         &self.caller_id
     }
 
-    /// The tools [`Self::execute`] can call, Pi's `ctx.tools`: the tools of
+    /// The tools [`Self::start`] can call, Pi's `ctx.tools`: the tools of
     /// the run, as the model-issued calls see them, whose
     /// [`AgentTool::nested_callable`] is set. Empty where no agent runs the
     /// caller.
@@ -534,40 +535,53 @@ impl NestedToolExecutor {
     }
 
     /// Runs the tool `name` with `args` on behalf of the caller, Pi's
-    /// `ctx.executeTool`. The call gets the id `<caller id>/<n>` and goes
-    /// through the agent's tool pipeline; its events carry
-    /// `parent_tool_call_id`, and its result is not added to the transcript.
-    ///
-    /// The call runs as a task of the caller's own, started on the first
-    /// poll; the returned future only waits for its outcome. Once the
-    /// caller settles, the call is aborted and the caller's result waits for
-    /// it, so a future still held then resolves to the aborted outcome.
-    ///
-    /// Never fails with `Err`: unknown tools, invalid arguments, blocked or
-    /// refused calls, and tool errors come back as `is_error` outcomes
-    /// carrying the error text.
+    /// `ctx.executeTool`: [`Self::start`] on the first poll.
     pub async fn execute(
         &self,
         name: &str,
         args: Value,
         options: NestedToolCallOptions,
     ) -> AgentToolCallOutcome {
+        self.start(name, args, options).await
+    }
+
+    /// Starts the tool `name` with `args` on behalf of the caller, Pi's
+    /// `ctx.executeTool`. The call gets the id `<caller id>/<n>` and goes
+    /// through the agent's tool pipeline; its events carry
+    /// `parent_tool_call_id`, and its result is not added to the transcript.
+    ///
+    /// The call gets its id and record and starts as a task of the caller's
+    /// own before this returns, so calls started one after another are
+    /// numbered and recorded in that order; the returned future only waits
+    /// for its outcome. Once the caller settles, the call is aborted and the
+    /// caller's result waits for it, so a future still held then resolves to
+    /// the aborted outcome.
+    ///
+    /// Never fails: unknown tools, invalid arguments, blocked or refused
+    /// calls, and tool errors come back as `is_error` outcomes carrying the
+    /// error text.
+    pub fn start(
+        &self,
+        name: &str,
+        args: Value,
+        options: NestedToolCallOptions,
+    ) -> BoxFuture<'static, AgentToolCallOutcome> {
+        let refused = |text: &str| -> BoxFuture<'static, AgentToolCallOutcome> {
+            Box::pin(std::future::ready(self.refused(name, text)))
+        };
         let Some(bound) = &self.bound else {
-            return self.refused(name, NESTED_CALLS_UNAVAILABLE);
+            return refused(NESTED_CALLS_UNAVAILABLE);
         };
         let Some(runtime) = &bound.runner.runtime else {
-            return self.refused(name, NESTED_CALLS_UNAVAILABLE);
+            return refused(NESTED_CALLS_UNAVAILABLE);
         };
         if bound.depth > MAX_NESTED_CALL_DEPTH {
-            return self.refused(
-                name,
-                &format!(
-                    "Nested tool calls are limited to {MAX_NESTED_CALL_DEPTH} levels below the model's tool call"
-                ),
-            );
+            return refused(&format!(
+                "Nested tool calls are limited to {MAX_NESTED_CALL_DEPTH} levels below the model's tool call"
+            ));
         }
         let Some(running) = bound.scope.enter() else {
-            return self.refused(name, NESTED_CALLER_FINISHED);
+            return refused(NESTED_CALLER_FINISHED);
         };
         let id = format!(
             "{}/{}",
@@ -607,16 +621,19 @@ impl NestedToolExecutor {
             };
             let _ = sender.send(outcome);
         });
-        // No outcome when the task was aborted before it settled.
-        outcome.await.unwrap_or_else(|_| {
-            immediate(
-                ToolCall {
-                    id,
-                    name: name.to_owned(),
-                    ..ToolCall::default()
-                },
-                NESTED_CALL_ABORTED,
-            )
+        let name = name.to_owned();
+        Box::pin(async move {
+            // No outcome when the task was aborted before it settled.
+            outcome.await.unwrap_or_else(|_| {
+                immediate(
+                    ToolCall {
+                        id,
+                        name,
+                        ..ToolCall::default()
+                    },
+                    NESTED_CALL_ABORTED,
+                )
+            })
         })
     }
 

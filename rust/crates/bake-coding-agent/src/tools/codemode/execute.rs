@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::Instant;
 
 use bake_agent::{
-    AgentTool, AgentToolCallOutcome, AgentToolResult, AgentToolUpdateCallback,
+    AgentTool, AgentToolCallOutcome, AgentToolResult, AgentToolUpdateCallback, BoxFuture,
     NestedToolCallOptions, NestedToolExecutor, ToolContext,
 };
 use bake_ai::{AbortController, AbortSignal, ImageContent, TextContent, UserContentBlock};
@@ -592,6 +592,15 @@ struct QueuedCall {
     args: Option<Value>,
 }
 
+/// A nested call that has started: what answering the script and
+/// recording it need.
+struct StartedCall {
+    id: u32,
+    index: usize,
+    tool: Arc<AgentTool>,
+    started: Instant,
+}
+
 /// Records a call as it starts, in the order calls start, and publishes
 /// the records; returns its place.
 fn record_start(records: &Records, call: &QueuedCall) -> usize {
@@ -611,27 +620,22 @@ fn record_start(records: &Records, call: &QueuedCall) -> usize {
     index
 }
 
-/// Runs one nested call, recorded at `index`, and answers the script.
-async fn run_nested_call(
-    nested: NestedToolExecutor,
-    call: QueuedCall,
-    index: usize,
+/// Waits for one started nested call, recorded at `index`, and answers the
+/// script.
+async fn settle_nested_call(
+    outcome: BoxFuture<'static, AgentToolCallOutcome>,
+    call: StartedCall,
     signal: AbortSignal,
     handle: RunHandle,
     records: Records,
 ) {
-    let QueuedCall { id, tool, args } = call;
-    let started = Instant::now();
-    let outcome = nested
-        .execute(
-            &tool.name,
-            args.unwrap_or(Value::Null),
-            NestedToolCallOptions {
-                signal: Some(signal.clone()),
-                on_update: None,
-            },
-        )
-        .await;
+    let StartedCall {
+        id,
+        index,
+        tool,
+        started,
+    } = call;
+    let outcome = outcome.await;
     {
         let mut calls = records.lock();
         if let Some(record) = calls.get_mut(index) {
@@ -770,10 +774,26 @@ async fn run_script(
             };
             let controller = AbortController::new();
             let index = record_start(records, &call);
-            running.spawn(run_nested_call(
-                nested.clone(),
-                call,
-                index,
+            let QueuedCall { id, tool, args } = call;
+            let started = Instant::now();
+            // Started here, not in the task, so nested ids follow the order
+            // the script made its calls.
+            let outcome = nested.start(
+                &tool.name,
+                args.unwrap_or(Value::Null),
+                NestedToolCallOptions {
+                    signal: Some(controller.signal()),
+                    on_update: None,
+                },
+            );
+            running.spawn(settle_nested_call(
+                outcome,
+                StartedCall {
+                    id,
+                    index,
+                    tool,
+                    started,
+                },
                 controller.signal(),
                 handle.clone(),
                 records.clone(),

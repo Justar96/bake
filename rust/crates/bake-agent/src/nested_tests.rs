@@ -193,6 +193,45 @@ async fn assigns_ids_below_the_caller_emits_events_with_the_parent_id_and_record
     assert_eq!(runner.executor("other", None).take_summary(), None);
 }
 
+/// `start` numbers and records a call before it returns, so calls started
+/// one after another keep that order even when the later one is awaited
+/// first and finishes first.
+#[tokio::test(start_paused = true)]
+async fn start_numbers_and_records_calls_in_the_order_they_start() {
+    let slow = tool("slow", |_id, _update, _ctx| {
+        Box::pin(async {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            Ok(AgentToolResult::text("slow"))
+        })
+    });
+    let fast = tool("fast", |_id, _update, _ctx| empty());
+    let (runner, _) = create_runner(vec![slow, fast], false);
+    let call = runner.executor("call", None);
+
+    let slow = call.start("slow", json!({}), NestedToolCallOptions::default());
+    let fast = call.start("fast", json!({}), NestedToolCallOptions::default());
+    let fast = fast.await;
+    let slow = slow.await;
+
+    assert_eq!(slow.tool_call.id, "call/1");
+    assert_eq!(fast.tool_call.id, "call/2");
+    let recorded: Vec<(String, String)> = call
+        .take_summary()
+        .and_then(|summary| summary.calls)
+        .expect("a record")
+        .calls
+        .into_iter()
+        .map(|record| (record.id, record.name))
+        .collect();
+    assert_eq!(
+        recorded,
+        [
+            ("call/1".to_owned(), "slow".to_owned()),
+            ("call/2".to_owned(), "fast".to_owned())
+        ]
+    );
+}
+
 #[tokio::test]
 async fn records_calls_of_nested_tools_on_the_model_issued_call() {
     let leaf = tool("leaf", |_id, _update, _ctx| empty());

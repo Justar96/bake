@@ -477,6 +477,60 @@ async fn runs_nested_calls_in_parallel_and_returns_only_the_script_result() {
     );
 }
 
+fn slow() -> AgentTool {
+    AgentTool::new(
+        "slow",
+        "Slow",
+        "Answer after a while",
+        json!({ "type": "object", "properties": {} }),
+        |_id, _args, _signal, _update, _ctx| {
+            Box::pin(async {
+                tokio::time::sleep(Duration::from_millis(200)).await;
+                Ok(AgentToolResult::text("slow"))
+            })
+        },
+    )
+}
+
+/// Nested ids, the result's `nested_calls`, and the details follow the
+/// order the script made its calls, although the later call finishes first.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn nested_calls_are_numbered_in_the_order_the_script_makes_them() {
+    let fx = Fixture::new("codemode-order");
+    let session = fx
+        .session(vec![slow(), echo()], &["slow", "echo", "codemode"])
+        .await;
+    fx.script(
+        "return await Promise.all([tools.slow({}), tools.echo({ text: \"fast\" })]);",
+        "c1",
+    );
+    prompt(&session).await;
+    let result = codemode_result(&session);
+    session.shutdown().await;
+    assert_eq!(result_text(&result), "[\"slow\",\"echo: fast\"]");
+    assert_eq!(
+        calls(&result),
+        [
+            ("c1/1".to_owned(), "slow".to_owned(), "ok".to_owned()),
+            ("c1/2".to_owned(), "echo".to_owned(), "ok".to_owned()),
+        ]
+    );
+    let recorded: Vec<(String, String)> = result
+        .nested_calls
+        .expect("nested calls")
+        .calls
+        .into_iter()
+        .map(|record| (record.id, record.name))
+        .collect();
+    assert_eq!(
+        recorded,
+        [
+            ("c1/1".to_owned(), "slow".to_owned()),
+            ("c1/2".to_owned(), "echo".to_owned()),
+        ]
+    );
+}
+
 /// Pi's "routes nested calls through extension hooks", with a plugin veto.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn routes_nested_calls_through_plugin_vetoes() {
