@@ -36,13 +36,16 @@ use bake_sandbox::SandboxMode;
 use crate::model_registry::resolver::parse_thinking_level;
 use crate::permissions::ApprovalPolicy;
 
-/// Pi's `--mode` values that `bake-rs` runs; `rpc` is not ported.
+/// Pi's `--mode` values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
     /// `text`
     Text,
     /// `json`
     Json,
+    /// `rpc`: Pi's JSONL protocol on standard input and output
+    /// ([`crate::rpc`]).
+    Rpc,
 }
 
 /// Pi's diagnostic kinds.
@@ -251,17 +254,18 @@ pub fn parse_args(args: &[String]) -> Args {
             "--mode" => match next {
                 None => result
                     .diagnostics
-                    .push(Diagnostic::error("--mode requires text or json")),
+                    .push(Diagnostic::error("--mode requires text, json, or rpc")),
                 Some(mode) if mode.starts_with('-') => result
                     .diagnostics
-                    .push(Diagnostic::error("--mode requires text or json")),
+                    .push(Diagnostic::error("--mode requires text, json, or rpc")),
                 Some(mode) => {
                     i += 1;
                     match mode {
                         "text" => result.mode = Some(Mode::Text),
                         "json" => result.mode = Some(Mode::Json),
+                        "rpc" => result.mode = Some(Mode::Rpc),
                         other => result.diagnostics.push(Diagnostic::error(format!(
-                            "Invalid mode \"{other}\". Valid values: text, json"
+                            "Invalid mode \"{other}\". Valid values: text, json, rpc"
                         ))),
                     }
                 }
@@ -515,14 +519,15 @@ mod tests {
     fn modes_and_their_errors() {
         assert_eq!(parse(&["--mode", "json"]).mode, Some(Mode::Json));
         assert_eq!(parse(&["--mode", "text"]).mode, Some(Mode::Text));
+        assert_eq!(parse(&["--mode", "rpc"]).mode, Some(Mode::Rpc));
         assert_eq!(
             parse(&["--mode"]).diagnostics,
-            [Diagnostic::error("--mode requires text or json")]
+            [Diagnostic::error("--mode requires text, json, or rpc")]
         );
         assert_eq!(
-            parse(&["--mode", "rpc"]).diagnostics,
+            parse(&["--mode", "acp"]).diagnostics,
             [Diagnostic::error(
-                "Invalid mode \"rpc\". Valid values: text, json"
+                "Invalid mode \"acp\". Valid values: text, json, rpc"
             )]
         );
     }
@@ -871,7 +876,7 @@ mod tests {
             assert_eq!(
                 args.diagnostics,
                 [Diagnostic::error(format!(
-                    "Invalid mode \"{mode}\". Valid values: text, json"
+                    "Invalid mode \"{mode}\". Valid values: text, json, rpc"
                 ))]
             );
         }
@@ -881,13 +886,13 @@ mod tests {
         assert!(args.unknown_flags.is_empty());
         assert_eq!(
             args.diagnostics,
-            [Diagnostic::error("--mode requires text or json")]
+            [Diagnostic::error("--mode requires text, json, or rpc")]
         );
         // The later value decides, and its error is reported.
         assert_eq!(
             parse(&["--mode", "json", "--mode", "yaml"]).diagnostics,
             [Diagnostic::error(
-                "Invalid mode \"yaml\". Valid values: text, json"
+                "Invalid mode \"yaml\". Valid values: text, json, rpc"
             )]
         );
     }

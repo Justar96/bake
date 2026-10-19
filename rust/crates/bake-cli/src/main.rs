@@ -70,7 +70,8 @@ Options:
   -p, --print               Send the prompts, print the final answer, and exit
       --inline              Keep an interactive session in the terminal's
                             scrollback instead of the full screen
-      --mode <mode>         Output: text (the final answer) or json (every event)
+      --mode <mode>         Output: text (the final answer), json (every event),
+                            or rpc (Pi's JSONL protocol on stdin and stdout)
       --max-model-calls <n> Print-mode request limit shared by all prompts,
                             retries, and summaries; 0 starts no model request
       --run-timeout-ms <n>  Print-mode deadline, starting before the first prompt
@@ -163,9 +164,14 @@ settings.json, reach no network, and write nothing. A key reaches standard
 output only from 'auth print-api-key' and 'auth check --credentials', whose
 purpose is to print it.
 
+With --mode rpc, bake-rs serves Pi's JSONL protocol instead of printing: it
+takes commands on standard input and writes responses, the json mode's events,
+and approval questions on standard output, until that input ends. Message and
+@file arguments are not prompts there; see 'bake-rs docs rpc'.
+
 Run 'bake-rs docs' for the documentation: the Bake home, settings, models,
-permissions, sessions, plugins, context files, skills, MCP servers, and the
-command line.
+permissions, sessions, plugins, context files, skills, MCP servers, the RPC
+protocol, and the command line.
 ";
 
 #[derive(Debug, PartialEq, Eq)]
@@ -450,11 +456,21 @@ fn interrupt() -> Interrupt {
     cli::no_interrupt()
 }
 
+/// What [`agent`] runs once the command line is planned.
+enum Run {
+    /// Print mode, in `text` or `json`.
+    Print(Box<cli::Args>, cli::Mode),
+    /// RPC mode: Pi's JSONL protocol on standard input and output.
+    Rpc(Box<cli::Args>),
+    /// An interactive session in this terminal.
+    Interactive(Box<cli::Args>),
+}
+
 fn agent(args: &[String]) -> ExitCode {
     let stderr: SharedWriter = Arc::new(Mutex::new(io::stderr()));
     let stdin_is_terminal = io::stdin().is_terminal();
     let action = cli::plan(args, stdin_is_terminal, io::stdout().is_terminal(), &stderr);
-    let (parsed, mode) = match action {
+    let run = match action {
         Action::Help => return print(HELP),
         Action::Version => return print(&format!("bake-rs {VERSION}\n")),
         Action::Export(input, output) => {
@@ -462,8 +478,9 @@ fn agent(args: &[String]) -> ExitCode {
             return exit_code(cli::run_export(&input, output.as_deref(), &stdout, &stderr));
         }
         Action::Exit(code) => return exit_code(code),
-        Action::Print(parsed, mode) => (parsed, Some(mode)),
-        Action::Interactive(parsed) => (parsed, None),
+        Action::Print(parsed, mode) => Run::Print(parsed, mode),
+        Action::Rpc(parsed) => Run::Rpc(parsed),
+        Action::Interactive(parsed) => Run::Interactive(parsed),
     };
     let runtime = match tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -475,8 +492,8 @@ fn agent(args: &[String]) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let code = match mode {
-        Some(mode) => runtime.block_on(async move {
+    let code = match run {
+        Run::Print(parsed, mode) => runtime.block_on(async move {
             let output = match print_output::Output::start() {
                 Ok(output) => output,
                 Err(error) => {
@@ -501,7 +518,39 @@ fn agent(args: &[String]) -> ExitCode {
             // interrupt wins cli::run's select; the observed signal owns status.
             signals.finish().unwrap_or(code)
         }),
-        None => interactive(&runtime, *parsed, stderr),
+        Run::Rpc(parsed) => runtime.block_on(async move {
+            let output = match print_output::Output::start() {
+                Ok(output) => output,
+                Err(error) => {
+                    eprintln!("Error: could not start RPC output: {error}");
+                    return 1;
+                }
+            };
+            let (signals, interrupt) = match print_output::Signals::start(&output, interrupt) {
+                Ok(signals) => signals,
+                Err(error) => {
+                    eprintln!("Error: could not listen for stop requests: {error}");
+                    return 1;
+                }
+            };
+            // The client answers the session's approval requests (D24)
+            // over the protocol, as the terminal answers them interactively.
+            let approvals = ApprovalBroker::new();
+            let mut environment = environment(
+                stdin_is_terminal,
+                output.stderr(),
+                interrupt,
+                Some(approvals.clone()),
+            );
+            environment.stdout = output.stdout();
+            let mut code = cli::run_rpc(environment, *parsed, Some(approvals)).await;
+            if output.finish().await.is_err() {
+                code = 1;
+            }
+            // As in print mode, the observed signal owns the status.
+            signals.finish().unwrap_or(code)
+        }),
+        Run::Interactive(parsed) => interactive(&runtime, *parsed, stderr),
     };
     // A blocked standard-input read cannot be cancelled; do not wait for it.
     runtime.shutdown_timeout(std::time::Duration::from_secs(1));

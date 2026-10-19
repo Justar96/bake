@@ -73,6 +73,11 @@ pub const TOPICS: &[Topic] = &[
         text: include_str!("../docs/codemode.md"),
     },
     Topic {
+        name: "rpc",
+        summary: "--mode rpc: the JSONL protocol, its commands, and approvals",
+        text: include_str!("../docs/rpc.md"),
+    },
+    Topic {
         name: "hooks",
         summary: "Claude Code and Codex hooks.json command hooks",
         text: include_str!("../docs/hooks.md"),

@@ -61,8 +61,12 @@
 //! ([`Started::resume`]), where Pi opens its own before the session is
 //! made; print mode, which has no terminal for it, refuses the flag.
 //!
-//! Not ported (deferred): RPC mode, theme and extension flags, extension
-//! tools, and the missing-session-cwd prompt.
+//! RPC mode ([`crate::rpc`]) takes the same setup through [`start_rpc`],
+//! which reads no piped standard input: there the stream carries the
+//! protocol. [`run_rpc`] runs its loop.
+//!
+//! Not ported (deferred): theme and extension flags, extension tools, and
+//! the missing-session-cwd prompt.
 
 pub mod args;
 pub mod auth_command;
@@ -266,6 +270,10 @@ pub enum Action {
     Export(String, Option<String>),
     /// Run print mode.
     Print(Box<Args>, Mode),
+    /// Run RPC mode (`--mode rpc`): Pi's JSONL protocol on standard input
+    /// and output, whether or not the streams are terminals
+    /// ([`crate::rpc`]).
+    Rpc(Box<Args>),
     /// Run interactive mode: both standard streams are terminals and
     /// neither `--print` nor `--mode` was given.
     Interactive(Box<Args>),
@@ -342,6 +350,12 @@ pub fn plan(
     {
         return Action::Exit(error(stderr, "--name requires a non-empty value"));
     }
+    if parsed.mode == Some(Mode::Rpc) {
+        if let Some(message) = validate_rpc_flags(&parsed) {
+            return Action::Exit(error(stderr, &message));
+        }
+        return Action::Rpc(Box::new(parsed));
+    }
     let mode = match parsed.mode {
         Some(mode) => mode,
         None if parsed.print
@@ -377,6 +391,37 @@ pub fn plan(
         ));
     }
     Action::Print(Box::new(parsed), mode)
+}
+
+/// The flags RPC mode cannot serve: the print-mode run limits, which it
+/// takes no prompt to spend, and Pi's refusal of `@file` arguments, since
+/// standard input carries the protocol rather than a prompt.
+fn validate_rpc_flags(args: &Args) -> Option<String> {
+    if resumes_at_startup(args) {
+        return Some(
+            "--resume opens the session picker, which RPC mode has no terminal for; use --session or --continue"
+                .to_owned(),
+        );
+    }
+    if !args.file_args.is_empty() {
+        return Some("@file arguments are not supported in RPC mode".into());
+    }
+    if args.recoverable || args.resume_run.is_some() {
+        return Some(
+            "--recoverable and --resume-run require print mode (--print or --mode text or json)"
+                .into(),
+        );
+    }
+    if args.max_model_calls.is_some() || args.run_timeout_ms.is_some() {
+        return Some(
+            "--max-model-calls and --run-timeout-ms require print mode (--print or --mode text or json)"
+                .into(),
+        );
+    }
+    if args.list_models.is_some() {
+        return Some("--list-models cannot be combined with --mode rpc".into());
+    }
+    None
 }
 
 fn validate_run_recovery_flags(args: &Args) -> Option<String> {
@@ -731,6 +776,9 @@ pub struct Started {
     pub initial_images: Vec<bake_ai::ImageContent>,
     /// The later messages, each its own prompt.
     pub messages: Vec<String>,
+    /// Standard input, unread: RPC mode's protocol stream. `None` in print
+    /// and interactive mode, which read piped input as the first prompt.
+    pub stdin: Option<Box<dyn Read + Send>>,
     /// Standard output.
     pub stdout: SharedWriter,
     /// Standard error.
@@ -769,6 +817,7 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
         initial_message,
         initial_images,
         messages,
+        stdin: _,
         stdout,
         stderr,
         mut interrupt,
@@ -813,8 +862,9 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
         }),
         recovery,
         mode: match mode {
-            Mode::Text => PrintOutput::Text,
             Mode::Json => PrintOutput::Json,
+            // [`plan`] sends `--mode rpc` to [`run_rpc`], never here.
+            Mode::Text | Mode::Rpc => PrintOutput::Text,
         },
         initial_message,
         initial_images,
@@ -894,6 +944,57 @@ pub fn run_export(
     }
 }
 
+/// Runs `bake-rs` RPC mode (`--mode rpc`); returns the exit status. The
+/// session is set up as print mode sets it up ([`start_rpc`]), its MCP
+/// servers connect in the background, as in Pi, and then
+/// [`crate::rpc::run_rpc_mode`] serves the protocol on the environment's
+/// standard input and output until that input ends or a stop request
+/// arrives. `approvals` is the queue the client answers (D24); without one
+/// every escalation fails closed. Must run inside a multi-threaded Tokio
+/// runtime.
+pub async fn run_rpc(
+    environment: CliEnvironment,
+    args: Args,
+    approvals: Option<crate::permissions::ApprovalBroker>,
+) -> i32 {
+    let started = match start_rpc(environment, args).await {
+        Ok(started) => started,
+        Err(code) => return code,
+    };
+    let Started {
+        session,
+        initial_message: _,
+        initial_images: _,
+        // Pi's RPC mode ignores the message arguments too: prompts arrive
+        // as `prompt` commands.
+        messages: _,
+        stdin,
+        stdout,
+        stderr,
+        interrupt,
+        home: _,
+        factory,
+        // `plan` refuses `--resume` in RPC mode.
+        resume: _,
+    } = started;
+    let Some(stdin) = stdin else {
+        session.shutdown().await;
+        return error(&stderr, "RPC mode needs standard input");
+    };
+    crate::rpc::run_rpc_mode(
+        session,
+        crate::rpc::RpcModeOptions {
+            stdin,
+            stdout,
+            stderr,
+            approvals,
+            factory: Some(factory),
+            interrupt,
+        },
+    )
+    .await
+}
+
 /// Sets the session up from the command line as Pi's `main` does before
 /// it picks a mode: settings, models, the session file and its permission,
 /// context files, skills, prompt templates, tools, the system prompt, and
@@ -904,7 +1005,7 @@ pub fn run_export(
 ///
 /// Without a model, print mode stops here with Pi's no-models message.
 pub async fn start(environment: CliEnvironment, args: Args) -> Result<Started, i32> {
-    start_with(environment, args, false).await
+    start_with(environment, args, StartKind::Print).await
 }
 
 /// [`start`] for interactive mode, which, as Pi's `main` does, starts
@@ -912,7 +1013,26 @@ pub async fn start(environment: CliEnvironment, args: Args) -> Result<Started, i
 /// from the session; a prompt is then refused with Pi's message. Invalid
 /// flags and an explicit `--model` that matches nothing still fail.
 pub async fn start_interactive(environment: CliEnvironment, args: Args) -> Result<Started, i32> {
-    start_with(environment, args, true).await
+    start_with(environment, args, StartKind::Interactive).await
+}
+
+/// [`start`] for RPC mode, which, as Pi's `main` does, reads no piped
+/// standard input: that stream carries the protocol, not a prompt. As in
+/// print mode, a session without a usable model fails the startup.
+pub async fn start_rpc(environment: CliEnvironment, args: Args) -> Result<Started, i32> {
+    start_with(environment, args, StartKind::Rpc).await
+}
+
+/// Which mode a session is being set up for: what it does without a model,
+/// and whether piped standard input is a prompt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StartKind {
+    /// Print mode: piped input is the first prompt, and no model fails.
+    Print,
+    /// Interactive mode: no model still opens the session.
+    Interactive,
+    /// RPC mode: standard input is the protocol, and no model fails.
+    Rpc,
 }
 
 /// What a session's setup reads besides its session file and model
@@ -1891,7 +2011,7 @@ fn open_listed(path: &Path, id: &str, place: &Path, cwd: &str) -> Result<Session
 async fn start_with(
     environment: CliEnvironment,
     args: Args,
-    allow_no_model: bool,
+    kind: StartKind,
 ) -> Result<Started, i32> {
     let CliEnvironment {
         cwd,
@@ -2149,7 +2269,13 @@ async fn start_with(
     // read fails or a stop request (print mode's SIGTERM or SIGHUP) comes
     // while a writer holds the pipe open. The read itself cannot be
     // cancelled; the binary does not wait for it at exit.
-    let piped = if stdin_is_terminal {
+    // In RPC mode the stream carries the protocol, as in Pi; nothing
+    // reads it here.
+    let mut protocol_stdin = None;
+    let piped = if stdin_is_terminal || kind == StartKind::Rpc {
+        if kind == StartKind::Rpc {
+            protocol_stdin = Some(stdin);
+        }
         Ok(None)
     } else {
         let read = tokio::task::spawn_blocking(move || read_piped_stdin(stdin));
@@ -2170,7 +2296,7 @@ async fn start_with(
     };
     let initial_message = build_initial_message(piped, &processed_files.text, &mut args.messages);
 
-    if session.model().is_none() && !allow_no_model {
+    if session.model().is_none() && kind != StartKind::Interactive {
         session.shutdown().await;
         write_out(
             &stderr,
@@ -2184,6 +2310,7 @@ async fn start_with(
         initial_message,
         initial_images: processed_files.images,
         messages: args.messages,
+        stdin: protocol_stdin,
         stdout,
         stderr,
         interrupt,

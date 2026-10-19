@@ -63,11 +63,11 @@ fn unknown_options_fail_as_pi_reports_them() {
     let out = run(&["-x", "hi"]);
     assert_eq!(out.status.code(), Some(1));
     assert_eq!(text(&out.stderr), "Error: Unknown option: -x\n");
-    let out = run(&["--mode", "rpc"]);
+    let out = run(&["--mode", "acp"]);
     assert_eq!(out.status.code(), Some(1));
     assert_eq!(
         text(&out.stderr),
-        "Error: Invalid mode \"rpc\". Valid values: text, json\n"
+        "Error: Invalid mode \"acp\". Valid values: text, json, rpc\n"
     );
 }
 
