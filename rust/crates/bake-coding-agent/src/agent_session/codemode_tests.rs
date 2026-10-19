@@ -423,6 +423,49 @@ async fn presents_callable_tools_per_codemode_mode() {
     }
 }
 
+/// With `on`, the request declares each tool with a `Codemode:` paragraph,
+/// but scripts see the tool's own description in `ALL_TOOLS`,
+/// `describeTool()`, and `searchTools()`, as Pi's `ctx.tools` does.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn scripts_see_each_tools_own_description_in_on_mode() {
+    let fx = Fixture::new("codemode-own-description");
+    let session = fx
+        .session_with(
+            vec![Arc::new(echo())],
+            Vec::new(),
+            &["echo", "codemode"],
+            Settings {
+                codemode_mode: CodemodeMode::On,
+                ..Settings::default()
+            },
+        )
+        .await;
+    fx.script(
+        "return [await describeTool(\"echo\"), ALL_TOOLS.find((tool) => tool.name === \"echo\").description, (await searchTools(\"echo\"))[0].description];",
+        "c1",
+    );
+    prompt(&session).await;
+    let result = codemode_result(&session);
+    let requests = fx.requests.lock().unwrap().clone();
+    session.shutdown().await;
+    let declared_echo = declared(&requests[0])
+        .into_iter()
+        .find(|tool| tool.name == "echo")
+        .expect("echo")
+        .description;
+    assert!(declared_echo.contains("Codemode:"), "{declared_echo}");
+    let seen: Vec<String> = serde_json::from_str(&result_text(&result)).expect("strings");
+    assert_eq!(seen.len(), 3);
+    for description in &seen {
+        assert!(
+            description
+                .starts_with("Echo text back.\n\nSecond paragraph.\n\ncodemode tool declaration:"),
+            "{description}"
+        );
+        assert!(!description.contains("Codemode:"), "{description}");
+    }
+}
+
 /// Pi's "runs nested calls in parallel and returns only the script result".
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn runs_nested_calls_in_parallel_and_returns_only_the_script_result() {

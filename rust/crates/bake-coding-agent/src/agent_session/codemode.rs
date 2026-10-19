@@ -30,6 +30,10 @@ pub(super) struct SessionCodemodeHost {
     pub(super) core: Arc<Core>,
     pub(super) guidelines: Arc<HashMap<String, Vec<String>>>,
     pub(super) mcp: Arc<OnceLock<McpServers>>,
+    /// The tools' own descriptions that the last request's loadout
+    /// replaced, by tool name: scripts see these, as Pi's `ctx.tools` keeps
+    /// the registry's descriptions.
+    pub(super) own_descriptions: Mutex<HashMap<String, String>>,
 }
 
 impl CodemodeHost for SessionCodemodeHost {
@@ -39,6 +43,14 @@ impl CodemodeHost for SessionCodemodeHost {
 
     fn tool_guidelines(&self, name: &str) -> Vec<String> {
         self.guidelines.get(name).cloned().unwrap_or_default()
+    }
+
+    fn tool_description(&self, name: &str) -> Option<String> {
+        self.own_descriptions
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(name)
+            .cloned()
     }
 
     fn load_store(&self) -> BoxFuture<'static, Result<StoreValues, String>> {
@@ -77,12 +89,18 @@ impl CodemodeHost for SessionCodemodeHost {
 /// The tools of one request with the active `codemode` tool's loadout
 /// applied: Pi's `_applyToolLoadout`. Without an active `codemode` tool the
 /// tools are returned unchanged and nothing is hidden, so requests are what
-/// they would be without code mode.
+/// they would be without code mode. The host keeps the descriptions the
+/// loadout replaces for the request's scripts.
 pub(super) fn apply_codemode_loadout(
     tools: Vec<Arc<AgentTool>>,
     settings: &Settings,
     host: &SessionCodemodeHost,
 ) -> (Vec<Arc<AgentTool>>, Vec<String>) {
+    let mut own_descriptions = host
+        .own_descriptions
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    own_descriptions.clear();
     if !tools.iter().any(|tool| tool.name == CODEMODE_TOOL_NAME) {
         return (tools, Vec::new());
     }
@@ -106,6 +124,7 @@ pub(super) fn apply_codemode_loadout(
                 .find(|(name, _)| name == &tool.name)
             {
                 Some((_, description)) if description != &tool.description => {
+                    own_descriptions.insert(tool.name.clone(), tool.description.clone());
                     let mut described = (*tool).clone();
                     described.description = description.clone();
                     Arc::new(described)

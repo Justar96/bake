@@ -1602,6 +1602,7 @@ impl AgentSession {
             core: Arc::clone(&core),
             guidelines: tool_guidelines,
             mcp: Arc::clone(&mcp),
+            own_descriptions: Mutex::default(),
         });
         if own_codemode {
             tools.push(Arc::new(crate::tools::codemode::create_codemode_tool(

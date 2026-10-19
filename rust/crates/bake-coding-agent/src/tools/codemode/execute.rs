@@ -907,11 +907,26 @@ pub(super) async fn execute_with(
     records.publish();
 
     let nested = ctx.nested().clone();
+    // Scripts see each tool's own description, not the one the request
+    // declares.
     let tools: Vec<Arc<AgentTool>> = nested
         .tools()
         .await
         .into_iter()
         .filter(|tool| tool.name != CODEMODE_TOOL_NAME)
+        .map(|tool| {
+            match host
+                .as_ref()
+                .and_then(|host| host.tool_description(&tool.name))
+            {
+                Some(description) => {
+                    let mut own = (*tool).clone();
+                    own.description = description;
+                    Arc::new(own)
+                }
+                None => tool,
+            }
+        })
         .collect();
     let samples = tools
         .iter()

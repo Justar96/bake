@@ -137,6 +137,11 @@ pub trait CodemodeHost: Send + Sync {
     fn tool_namespace(&self, name: &str) -> Option<CodemodeNamespace>;
     /// A tool's prompt guidelines, shown with its declaration.
     fn tool_guidelines(&self, name: &str) -> Vec<String>;
+    /// A tool's own description when the request declares it with another,
+    /// such as the `Codemode:` paragraph [`CodemodeMode::On`] adds; `None`
+    /// when the declared description is its own. Scripts see this one in
+    /// `ALL_TOOLS`, `describeTool()`, and `searchTools()`.
+    fn tool_description(&self, name: &str) -> Option<String>;
     /// What `load()` reads: the `codemode-store` entries on the session's
     /// current branch ([`read_codemode_store`]).
     fn load_store(&self) -> BoxFuture<'static, Result<StoreValues, String>>;

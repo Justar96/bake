@@ -681,6 +681,10 @@ impl CodemodeHost for UnwritableStore {
         Vec::new()
     }
 
+    fn tool_description(&self, _name: &str) -> Option<String> {
+        None
+    }
+
     fn load_store(&self) -> BoxFuture<'static, Result<bake_codemode::StoreValues, String>> {
         Box::pin(async { Ok(bake_codemode::StoreValues::new()) })
     }
