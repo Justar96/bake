@@ -57,6 +57,8 @@ A session starts with `read`, `bash`, `edit`, `write`, the background-job tools 
 
 For example, `bake-rs -t +grep,+find -p "..."` adds `grep` and `find` to the defaults.
 
+`codemode`, which runs a model-written JavaScript script that calls the other tools, is available but not in the default set: `-t +codemode` turns it on (`bake-rs docs codemode`).
+
 ## Web tools
 
 `web_fetch` retrieves one public HTTP(S) URL anonymously, without cookies or credentials, and returns it as text, with HTML converted to Markdown. It refuses URLs with credentials and any destination that is not a public address, such as `localhost`, private networks, link-local and cloud metadata addresses, checking every address a name resolves to and connecting only to those it checked. It follows at most five redirects, all on the same origin; a redirect to another origin is reported for a new call. A fetch reads at most 5,000,000 bytes and 100,000 characters, stops after 30 seconds, and returns at most 200,000 characters. It reaches the network directly, not through a proxy.

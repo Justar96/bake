@@ -40,6 +40,9 @@ const RUN_TIMEOUT: Duration = Duration::from_secs(60);
 #[path = "print_mode/background_accounting.rs"]
 mod background_accounting;
 
+#[path = "print_mode/codemode.rs"]
+mod codemode;
+
 #[path = "print_mode/schedules.rs"]
 mod schedules;
 

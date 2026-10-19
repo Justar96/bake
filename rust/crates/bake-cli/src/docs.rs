@@ -68,6 +68,11 @@ pub const TOPICS: &[Topic] = &[
         text: include_str!("../docs/mcp.md"),
     },
     Topic {
+        name: "codemode",
+        summary: "The codemode tool: scripts that call the other tools",
+        text: include_str!("../docs/codemode.md"),
+    },
+    Topic {
         name: "hooks",
         summary: "Claude Code and Codex hooks.json command hooks",
         text: include_str!("../docs/hooks.md"),

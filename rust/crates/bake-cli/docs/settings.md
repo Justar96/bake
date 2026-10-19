@@ -18,6 +18,7 @@ bake-rs reads its settings from `settings.json` in the Bake home, a JSON object 
 | `taskDocuments` | When `true`, enables the versioned `task_document` tool for plans, todos, and user-requested goals; default `false` |
 | `subagents` | When `true`, gives a top-level session the subagent tools: `subagent`, `send_message`, `interrupt_agent`, `list_agents`, and `list_subagent_models` when more than one model is available; default `false` |
 | `schedules` | When `true`, gives a top-level session the reminder tools `schedule_create`, `schedule_list`, and `schedule_delete`; default `false` |
+| `codemode` | `mode`: how the other tools are presented while the `codemode` tool is active, `on` (default) or `only`; `inlineBudget`: the estimated tokens its description's tool declarations may take, 3000 when unset (`bake-rs docs codemode`) |
 | `maxToolArgumentWhitespace` | The most whitespace a streamed tool call's arguments may end with, outside string values, before bake-rs abandons the response as a retryable error; a positive integer, 2000 when unset |
 | `sessionDir` | One directory to keep every project's sessions in, in place of `sessions/` in the Bake home; continuing and listing still pick the working directory's sessions |
 | `blockImages` | When `true`, images are not sent to the model |
