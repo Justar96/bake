@@ -4,7 +4,11 @@
 //! session's whole pipeline: Bake's D24 `write` and `bash` under each
 //! permission (allowed, refused, an approval answered yes and no, under
 //! `never`, and aborted while pending), the plugins' vetoes, the external
-//! hooks, the file mutation queue, and the session's work gate.
+//! hooks before and after the call (a deny, an ask, and a `PostToolUse`
+//! feedback), the file mutation queue (a nested write waits behind a held
+//! queue, after the batch's direct write to the same file), and the
+//! session's work gate (shutdown during a nested write waits for its
+//! worker, and the write is refused).
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -642,12 +646,45 @@ async fn a_plugin_vetoes_a_nested_call() {
     assert_eq!(decision["data"]["plugin"], "guard");
 }
 
+/// Installs `hooks` (a hooks file of `dialect`) on `session`, asking
+/// `approver` for a hook's `ask`.
+#[cfg(unix)]
+fn install_hooks(
+    session: &AgentSession,
+    fx: &Fixture,
+    dialect: crate::hooks::HookDialect,
+    hooks: &Value,
+    approver: Arc<dyn Approver>,
+) {
+    use crate::hooks::{HookFile, HookScope, HooksOptions, parse_hooks};
+    session
+        .set_hooks(HooksOptions {
+            files: vec![HookFile {
+                dialect,
+                path: PathBuf::from("hooks.json"),
+                groups: parse_hooks(hooks, dialect).expect("hooks").groups,
+            }],
+            scope: HookScope::Session,
+            standing: Arc::new(StandingPermissions::new(
+                SandboxMode::DangerFullAccess,
+                ApprovalPolicy::Ask,
+                "test",
+                fx.ws(),
+                None,
+            )),
+            sandbox: Arc::new(bake_sandbox::UnavailableProvider::new(None)),
+            approver,
+            default_timeout: crate::hooks::DEFAULT_HOOK_TIMEOUT,
+        })
+        .expect("hooks");
+}
+
 /// Claude Code and Codex `PreToolUse` hooks see a nested call by its own
 /// id; a deny refuses it and is recorded with the hook's handler id.
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn hooks_deny_a_nested_call_and_record_it() {
-    use crate::hooks::{HookDialect, HookFile, HookScope, HooksOptions, parse_hooks};
+    use crate::hooks::HookDialect;
     for dialect in [HookDialect::ClaudeCode, HookDialect::Codex] {
         let fx = Fixture::new("nested-hooks");
         fx.script(json!([write("a.txt")]));
@@ -669,26 +706,13 @@ async fn hooks_deny_a_nested_call_and_record_it() {
             "matcher": "write",
             "hooks": [{ "type": "command", "command": command }],
         }] } });
-        session
-            .set_hooks(HooksOptions {
-                files: vec![HookFile {
-                    dialect,
-                    path: PathBuf::from("hooks.json"),
-                    groups: parse_hooks(&hooks, dialect).expect("hooks").groups,
-                }],
-                scope: HookScope::Session,
-                standing: Arc::new(StandingPermissions::new(
-                    SandboxMode::DangerFullAccess,
-                    ApprovalPolicy::Ask,
-                    "test",
-                    fx.ws(),
-                    None,
-                )),
-                sandbox: Arc::new(bake_sandbox::UnavailableProvider::new(None)),
-                approver: Arc::new(crate::permissions::NoApprover),
-                default_timeout: crate::hooks::DEFAULT_HOOK_TIMEOUT,
-            })
-            .expect("hooks");
+        install_hooks(
+            &session,
+            &fx,
+            dialect,
+            &hooks,
+            Arc::new(crate::permissions::NoApprover),
+        );
         prompt(&session).await;
         let outcomes = outcomes(&session);
         let entries = file_entries(&session);
@@ -710,4 +734,239 @@ async fn hooks_deny_a_nested_call_and_record_it() {
         assert_eq!(decisions[0]["decision"], "deny");
         assert!(decisions[0]["hooks"][0]["handlerId"].is_string());
     }
+}
+
+/// A `PostToolUse` hook sees a nested call by its own id after it ran, and
+/// its feedback replaces the nested result the script gets; a `PreToolUse`
+/// ask about a nested call names the script that made it.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn hooks_after_and_asking_about_a_nested_call() {
+    use crate::hooks::HookDialect;
+    let fx = Fixture::new("nested-post-hook");
+    fx.script(json!([write("a.txt")]));
+    let session = fx
+        .session(
+            SandboxMode::WorkspaceWrite,
+            ApprovalPolicy::Ask,
+            Answer::Now(EscalationOutcome::Rejected),
+            PluginRegistry::default(),
+        )
+        .await;
+    let hooks = json!({ "hooks": { "PostToolUse": [{
+        "matcher": "write",
+        "hooks": [{ "type": "command", "command": "echo 'bad output' >&2; exit 2" }],
+    }] } });
+    install_hooks(
+        &session,
+        &fx,
+        HookDialect::ClaudeCode,
+        &hooks,
+        Arc::new(crate::permissions::NoApprover),
+    );
+    prompt(&session).await;
+    let reported = outcomes(&session);
+    let entries = file_entries(&session);
+    session.shutdown().await;
+    assert!(fx.ws().join("a.txt").exists(), "the nested write ran");
+    assert_eq!(
+        reported,
+        [("c1/1".to_owned(), true, "bad output".to_owned())]
+    );
+    let decisions: Vec<_> = entries
+        .iter()
+        .filter(|entry| entry["customType"] == crate::hooks::DECISION_ENTRY_TYPE)
+        .map(|entry| &entry["data"])
+        .collect();
+    assert_eq!(decisions.len(), 1);
+    assert_eq!(decisions[0]["event"], "PostToolUse");
+    assert_eq!(decisions[0]["toolCallId"], "c1/1");
+    assert_eq!(decisions[0]["decision"], "block");
+
+    let fx = Fixture::new("nested-ask-hook");
+    fx.script(json!([write("a.txt")]));
+    let session = fx
+        .session(
+            SandboxMode::WorkspaceWrite,
+            ApprovalPolicy::Ask,
+            Answer::Now(EscalationOutcome::Rejected),
+            PluginRegistry::default(),
+        )
+        .await;
+    let hooks = json!({ "hooks": { "PreToolUse": [{
+        "matcher": "write",
+        "hooks": [{ "type": "command", "command": r#"echo '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":"scripted write"}}'"# }],
+    }] } });
+    install_hooks(
+        &session,
+        &fx,
+        HookDialect::ClaudeCode,
+        &hooks,
+        Arc::new(Answerer {
+            answer: Answer::Now(EscalationOutcome::Rejected),
+            asked: Arc::clone(&fx.asked),
+            notify: Arc::clone(&fx.notify),
+        }),
+    );
+    prompt(&session).await;
+    let reported = outcomes(&session);
+    session.shutdown().await;
+    assert!(!fx.ws().join("a.txt").exists());
+    assert!(reported[0].1, "{reported:?}");
+    assert_eq!(fx.asked_ids(), ["c1/1"]);
+    assert_eq!(fx.asked_parents(), [Some("c1".to_owned())]);
+}
+
+/// Holds `path`'s place in the process-wide file mutation queue until the
+/// returned sender is dropped; `held` resolves once it is held.
+fn hold_mutation_queue(
+    path: PathBuf,
+) -> (
+    std::sync::mpsc::Sender<()>,
+    tokio::sync::oneshot::Receiver<()>,
+    std::thread::JoinHandle<()>,
+) {
+    let (release, released) = std::sync::mpsc::channel::<()>();
+    let (entered, held) = tokio::sync::oneshot::channel();
+    let holder = std::thread::spawn(move || {
+        let _ = crate::tools::file_mutation_queue::with_file_mutation_queue(&path, || {
+            let _ = entered.send(());
+            let _ = released.recv();
+            Ok(())
+        });
+    });
+    (release, held, holder)
+}
+
+/// A nested write takes its place in the file mutation queue as a direct
+/// write does: with the file's queue held elsewhere, neither the batch's
+/// direct write nor the script's nested write to the same file runs; once
+/// released, they write in the batch's order.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_nested_write_waits_in_the_file_mutation_queue_behind_a_direct_write() {
+    let fx = Fixture::new("nested-mutation-queue");
+    let target = fx.ws().join("a.txt");
+    fx.h.faux.append_responses(vec![
+        faux_assistant_blocks(
+            vec![
+                faux_tool_call(
+                    "write",
+                    json!({ "path": "a.txt", "content": "direct" }),
+                    Some("c0"),
+                ),
+                faux_tool_call(
+                    "script",
+                    json!({ "calls": [{ "name": "write", "args": { "path": "a.txt", "content": "nested" } }] }),
+                    Some("c1"),
+                ),
+            ],
+            StopReason::ToolUse,
+        )
+        .into(),
+        faux_assistant_message("done").into(),
+    ]);
+    let session = Arc::new(
+        fx.session(
+            SandboxMode::WorkspaceWrite,
+            ApprovalPolicy::Ask,
+            Answer::Now(EscalationOutcome::Rejected),
+            PluginRegistry::default(),
+        )
+        .await,
+    );
+    let (release, held, holder) = hold_mutation_queue(target.clone());
+    tokio::time::timeout(WAIT, held)
+        .await
+        .expect("the queue is held")
+        .expect("holder");
+    let running = tokio::spawn({
+        let session = Arc::clone(&session);
+        async move { session.prompt("go", Vec::new()).await }
+    });
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(!target.exists(), "a write ran while the queue was held");
+    drop(release);
+    tokio::time::timeout(WAIT, running)
+        .await
+        .expect("prompt settles")
+        .expect("prompt task")
+        .expect("prompt");
+    holder.join().expect("holder thread");
+    let outcomes = outcomes(&session);
+    let direct = session
+        .messages()
+        .iter()
+        .find_map(|message| {
+            message
+                .as_tool_result()
+                .filter(|result| result.tool_call_id == "c0")
+                .map(|result| (result.is_error, text(&result.content)))
+        })
+        .expect("the direct write's result");
+    session.shutdown().await;
+    assert_eq!(direct, (false, "Successfully wrote to a.txt".to_owned()));
+    assert_eq!(
+        outcomes,
+        [(
+            "c1/1".to_owned(),
+            false,
+            "Successfully wrote to a.txt".to_owned()
+        )]
+    );
+    assert_eq!(std::fs::read_to_string(&target).unwrap(), "nested");
+}
+
+/// Shutting the session down while a nested write's worker is parked in
+/// the file's mutation queue waits for that worker, owned by the session's
+/// work gate, and the write, seeing the abort, leaves no file.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn shutdown_during_a_nested_write_waits_for_its_worker() {
+    let fx = Fixture::new("nested-shutdown");
+    let target = fx.ws().join("a.txt");
+    fx.script(json!([write("a.txt")]));
+    let (entered, ready) = tokio::sync::oneshot::channel();
+    // Dropped on every path out of the test, so a failed case never leaves
+    // the worker parked.
+    let (release, held) = std::sync::mpsc::channel::<()>();
+    crate::permissions::fs::seam::on_after_check(&target, move || {
+        let _ = entered.send(());
+        let _ = held.recv();
+    });
+    let session = Arc::new(
+        fx.session(
+            SandboxMode::WorkspaceWrite,
+            ApprovalPolicy::Ask,
+            Answer::Now(EscalationOutcome::Rejected),
+            PluginRegistry::default(),
+        )
+        .await,
+    );
+    let running = tokio::spawn({
+        let session = Arc::clone(&session);
+        async move { session.prompt("go", Vec::new()).await }
+    });
+    tokio::time::timeout(WAIT, ready)
+        .await
+        .expect("the nested write is in its worker")
+        .expect("seam");
+    let shutdown = tokio::spawn({
+        let session = Arc::clone(&session);
+        async move { session.shutdown().await }
+    });
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let waited = !shutdown.is_finished();
+    drop(release);
+    tokio::time::timeout(WAIT, shutdown)
+        .await
+        .expect("shutdown returns")
+        .expect("shutdown task");
+    let _ = tokio::time::timeout(WAIT, running)
+        .await
+        .expect("prompt settles");
+    assert!(
+        waited,
+        "shutdown returned while the nested write's worker ran"
+    );
+    assert!(!target.exists(), "the aborted nested write wrote the file");
 }
