@@ -52,6 +52,15 @@ type Events = Arc<Mutex<Vec<AgentEvent>>>;
 
 /// Pi's `createRunner`: a runner over `tools`, collecting its events.
 fn create_runner(tools: Vec<AgentTool>, sequential: bool) -> (Arc<NestedToolCallRunner>, Events) {
+    create_runner_with(tools, sequential, None)
+}
+
+/// [`create_runner`] whose pipeline runs `before`.
+fn create_runner_with(
+    tools: Vec<AgentTool>,
+    sequential: bool,
+    before: Option<BeforeToolCall>,
+) -> (Arc<NestedToolCallRunner>, Events) {
     let events: Events = Arc::default();
     let sink: AgentEventSink = {
         let events = Arc::clone(&events);
@@ -64,7 +73,7 @@ fn create_runner(tools: Vec<AgentTool>, sequential: bool) -> (Arc<NestedToolCall
     let (requests, _) = mpsc::unbounded_channel();
     let pipeline = NestedPipeline::new(
         requests,
-        None,
+        before,
         None,
         sink,
         if sequential {
@@ -455,4 +464,180 @@ async fn closing_a_caller_aborts_and_awaits_its_running_calls_and_refuses_new_on
             NESTED_CALLER_FINISHED
         ))]
     );
+}
+
+/// A tool that waits for its signal, then ends as aborted.
+fn waiting(name: &str) -> AgentTool {
+    AgentTool::new(
+        name,
+        name,
+        name,
+        json!({ "type": "object" }),
+        |_id, _args, signal, _update, _ctx| {
+            Box::pin(async move {
+                if let Some(signal) = signal {
+                    signal.cancelled().await;
+                }
+                Err("Operation aborted".to_owned())
+            })
+        },
+    )
+}
+
+/// Polls `future` once.
+async fn poll_once<F: Future + Unpin>(future: &mut F) -> std::task::Poll<F::Output> {
+    std::future::poll_fn(|cx| std::task::Poll::Ready(std::pin::Pin::new(&mut *future).poll(cx)))
+        .await
+}
+
+fn text(outcome: &AgentToolCallOutcome) -> String {
+    text_of(&outcome.result)
+}
+
+const WAIT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// A tool may poll a call's future once and then hold it without polling,
+/// as an interpreter's table of pending operations might. The call runs as
+/// the scope's task all the same: closing the caller aborts it and returns,
+/// the exclusive queue it held is free, and the held future resolves to the
+/// aborted outcome.
+#[tokio::test(start_paused = true)]
+async fn a_call_held_unpolled_neither_blocks_close_nor_keeps_the_queue() {
+    let (runner, _) = create_runner(
+        vec![waiting("wait"), tool("quick", |_, _, _| empty())],
+        true,
+    );
+    let call = runner.executor("call", None);
+    let mut held = Box::pin(call.execute("wait", json!({}), NestedToolCallOptions::default()));
+    assert!(poll_once(&mut held).await.is_pending());
+    tokio::task::yield_now().await;
+
+    tokio::time::timeout(WAIT, call.close())
+        .await
+        .expect("close returns");
+    let other = runner.executor("other", None);
+    let quick = tokio::time::timeout(
+        WAIT,
+        other.execute("quick", json!({}), NestedToolCallOptions::default()),
+    )
+    .await
+    .expect("the queue is free");
+    assert!(!quick.is_error, "{}", text(&quick));
+
+    let held = held.await;
+    assert_eq!(held.tool_call.id, "call/1");
+    assert!(held.is_error);
+    assert_eq!(text(&held), "Operation aborted");
+}
+
+/// A tool that ignores its signal is ended when the caller's run is dropped
+/// mid-call, and later calls of that caller get no task.
+#[tokio::test(start_paused = true)]
+async fn dropping_the_abort_guard_ends_calls_that_ignore_their_signal() {
+    let stuck = tool("stuck", |_, _, _| Box::pin(std::future::pending()));
+    let (runner, _) = create_runner(vec![stuck], false);
+    let call = runner.executor("call", None);
+    let guard = call.abort_on_drop();
+    let running = tokio::spawn({
+        let call = call.clone();
+        async move {
+            call.execute("stuck", json!({}), NestedToolCallOptions::default())
+                .await
+        }
+    });
+    tokio::task::yield_now().await;
+    drop(guard);
+    let outcome = tokio::time::timeout(WAIT, running)
+        .await
+        .expect("the call ends")
+        .unwrap();
+    assert_eq!(outcome.tool_call.id, "call/1");
+    assert_eq!(text(&outcome), "Operation aborted");
+    let later = tokio::time::timeout(
+        WAIT,
+        call.execute("stuck", json!({}), NestedToolCallOptions::default()),
+    )
+    .await
+    .expect("no task runs it");
+    assert_eq!(later.tool_call.id, "call/2");
+    assert_eq!(text(&later), "Operation aborted");
+    // The record keeps both calls unfinished.
+    let calls = call
+        .take_summary()
+        .and_then(|summary| summary.calls)
+        .unwrap();
+    assert!(!calls.complete);
+}
+
+/// An aborted call never reaches `before_tool_call`, where a session asks,
+/// journals the dispatch, and runs hooks: not when its own signal or its
+/// caller's aborted first, nor when its caller settles while it waits for
+/// the exclusive queue.
+#[tokio::test(start_paused = true)]
+async fn an_aborted_call_does_not_reach_before_tool_call() {
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let before = crate::hook::before_tool_call({
+        let seen = Arc::clone(&seen);
+        move |ctx, _signal| {
+            seen.lock().unwrap().push(ctx.tool_call.id.clone());
+            Box::pin(async { Ok(None) })
+        }
+    });
+    let (runner, _) = create_runner_with(
+        vec![waiting("wait"), tool("quick", |_, _, _| empty())],
+        true,
+        Some(before),
+    );
+    let aborted = AbortController::new();
+    aborted.abort();
+
+    let own = runner.executor("own", None);
+    let outcome = own
+        .execute(
+            "quick",
+            json!({}),
+            NestedToolCallOptions {
+                signal: Some(aborted.signal()),
+                on_update: None,
+            },
+        )
+        .await;
+    assert_eq!(text(&outcome), "Operation aborted");
+
+    let caller = runner.executor("caller", Some(aborted.signal()));
+    let outcome = caller
+        .execute("quick", json!({}), NestedToolCallOptions::default())
+        .await;
+    assert_eq!(text(&outcome), "Operation aborted");
+
+    // `holder` takes the queue; `queued` waits for it until its caller
+    // settles.
+    let holder = runner.executor("holder", None);
+    let holding = tokio::spawn({
+        let holder = holder.clone();
+        async move {
+            holder
+                .execute("wait", json!({}), NestedToolCallOptions::default())
+                .await
+        }
+    });
+    tokio::task::yield_now().await;
+    let queued = runner.executor("queued", None);
+    let waiting = tokio::spawn({
+        let queued = queued.clone();
+        async move {
+            queued
+                .execute("quick", json!({}), NestedToolCallOptions::default())
+                .await
+        }
+    });
+    tokio::task::yield_now().await;
+    tokio::time::timeout(WAIT, queued.close())
+        .await
+        .expect("close returns");
+    assert_eq!(text(&waiting.await.unwrap()), "Operation aborted");
+    holder.close().await;
+    assert_eq!(text(&holding.await.unwrap()), "Operation aborted");
+
+    assert_eq!(*seen.lock().unwrap(), ["holder/1"]);
 }

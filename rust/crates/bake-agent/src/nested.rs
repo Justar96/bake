@@ -26,15 +26,20 @@
 //!   at a time: a nested call runs exclusively when the agent executes
 //!   sequentially, when its tool is sequential, or, with
 //!   `max_concurrent_read_tools`, when its tool is not read-only.
-//! - A calling tool's nested calls cannot outlive it. When its execution
-//!   settles, its executor refuses further calls, aborts the calls still
-//!   running, and the loop waits for them before it finalizes the caller's
-//!   result. A nested call also stops when the caller's signal aborts.
+//! - A calling tool's nested calls cannot outlive it. Each runs as a task
+//!   its caller's scope owns, so a future the tool holds without polling
+//!   neither stalls the call nor keeps the exclusive queue. When the
+//!   caller's execution settles, its executor refuses further calls, aborts
+//!   the calls still running, and the loop waits for them before it
+//!   finalizes the caller's result; if the loop is dropped instead, the
+//!   tasks are ended at once. A nested call also stops when the caller's
+//!   signal aborts, and an aborted call ends before `before_tool_call`.
 //! - Arguments that are not a JSON object (or null) fail validation without
 //!   reaching the hooks, since a tool call's arguments are an object; their
 //!   record keeps only their size.
 //! - Error text in the record is cut at 500 characters, not UTF-16 units.
 
+use std::future::Future;
 use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -44,7 +49,9 @@ use bake_ai::{
     NestedToolCalls, ToolCall, Usage, UserContentBlock,
 };
 use serde_json::Value;
+use tokio::runtime::Handle;
 use tokio::sync::{OnceCell, mpsc, oneshot, watch};
+use tokio::task::JoinSet;
 
 use crate::agent_loop::{
     ToolCallHooks, create_error_tool_result, elapsed_ms, find_tool, run_tool_call_in,
@@ -86,6 +93,10 @@ pub const NESTED_CALLS_UNAVAILABLE: &str = "Nested tool calls are not available 
 /// The error text of a nested call made after its caller settled.
 pub const NESTED_CALLER_FINISHED: &str =
     "Nested tool calls are not available after the calling tool call finished";
+
+/// The error text of a nested call aborted before it settled, as the
+/// pipeline's.
+const NESTED_CALL_ABORTED: &str = "Operation aborted";
 
 /// What the nested calls of one model-issued call leave on its tool result,
 /// Pi's `NestedCallSummary`.
@@ -302,6 +313,9 @@ pub(crate) struct NestedToolCallRunner {
     /// Serializes nested calls that must not run concurrently; FIFO, as
     /// Pi's promise chain.
     queue: Arc<tokio::sync::Mutex<()>>,
+    /// Runs each nested call as its own task; `None` outside a Tokio
+    /// runtime, where nested calls are refused.
+    runtime: Option<Handle>,
 }
 
 impl NestedToolCallRunner {
@@ -309,6 +323,7 @@ impl NestedToolCallRunner {
         Arc::new(Self {
             pipeline,
             queue: Arc::default(),
+            runtime: Handle::try_current().ok(),
         })
     }
 
@@ -337,6 +352,14 @@ struct Gate {
     running: usize,
 }
 
+/// The tasks running a scope's calls.
+#[derive(Default)]
+struct ScopeTasks {
+    set: JoinSet<()>,
+    /// Set once the tasks were aborted; later calls get no task.
+    aborted: bool,
+}
+
 /// The nested calls of one calling tool call.
 struct CallScope {
     /// Shared by every call below one model-issued call.
@@ -348,6 +371,9 @@ struct CallScope {
     gate: watch::Sender<Gate>,
     /// Aborted when the caller settles, stopping its running calls.
     closing: AbortController,
+    /// The scope owns each call's body, so a future the calling tool holds
+    /// without polling neither stalls the call nor outlives the caller.
+    tasks: Mutex<ScopeTasks>,
 }
 
 impl CallScope {
@@ -358,11 +384,16 @@ impl CallScope {
             holds_queue,
             gate: watch::Sender::new(Gate::default()),
             closing: AbortController::new(),
+            tasks: Mutex::default(),
         })
     }
 
     fn recorder(&self) -> std::sync::MutexGuard<'_, NestedCallRecorder> {
         self.recorder.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn tasks(&self) -> std::sync::MutexGuard<'_, ScopeTasks> {
+        self.tasks.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     /// Admits one call, unless the scope closed.
@@ -375,6 +406,24 @@ impl CallScope {
             true
         });
         admitted.then(|| Running(Arc::clone(self)))
+    }
+
+    /// Runs `body` as one of the scope's tasks; drops it unrun once the
+    /// tasks were aborted.
+    fn spawn(&self, runtime: &Handle, body: impl Future<Output = ()> + Send + 'static) {
+        let mut tasks = self.tasks();
+        if tasks.aborted {
+            return;
+        }
+        while tasks.set.try_join_next().is_some() {}
+        tasks.set.spawn_on(body, runtime);
+    }
+
+    /// Ends every task at once, whether or not its tool honors its signal.
+    fn abort_tasks(&self) {
+        let mut tasks = self.tasks();
+        tasks.aborted = true;
+        tasks.set.abort_all();
     }
 }
 
@@ -392,6 +441,19 @@ struct Bound {
     scope: Arc<CallScope>,
     /// The calling tool's signal, the default of its nested calls.
     signal: Option<AbortSignal>,
+}
+
+/// Aborts the tasks of an executor's nested calls when dropped. The loop
+/// holds one while the caller executes, so a run dropped mid-call leaves no
+/// nested call running.
+pub(crate) struct AbortNestedCallsOnDrop(Option<Arc<Bound>>);
+
+impl Drop for AbortNestedCallsOnDrop {
+    fn drop(&mut self) {
+        if let Some(bound) = &self.0 {
+            bound.scope.abort_tasks();
+        }
+    }
 }
 
 /// Runs session tools on behalf of one calling tool call, the
@@ -444,6 +506,11 @@ impl NestedToolExecutor {
     /// through the agent's tool pipeline; its events carry
     /// `parent_tool_call_id`, and its result is not added to the transcript.
     ///
+    /// The call runs as a task of the caller's own, started on the first
+    /// poll; the returned future only waits for its outcome. Once the
+    /// caller settles, the call is aborted and the caller's result waits for
+    /// it, so a future still held then resolves to the aborted outcome.
+    ///
     /// Never fails with `Err`: unknown tools, invalid arguments, blocked or
     /// refused calls, and tool errors come back as `is_error` outcomes
     /// carrying the error text.
@@ -456,7 +523,10 @@ impl NestedToolExecutor {
         let Some(bound) = &self.bound else {
             return self.refused(name, NESTED_CALLS_UNAVAILABLE);
         };
-        let Some(_running) = bound.scope.enter() else {
+        let Some(runtime) = &bound.runner.runtime else {
+            return self.refused(name, NESTED_CALLS_UNAVAILABLE);
+        };
+        let Some(running) = bound.scope.enter() else {
             return self.refused(name, NESTED_CALLER_FINISHED);
         };
         let id = format!(
@@ -470,160 +540,31 @@ impl NestedToolExecutor {
             args
         };
         let record = bound.scope.recorder().start(&id, name, &args);
-        let pipeline = &bound.runner.pipeline;
-        pipeline
-            .emit(AgentEvent::ToolExecutionStart {
-                tool_call_id: id.clone(),
-                tool_name: name.to_owned(),
-                args: args.clone(),
-                parent_tool_call_id: Some(self.caller_id.clone()),
-            })
-            .await;
-
-        let outcome = self.run(bound, id, name, args, options).await;
-
-        let error_text = text_of(&outcome.result);
-        bound
-            .scope
-            .recorder()
-            .finish(record, outcome.is_error, &error_text);
-        // Nested results are not persisted, so their usage is only counted
-        // through the recorder.
-        if let Some(usage) = &outcome.result.usage {
-            bound.scope.recorder().add_usage(usage);
-        }
-        pipeline
-            .emit(AgentEvent::ToolExecutionEnd {
-                tool_call_id: outcome.tool_call.id.clone(),
-                tool_name: name.to_owned(),
-                result: outcome.result.clone(),
-                is_error: outcome.is_error,
-                duration_ms: outcome.duration_ms,
-                parent_tool_call_id: Some(self.caller_id.clone()),
-            })
-            .await;
-        outcome
-    }
-
-    async fn run(
-        &self,
-        bound: &Bound,
-        id: String,
-        name: &str,
-        args: Value,
-        options: NestedToolCallOptions,
-    ) -> AgentToolCallOutcome {
-        let runner = &bound.runner;
-        let pipeline = &runner.pipeline;
-        let mut tool_call = ToolCall {
-            id,
+        let (sender, outcome) = oneshot::channel();
+        let call = NestedCall {
+            caller_id: self.caller_id.clone(),
+            bound: Arc::clone(bound),
+            id: id.clone(),
             name: name.to_owned(),
-            ..ToolCall::default()
+            args,
+            options,
+            record,
         };
-        let Some(site) = pipeline.site().await else {
-            return immediate(tool_call, NESTED_CALLER_FINISHED);
-        };
-        let tool = find_tool(&site.context.tools, name);
-        tool_call.arguments = match args {
-            Value::Object(arguments) => arguments,
-            other => {
-                let error = match tool {
-                    None => format!("Tool {name} not found"),
-                    Some(tool) => validate_tool_arguments(&tool.parameters, name, &other)
-                        .err()
-                        .unwrap_or_else(|| {
-                            format!(
-                                "Validation failed for tool \"{name}\": arguments must be an object"
-                            )
-                        }),
-                };
-                return immediate(tool_call, &error);
-            }
-        };
-
-        // The call stops when its own signal or the caller's aborts, or when
-        // the caller settles.
-        let controller = AbortController::new();
-        let cancelled = {
-            let closing = bound.scope.closing.signal();
-            let own = options.signal;
-            let caller = bound.signal.clone();
-            async move {
-                tokio::select! {
-                    () = closing.cancelled() => {}
-                    () = cancelled_by(own.as_ref()) => {}
-                    () = cancelled_by(caller.as_ref()) => {}
-                }
-            }
-        };
-        tokio::pin!(cancelled);
-
-        let exclusive = !bound.scope.holds_queue && pipeline.is_exclusive(tool.map(AsRef::as_ref));
-        // An aborted call skips the queue; the pipeline then refuses it.
-        let _permit = if exclusive {
-            tokio::select! {
-                permit = Arc::clone(&runner.queue).lock_owned() => Some(permit),
-                () = &mut cancelled => {
-                    controller.abort();
-                    None
-                }
-            }
-        } else {
-            None
-        };
-
-        let child = NestedToolExecutor {
-            caller_id: tool_call.id.clone(),
-            bound: Some(Arc::new(Bound {
-                runner: Arc::clone(runner),
-                scope: CallScope::new(
-                    Arc::clone(&bound.scope.recorder),
-                    bound.scope.holds_queue || exclusive,
-                ),
-                signal: Some(controller.signal()),
-            })),
-        };
-        let on_update = options.on_update;
-        let caller_id = self.caller_id.clone();
-        let update_call = tool_call.clone();
-        let updates = move |partial_result: AgentToolResult| -> BoxFuture<'_, ()> {
-            if let Some(on_update) = &on_update {
-                on_update.update(partial_result.clone());
-            }
-            Box::pin(pipeline.emit(AgentEvent::ToolExecutionUpdate {
-                tool_call_id: update_call.id.clone(),
-                tool_name: update_call.name.clone(),
-                args: Value::Object(update_call.arguments.clone()),
-                partial_result,
-                parent_tool_call_id: Some(caller_id.clone()),
-            }))
-        };
-        let signal = controller.signal();
-        let running = run_tool_call_in(
-            &tool_call,
-            &site.context.tools,
-            &site.assistant_message,
-            &site.context,
-            ToolCallHooks {
-                before: pipeline.before.as_ref(),
-                after: pipeline.after.as_ref(),
-            },
-            Some(&signal),
-            Some(&self.caller_id),
-            ToolContext::new(child),
-            &updates,
-        );
-        tokio::pin!(running);
-        if controller.signal().aborted() {
-            return running.await;
-        }
-        tokio::select! {
-            outcome = &mut running => outcome,
-            () = &mut cancelled => {
-                controller.abort();
-                running.await
-            }
-        }
+        bound.scope.spawn(runtime, async move {
+            let _running = running;
+            let _ = sender.send(call.run().await);
+        });
+        // No outcome when the task was aborted before it settled.
+        outcome.await.unwrap_or_else(|_| {
+            immediate(
+                ToolCall {
+                    id,
+                    name: name.to_owned(),
+                    ..ToolCall::default()
+                },
+                NESTED_CALL_ABORTED,
+            )
+        })
     }
 
     /// Refuses later calls, aborts the running ones, and waits for them.
@@ -638,6 +579,11 @@ impl NestedToolExecutor {
         let mut gate = scope.gate.subscribe();
         // The sender lives in `scope`, so the wait ends only at zero.
         let _ = gate.wait_for(|gate| gate.running == 0).await;
+    }
+
+    /// A guard that, dropped, aborts the tasks of this executor's calls.
+    pub(crate) fn abort_on_drop(&self) -> AbortNestedCallsOnDrop {
+        AbortNestedCallsOnDrop(self.bound.clone())
     }
 
     /// Removes and returns the record of the calls below this model-issued
@@ -661,6 +607,192 @@ impl NestedToolExecutor {
             text,
         )
     }
+}
+
+/// One admitted nested call, run by its scope's task.
+struct NestedCall {
+    caller_id: String,
+    bound: Arc<Bound>,
+    id: String,
+    name: String,
+    args: Value,
+    options: NestedToolCallOptions,
+    /// The call's place in the recorder; `None` when it was dropped.
+    record: Option<usize>,
+}
+
+impl NestedCall {
+    /// Emits the call's events around its outcome and records it.
+    async fn run(self) -> AgentToolCallOutcome {
+        let Self {
+            caller_id,
+            bound,
+            id,
+            name,
+            args,
+            options,
+            record,
+        } = self;
+        let pipeline = &bound.runner.pipeline;
+        pipeline
+            .emit(AgentEvent::ToolExecutionStart {
+                tool_call_id: id.clone(),
+                tool_name: name.clone(),
+                args: args.clone(),
+                parent_tool_call_id: Some(caller_id.clone()),
+            })
+            .await;
+
+        let outcome = outcome(&bound, &caller_id, id, &name, args, options).await;
+
+        let error_text = text_of(&outcome.result);
+        bound
+            .scope
+            .recorder()
+            .finish(record, outcome.is_error, &error_text);
+        // Nested results are not persisted, so their usage is only counted
+        // through the recorder.
+        if let Some(usage) = &outcome.result.usage {
+            bound.scope.recorder().add_usage(usage);
+        }
+        pipeline
+            .emit(AgentEvent::ToolExecutionEnd {
+                tool_call_id: outcome.tool_call.id.clone(),
+                tool_name: name,
+                result: outcome.result.clone(),
+                is_error: outcome.is_error,
+                duration_ms: outcome.duration_ms,
+                parent_tool_call_id: Some(caller_id),
+            })
+            .await;
+        outcome
+    }
+}
+
+/// Runs one nested call through the pipeline, once the exclusive queue
+/// admits it.
+async fn outcome(
+    bound: &Bound,
+    caller_id: &str,
+    id: String,
+    name: &str,
+    args: Value,
+    options: NestedToolCallOptions,
+) -> AgentToolCallOutcome {
+    let runner = &bound.runner;
+    let pipeline = &runner.pipeline;
+    let mut tool_call = ToolCall {
+        id,
+        name: name.to_owned(),
+        ..ToolCall::default()
+    };
+    let Some(site) = pipeline.site().await else {
+        return immediate(tool_call, NESTED_CALLER_FINISHED);
+    };
+    let tool = find_tool(&site.context.tools, name);
+    tool_call.arguments = match args {
+        Value::Object(arguments) => arguments,
+        other => {
+            let error = match tool {
+                None => format!("Tool {name} not found"),
+                Some(tool) => validate_tool_arguments(&tool.parameters, name, &other)
+                    .err()
+                    .unwrap_or_else(|| {
+                        format!(
+                            "Validation failed for tool \"{name}\": arguments must be an object"
+                        )
+                    }),
+            };
+            return immediate(tool_call, &error);
+        }
+    };
+
+    // The call stops when its own signal or the caller's aborts, or when
+    // the caller settles.
+    let closing = bound.scope.closing.signal();
+    let own = options.signal;
+    let caller = bound.signal.clone();
+    let stopped = {
+        let (closing, own, caller) = (closing.clone(), own.clone(), caller.clone());
+        move || closing.aborted() || is_aborted(own.as_ref()) || is_aborted(caller.as_ref())
+    };
+    let cancelled = async move {
+        tokio::select! {
+            () = closing.cancelled() => {}
+            () = cancelled_by(own.as_ref()) => {}
+            () = cancelled_by(caller.as_ref()) => {}
+        }
+    };
+    tokio::pin!(cancelled);
+
+    let exclusive = !bound.scope.holds_queue && pipeline.is_exclusive(tool.map(AsRef::as_ref));
+    // An aborted call ends before the pipeline, whose `before_tool_call`
+    // would ask, record, or run hooks for a call that never runs.
+    let _permit = if exclusive {
+        tokio::select! {
+            permit = Arc::clone(&runner.queue).lock_owned() => Some(permit),
+            () = &mut cancelled => return immediate(tool_call, NESTED_CALL_ABORTED),
+        }
+    } else {
+        None
+    };
+    if stopped() {
+        return immediate(tool_call, NESTED_CALL_ABORTED);
+    }
+
+    let controller = AbortController::new();
+    let child = NestedToolExecutor {
+        caller_id: tool_call.id.clone(),
+        bound: Some(Arc::new(Bound {
+            runner: Arc::clone(runner),
+            scope: CallScope::new(
+                Arc::clone(&bound.scope.recorder),
+                bound.scope.holds_queue || exclusive,
+            ),
+            signal: Some(controller.signal()),
+        })),
+    };
+    let on_update = options.on_update;
+    let update_call = tool_call.clone();
+    let updates = move |partial_result: AgentToolResult| -> BoxFuture<'_, ()> {
+        if let Some(on_update) = &on_update {
+            on_update.update(partial_result.clone());
+        }
+        Box::pin(pipeline.emit(AgentEvent::ToolExecutionUpdate {
+            tool_call_id: update_call.id.clone(),
+            tool_name: update_call.name.clone(),
+            args: Value::Object(update_call.arguments.clone()),
+            partial_result,
+            parent_tool_call_id: Some(caller_id.to_owned()),
+        }))
+    };
+    let signal = controller.signal();
+    let running = run_tool_call_in(
+        &tool_call,
+        &site.context.tools,
+        &site.assistant_message,
+        &site.context,
+        ToolCallHooks {
+            before: pipeline.before.as_ref(),
+            after: pipeline.after.as_ref(),
+        },
+        Some(&signal),
+        Some(caller_id),
+        ToolContext::new(child),
+        &updates,
+    );
+    tokio::pin!(running);
+    tokio::select! {
+        outcome = &mut running => outcome,
+        () = &mut cancelled => {
+            controller.abort();
+            running.await
+        }
+    }
+}
+
+fn is_aborted(signal: Option<&AbortSignal>) -> bool {
+    signal.is_some_and(AbortSignal::aborted)
 }
 
 /// Completes when `signal` aborts; never without one.

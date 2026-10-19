@@ -1352,6 +1352,8 @@ async fn execute_prepared_tool_call(
     let started = tokio::time::Instant::now();
     let execute = Arc::clone(&tool.execute);
     let nested = ctx.nested().clone();
+    // A run dropped while the tool executes ends its nested calls too.
+    let _abort_nested = nested.abort_on_drop();
     let future = catch_unwind(AssertUnwindSafe(|| {
         execute(
             tool_call.id.clone(),
