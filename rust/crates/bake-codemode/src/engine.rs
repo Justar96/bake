@@ -136,6 +136,13 @@ impl CodemodeEngine {
         config.async_stack_size(MAX_WASM_STACK + (1 << 20));
         // Trap texts stay short: no Wasm backtrace is attached.
         config.wasm_backtrace_max_frames(None);
+        // Unix signal handling on macOS too. Wasmtime 49's Mach-port thread
+        // aborts the process when a signal interrupts its receive
+        // (`MACH_RCV_INTERRUPTED`), which a session's child processes and
+        // their handled `SIGCHLD` can cause (`tests/codemode/signals.rs`),
+        // and Mach ports do not survive `fork`. Every engine in a process
+        // must agree, so the plugin host's engine sets the same.
+        config.macos_use_mach_ports(false);
         let engine = Engine::new(&config).map_err(|error| EngineError(format!("{error:#}")))?;
         let module = Module::new(&engine, QUICKJS_WASM)
             .map_err(|error| EngineError(format!("{error:#}")))?;

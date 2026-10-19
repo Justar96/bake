@@ -9,3 +9,5 @@ mod engine;
 mod harness;
 mod lifetime;
 mod sandbox;
+#[cfg(unix)]
+mod signals;

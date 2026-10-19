@@ -82,6 +82,10 @@ pub(crate) fn engine() -> wasmtime::Result<Engine> {
     // Copy-on-write images would back initial memory with a memfd, which
     // the helper's zero file-size limit forbids.
     config.memory_init_cow(false);
+    // Unix signal handling on macOS, as `bake-codemode`'s engine uses:
+    // Wasmtime requires every engine in a process to agree, and its Mach-port
+    // thread aborts the process when a signal interrupts it.
+    config.macos_use_mach_ports(false);
     Engine::new(&config)
 }
 
