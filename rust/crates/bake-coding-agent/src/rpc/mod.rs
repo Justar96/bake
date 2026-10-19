@@ -59,13 +59,13 @@ pub mod types;
 
 use std::io::Read;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use bake_agent::AgentEvent;
 use bake_ai::{Model, ModelThinkingLevel};
 use serde_json::{Map, Value, json};
-use tokio::sync::Notify;
+use tokio::sync::oneshot;
 
 use crate::agent_session::{
     AgentSession, ForkPosition, SessionEvent, SessionStats, SessionSubscription,
@@ -117,17 +117,7 @@ pub async fn run_rpc_mode(session: AgentSession, options: RpcModeOptions) -> i32
     let bridge = approvals
         .as_ref()
         .and_then(|broker| ApprovalBridge::connect(broker, &stdout));
-    let handler = Arc::new(Handler {
-        session: Mutex::new(Arc::new(session)),
-        factory,
-        out: stdout,
-        stderr,
-        bridge,
-        subscription: Mutex::new(None),
-        run_started: Arc::new(Notify::new()),
-        replacing: tokio::sync::Mutex::new(()),
-        closing: AtomicBool::new(false),
-    });
+    let handler = Arc::new(Handler::new(session, stdout, stderr, bridge, factory));
     handler.subscribe();
     let mut rpc = Rpc {
         handler,
@@ -241,6 +231,10 @@ impl Rpc {
     }
 }
 
+/// The prompt waiting for the session's next `agent_start`: the key it
+/// claimed the slot with, and how to tell it that its run started.
+type RunStartClaim = (u64, oneshot::Sender<()>);
+
 /// What every command task shares: the session in use, how to replace it,
 /// and where its records go.
 struct Handler {
@@ -252,10 +246,21 @@ struct Handler {
     stderr: SharedWriter,
     bridge: Option<Arc<ApprovalBridge>>,
     subscription: Mutex<Option<SessionSubscription>>,
-    /// Notified when a run starts, so a prompt learns that it was
-    /// admitted. Every waiting prompt is notified: a prompt the session
-    /// refused has stopped waiting by then.
-    run_started: Arc<Notify>,
+    /// The one prompt waiting to learn that its run was admitted, under
+    /// the key it claimed. The session's next `agent_start` is that
+    /// prompt's: only an idle session with no claim admits one, so no
+    /// other prompt's run, continuation, or refusal can answer for it.
+    run_started: Arc<Mutex<Option<RunStartClaim>>>,
+    /// The keys handed to prompts, so a claim is cleared only by the
+    /// prompt that made it.
+    prompts: AtomicU64,
+    /// Held by the prompt deciding its disposition, so two prompts
+    /// pipelined back to back cannot both claim the next `agent_start`
+    /// while the session is still idle: the second claims nothing, since
+    /// the first is admitted or refused by then, and its own result
+    /// decides. It is released as soon as the response is known, so the
+    /// run itself runs outside it.
+    prompting: tokio::sync::Mutex<()>,
     /// Held by the command that replaces the session, so two replacements
     /// never overlap and shutdown can wait for one.
     replacing: tokio::sync::Mutex<()>,
@@ -265,6 +270,29 @@ struct Handler {
 }
 
 impl Handler {
+    /// The state for `session`, with no command running yet.
+    fn new(
+        session: AgentSession,
+        out: SharedWriter,
+        stderr: SharedWriter,
+        bridge: Option<Arc<ApprovalBridge>>,
+        factory: Option<SessionFactory>,
+    ) -> Self {
+        Self {
+            session: Mutex::new(Arc::new(session)),
+            factory,
+            out,
+            stderr,
+            bridge,
+            subscription: Mutex::new(None),
+            run_started: Arc::new(Mutex::new(None)),
+            prompts: AtomicU64::new(0),
+            prompting: tokio::sync::Mutex::new(()),
+            replacing: tokio::sync::Mutex::new(()),
+            closing: AtomicBool::new(false),
+        }
+    }
+
     /// The session a command runs against.
     fn session(&self) -> Arc<AgentSession> {
         Arc::clone(&self.session.lock().unwrap_or_else(PoisonError::into_inner))
@@ -287,8 +315,13 @@ impl Handler {
         let started = Arc::clone(&self.run_started);
         let subscription = self.session().subscribe(move |event| {
             write_out(&out, &serialize_json_line(&session_event_json(event)));
-            if matches!(event, SessionEvent::Agent(AgentEvent::AgentStart)) {
-                started.notify_waiters();
+            if matches!(event, SessionEvent::Agent(AgentEvent::AgentStart))
+                && let Some((_, sender)) = started
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .take()
+            {
+                let _ = sender.send(());
             }
         });
         if let Some(previous) = self
@@ -561,17 +594,20 @@ impl Handler {
         message: String,
         images: Vec<bake_ai::ImageContent>,
     ) {
-        // Registered before the run starts, so its `agent_start` cannot
-        // arrive unheard.
-        let started = self.run_started.notified();
+        // One prompt decides its disposition at a time, and claims
+        // before the run starts, so its `agent_start` cannot arrive
+        // unheard.
+        let deciding = self.prompting.lock().await;
+        let (key, started) = self.claim_run_start(session);
         tokio::pin!(started);
-        started.as_mut().enable();
         let run = session.prompt(&message, images);
         tokio::pin!(run);
         let (response, running) = tokio::select! {
-            // The run's first event wins a tie: the prompt did start.
+            // The run's first event wins a tie: the prompt did start. A
+            // prompt that claimed nothing has a sender already dropped,
+            // which disables this branch, so its own result decides.
             biased;
-            () = &mut started => (
+            Ok(()) = &mut started => (
                 success_response(id, "prompt", Some(json!({ "disposition": "started" }))),
                 true,
             ),
@@ -580,9 +616,49 @@ impl Handler {
                 Err(message) => error_response(id, "prompt", &message),
             }, false),
         };
+        if let Some(key) = key {
+            self.release_run_start(key);
+        }
         self.send(&response);
+        drop(deciding);
         if running {
             let _ = run.await;
+        }
+    }
+
+    /// Claims the session's next `agent_start` for one prompt, with the
+    /// key that clears the claim again.
+    ///
+    /// Only an idle session with no claim outstanding is claimed: a prompt
+    /// the session is about to refuse takes no claim, so neither another
+    /// prompt's run nor its continuation, which starts the agent again,
+    /// can report that this prompt started. A prompt without a claim gets
+    /// a receiver whose sender is already dropped, which disables its
+    /// `started` branch for good.
+    fn claim_run_start(&self, session: &AgentSession) -> (Option<u64>, oneshot::Receiver<()>) {
+        let (sender, receiver) = oneshot::channel();
+        let mut slot = self
+            .run_started
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if slot.is_some() || session.is_streaming() || session.is_compacting() {
+            return (None, receiver);
+        }
+        let key = self.prompts.fetch_add(1, Ordering::Relaxed);
+        *slot = Some((key, sender));
+        (Some(key), receiver)
+    }
+
+    /// Clears the claim `key` made, if it is still the one outstanding: a
+    /// claim the session's `agent_start` has already taken, or one a later
+    /// prompt now holds, is left alone.
+    fn release_run_start(&self, key: u64) {
+        let mut slot = self
+            .run_started
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if slot.as_ref().is_some_and(|(held, _)| *held == key) {
+            *slot = None;
         }
     }
 

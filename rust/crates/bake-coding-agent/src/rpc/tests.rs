@@ -587,14 +587,15 @@ async fn refuses_the_commands_bake_does_not_support() {
 // without awaiting the one before it: a long command delays no other.
 // ----------------------------------------------------------------------------
 
-/// A summary request that reports it started and then waits, so the
-/// compaction it serves is held until its own request is cancelled or
+/// A model response that reports it started and then waits, so the
+/// command it serves is held until its own request is cancelled or
 /// `release` is notified. Pi holds a compaction the same way in
 /// `test/suite/regressions/7150-rpc-prompt-during-compaction.test.ts`,
 /// there through its `session_before_compact` handler.
-fn held_summary(
+fn held_reply(
     started: tokio::sync::mpsc::UnboundedSender<()>,
     release: Arc<Notify>,
+    reply: &'static str,
 ) -> FauxResponseStep {
     FauxResponseStep::Factory(Arc::new(move |_, options, _, _| {
         let signal = options.base.signal.clone();
@@ -616,7 +617,7 @@ fn held_summary(
                 }
                 None => released.await,
             }
-            Ok(faux_assistant_message("## Goal\nHeld summary"))
+            Ok(faux_assistant_message(reply))
         });
         wait
     }))
@@ -659,7 +660,7 @@ async fn hold_a_compaction(
     let (started, mut requested) = tokio::sync::mpsc::unbounded_channel();
     let release = Arc::new(Notify::new());
     h.faux.set_responses(vec![
-        held_summary(started, Arc::clone(&release)),
+        held_reply(started, Arc::clone(&release), "## Goal\nHeld summary"),
         // A compaction that keeps one token summarizes the last turn's
         // prefix too, so a released hold needs a second summary.
         faux_assistant_message("## Original Request\nthree").into(),
@@ -783,4 +784,123 @@ async fn end_of_input_during_a_held_compaction_shuts_down() {
     assert_eq!(compacted.len(), 1, "{:?}", out.records());
     assert_eq!(compacted[0]["success"], json!(false), "{:?}", compacted[0]);
     assert_eq!(compacted[0]["error"], json!("Compaction cancelled"));
+}
+
+// Pi `test/rpc-prompt-response-semantics.test.ts`: "emits one started
+// response when prompt preflight succeeds" and "emits one failure
+// response when prompt preflight rejects", for two prompts pipelined back
+// to back. Each answers for itself: one claims the run and reports
+// `started`, the other gets the session's refusal, since a prompt without
+// a streaming behavior is not queued while a turn runs. The session
+// admits exactly one of two concurrent prompts, and which line that is
+// depends on the tasks' scheduling, so the pair is checked rather than
+// the lines' order.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn pipelined_prompts_each_answer_for_themselves() {
+    let dir = TempDir::new("rpc-pipelined-prompts");
+    let h = harness();
+    let (started, mut requested) = tokio::sync::mpsc::unbounded_channel();
+    let release = Arc::new(Notify::new());
+    h.faux.set_responses(vec![held_reply(
+        started,
+        Arc::clone(&release),
+        "the admitted run",
+    )]);
+    let session = session(&dir, &h).await;
+    let (input, pipe) = Input::new();
+    let out = Output(Arc::new(Mutex::new(Vec::new())));
+    let mode = start(session, pipe, &out, None);
+    input.send(json!({ "id": "p1", "type": "prompt", "message": "one" }));
+    input.send(json!({ "id": "p2", "type": "prompt", "message": "two" }));
+    let first = out.wait_for_response("p1").await;
+    let second = out.wait_for_response("p2").await;
+    let (admitted, refused) = if first["success"] == json!(true) {
+        (first, second)
+    } else {
+        (second, first)
+    };
+    assert_eq!(
+        admitted["data"],
+        json!({ "disposition": "started" }),
+        "{admitted}"
+    );
+    assert_eq!(refused["success"], json!(false), "{refused}");
+    assert!(
+        refused["error"]
+            .as_str()
+            .is_some_and(|error| error.contains("streamingBehavior")),
+        "{refused}"
+    );
+    // One run, answering for the prompt that claimed it, and it did
+    // reach the model: the refusal started nothing.
+    requested.recv().await.expect("the model request started");
+    release.notify_one();
+    out.wait_for("agent_settled", |out| {
+        !out.of_kind("agent_settled").is_empty()
+    })
+    .await;
+    assert_eq!(out.of_kind("agent_start").len(), 1, "{:?}", out.records());
+    assert_eq!(out.responses("p1").len(), 1, "{:?}", out.records());
+    assert_eq!(out.responses("p2").len(), 1, "{:?}", out.records());
+    input.send(json!({ "id": "t", "type": "get_last_assistant_text" }));
+    assert_eq!(
+        out.wait_for_response("t").await["data"],
+        json!({ "text": "the admitted run" })
+    );
+    input.close();
+    assert_eq!(mode.await.expect("the loop ends"), 0);
+}
+
+// The claim one prompt makes on the session's next `agent_start`, which
+// stands in for Pi's `preflightResult` callback: Pi passes that callback
+// to the one `session.prompt()` call, so no other prompt can be told that
+// it started. Only an idle session with no claim outstanding hands the
+// claim out, a prompt without one has no sender at all, and a claim is
+// cleared only by the key that made it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn only_one_idle_prompt_claims_the_next_run_start() {
+    let dir = TempDir::new("rpc-run-start-claim");
+    let h = harness();
+    let (started, mut requested) = tokio::sync::mpsc::unbounded_channel();
+    let release = Arc::new(Notify::new());
+    h.faux
+        .set_responses(vec![held_reply(started, Arc::clone(&release), "held")]);
+    let out = Output(Arc::new(Mutex::new(Vec::new())));
+    let handler = Arc::new(Handler::new(
+        session(&dir, &h).await,
+        writer(&out),
+        sink(),
+        None,
+        None,
+    ));
+    let session = handler.session();
+
+    let (first, answer) = handler.claim_run_start(&session);
+    let first = first.expect("the idle session's claim");
+    // A second prompt, pipelined behind it, claims nothing, and its
+    // receiver has no sender: its `started` branch is disabled for good.
+    let (second, mut no_answer) = handler.claim_run_start(&session);
+    assert_eq!(second, None);
+    assert!(matches!(
+        no_answer.try_recv(),
+        Err(oneshot::error::TryRecvError::Closed)
+    ));
+    // Another prompt's key clears nothing.
+    handler.release_run_start(first + 1);
+    assert_eq!(handler.claim_run_start(&session).0, None);
+    // The session's `agent_start` answers the claim that was made.
+    handler.subscribe();
+    let run = {
+        let session = Arc::clone(&session);
+        tokio::spawn(async move { session.prompt("one", Vec::new()).await })
+    };
+    requested.recv().await.expect("the model request started");
+    assert_eq!(answer.await, Ok(()));
+    // A prompt sent while that run streams claims nothing either.
+    assert_eq!(handler.claim_run_start(&session).0, None);
+    release.notify_one();
+    run.await.expect("joined").expect("the run");
+    // The claim is free again once the run has ended.
+    assert!(handler.claim_run_start(&session).0.is_some());
+    session.shutdown().await;
 }
