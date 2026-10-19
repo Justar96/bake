@@ -240,7 +240,8 @@ test.skipIf(!isRustTarget(hostTarget()))('the packed bake-rs unpacks and runs wi
   mkdirSync(unpacked)
   const archiveInput = openSync(archive, 'r')
   try {
-    const untar = Bun.spawnSync(['tar', '-xzf', '-'], { cwd: unpacked, stdin: archiveInput, stderr: 'pipe' })
+    // -p restores the archived modes instead of applying this shell's umask.
+    const untar = Bun.spawnSync(['tar', '-xpzf', '-'], { cwd: unpacked, stdin: archiveInput, stderr: 'pipe' })
     expect(untar.exitCode).toBe(0)
   } finally {
     closeSync(archiveInput)

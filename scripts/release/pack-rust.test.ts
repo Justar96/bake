@@ -341,7 +341,8 @@ describe.skipIf(process.platform === 'win32' || !releaseHost)('packing', () => {
     ].sort())
     expect(readdirSync(options.outputDir)).toEqual([archiveName(VERSION, target)])
     const unpacked = scratch()
-    expect(Bun.spawnSync(['tar', '-xzf', destination, '-C', unpacked]).exitCode).toBe(0)
+    // -p restores the archived modes instead of applying this shell's umask.
+    expect(Bun.spawnSync(['tar', '-xpzf', destination, '-C', unpacked]).exitCode).toBe(0)
     expect(statSync(join(unpacked, 'bin/bake-rs')).mode & 0o777).toBe(0o755)
     expect(readFileSync(join(unpacked, 'notices/bake-ai/NOTICE'), 'utf8')).toContain('Mario Zechner')
     expect(readdirSync(unpacked).sort()).toEqual(['LICENSE', 'THIRD_PARTY_NOTICES.md', 'bin', 'licenses', 'notices'])
