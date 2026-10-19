@@ -1975,6 +1975,35 @@ await liveScenario('a terminal hangup while a sign-in check is held aborts the c
 
 // ---- Session sheets: /name, /session, /new, /resume ----
 
+/** Pi's `--resume`: the picker opens before the first prompt, which waits. */
+await liveScenario('-r opens the session picker before the first prompt, which then runs in the chosen session', async (world) => {
+  const first = world.launch()
+  await first.ready()
+  first.send('ECHO alpha\r')
+  await first.wait('first answer completed', () => first.screen.includes('Echo: alpha.')
+    && /^ {2}✓ Completed/mu.test(first.screen))
+  await first.quit()
+  const saved = await sessionEntries(world.home)
+  assert.equal(saved.length, 1, 'expected one saved session')
+
+  const requests = world.model.requests.length
+  const session = world.launch(['-r', 'ECHO gamma'])
+  await sheetReady(session, 'Resume session')
+  assert.equal(world.model.requests.length, requests, 'the held prompt reached the model before the picker chose')
+  assert(session.screen.includes('ECHO alpha'), session.screen)
+  session.send('\r')
+  await session.wait('resumed', () => session.screen.includes('Echo: alpha.') && !session.screen.includes('Resume session'))
+  // The held prompt runs once the picker has chosen, in that session.
+  await session.wait('held prompt answered', () => session.screen.includes('Echo: gamma.')
+    && /^ {2}✓ Completed/mu.test(session.screen))
+  const sent = JSON.stringify(world.model.requests[requests]?.input)
+  assert(sent.includes('ECHO alpha') && sent.includes('ECHO gamma'), `the resumed request lost its history: ${sent}`)
+  await session.quit()
+  const files = await sessionEntries(world.home)
+  assert.equal(files.length, 1, '-r left a file for the session it did not use')
+  assert.deepEqual(messageTexts(files[0] ?? [], 'user'), ['ECHO alpha', 'ECHO gamma'])
+})
+
 /** Blank rows between the last row holding `text` and the composer's top edge. */
 function gapAboveControls(screen: string, text: string): number {
   const lines = screen.split('\n')
