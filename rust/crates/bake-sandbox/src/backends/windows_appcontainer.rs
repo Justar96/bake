@@ -227,9 +227,11 @@
 //!   `WSAEACCES` (10013) without a capability and succeeded with
 //!   `internetClient`, while a loopback connection timed out with and
 //!   without capabilities; a timeout is not proof of a deliberate denial.
-//!   The loopback test accepts only a refusal code and fails a timeout as
-//!   inconclusive, even when the TCP table shows the command's SYN
-//!   unanswered and the listener nothing; it has not run natively. Firewall-service state and
+//!   The loopback test counts only a refusal code as a denial. A timeout,
+//!   even with the TCP table showing the command's SYN unanswered and the
+//!   listener nothing, is a named gap (`gap=loopback-denial-unproven`), not
+//!   a failure; a connection or any other error fails it. Windows CI's
+//!   connects have all timed out, so loopback denial is unproven. Firewall-service state and
 //!   enterprise policy are untested.
 //! - **Residue.** A renamed root leaves its ACEs behind.
 //! - **Grant propagation is eager.** The first grant on a root walks the

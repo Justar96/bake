@@ -863,10 +863,12 @@ pub(super) fn loopback_outcome(
         return format!("refused:{code}");
     }
     assert_eq!(result, "timeout", "the connect probe's result");
-    // A timeout is inconclusive even with the probe's SYN unanswered in the
-    // TCP table: a slow host, a filter driver, or a firewall rule drops the
-    // same way, so only a refusal code counts as a denial.
-    panic!(
-        "inconclusive: the loopback connect timed out instead of being refused, which is not proof of a denial (syn_sent_polls={syn_sent})"
-    );
+    // D41: a timeout is inconclusive even with the probe's SYN unanswered in
+    // the TCP table, since a slow host, a filter driver, or a firewall rule
+    // drops the same way. It is a named gap, not a denial and not a
+    // failure: loopback denial stays unproven.
+    observe(format_args!(
+        "gap=loopback-denial-unproven network={network:?} syn_sent_polls={syn_sent}: the connect timed out instead of being refused"
+    ));
+    "inconclusive".to_owned()
 }
