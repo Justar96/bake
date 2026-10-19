@@ -71,6 +71,10 @@
 //! permission engine bound to the session ([`AgentSession::record_approvals`])
 //! writes each approval request and its answer through that boundary too
 //! (in `agent_session/approval_history.rs`), before the call can run.
+//! A call a tool makes through `bake_agent::ToolContext::nested` is run by
+//! the agent loop through the same hooks and tools, so the vetoes, the
+//! journal (which records it by its own id and its parent's), the
+//! permission wrappers, and the approvals apply to it as to the model's.
 //!
 //! External hooks ([`crate::hooks`], installed by
 //! [`AgentSession::set_hooks`]) run at the same extension points (in
@@ -3036,6 +3040,8 @@ mod job_tests;
 mod navigation_summary_tests;
 #[cfg(test)]
 mod navigation_tests;
+#[cfg(test)]
+mod nested_call_tests;
 #[cfg(test)]
 mod plugin_tests;
 #[cfg(test)]

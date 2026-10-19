@@ -19,6 +19,15 @@
 //! one before the crash, decides it; Pi reruns with its recorded arguments.
 //! The rerun results are committed before the recovery notice, which is
 //! committed before the resumed request.
+//!
+//! A nested call, one a tool made through `ToolContext::nested`, is
+//! journaled by its own id (`<caller id>/<n>`) under the same assistant,
+//! with `parent_tool_call_id` naming the call that made it; the field is
+//! absent on a model-issued call's dispatch. A nested dispatch is accepted
+//! only after its parent's dispatch in the same run, and it is evidence of
+//! which nested calls started: it is never rerun, and recovery's
+//! uncertainty is the model-issued call's, which has no result until its
+//! nested calls settle.
 
 mod projection;
 
@@ -103,6 +112,10 @@ enum Event {
             deserialize_with = "replay_class"
         )]
         replay: Option<ToolReplay>,
+        /// For a nested call, the id of the call that made it, dispatched
+        /// earlier in the run; absent for a model-issued call.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        parent_tool_call_id: Option<String>,
     },
     Resumed {
         model_calls: u64,
@@ -449,6 +462,7 @@ impl Journal {
         &self,
         tool_call: &bake_ai::ToolCall,
         replay: Option<ToolReplay>,
+        parent_tool_call_id: Option<String>,
     ) -> Result<(), String> {
         let assistant_entry_id = self
             .latest_assistant
@@ -461,6 +475,7 @@ impl Journal {
             tool_call_id: tool_call.id.clone(),
             tool_name: tool_call.name.clone(),
             replay: replay.filter(|replay| *replay == ToolReplay::Safe),
+            parent_tool_call_id,
         })
         .await
     }
@@ -568,6 +583,7 @@ pub(super) fn tool_hook(
         let previous = previous.clone();
         Box::pin(async move {
             let call = context.tool_call.clone();
+            let parent = context.parent_tool_call_id.map(str::to_owned);
             let replay = replay_of(&context.context.tools, &call.name);
             let decision = if let Some(previous) = previous {
                 previous(context, signal).await?
@@ -578,7 +594,7 @@ pub(super) fn tool_hook(
                 return Ok(decision);
             }
             if let Some(journal) = journal {
-                journal.dispatch(&call, replay).await?;
+                journal.dispatch(&call, replay, parent).await?;
             }
             Ok(decision)
         })

@@ -22,6 +22,9 @@ mod rerun;
 #[path = "run_journal_kill_tests.rs"]
 mod kill;
 
+#[path = "run_journal_nested_tests.rs"]
+mod nested;
+
 fn append_fact(session: &mut SessionManager, run_id: &str, mut event: Value) -> String {
     if event["kind"] == "started" && event.get("session_id").is_none() {
         event["session_id"] = json!(session.session_id());

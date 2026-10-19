@@ -124,6 +124,9 @@ pub(super) fn project(session: &SessionManager, run_id: &str) -> Result<Selected
     let mut acknowledged = HashSet::new();
     let mut resumes = 0_u64;
     let mut dispatches: HashMap<(String, String), Dispatched> = HashMap::new();
+    // Nested calls, by assistant and id, with the resumptions before each;
+    // evidence only: the model-issued call governs recovery.
+    let mut nested_dispatches: HashMap<(String, String), u64> = HashMap::new();
     let mut terminal = None;
     let by_id: HashMap<_, _> = entries
         .iter()
@@ -164,8 +167,39 @@ pub(super) fn project(session: &SessionManager, run_id: &str) -> Result<Selected
             Event::Dispatch {
                 assistant_entry_id,
                 tool_call_id,
+                tool_name: _,
+                replay: _,
+                parent_tool_call_id: Some(parent),
+            } => {
+                let Some((at, _)) = by_id.get(assistant_entry_id.as_str()) else {
+                    return Err("Run dispatch refers outside the selected branch".into());
+                };
+                let key = (assistant_entry_id.clone(), tool_call_id.clone());
+                let parent_key = (assistant_entry_id.clone(), parent.clone());
+                let parent_dispatched = dispatches.contains_key(&parent_key)
+                    || nested_dispatches.contains_key(&parent_key);
+                let repeat = nested_dispatches
+                    .get(&key)
+                    .is_some_and(|earlier| *earlier == resumes);
+                if *at <= start
+                    || *at >= *index
+                    || !acknowledged.contains(assistant_entry_id)
+                    || !parent_dispatched
+                    || repeat
+                {
+                    return Err(
+                        "Run nested dispatch has no earlier parent dispatch or repeats an identity"
+                            .into(),
+                    );
+                }
+                nested_dispatches.insert(key, resumes);
+            }
+            Event::Dispatch {
+                assistant_entry_id,
+                tool_call_id,
                 tool_name,
                 replay,
+                parent_tool_call_id: None,
             } => {
                 let Some((at, entry)) = by_id.get(assistant_entry_id.as_str()) else {
                     return Err("Run dispatch refers outside the selected branch".into());
