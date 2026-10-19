@@ -11,7 +11,7 @@
 //! owned by the session's gate, runs the producer, then closes the job's
 //! gate and waits for it, and only then records the terminal state. So:
 //!
-//! - **A turn does not own a job.** [`AgentSession::abort`] and the end of a
+//! - **A turn does not own a job.** `AgentSession::abort` and the end of a
 //!   turn leave it running. Only [`JobRegistry::kill`], [`JobRegistry::close`],
 //!   and the session gate's close stop it.
 //! - **Stopping is a request.** `kill` marks the job `Stopping`, aborts its

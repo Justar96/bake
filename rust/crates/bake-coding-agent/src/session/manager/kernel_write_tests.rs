@@ -9,6 +9,13 @@
 //! migration's temporary file, stopped at its first byte, after one byte,
 //! half way, and before its newline. `/dev/full` gives a real `ENOSPC`.
 //!
+//! Linux only. macOS checks `RLIMIT_FSIZE` against the descriptor's offset
+//! rather than the end of an `O_APPEND` file: measured on macOS 26.7.1
+//! (Intel), a fresh append descriptor on a file already at the limit
+//! writes past it with no signal, and one a byte short writes a whole
+//! line. The limit cannot stop a macOS writer at a chosen byte, so these
+//! cases have no macOS form.
+//!
 //! Each test owns its temporary directory and the child processes it
 //! starts; the limit and the signal disposition are the child's alone.
 

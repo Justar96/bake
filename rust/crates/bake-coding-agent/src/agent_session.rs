@@ -1959,7 +1959,7 @@ impl AgentSession {
     /// Pi's `setSessionName`: records `name` in a `session_info` entry,
     /// line breaks as spaces and trimmed, announces the name the session
     /// now has ([`SessionEvent::SessionInfoChanged`]), and returns it. Serialized and owned as the other changes
-    /// ([`Self::run_change`]) and refused after shutdown; a failed write
+    /// (`Self::run_change`) and refused after shutdown; a failed write
     /// stops the session as any failed write does.
     pub async fn set_session_name(&self, name: &str) -> Result<Option<String>, String> {
         let name = name.to_owned();
@@ -2153,7 +2153,7 @@ impl AgentSession {
     /// session file, then applies and announces it, and saves `level` as
     /// the default when `persist` is set.
     ///
-    /// Serialized with the other changes and owned as [`Self::run_change`]
+    /// Serialized with the other changes and owned as `Self::run_change`
     /// describes; refused once the session is shut down. A change takes
     /// effect at the next model request, including the next request of a
     /// run that is streaming. When the session write fails, the change is

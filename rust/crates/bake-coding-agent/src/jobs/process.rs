@@ -1,5 +1,5 @@
 //! A process as a background job: the producer a background command
-//! runs. Its output streams into the job's [`JobOutput`], and its outcome
+//! runs. Its output streams into the job's `JobOutput`, and its outcome
 //! follows Bake's TypeScript `packages/shell/tool-bash/src/background.ts`
 //! (`processOutcome`, `processJob`): a killed process is `killed` with its
 //! signal as detail, any other exit is `completed` with its exit code, a

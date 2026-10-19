@@ -293,7 +293,7 @@ fn embedded_ipv4(bytes: &[u8; 16], prefix_length: u8) -> Option<Ipv4Addr> {
 }
 
 /// `discoverNat64Prefixes`: the prefixes the answers for
-/// [`IPV4ONLY_DISCOVERY_HOST`] reveal.
+/// `IPV4ONLY_DISCOVERY_HOST` reveal.
 pub fn nat64_prefixes(discovered: &[IpAddr]) -> Vec<Nat64Prefix> {
     let mut prefixes: Vec<Nat64Prefix> = Vec::new();
     for entry in discovered {

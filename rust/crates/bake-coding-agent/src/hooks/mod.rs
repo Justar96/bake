@@ -4,7 +4,7 @@
 //! Ported from Bake 0.3's hooks group (`packages/hooks/`): the shared
 //! engine `hook-protocol` ([`matcher`], [`codec`], [`merge`], [`runner`])
 //! and both bridges, `hooks-claude-code` and `hooks-codex` ([`config`] and
-//! the decision mapping in [`engine`]), with their tests. The hook points
+//! the decision mapping in `engine`), with their tests. The hook points
 //! are Pi v1.3.0's extension events (`src/core/extensions/types.ts`,
 //! `runner.ts`, and their callers in `agent-session.ts`): `session_start`,
 //! `input`, `tool_call`, `tool_result`, and `agent_before_settle`; the

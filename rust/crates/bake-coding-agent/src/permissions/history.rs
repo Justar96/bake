@@ -41,7 +41,9 @@
 //! skips an entry it cannot read, of an unknown version, or out of order,
 //! and reports it in [`ApprovalHistory::skipped`]: the history is an audit
 //! trail that grants nothing, so a damaged entry cannot widen anything, and
-//! one bad line should not hide the rest.
+//! one bad entry should not hide the rest. A file line that is not JSON
+//! never reaches the fold: the session loader drops it, as Pi v1.3.0's
+//! `parseSessionEntries` does, and it is not reported here.
 
 use std::collections::HashMap;
 use std::fmt;

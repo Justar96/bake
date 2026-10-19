@@ -61,9 +61,9 @@
 //! session write does: nothing more is written and later prompts are
 //! refused.
 //!
-//! `/changelog` ([`changelog`]), `/share` ([`share`]), and `/bug`
-//! ([`bug`]) follow Pi v1.3.0. `/share` and `/bug` upload through the
-//! GitHub CLI ([`gh`]) only after a sheet that says what leaves the machine
+//! `/changelog` ([`changelog`]), `/share` (`share`), and `/bug`
+//! (`bug`) follow Pi v1.3.0. `/share` and `/bug` upload through the
+//! GitHub CLI (`gh`) only after a sheet that says what leaves the machine
 //! and where it goes, and only while the session is idle ([`IDLE`]); a
 //! prompt sent while one runs is refused with its draft kept, so they read
 //! a settled session from the sheet to the upload.
@@ -1768,7 +1768,7 @@ const UNSYNCED: &str = "may not survive a power loss";
 
 /// The once-per-launch refresh, Bake's `runner.ts` background
 /// `refreshCliProxyModels`: only a signed-in account, keeping the models in
-/// use ([`models_in_use`]); bounded by `CATALOG_TIMEOUT`'s fetch and the
+/// use (`models_in_use`); bounded by `CATALOG_TIMEOUT`'s fetch and the
 /// abort signal. It is quiet, as Bake's is, except that a route write it
 /// committed but could not flush goes to the transcript through `send`.
 pub async fn startup_refresh(

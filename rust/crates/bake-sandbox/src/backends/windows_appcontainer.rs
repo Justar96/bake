@@ -85,7 +85,7 @@
 //!   run's own profile root is touched. Under `workspace-write` the storage
 //!   stays writable, as `TEMP`.
 //! - **Deletion after settlement.** The Job is `bake-process`'s
-//!   [`windows_job::Job`](bake_process::windows_job::Job), shared with the
+//!   `bake_process::windows_job::Job`, shared with the
 //!   restricted-token runner: its account is pumped while the command runs
 //!   and, after the command's exit, `terminate_and_settle` must report every
 //!   member it ever had ended (each held by handle until signalled, never

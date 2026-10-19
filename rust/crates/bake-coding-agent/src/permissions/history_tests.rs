@@ -384,7 +384,10 @@ fn the_fold_steps_over_other_entries_and_damaged_ones() {
 
 /// A session file with approval entries, unparseable lines between them,
 /// and a torn last line opens and folds without a panic; the readable
-/// entries survive.
+/// entries survive. The loader drops a line that is not JSON before the
+/// fold sees it, as Pi v1.3.0's `parseSessionEntries` does, so nothing is
+/// reported as skipped: the fold reports only approval entries it reads
+/// and cannot use.
 #[test]
 fn a_damaged_session_file_opens_and_folds() {
     let dir = TempDir::new("approval-history-damaged");

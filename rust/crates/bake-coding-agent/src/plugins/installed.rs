@@ -30,14 +30,14 @@
 //! changed, or no longer matches its record, blocks the tools its record
 //! lists from the first call and is never asked; the record's tool list is
 //! what protects them, so it does not depend on the package being readable.
-//! A plugin that fails in a session ([`FailureKind::persists`]) is recorded
+//! A plugin that fails in a session (`FailureKind::persists`) is recorded
 //! before its denial is written, so every later session, a resumed one
 //! included, blocks its tools too, until [`PluginHome::disable`] removes the
 //! record. Disabling and enabling again is the only reset. A session reads
 //! the file once, when it starts: a failure recorded by another running
 //! session, or an `enable` or `disable`, reaches it at its next start.
 //!
-//! Only the owner's files are trusted ([`trust`]). On Unix `plugins.json`
+//! Only the owner's files are trusted (`trust`). On Unix `plugins.json`
 //! and each store copy are read through descriptors opened one directory
 //! at a time from `/` without following links, and each opened object
 //! must be owned by the user or root and not writable by others: by mode
@@ -53,8 +53,6 @@
 //! home with no `plugins.json`, or one that enables nothing, works on
 //! every platform; deleting the file, which needs write access to the
 //! plugins directory, disables every plugin.
-//!
-//! [`FailureKind::persists`]: super::veto::FailureKind::persists
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -317,8 +315,8 @@ impl PluginHome {
     }
 
     /// The enabled plugins by id; none when `plugins.json` does not exist.
-    /// On Unix an existing file is read through the [trust
-    /// checks](trust), so an untrusted one is an error. Reads without the
+    /// On Unix an existing file is read through the trust
+    /// checks (`trust`), so an untrusted one is an error. Reads without the
     /// lock, as a session does. Blocks.
     pub fn enabled(&self) -> Result<BTreeMap<String, EnabledPlugin>, PluginHomeError> {
         Ok(self.read_config()?.0)
@@ -631,7 +629,7 @@ impl PluginHome {
     /// id order, as the module documentation describes, and a warning for
     /// each that starts blocked. An invalid or untrusted `plugins.json` is
     /// an error, and so is a plugins directory that overlaps `workspace`
-    /// or lies in a git working tree ([`trust::check_outside`]) while it
+    /// or lies in a git working tree (`trust::check_outside`) while it
     /// enables any plugin. Blocks.
     pub fn load(
         &self,

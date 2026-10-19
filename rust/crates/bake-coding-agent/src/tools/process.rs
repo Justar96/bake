@@ -9,7 +9,7 @@
 //! own, under the tool's owner. An abort or the caller's stop kills that
 //! tree, and the run returns only after the child and the tree are gone;
 //! dropping the run kills the tree and hands it to the owner
-//! ([`crate::child_process`]).
+//! (`crate::child_process`).
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};

@@ -108,7 +108,7 @@ pub fn redact_url(value: &str) -> String {
 }
 
 /// Pi's `redactJsonValue`: a copy in which every non-null value under a
-/// sensitive key is [`REDACTED`] and every string is passed through
+/// sensitive key is `REDACTED` and every string is passed through
 /// [`redact_url`].
 pub fn redact_json_value(value: &Value) -> Value {
     match value {

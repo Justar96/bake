@@ -5,7 +5,7 @@
 //! exit 2 blocks with standard error as the reason; every other exit, and a
 //! hook that could not run, is a non-blocking error. Decoding is total:
 //! malformed JSON stays plain output. The dialects decide which fields
-//! apply ([`super::session`]).
+//! apply (`super::session`).
 
 use serde_json::{Map, Value};
 
