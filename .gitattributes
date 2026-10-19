@@ -18,3 +18,7 @@ docs/persistence-changes/historical-formats/*.schema.json linguist-generated=tru
 # space, and a tab-indented source puts a tab after it. Changing those bytes
 # would stop the patch applying, so whitespace checks skip it.
 patches/*.patch -whitespace
+
+# Third-party license files are upstream bytes; quickjs-ng's LICENSE has a line
+# holding one space, so whitespace checks skip them.
+rust/crates/*/*/LICENSE-* -whitespace
