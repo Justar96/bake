@@ -277,6 +277,7 @@ fn started_harness(
         home: None,
         factory: Some(factory),
         resume: startup.resume,
+        offline: false,
         commit_gate: gate,
         gh: None,
     };

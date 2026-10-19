@@ -133,6 +133,7 @@ fn setup_with(
         home: None,
         factory: None,
         resume: false,
+        offline: false,
         commit_gate: None,
         gh: None,
     };

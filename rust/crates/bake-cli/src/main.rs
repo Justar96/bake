@@ -107,6 +107,8 @@ Options:
                             workspace-write
       --sandbox <mode>      read-only, workspace-write, or danger-full-access
       --approval <policy>   ask or never
+      --offline             Run no startup network operation (BAKE_OFFLINE,
+                            then DSH_OFFLINE, set to 1, true, or yes)
   -h, --help                Show this help
   -v, --version             Show the version
 
@@ -504,6 +506,9 @@ fn environment(
 /// and SIGHUP itself, shutting the session down before it restores the
 /// terminal.
 fn interactive(runtime: &tokio::runtime::Runtime, args: cli::Args, stderr: SharedWriter) -> i32 {
+    // `--offline`, or BAKE_OFFLINE then DSH_OFFLINE: the terminal starts
+    // the session without the CLIProxyAPI catalog refresh.
+    let offline = cli::offline_mode(&args, |name| std::env::var_os(name));
     let screen = if args.inline {
         ScreenMode::Inline
     } else {
@@ -548,6 +553,7 @@ fn interactive(runtime: &tokio::runtime::Runtime, args: cli::Args, stderr: Share
         home: Some(started.home),
         factory: Some(started.factory),
         resume: started.resume,
+        offline,
     };
     match bake_tui::run_live(screen, live) {
         Ok(exit) => exit_status(exit),

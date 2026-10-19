@@ -180,6 +180,22 @@ fn home_harness(home: &Home, gate: Option<commands::CommitGate>) -> Harness {
     panicking_harness(home, gate, None).0
 }
 
+/// [`home_harness`] with `--offline`.
+fn offline_harness(home: &Home) -> Harness {
+    let (runtime, faux, mut live) = setup(Vec::new(), Vec::new(), Some("test-key"));
+    live.home = Some(home.0.clone());
+    live.offline = true;
+    let (sender, updates) = std_mpsc::channel();
+    let mut port = LivePort::start(live, move |update| sender.send(update).is_ok());
+    port.begin();
+    Harness {
+        runtime,
+        faux,
+        port: Some(port),
+        updates,
+    }
+}
+
 /// [`home_harness`], whose driver panics when it refuses the prompt
 /// `panic_on`, as a driver bug would, with whatever it owns still running.
 /// The `Weak` is gone once nothing holds the port's update callback: the
@@ -613,6 +629,60 @@ fn a_driver_panic_during_a_held_login_commit_still_finishes_it() {
         "a task outlived the port"
     );
     proxy.stop(&runtime);
+}
+
+// Pi's `offlineMode`: `--offline` runs no startup network operation. The
+// home is signed in to a loopback proxy that reports every request it
+// receives, so the refresh an ordinary launch makes is the test's control:
+// the offline launch reaches the proxy not once.
+#[test]
+fn offline_starts_the_session_without_the_catalog_refresh() {
+    let home = Home::new("offline");
+    let (reached_tx, reached) = std_mpsc::channel();
+    let release = Arc::new(Notify::new());
+    let signed_in = home_harness(&home, None);
+    // The sign-in's own check is request 0; the refreshes are held from 1.
+    let proxy = Proxy::start_holding_from(
+        &signed_in.runtime,
+        models(),
+        Some((reached_tx, Arc::clone(&release))),
+        1,
+    );
+    signed_in.submit_id(1, Submission::FollowUp("/login".into()));
+    let url = signed_in.dialog();
+    signed_in.reply(url.id, entered(&proxy.url));
+    let key = signed_in.dialog();
+    signed_in.reply(key.id, entered(KEY));
+    assert!(matches!(
+        signed_in.command_end(1).last(),
+        Some(RuntimeUpdate::Admitted(1))
+    ));
+    // The proxy's task runs on the first runtime, which stays up.
+    let Harness {
+        runtime: proxy_runtime,
+        port,
+        ..
+    } = signed_in;
+    port.expect("port").stop().expect("stop");
+
+    let offline = offline_harness(&home);
+    offline.submit_id(2, Submission::FollowUp("hello".into()));
+    offline.until_turn_end();
+    offline.stop();
+    assert_eq!(
+        reached.try_recv(),
+        Err(std_mpsc::TryRecvError::Empty),
+        "an offline launch reached the proxy"
+    );
+
+    // The control: the same home without `--offline` does refresh.
+    let online = home_harness(&home, None);
+    reached
+        .recv_timeout(PATIENCE)
+        .expect("the startup refresh reached the proxy");
+    release.notify_waiters();
+    online.stop();
+    proxy.stop(&proxy_runtime);
 }
 
 // Bake: a driver that panics while the startup refresh's fetch is held

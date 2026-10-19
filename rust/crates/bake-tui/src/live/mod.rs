@@ -115,6 +115,10 @@ pub struct LiveSession {
     /// `--resume`: open `/resume` before the first prompt, which waits for
     /// it ([`bake_coding_agent::cli::Started::resume`]).
     pub resume: bool,
+    /// `--offline` ([`bake_coding_agent::cli::offline_mode`]): the
+    /// once-per-launch CLIProxyAPI catalog refresh does not run, so the
+    /// session starts without reaching the network.
+    pub offline: bool,
     /// Holds `/login` at its commit, for tests of that boundary.
     #[cfg(test)]
     pub commit_gate: Option<commands::CommitGate>,
@@ -192,6 +196,7 @@ impl LivePort {
             home,
             factory,
             resume,
+            offline,
             #[cfg(test)]
             commit_gate,
             #[cfg(test)]
@@ -245,6 +250,7 @@ impl LivePort {
                 })
                 .collect(),
             resume,
+            offline,
             aborts: Vec::new(),
             turns: 0,
             approvals: approvals.clone(),
@@ -473,6 +479,8 @@ struct Driver {
     held: VecDeque<Queued>,
     /// `--resume`: open `/resume` before the first prompt.
     resume: bool,
+    /// `--offline`: do not refresh the CLIProxyAPI catalog at startup.
+    offline: bool,
     /// Aborts in flight. Each is awaited before the next prompt starts, so
     /// an abort never reaches a later run.
     aborts: Vec<JoinHandle<()>>,
@@ -539,7 +547,8 @@ impl Driver {
         let mut running: Option<Running> = None;
         self.status();
         self.publish_mcp();
-        if let Some(home) = self.home.clone() {
+        // `--offline` stops the one startup network operation.
+        if let Some(home) = self.home.clone().filter(|_| !self.offline) {
             let abort = AbortController::new();
             let session = Arc::clone(&self.session);
             let signal = abort.signal();

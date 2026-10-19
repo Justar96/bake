@@ -2,6 +2,8 @@
 
 The Bake home is the directory that holds bake-rs's models, keys, settings, and saved sessions. It is the first of these that is set and not blank: `BAKE_HOME`, then `DSH_HOME`, then `~/.bake`. A leading `~` in either variable is expanded, and a relative path is taken from the working directory. When none of them can be resolved, bake-rs stops with an error.
 
+`BAKE_OFFLINE`, then `DSH_OFFLINE`, set to `1`, `true`, or `yes`, does what `--offline` does: no startup network operation runs (`bake-rs docs models`).
+
 ## What bake-rs reads there
 
 | Path | Contents |

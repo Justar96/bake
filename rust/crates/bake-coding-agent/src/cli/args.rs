@@ -80,6 +80,9 @@ pub struct Args {
     pub continue_session: bool,
     /// `--resume`, `-r`: pick the session to open. Interactive mode only.
     pub resume: bool,
+    /// `--offline`: run no startup network operation. The environment can
+    /// set it too ([`crate::cli::offline_mode`]).
+    pub offline: bool,
     /// `--provider`.
     pub provider: Option<String>,
     /// `--model`.
@@ -307,6 +310,7 @@ pub fn parse_args(args: &[String]) -> Args {
             "--no-prompt-templates" | "-np" => result.no_prompt_templates = true,
             "--no-context-files" | "-nc" => result.no_context_files = true,
             "--no-mcp" => result.no_mcp = true,
+            "--offline" => result.offline = true,
             "--export" if next.is_some() => {
                 result.export = next.map(str::to_owned);
                 i += 1;
@@ -667,6 +671,16 @@ mod tests {
             unknown_flags_message(&args.unknown_flags).as_deref(),
             Some("Unknown options: --flag, --other")
         );
+    }
+
+    // Pi `args.ts`: `--offline` takes no value.
+    #[test]
+    fn offline_flag() {
+        assert!(!parse(&["-p", "hi"]).offline);
+        let args = parse(&["--offline", "-p", "hi"]);
+        assert!(args.offline);
+        assert_eq!(args.messages, ["hi"]);
+        assert!(args.diagnostics.is_empty() && args.unknown_flags.is_empty());
     }
 
     // Pi `args.ts`: `--export` takes the next argument, and the first

@@ -559,6 +559,37 @@ enum SessionStartError {
     Plain(String),
 }
 
+/// `BAKE_OFFLINE`, read before [`DSH_OFFLINE_ENV`].
+pub const BAKE_OFFLINE_ENV: &str = "BAKE_OFFLINE";
+/// `DSH_OFFLINE`, read when `BAKE_OFFLINE` is unset or blank.
+pub const DSH_OFFLINE_ENV: &str = "DSH_OFFLINE";
+
+/// Pi's `offlineMode`: `--offline`, or a truthy environment setting. Where
+/// Pi reads `PI_OFFLINE`, Bake reads [`BAKE_OFFLINE_ENV`] and then
+/// [`DSH_OFFLINE_ENV`], as it reads its home ([`crate::home`]); a blank
+/// value counts as unset. The value's test is Pi's `isTruthyEnvFlag`: `1`,
+/// `true`, or `yes`, ignoring case.
+///
+/// `bake-rs` runs one startup network operation, the interactive
+/// terminal's once-per-launch CLIProxyAPI catalog refresh
+/// (`bake_tui`'s `startup_refresh`), and this stops it. Print mode starts
+/// no network operation of its own: its models, keys, settings, sessions,
+/// skills, context files, and `mcp.json` are files, an `mcp.json` server
+/// reached over HTTP is refused before it is started, and the web tools
+/// and model requests run only for a prompt. Pi's version check, which
+/// `PI_OFFLINE` also stops, has no equivalent here.
+pub fn offline_mode(args: &Args, env: impl Fn(&str) -> Option<std::ffi::OsString>) -> bool {
+    if args.offline {
+        return true;
+    }
+    [BAKE_OFFLINE_ENV, DSH_OFFLINE_ENV]
+        .into_iter()
+        .filter_map(env)
+        .map(|value| value.to_string_lossy().trim().to_ascii_lowercase())
+        .find(|value| !value.is_empty())
+        .is_some_and(|value| matches!(value.as_str(), "1" | "true" | "yes"))
+}
+
 /// Whether `--resume` opens the session picker for this run, as Pi's
 /// `createSessionManager` reaches its `parsed.resume` branch: `--no-session`,
 /// `--fork`, and `--session` are taken first and leave `--resume` unused.
@@ -2192,6 +2223,50 @@ mod tests {
             Action::Interactive(_)
         ));
         assert_eq!(text(&errors), "");
+    }
+
+    // Pi's `offlineMode`, with Bake's variable names: the flag, then
+    // `BAKE_OFFLINE`, then `DSH_OFFLINE`, each read as Pi's
+    // `isTruthyEnvFlag` reads `PI_OFFLINE`.
+    #[test]
+    fn offline_comes_from_the_flag_or_the_environment() {
+        let none = |_: &str| None;
+        assert!(!offline_mode(&parse_args(&[]), none));
+        assert!(offline_mode(&parse_args(&strings(&["--offline"])), none));
+        let set = |name: &'static str, value: &'static str| {
+            move |asked: &str| (asked == name).then(|| std::ffi::OsString::from(value.to_owned()))
+        };
+        for value in ["1", "true", "TRUE", "yes", " Yes "] {
+            assert!(
+                offline_mode(&parse_args(&[]), set(BAKE_OFFLINE_ENV, value)),
+                "{value:?}"
+            );
+            assert!(
+                offline_mode(&parse_args(&[]), set(DSH_OFFLINE_ENV, value)),
+                "{value:?}"
+            );
+        }
+        for value in ["", "   ", "0", "no", "false", "on"] {
+            assert!(
+                !offline_mode(&parse_args(&[]), set(BAKE_OFFLINE_ENV, value)),
+                "{value:?}"
+            );
+        }
+        // A blank `BAKE_OFFLINE` falls through to `DSH_OFFLINE`, as the
+        // home does.
+        let blank_then_set = |asked: &str| match asked {
+            BAKE_OFFLINE_ENV => Some(std::ffi::OsString::from("  ")),
+            DSH_OFFLINE_ENV => Some(std::ffi::OsString::from("1")),
+            _ => None,
+        };
+        assert!(offline_mode(&parse_args(&[]), blank_then_set));
+        // A set `BAKE_OFFLINE` decides, whatever `DSH_OFFLINE` says.
+        let both = |asked: &str| match asked {
+            BAKE_OFFLINE_ENV => Some(std::ffi::OsString::from("0")),
+            DSH_OFFLINE_ENV => Some(std::ffi::OsString::from("1")),
+            _ => None,
+        };
+        assert!(!offline_mode(&parse_args(&[]), both));
     }
 
     // Pi's `createSessionManager` reaches `--resume` only after
