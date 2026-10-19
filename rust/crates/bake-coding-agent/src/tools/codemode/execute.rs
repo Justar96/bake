@@ -774,8 +774,13 @@ async fn run_script(
     };
     tokio::pin!(cancelled);
     let outcome = loop {
-        // Start waiting calls while there is room, in the order made.
-        while !stopping && running.len() < MAX_CONCURRENT_NESTED_CALLS {
+        // Start waiting calls while there is room, in the order made. A
+        // running call may stop on the script's aborted signal and free its
+        // room before the abort is handled below, so the signal is read too.
+        while !stopping
+            && !signal.is_some_and(AbortSignal::aborted)
+            && running.len() < MAX_CONCURRENT_NESTED_CALLS
+        {
             let Some(call) = queue.pop_front() else {
                 break;
             };
