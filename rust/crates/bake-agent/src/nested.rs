@@ -816,7 +816,7 @@ async fn outcome(
         },
         Some(&signal),
         Some(caller_id),
-        ToolContext::new(child),
+        ToolContext::new(child, Some(caller_id.to_owned())),
         &updates,
     );
     tokio::pin!(running);

@@ -221,6 +221,16 @@ impl Fixture {
             .map(|request| request.call_id.clone())
             .collect()
     }
+
+    /// The calling tool call each approval request names.
+    fn asked_parents(&self) -> Vec<Option<String>> {
+        self.asked
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|request| request.parent_tool_call_id.clone())
+            .collect()
+    }
 }
 
 /// The outcomes `script` reported, as `(id, is_error, text)`.
@@ -418,14 +428,20 @@ async fn nested_writes_meet_each_permission_and_approval_answer() {
                 assert!(!fx.ws().join("a.txt").exists(), "{name}");
             }
         }
-        // The prompt names the nested call, and the request and its answer
-        // are on disk under that id.
+        // The prompt names the nested call and the script that made it,
+        // and the request and its answer are on disk under the call's id.
         let expected_asks: Vec<String> = if case.asked {
             vec!["c1/1".into()]
         } else {
             Vec::new()
         };
         assert_eq!(fx.asked_ids(), expected_asks, "{name}");
+        let expected_parents: Vec<Option<String>> = if case.asked {
+            vec![Some("c1".into())]
+        } else {
+            Vec::new()
+        };
+        assert_eq!(fx.asked_parents(), expected_parents, "{name}");
         let recorded = if case.recorded {
             let outcome = if case.result.is_ok() {
                 EscalationOutcome::AllowedOnce

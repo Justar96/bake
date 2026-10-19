@@ -307,7 +307,8 @@ impl fmt::Debug for AgentToolUpdateCallback {
 
 /// What one tool execution may use beyond its arguments, the part of Pi's
 /// `ExtensionToolContext` a tool needs: the [`NestedToolExecutor`] that runs
-/// other tools on behalf of this call.
+/// other tools on behalf of this call, and the call that made this one when
+/// it is a nested call.
 ///
 /// The agent loop builds one per call; it is cheap to clone and may move to
 /// another task or thread.
@@ -315,22 +316,33 @@ impl fmt::Debug for AgentToolUpdateCallback {
 #[non_exhaustive]
 pub struct ToolContext {
     nested: NestedToolExecutor,
+    parent_tool_call_id: Option<String>,
 }
 
 impl ToolContext {
     /// A context outside any agent, for tests and direct calls: its executor
     /// refuses every nested call.
     pub fn detached() -> Self {
-        Self::new(NestedToolExecutor::unavailable(""))
+        Self::new(NestedToolExecutor::unavailable(""), None)
     }
 
-    pub(crate) fn new(nested: NestedToolExecutor) -> Self {
-        Self { nested }
+    pub(crate) fn new(nested: NestedToolExecutor, parent_tool_call_id: Option<String>) -> Self {
+        Self {
+            nested,
+            parent_tool_call_id,
+        }
     }
 
     /// Runs other tools on behalf of this call, Pi's `ctx.executeTool`.
     pub fn nested(&self) -> &NestedToolExecutor {
         &self.nested
+    }
+
+    /// The id of the tool call that made this one through its
+    /// [`NestedToolExecutor`]; `None` for a model-issued or direct call.
+    /// Approval prompts use it to name the calling script.
+    pub fn parent_tool_call_id(&self) -> Option<&str> {
+        self.parent_tool_call_id.as_deref()
     }
 }
 

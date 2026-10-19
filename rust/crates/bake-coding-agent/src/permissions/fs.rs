@@ -44,7 +44,7 @@
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
-use bake_agent::BoxFuture;
+use bake_agent::{BoxFuture, ToolContext};
 use bake_ai::AbortSignal;
 use bake_sandbox::escalation::{escalation_hint_marker, sandbox_denial_marker};
 use bake_sandbox::{SandboxMode, SandboxPolicy, canonical_path, is_path_under};
@@ -216,10 +216,16 @@ fn fs_parameters(parameters: Value, permissions: &ToolPermissions) -> Value {
     )
 }
 
-fn call<'a>(tool_name: &'a str, id: &'a str, args: &'a Value) -> ToolCall<'a> {
+fn call<'a>(
+    tool_name: &'a str,
+    id: &'a str,
+    args: &'a Value,
+    ctx: &'a ToolContext,
+) -> ToolCall<'a> {
     ToolCall {
         tool_name,
         call_id: id,
+        parent_tool_call_id: ctx.parent_tool_call_id(),
         args,
         subject: "operation",
         blank_justification: BlankJustification::Checked,
@@ -248,14 +254,14 @@ pub(crate) fn owned_sandboxed_write_tool_definition(
     let tool = &mut definition.tool;
     tool.parameters = fs_parameters(std::mem::take(&mut tool.parameters), &permissions);
     tool.execute = Arc::new(
-        move |id: String, args: Value, signal: Option<AbortSignal>, _update, _ctx| {
+        move |id: String, args: Value, signal: Option<AbortSignal>, _update, ctx: ToolContext| {
             let cwd = cwd.clone();
             let permissions = permissions.clone();
             let owner = owner.clone();
             Box::pin(async move {
                 let policy = permissions
                     .engine
-                    .resolve(&call("write", &id, &args), signal.as_ref())
+                    .resolve(&call("write", &id, &args, &ctx), signal.as_ref())
                     .await?;
                 let hint = permissions.offers_escalation_beyond(policy.mode);
                 crate::tools::write::execute_owned(
@@ -295,7 +301,7 @@ pub(crate) fn owned_sandboxed_edit_tool_definition(
     let tool = &mut definition.tool;
     tool.parameters = fs_parameters(std::mem::take(&mut tool.parameters), &permissions);
     tool.execute = Arc::new(
-        move |id: String, args: Value, signal: Option<AbortSignal>, _update, _ctx| {
+        move |id: String, args: Value, signal: Option<AbortSignal>, _update, ctx: ToolContext| {
             let cwd = cwd.clone();
             let permissions = permissions.clone();
             let owner = owner.clone();
@@ -303,7 +309,7 @@ pub(crate) fn owned_sandboxed_edit_tool_definition(
                 validate_edit_input(&args)?;
                 let policy = permissions
                     .engine
-                    .resolve(&call("edit", &id, &args), signal.as_ref())
+                    .resolve(&call("edit", &id, &args, &ctx), signal.as_ref())
                     .await?;
                 let hint = permissions.offers_escalation_beyond(policy.mode);
                 crate::tools::edit::execute_owned(

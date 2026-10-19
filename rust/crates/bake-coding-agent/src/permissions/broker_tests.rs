@@ -32,6 +32,7 @@ fn ask(tool: &str, call: &str) -> ApprovalRequest {
     ApprovalRequest {
         tool_name: tool.into(),
         call_id: call.into(),
+        parent_tool_call_id: None,
         reason: format!("escalate sandbox to workspace-write: {call}"),
         arguments: serde_json::json!({ "command": format!("touch {call}") }),
     }

@@ -786,6 +786,7 @@ fn request() -> ApprovalRequest {
     ApprovalRequest {
         tool_name: "bash".into(),
         call_id: "call-1".into(),
+        parent_tool_call_id: None,
         reason: "escalate sandbox to workspace-write: needed".into(),
         arguments: serde_json::json!({ "command": "make" }),
     }
@@ -918,6 +919,7 @@ async fn resolve(
     let call = ToolCall {
         tool_name: "bash",
         call_id: "call-1",
+        parent_tool_call_id: None,
         args: &args,
         subject,
         blank_justification: blank,
@@ -1149,6 +1151,7 @@ async fn an_aborted_call_cancels_its_approval() {
     let call = ToolCall {
         tool_name: "bash",
         call_id: "c",
+        parent_tool_call_id: None,
         args: &args,
         subject: "command",
         blank_justification: BASH,

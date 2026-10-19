@@ -103,6 +103,9 @@ pub struct ApprovalRequest {
     pub tool_name: String,
     /// The exact tool call being decided.
     pub call_id: String,
+    /// The tool call that made this one, when a tool such as code mode ran
+    /// it through its nested-call executor; a prompt can name that script.
+    pub parent_tool_call_id: Option<String>,
     /// Why the asker asks, such as `escalate sandbox to …: <justification>`.
     pub reason: String,
     /// The call's validated arguments.

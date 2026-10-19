@@ -337,6 +337,7 @@ pub fn create_sandboxed_bash_tool_definition(
                 let call = ToolCall {
                     tool_name: "bash",
                     call_id: &id,
+                    parent_tool_call_id: ctx.parent_tool_call_id(),
                     args: &args,
                     subject: "command",
                     blank_justification: BlankJustification::IgnoredAlone,

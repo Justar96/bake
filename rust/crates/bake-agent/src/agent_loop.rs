@@ -980,7 +980,7 @@ impl Batch<'_> {
             args,
             self.signal,
             &updates,
-            ToolContext::new(nested.clone()),
+            ToolContext::new(nested.clone(), None),
         )
         .await;
         let mut finalized = finalize_executed_tool_call(
@@ -1167,9 +1167,13 @@ fn immediate_error(message: impl Into<String>) -> Preparation {
     }
 }
 
-/// The context of a call no nested-call executor serves.
-fn unavailable_context(tool_call: &ToolCall) -> ToolContext {
-    ToolContext::new(NestedToolExecutor::unavailable(tool_call.id.clone()))
+/// The context of a call no nested-call executor serves, made by
+/// `parent_tool_call_id` when it is a nested call.
+fn unavailable_context(tool_call: &ToolCall, parent_tool_call_id: Option<&str>) -> ToolContext {
+    ToolContext::new(
+        NestedToolExecutor::unavailable(tool_call.id.clone()),
+        parent_tool_call_id.map(str::to_owned),
+    )
 }
 
 fn should_terminate_tool_batch(finalized_calls: &[AgentToolCallOutcome]) -> bool {
@@ -1626,7 +1630,7 @@ pub async fn run_tool_call(
         hooks,
         options.signal.as_ref(),
         options.parent_tool_call_id.as_deref(),
-        unavailable_context(tool_call),
+        unavailable_context(tool_call, options.parent_tool_call_id.as_deref()),
         &updates,
     )
     .await

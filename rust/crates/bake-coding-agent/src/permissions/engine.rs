@@ -169,6 +169,8 @@ pub struct ToolCall<'a> {
     pub tool_name: &'a str,
     /// The tool call's id.
     pub call_id: &'a str,
+    /// The tool call that made this one, when it is a nested call.
+    pub parent_tool_call_id: Option<&'a str>,
     /// The call's validated arguments.
     pub args: &'a Value,
     /// The noun the escalation texts use: `command` for bash, `operation`
@@ -461,6 +463,7 @@ impl PermissionEngine {
         let request = ApprovalRequest {
             tool_name: call.tool_name.to_owned(),
             call_id: call.call_id.to_owned(),
+            parent_tool_call_id: call.parent_tool_call_id.map(str::to_owned),
             reason,
             arguments: call.args.clone(),
         };

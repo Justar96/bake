@@ -136,6 +136,7 @@ fn effect_tool(
                 let call = ToolCall {
                     tool_name: "effect",
                     call_id: &id,
+                    parent_tool_call_id: None,
                     args: &args,
                     subject: "operation",
                     blank_justification: BlankJustification::Checked,
@@ -438,6 +439,8 @@ async fn the_request_and_its_answer_are_on_disk_before_the_call_runs() {
         panic!("one request: {asked:?}");
     };
     assert_eq!(request.call_id, "c1");
+    // A model-issued call has no calling tool call.
+    assert_eq!(request.parent_tool_call_id, None);
     assert!(request.reason.contains("to write the file"), "{request:?}");
     let id = seen_when_asked
         .first()
@@ -922,6 +925,7 @@ async fn a_shut_down_session_refuses_without_asking() {
     let call = ToolCall {
         tool_name: "effect",
         call_id: "c1",
+        parent_tool_call_id: None,
         args: &args,
         subject: "operation",
         blank_justification: BlankJustification::Checked,

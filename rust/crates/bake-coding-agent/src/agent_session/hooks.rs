@@ -312,6 +312,7 @@ pub(super) fn before_tool_call(
                     let request = ApprovalRequest {
                         tool_name: tool_call.name.clone(),
                         call_id: tool_call.id.clone(),
+                        parent_tool_call_id: parent_tool_call_id.map(str::to_owned),
                         reason: ask_text(reason.as_deref()),
                         arguments: args.clone(),
                     };
