@@ -1,0 +1,11 @@
+[package]
+name = "bake-codemode"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Pi's codemode for Bake's Rust agent: the script source format, TypeScript declarations rendered from JSON Schema, script identifiers, and tool-search ranking; no agent types"
+
+[dependencies]
+serde_json.workspace = true

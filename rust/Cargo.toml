@@ -4,6 +4,7 @@ members = [
     "crates/bake-agent",
     "crates/bake-ai",
     "crates/bake-cli",
+    "crates/bake-codemode",
     "crates/bake-coding-agent",
     "crates/bake-conformance",
     "crates/bake-mcp",
@@ -26,6 +27,7 @@ publish = false
 [workspace.dependencies]
 bake-agent = { path = "crates/bake-agent" }
 bake-ai = { path = "crates/bake-ai" }
+bake-codemode = { path = "crates/bake-codemode" }
 bake-coding-agent = { path = "crates/bake-coding-agent" }
 bake-mcp = { path = "crates/bake-mcp" }
 bake-process = { path = "crates/bake-process" }
