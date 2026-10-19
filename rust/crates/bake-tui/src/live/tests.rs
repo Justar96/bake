@@ -132,6 +132,7 @@ fn setup_with(
         approvals: None,
         home: None,
         factory: None,
+        resume: false,
         commit_gate: None,
         gh: None,
     };

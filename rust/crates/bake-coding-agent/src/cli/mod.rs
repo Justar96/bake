@@ -57,9 +57,12 @@
 //! standing permission, sandbox provider, and approver; a subagent runs
 //! only the tool hooks.
 //!
-//! Not ported (deferred): RPC mode, `--resume`,
-//! theme and extension flags, extension tools, and the missing-session-cwd
-//! prompt.
+//! `--resume` opens the session picker the terminal already has
+//! ([`Started::resume`]), where Pi opens its own before the session is
+//! made; print mode, which has no terminal for it, refuses the flag.
+//!
+//! Not ported (deferred): RPC mode, theme and extension flags, extension
+//! tools, and the missing-session-cwd prompt.
 
 pub mod args;
 pub mod export;
@@ -360,6 +363,15 @@ pub fn plan(
             return Action::Interactive(Box::new(parsed));
         }
     };
+    // Pi's `--resume` opens a terminal session picker from
+    // `createSessionManager`, whatever the mode; print mode here has no
+    // terminal to open it in, so it is refused instead of ignored.
+    if resumes_at_startup(&parsed) {
+        return Action::Exit(error(
+            stderr,
+            "--resume opens the session picker, which print mode has no terminal for; use --session or --continue",
+        ));
+    }
     Action::Print(Box::new(parsed), mode)
 }
 
@@ -426,6 +438,9 @@ fn validate_fork_flags(parsed: &Args) -> Option<String> {
     if parsed.continue_session {
         conflicts.push("--continue");
     }
+    if parsed.resume {
+        conflicts.push("--resume");
+    }
     if parsed.no_session {
         conflicts.push("--no-session");
     }
@@ -442,6 +457,9 @@ fn validate_session_id_flags(parsed: &Args) -> Option<String> {
     }
     if parsed.continue_session {
         conflicts.push("--continue");
+    }
+    if parsed.resume {
+        conflicts.push("--resume");
     }
     if !conflicts.is_empty() {
         return Some(format!(
@@ -541,6 +559,15 @@ enum SessionStartError {
     Plain(String),
 }
 
+/// Whether `--resume` opens the session picker for this run, as Pi's
+/// `createSessionManager` reaches its `parsed.resume` branch: `--no-session`,
+/// `--fork`, and `--session` are taken first and leave `--resume` unused.
+/// `--session-id` and `--fork` with `--resume` are refused before this
+/// ([`validate_session_id_flags`], [`validate_fork_flags`]).
+pub fn resumes_at_startup(args: &Args) -> bool {
+    args.resume && !args.no_session && args.fork.is_none() && args.session.is_none()
+}
+
 /// Pi's `createSessionManager` for the ported flags. Without
 /// `session_dir`, sessions live under `home`, never the process's own Bake
 /// home. Blocking.
@@ -615,6 +642,14 @@ fn create_session_manager(
             ))),
         };
     }
+    // Pi's `createSessionManager` takes `--resume` before `--continue`:
+    // the session picker decides what opens, and nothing else does. The
+    // terminal opens the picker over this new session, which writes no
+    // file until it holds a message ([`Started::resume`]).
+    if resumes_at_startup(args) {
+        return SessionManager::create(cwd, Some(&dir), NewSessionOptions::default())
+            .map_err(failed);
+    }
     if args.continue_session {
         return SessionManager::continue_recent(cwd, Some(&dir)).map_err(failed);
     }
@@ -661,6 +696,10 @@ pub struct Started {
     pub home: PathBuf,
     /// Builds the sessions `/new` and `/resume` replace this one with.
     pub factory: SessionFactory,
+    /// `--resume`: the terminal opens the session picker over this new
+    /// session, before its first prompt ([`resumes_at_startup`]). Print
+    /// mode never sees it: [`plan`] refuses `--resume` there.
+    pub resume: bool,
 }
 
 /// Runs `bake-rs` print mode; returns the exit code. Must run inside a
@@ -690,6 +729,7 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
         mut interrupt,
         home: _,
         factory: _,
+        resume: _,
     } = started;
     // The first prompt's startup wait, taken here so print mode can report
     // what is not serving before the answer; the prompt then waits no more.
@@ -2093,6 +2133,7 @@ async fn start_with(
         );
         return Err(1);
     }
+    let resume = resumes_at_startup(&args);
     Ok(Started {
         session,
         initial_message,
@@ -2103,6 +2144,7 @@ async fn start_with(
         interrupt,
         home,
         factory,
+        resume,
     })
 }
 
@@ -2150,6 +2192,52 @@ mod tests {
             Action::Interactive(_)
         ));
         assert_eq!(text(&errors), "");
+    }
+
+    // Pi's `createSessionManager` reaches `--resume` only after
+    // `--no-session`, `--fork`, and `--session`, and `validateForkFlags`
+    // and `validateSessionIdFlags` refuse it beside `--fork` and
+    // `--session-id`. Print mode has no terminal for the picker.
+    #[test]
+    fn resume_opens_the_picker_only_in_an_interactive_session() {
+        let (stderr, errors) = sink();
+        assert!(matches!(
+            plan(&strings(&["-r"]), true, true, &stderr),
+            Action::Interactive(args) if args.resume
+        ));
+        assert!(matches!(
+            plan(&strings(&["--resume", "--continue"]), true, true, &stderr),
+            Action::Interactive(_)
+        ));
+        // Pi takes the other session choice and leaves `--resume` unused,
+        // so print mode still runs.
+        for flags in [
+            vec!["-p", "-r", "--no-session"],
+            vec!["-p", "-r", "--session", "abc"],
+        ] {
+            assert!(
+                matches!(
+                    plan(&strings(&flags), true, true, &stderr),
+                    Action::Print(..)
+                ),
+                "{flags:?}"
+            );
+        }
+        assert_eq!(text(&errors), "");
+        for flags in [
+            vec!["-p", "-r"],
+            vec!["--mode", "json", "--resume"],
+            vec!["-r", "--fork", "a"],
+            vec!["-r", "--session-id", "s1"],
+        ] {
+            let (stderr, errors) = sink();
+            assert_eq!(
+                plan(&strings(&flags), true, true, &stderr),
+                Action::Exit(1),
+                "{flags:?}"
+            );
+            assert!(text(&errors).starts_with("Error: "), "{flags:?}");
+        }
     }
 
     #[test]

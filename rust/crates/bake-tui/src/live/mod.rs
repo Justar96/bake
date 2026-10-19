@@ -112,6 +112,9 @@ pub struct LiveSession {
     /// Builds the sessions `/new` and `/resume` replace this one with;
     /// `None` refuses both.
     pub factory: Option<SessionFactory>,
+    /// `--resume`: open `/resume` before the first prompt, which waits for
+    /// it ([`bake_coding_agent::cli::Started::resume`]).
+    pub resume: bool,
     /// Holds `/login` at its commit, for tests of that boundary.
     #[cfg(test)]
     pub commit_gate: Option<commands::CommitGate>,
@@ -188,6 +191,7 @@ impl LivePort {
             approvals,
             home,
             factory,
+            resume,
             #[cfg(test)]
             commit_gate,
             #[cfg(test)]
@@ -231,7 +235,8 @@ impl LivePort {
             projector,
             send,
             gone,
-            waiting: prompts
+            waiting: VecDeque::new(),
+            held: prompts
                 .into_iter()
                 .map(|(text, images)| Queued {
                     id: None,
@@ -239,6 +244,7 @@ impl LivePort {
                     images,
                 })
                 .collect(),
+            resume,
             aborts: Vec::new(),
             turns: 0,
             approvals: approvals.clone(),
@@ -461,6 +467,12 @@ struct Driver {
     /// submitted with images while a turn ran, and those submitted after a
     /// cancel, before its turn ended.
     waiting: VecDeque<Queued>,
+    /// The command line's prompts while the startup `/resume` runs, which
+    /// must not count as waiting: a session is replaced only while nothing
+    /// waits ([`Driver::busy`]). They become `waiting` once it ends.
+    held: VecDeque<Queued>,
+    /// `--resume`: open `/resume` before the first prompt.
+    resume: bool,
     /// Aborts in flight. Each is awaited before the next prompt starts, so
     /// an abort never reaches a later run.
     aborts: Vec<JoinHandle<()>>,
@@ -542,8 +554,22 @@ impl Driver {
                 abort,
             ));
         }
-        if let Some(next) = self.waiting.pop_front() {
-            running = Some(self.begin(next));
+        // `--resume` opens the session picker before the first prompt; the
+        // prompts wait in `held` until it ends, so the replacement it
+        // chooses is not refused for prompts that wait.
+        if self.resume {
+            self.resume = false;
+            self.command(
+                None,
+                format!("/{}", commands::RESUME),
+                commands::RESUME,
+                String::new(),
+            );
+        } else {
+            self.waiting.append(&mut self.held);
+            if let Some(next) = self.waiting.pop_front() {
+                running = Some(self.begin(next));
+            }
         }
         self.publish_pending();
         let mut shells = tokio::time::interval(SHELLS_EVERY);
@@ -603,7 +629,20 @@ impl Driver {
                 }
                 // Checked at the top of the loop.
                 Next::Jobs => {}
-                Next::Commanded(done) => self.commanded(done, running.as_ref()).await,
+                Next::Commanded(done) => {
+                    self.commanded(done, running.as_ref()).await;
+                    // The startup picker ended: the command line's prompts
+                    // become ordinary waiting prompts, in order.
+                    if !self.held.is_empty() && self.command.is_none() {
+                        self.waiting.append(&mut self.held);
+                        if running.is_none()
+                            && let Some(next) = self.waiting.pop_front()
+                        {
+                            running = Some(self.begin(next));
+                        }
+                        self.publish_pending();
+                    }
+                }
                 Next::McpChanged => self.publish_mcp(),
                 Next::Shells => self.publish_shells(),
                 Next::Request(None) => break,

@@ -76,6 +76,7 @@ Options:
       --append-system-prompt <text|path>
                             Append to the system prompt (repeatable)
   -c, --continue            Continue the most recent session in this directory
+  -r, --resume              Pick the session to open, before the first prompt
       --session <path|id>   Use a session file, or a session id or id prefix
       --session-id <id>     Use a specific session id, opening or creating it
       --fork <path|id>      Fork a session into a new session in this directory
@@ -546,6 +547,7 @@ fn interactive(runtime: &tokio::runtime::Runtime, args: cli::Args, stderr: Share
         approvals: Some(approvals),
         home: Some(started.home),
         factory: Some(started.factory),
+        resume: started.resume,
     };
     match bake_tui::run_live(screen, live) {
         Ok(exit) => exit_status(exit),

@@ -7,6 +7,7 @@ In a terminal, bake-rs opens an interactive session; with `-p` or `--mode`, or w
 ```sh
 bake-rs                       # a new session, fullscreen
 bake-rs --inline -c           # continue the latest session, in the terminal's scrollback
+bake-rs -r                    # pick the session to open, then keep it open
 bake-rs "Explain src/main.rs" # send a first prompt, then keep the session open
 ```
 

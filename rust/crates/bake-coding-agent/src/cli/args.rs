@@ -78,6 +78,8 @@ pub struct Args {
     pub mode: Option<Mode>,
     /// `--continue`, `-c`.
     pub continue_session: bool,
+    /// `--resume`, `-r`: pick the session to open. Interactive mode only.
+    pub resume: bool,
     /// `--provider`.
     pub provider: Option<String>,
     /// `--model`.
@@ -239,6 +241,7 @@ pub fn parse_args(args: &[String]) -> Args {
                 }
             },
             "--continue" | "-c" => result.continue_session = true,
+            "--resume" | "-r" => result.resume = true,
             "--provider" if next.is_some() => {
                 result.provider = next.map(str::to_owned);
                 i += 1;
@@ -508,6 +511,8 @@ mod tests {
         assert_eq!(args.model.as_deref(), Some("gpt-4o:high"));
         assert_eq!(args.thinking, Some(ModelThinkingLevel::Low));
         assert!(args.continue_session && args.no_session);
+        assert!(!args.resume);
+        assert!(parse(&["-r"]).resume && parse(&["--resume"]).resume);
         assert_eq!(args.session.as_deref(), Some("abc"));
         assert!(args.diagnostics.is_empty());
         // Pi: a flag missing its value falls through to the unknown flags.

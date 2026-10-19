@@ -162,6 +162,10 @@ pub const NO_DIALOG: &[&str] = &[COMPACT, "changelog"];
 /// shows it, and Esc cancels it rather than a dialog.
 pub const COMPACT: &str = "compact";
 
+/// The session picker, which `--resume` also opens before the first
+/// prompt ([`crate::LiveSession::resume`]).
+pub const RESUME: &str = "resume";
+
 /// The command a prompt names, with its argument, when it names one of
 /// [`COMMANDS`].
 pub fn parse(text: &str) -> Option<(&'static str, String)> {

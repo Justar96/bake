@@ -161,6 +161,14 @@ fn panicking_session_harness(
     settings_harness(world, manager, tools, gate, panic_on, Settings::default())
 }
 
+/// What the command line gave the session: `--resume`, which opens the
+/// session picker before the first prompt, and its prompts.
+#[derive(Default)]
+struct Startup {
+    resume: bool,
+    prompts: Vec<String>,
+}
+
 /// [`panicking_session_harness`] with the session's `settings`.
 fn settings_harness(
     world: &World,
@@ -169,6 +177,27 @@ fn settings_harness(
     gate: Option<commands::CommitGate>,
     panic_on: Option<u64>,
     settings: Settings,
+) -> (Harness, Requests, std::sync::Weak<()>) {
+    started_harness(
+        world,
+        manager,
+        tools,
+        gate,
+        panic_on,
+        settings,
+        Startup::default(),
+    )
+}
+
+/// [`settings_harness`] with what the command line gave the session.
+fn started_harness(
+    world: &World,
+    manager: SessionManager,
+    tools: Vec<Arc<AgentTool>>,
+    gate: Option<commands::CommitGate>,
+    panic_on: Option<u64>,
+    settings: Settings,
+    startup: Startup,
 ) -> (Harness, Requests, std::sync::Weak<()>) {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
@@ -238,11 +267,16 @@ fn settings_harness(
     let live = LiveSession {
         session,
         runtime: runtime.handle().clone(),
-        prompts: Vec::new(),
+        prompts: startup
+            .prompts
+            .into_iter()
+            .map(|text| (text, Vec::new()))
+            .collect(),
         notes: Vec::new(),
         approvals: None,
         home: None,
         factory: Some(factory),
+        resume: startup.resume,
         commit_gate: gate,
         gh: None,
     };
@@ -561,6 +595,85 @@ fn a_cancelled_or_empty_resume_keeps_the_session_and_draft() {
     h.stop();
     assert_eq!(texts(&file, "user"), ["one", "two"]);
     assert_eq!(h_requests(&requests), 2);
+}
+
+// Pi's `createSessionManager`: `--resume` picks the session the run opens.
+// Bake opens Pi's picker as the `/resume` sheet over the new session the
+// command line made, before its first prompt: the prompt waits for the
+// choice, runs in the chosen session, and the new session, which held no
+// message, leaves no file.
+#[test]
+fn the_resume_flag_opens_the_picker_before_the_first_prompt() {
+    let world = World::new("startup-resume");
+    let earlier = fixture(
+        &world,
+        "earlier.jsonl",
+        "01cccccc-earlier",
+        &world.project(),
+        "earlier",
+    );
+    let manager = persisted(&world);
+    let fresh = manager.session_file().expect("file").to_path_buf();
+    let (h, requests, _) = started_harness(
+        &world,
+        manager,
+        Vec::new(),
+        None,
+        None,
+        Settings::default(),
+        Startup {
+            resume: true,
+            prompts: vec!["after".into()],
+        },
+    );
+    // Nothing was submitted: the picker opens by itself.
+    let dialog = h.next_dialog();
+    h.choose_answer(dialog.id, choose(&dialog, "earlier"));
+    let updates = h.until(|u| matches!(u, RuntimeUpdate::Replaced(_)));
+    let rows = replaced(&updates).expect("replaced");
+    assert_eq!(saved_file(&rows), earlier);
+    assert!(rows.contains(&Row::User("earlier".into())), "{rows:#?}");
+    // The held prompt runs once the picker has chosen, in that session.
+    h.until_turn_end();
+    h.stop();
+    assert_eq!(texts(&earlier, "user"), ["earlier", "after"]);
+    assert!(!fresh.exists(), "the unused session left a file");
+    assert_eq!(world.files(), [earlier]);
+    assert_eq!(h_requests(&requests), 1);
+}
+
+// A cancelled startup picker leaves the new session in place, and its
+// held prompt runs there.
+#[test]
+fn a_cancelled_startup_picker_keeps_the_new_session() {
+    let world = World::new("startup-resume-cancel");
+    fixture(
+        &world,
+        "earlier.jsonl",
+        "01dddddd-earlier",
+        &world.project(),
+        "earlier",
+    );
+    let manager = persisted(&world);
+    let fresh = manager.session_file().expect("file").to_path_buf();
+    let (h, requests, _) = started_harness(
+        &world,
+        manager,
+        Vec::new(),
+        None,
+        None,
+        Settings::default(),
+        Startup {
+            resume: true,
+            prompts: vec!["after".into()],
+        },
+    );
+    let dialog = h.next_dialog();
+    h.choose_answer(dialog.id, DialogAnswer::Cancel);
+    h.until_turn_end();
+    h.stop();
+    assert_eq!(texts(&fresh, "user"), ["after"]);
+    assert_eq!(h_requests(&requests), 1);
 }
 
 /// Writes a session file holding one exchange, with `id`, started in
