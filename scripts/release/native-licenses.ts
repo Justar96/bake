@@ -17,7 +17,10 @@
  * `cfg()` applied: the union over all build hosts, a superset of what its
  * runner builds.
  * Dev-dependencies are excluded. Bake's own workspace crates are listed with
- * their NOTICE files, not as third-party crates.
+ * their NOTICE files, not as third-party crates, and with the license files of
+ * third-party artifacts they embed: each `LICENSE-*` file in an immediate
+ * subdirectory of the crate, such as `bake-codemode`'s
+ * `engine/LICENSE-QuickJS-NG` beside the WebAssembly binary it covers.
  *
  * Collection: cargo-about (exact version {@link CARGO_ABOUT_VERSION}, config
  * `rust/about.toml`) owns license policy: it parses each crate's SPDX
@@ -80,6 +83,8 @@ export type PlatformId = typeof PLATFORMS[number]['id']
 
 const CRATES_IO = 'registry+https://github.com/rust-lang/crates.io-index'
 const ATTRIBUTION_FILE = /^(?:notice|copyright|copying)(?:[._-][^/\\]*)?$/iu
+/** The license file of an artifact a Bake crate embeds, in an immediate subdirectory of the crate. */
+const EMBEDDED_LICENSE_FILE = /^LICENSE-[^/\\]+$/u
 const CONFIG_KEYS = new Set(['accepted', 'targets', 'ignore-dev-dependencies', 'ignore-build-dependencies', 'private'])
 const RULE = '='.repeat(80)
 const THIN_RULE = '-'.repeat(80)
@@ -660,8 +665,10 @@ export function buildBundle(inputs: BundleInputs): Bundle {
   }
 
   const workspaceNotices = new Map<string, Notice | null>()
+  const embeddedLicenses = new Map<string, Notice[]>()
   for (const { pkg } of workspace.values()) {
     if (pkg.license !== 'MIT') problems.push(`${pkg.key} is a Bake crate but declares ${JSON.stringify(pkg.license)}, not the repository's MIT`)
+    embeddedLicenses.set(pkg.key, readEmbeddedLicenses(pkg.dir, inputs.root, problems))
     const path = join(pkg.dir, 'NOTICE')
     if (!existsSync(path)) {
       workspaceNotices.set(pkg.key, null)
@@ -693,7 +700,11 @@ export function buildBundle(inputs: BundleInputs): Bundle {
     const own = crates.filter(entry => entry.roles.has(platform.id))
     const bake = members_
       .filter(entry => entry.platforms.has(platform.id))
-      .map(entry => ({ pkg: entry.pkg, notice: workspaceNotices.get(entry.pkg.key) ?? null }))
+      .map(entry => ({
+        pkg: entry.pkg,
+        notice: workspaceNotices.get(entry.pkg.key) ?? null,
+        embedded: embeddedLicenses.get(entry.pkg.key) ?? [],
+      }))
     const text = renderPlatform(platform, own, textList, bake, header, inputs)
     files[path] = text
     targetFiles.push({ id: platform.id, triple: platform.triple, file: path, sha256: sha256(text), crates: perPlatform[platform.id] })
@@ -719,6 +730,7 @@ export function buildBundle(inputs: BundleInputs): Bundle {
         license: pkg.license,
         platforms: PLATFORMS.map(platform => platform.id).filter(id => platforms.has(id)),
         notice: notice === null ? null : { file: notice.file, sha256: notice.sha256 },
+        embedded: (embeddedLicenses.get(pkg.key) ?? []).map(license => ({ file: license.file, sha256: license.sha256 })),
       }
     }),
     crates: crates.map(entry => ({
@@ -823,11 +835,41 @@ function compareVersions(left: string, right: string): number {
   return 0
 }
 
+/**
+ * The license files of the third-party artifacts a Bake crate embeds: each
+ * `LICENSE-*` file in an immediate subdirectory of the crate, sorted by path.
+ */
+function readEmbeddedLicenses(dir: string, root: string, problems: string[]): Notice[] {
+  const licenses: Notice[] = []
+  let entries: string[]
+  try {
+    entries = readdirSync(dir).sort()
+  } catch {
+    return licenses
+  }
+  for (const entry of entries) {
+    const sub = join(dir, entry)
+    if (entry === 'target' || !lstatSync(sub).isDirectory()) continue
+    for (const name of readdirSync(sub).sort()) {
+      const path = join(sub, name)
+      if (!EMBEDDED_LICENSE_FILE.test(name) || !lstatSync(path).isFile()) continue
+      const file = slash(relative(root, path))
+      try {
+        const body = decode(readFileSync(path), file)
+        licenses.push({ file, sha256: sha256(body), body })
+      } catch (error) {
+        problems.push((error as Error).message)
+      }
+    }
+  }
+  return licenses
+}
+
 function renderPlatform(
   platform: typeof PLATFORMS[number],
   crates: readonly ThirdParty[],
   allTexts: readonly Text[],
-  members: readonly { pkg: Package; notice: Notice | null }[],
+  members: readonly { pkg: Package; notice: Notice | null; embedded: readonly Notice[] }[],
   header: { cargoLock: string; config: string },
   inputs: BundleInputs,
 ): string {
@@ -840,7 +882,8 @@ function renderPlatform(
     '',
     'Bake is MIT-licensed (see LICENSE). This file reproduces, verbatim, the license',
     'texts and notice files found in the source packages of the Rust crates compiled',
-    'into bake-rs for this platform, and the NOTICE files of Bake\'s own crates.',
+    'into bake-rs for this platform, and the NOTICE files of Bake\'s own crates with',
+    'the licenses of the third-party artifacts they embed.',
     'Each crate remains under its own license.',
     '',
     `Generated by scripts/release/native-licenses.ts with cargo-about ${inputs.cargoAbout}`,
@@ -868,7 +911,7 @@ function renderPlatform(
     lines.push('', RULE, `[${text.id}] ${text.license}`, `Source: ${text.source}`, `Used by: ${[...text.users].filter(user => keys.has(user)).sort(byLabel).map(label).join(', ')}`, THIN_RULE, text.body.endsWith('\n') ? text.body.slice(0, -1) : text.body)
   }
   const thirdNotices = crates.flatMap(entry => entry.notices.map(notice => ({ title: `${entry.pkg.name} ${entry.pkg.version}, ${notice.file}`, notice })))
-  const bakeNotices = members.filter(member => member.notice !== null).map(member => ({ title: `${member.pkg.name} (Bake), ${(member.notice as Notice).file}`, notice: member.notice as Notice }))
+  const bakeNotices = members.flatMap(member => [...member.notice === null ? [] : [member.notice], ...member.embedded].map(notice => ({ title: `${member.pkg.name} (Bake), ${notice.file}`, notice })))
   lines.push('', RULE, `3. Notice files (${bakeNotices.length + thirdNotices.length})`, RULE)
   for (const { title, notice } of [...bakeNotices, ...thirdNotices]) {
     lines.push('', RULE, title, THIN_RULE, notice.body.endsWith('\n') ? notice.body.slice(0, -1) : notice.body)

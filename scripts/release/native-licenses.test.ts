@@ -214,6 +214,32 @@ describe('a generated bundle', () => {
     expect(shuffled).toEqual(forward)
   })
 
+  test('reproduces the licenses of artifacts a Bake crate embeds, beside its NOTICE', () => {
+    const { root, inputs } = fixture([crates.memchr])
+    const engine = join(root, 'rust/crates/bake-agent/engine')
+    mkdirSync(join(engine, 'nested'), { recursive: true })
+    writeFileSync(join(engine, 'LICENSE-QuickJS-NG'), MIT('2017-2024 Fabrice Bellard'))
+    writeFileSync(join(engine, 'LICENSE-quickjs-wasi'), MIT('2026 Vercel, Inc.'))
+    writeFileSync(join(engine, 'PROVENANCE'), 'quickjs.wasm from npm\n')
+    writeFileSync(join(engine, 'nested', 'LICENSE-deeper'), MIT('not an embedded artifact'))
+    writeFileSync(join(root, 'rust/crates/bake-agent/LICENSE-root'), MIT('not in a subdirectory'))
+    const { files } = buildBundle(inputs)
+    const linux = bundle(files, 'linux-x64')
+    expect(linux).toContain('bake-agent (Bake), rust/crates/bake-agent/engine/LICENSE-QuickJS-NG\n')
+    expect(linux).toContain('Copyright (c) 2017-2024 Fabrice Bellard')
+    expect(linux).toContain('Copyright (c) 2026 Vercel, Inc.')
+    expect(linux.indexOf('bake-agent (Bake), rust/crates/bake-agent/NOTICE')).toBeLessThan(linux.indexOf('engine/LICENSE-QuickJS-NG'))
+    expect(linux).toContain('3. Notice files (4)')
+    for (const absent of ['quickjs.wasm from npm', 'not an embedded artifact', 'not in a subdirectory']) expect(linux).not.toContain(absent)
+    type Embedded = { workspace: { name: string; embedded: { file: string; sha256: string }[] }[] }
+    const record = JSON.parse(files[INVENTORY_FILE] as string) as Embedded
+    expect(record.workspace.map(member => [member.name, member.embedded.map(license => license.file)])).toEqual([
+      ['bake-agent', ['rust/crates/bake-agent/engine/LICENSE-QuickJS-NG', 'rust/crates/bake-agent/engine/LICENSE-quickjs-wasi']],
+      ['bake-cli', []],
+    ])
+    expect(record.workspace[0]?.embedded[0]?.sha256).toBe(new Bun.CryptoHasher('sha256').update(MIT('2017-2024 Fabrice Bellard')).digest('hex'))
+  })
+
   test('drops a crate removed from the lock, and the earlier output then fails the check', () => {
     const out = join(fixture([]).root, 'out')
     const before = buildBundle(fixture([crates.memchr, crates.apache]).inputs).files
