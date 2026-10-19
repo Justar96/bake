@@ -1060,7 +1060,9 @@ fn refused_entries_are_reported_and_valid_servers_start(case: &Arc<Case>) {
     let expected = [
         format!("Warning: MCP: {shown}: server \"bad\" needs either \"command\""),
         format!("Warning: MCP: {shown}: server \"legacy\": legacy SSE transport is not supported"),
-        format!("Warning: MCP: {shown}: server \"code\": exposure \"codemode\" needs code mode"),
+        format!(
+            "Warning: MCP: {shown}: server \"code\": exposure \"codemode\" is not supported yet; use \"direct\" or \"hidden\""
+        ),
         format!("Warning: MCP: {shown}: server \"cmd\": env \"TOKEN\" runs a command"),
         format!("Warning: MCP: {shown}: invalid server name \"esc\\u{{1b}}[31mname\""),
         "Warning: MCP server \"remote\" uses Streamable HTTP, which bake-rs does not start yet"

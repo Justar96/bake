@@ -18,8 +18,9 @@
 //!
 //! - Server names follow Bake's tool-name contract,
 //!   `[A-Za-z0-9_-]{1,32}` (`packages/mcp/mcp-client`).
-//! - Bake has no code mode or tool search yet, so the only exposures are
-//!   `direct` (the default here; Pi's is `codemode`) and `hidden`.
+//! - The only exposures are `direct` (the default here; Pi's is
+//!   `codemode`) and `hidden`: Pi's `codemode`, `codemode-deferred`, and
+//!   `deferred` are not supported yet.
 //! - An environment value may reference variables (`$NAME`, `${NAME}`), as
 //!   Pi's config values do, but never run a command (`!cmd`). A server's
 //!   environment is Bake's scrubbed environment, which drops credential-like
@@ -299,7 +300,7 @@ fn exposure(name: &str, field: &str, value: &Value) -> Result<McpExposure, Strin
         Some("direct") => Ok(McpExposure::Direct),
         Some("hidden") => Ok(McpExposure::Hidden),
         Some(other @ ("codemode" | "codemode-deferred" | "deferred")) => Err(format!(
-            "server \"{name}\": {field} \"{other}\" needs code mode or tool search, which Bake does not have yet; use \"direct\" or \"hidden\""
+            "server \"{name}\": {field} \"{other}\" is not supported yet; use \"direct\" or \"hidden\""
         )),
         _ => Err(format!(
             "server \"{name}\": {field} must be one of \"direct\", \"hidden\""
@@ -552,8 +553,12 @@ mod tests {
         }));
         assert!(config.servers.is_empty());
         assert!(config.errors[0].contains("env \"TOKEN\" runs a command"));
-        assert!(config.errors[1].contains("exposure \"codemode\" needs code mode"));
-        assert!(config.errors[2].contains("toolExposure \"a\" \"deferred\" needs code mode"));
+        assert!(config.errors[1].ends_with(
+            "server \"code\": exposure \"codemode\" is not supported yet; use \"direct\" or \"hidden\""
+        ));
+        assert!(config.errors[2].contains(
+            "toolExposure \"a\" \"deferred\" is not supported yet; use \"direct\" or \"hidden\""
+        ));
         assert!(config.errors[3].contains("at most 32"));
         assert!(config.errors[4].contains("timeout must be a positive number"));
         assert!(config.errors[5].contains("timeout must be a positive number"));

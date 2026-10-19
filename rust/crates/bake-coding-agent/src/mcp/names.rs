@@ -39,9 +39,9 @@ fn normalize(text: &str) -> String {
 }
 
 /// The namespace of `server`'s tools for the `codemode` tool,
-/// `mcp__<server>`, normalized as public names are but never hashed: the
-/// prefix its tools' unhashed names share. Pi's `mcpNamespace` maps only
-/// `-` to `_`.
+/// `mcp__<server>`, never hashed: the prefix its tools' unhashed names
+/// share. Bake keeps `-` (`mcp__my-server`), where Pi's `mcpNamespace` maps
+/// it to `_` (`mcp__my_server`).
 pub fn mcp_namespace(server: &str) -> String {
     normalize(&format!("{MCP_TOOL_PREFIX}{server}"))
 }
@@ -117,5 +117,12 @@ mod tests {
         );
         // An astral character is two UTF-16 units, so two underscores.
         assert!(public_tool_name("s", "a😀").starts_with("mcp__s__a___"));
+    }
+
+    /// A namespace keeps the server's `-`, where Pi's is `mcp__my_server`.
+    #[test]
+    fn namespaces_keep_the_server_name() {
+        assert_eq!(mcp_namespace("my-server"), "mcp__my-server");
+        assert!(public_tool_name("my-server", "get").starts_with(&mcp_namespace("my-server")));
     }
 }
