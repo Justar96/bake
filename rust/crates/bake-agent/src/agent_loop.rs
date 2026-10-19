@@ -1392,13 +1392,15 @@ async fn execute_prepared_tool_call(
     // it sent are done emitting.
     let duration_ms = elapsed_ms(started);
     accepting.store(false, Ordering::SeqCst);
+    // The update in flight finishes first: it may already hold its place in
+    // the sink's order, which the nested calls' events then wait behind.
+    if let Some(emit) = emitting.take() {
+        emit.await;
+    }
     // Nothing the tool started outlives it: its nested calls still running
     // are aborted, and its result waits for them.
     nested.close().await;
     updates.close();
-    if let Some(emit) = emitting.take() {
-        emit.await;
-    }
     while let Ok(update) = updates.try_recv() {
         on_update(update).await;
     }

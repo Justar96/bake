@@ -434,3 +434,92 @@ async fn aborting_the_caller_cancels_and_awaits_its_nested_calls() {
     assert_eq!(nested.calls[0].status, "error");
     assert!(nested.complete);
 }
+
+/// A sink that keeps its events in order as the agent's does, with a lock
+/// held while each is handled, and that takes `delay` over a nested call's
+/// start.
+fn ordered_sink(delay: Duration) -> (bake_agent::AgentEventSink, Arc<Mutex<Vec<AgentEvent>>>) {
+    let order = Arc::new(tokio::sync::Mutex::new(()));
+    let events: Arc<Mutex<Vec<AgentEvent>>> = Arc::default();
+    let record = Arc::clone(&events);
+    let sink: bake_agent::AgentEventSink = Arc::new(move |event| {
+        let order = Arc::clone(&order);
+        let record = Arc::clone(&record);
+        Box::pin(async move {
+            let _order = order.lock().await;
+            if matches!(
+                &event,
+                AgentEvent::ToolExecutionStart {
+                    parent_tool_call_id: Some(_),
+                    ..
+                }
+            ) {
+                tokio::time::sleep(delay).await;
+            }
+            record.lock().unwrap().push(event);
+        })
+    });
+    (sink, events)
+}
+
+/// The caller settles while its update waits behind a nested call's event
+/// in the sink's order, and that nested call, left running on another
+/// task, still has events to emit. The update is emitted before the nested
+/// calls are closed, so neither waits on the other.
+#[tokio::test(start_paused = true)]
+async fn a_pending_caller_update_does_not_block_closing_its_nested_calls() {
+    let script = AgentTool::new(
+        "script",
+        "script",
+        "script",
+        empty_schema(),
+        |_id, _args, _signal, update, ctx| {
+            Box::pin(async move {
+                drop(tokio::spawn(async move {
+                    ctx.nested()
+                        .execute(
+                            "echo",
+                            json!({ "value": "a" }),
+                            NestedToolCallOptions::default(),
+                        )
+                        .await
+                }));
+                // The nested call's start now holds the sink.
+                tokio::time::sleep(Duration::from_millis(5)).await;
+                update.update(AgentToolResult::text("partial"));
+                // The loop starts emitting the update, which queues.
+                tokio::time::sleep(Duration::from_millis(1)).await;
+                Ok(AgentToolResult::text("done"))
+            })
+        },
+    );
+    let (sink, events) = ordered_sink(Duration::from_millis(20));
+    let run = bake_agent::run_agent_loop(
+        vec![user("go")],
+        context(vec![echo_tool(Arc::default()), script]),
+        config(),
+        sink,
+        None,
+        Some(tools_then_done(vec![call("c1", "script", json!({}))])),
+    );
+    tokio::time::timeout(Duration::from_secs(10), run)
+        .await
+        .expect("no deadlock")
+        .unwrap();
+    let events = events.lock().unwrap();
+    let c1 = Some("c1".to_owned());
+    assert_eq!(
+        parents(&events),
+        [
+            ("tool_execution_start", "c1".into(), None),
+            ("tool_execution_start", "c1/1".into(), c1.clone()),
+            ("tool_execution_end", "c1/1".into(), c1),
+            ("tool_execution_end", "c1".into(), None),
+        ]
+    );
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event, AgentEvent::ToolExecutionUpdate { tool_call_id, .. } if tool_call_id == "c1"))
+    );
+}
