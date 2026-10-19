@@ -6,7 +6,7 @@ This page designs code mode for `bake-rs`: a `codemode` tool whose input is a mo
 
 The model surface is Pi's `codemode` tool, ported under [D22](scope-00/support.md#decision-register). The engine is the same QuickJS-NG WebAssembly binary Pi runs, executed by the Wasmtime the workspace already pins, inside the `bake-rs` process. Bake writes its own WASI shim and its own driver for the binary's C API, so code mode adds no Rust crate and no JavaScript runtime. Nested calls run through the session's ordinary tool pipeline, so [D24](scope-00/support.md#decision-register)'s permissions, approvals, and sandbox apply to every call a script makes.
 
-**Status: slices 1 to 3 implemented 2026-10-19; the tool (slice 4) is not.** `bake-codemode` is the engine and script environment, and `bake_agent::nested` runs nested calls; no `bake-rs` tool uses them yet, so no request changes. [D42](scope-00/support.md#decision-register) records the choices, and supersedes D17. [D43](scope-00/support.md#decision-register) defers the rest of the native plugin API beyond 0.4.0, so code mode is the remaining scope 12 work after HTTP MCP.
+**Status: slices 1 to 5 implemented 2026-10-19; slice 6's eval record is pending.** `bake-codemode` is the engine and script environment, `bake_agent::nested` runs nested calls, `tools::codemode` is the opt-in tool, and the terminal draws it. Requests are unchanged while the tool is inactive. [D42](scope-00/support.md#decision-register) records the choices, and supersedes D17. [D43](scope-00/support.md#decision-register) defers the rest of the native plugin API beyond 0.4.0, so code mode is the remaining scope 12 work after HTTP MCP.
 
 ## Table of Contents
 
@@ -180,7 +180,7 @@ Every pointer and length the guest passes is checked against its linear memory b
 - `qjs_set_memory_limit` caps the QuickJS heap at 256 MiB, so an allocation beyond it is a catchable `InternalError: out of memory`, as in Pi.
 - `StoreLimits` caps the module's linear memory slightly above that: 320 MiB with one memory and one table. A growth past it fails, and the run ends as `OutOfMemory` instead of the host running out.
 - `qjs_set_max_stack_size` (512 KiB, Pi's `MAX_STACK_SIZE`) stays below `max_wasm_stack` (32 MiB) on a 40 MiB script thread. Measured: 1e5-deep `JSON.parse`, `JSON.stringify`, `String()`, and `eval` trapped the Wasm stack at 4 and 8 MiB and are a catchable `RangeError` from 12 MiB.
-- At most `MAX_PENDING_CALLS` (128) calls may wait for results. A script that issues calls without awaiting them never lets the VM take an answer, so the next call fails the run as `Protocol`, telling the script to await calls first, as Bake 0.3's `maxPendingCalls` did. Pi has no such limit.
+- At most `MAX_PENDING_CALLS` (1024) calls may wait for results, and their arguments may total 64 MiB. Past either, the run fails as `Protocol`, telling the script to await calls or batch them; Pi has no such limit. A thrown host error cannot stop the call synchronously, because Pi's prelude calls the bridge inside a `Promise` executor, which turns the error into a rejection a runaway loop never awaits.
 
 **Deterministic mode.**
 - The shim already owns every source of nondeterminism: clocks, randomness, and the time zone.
@@ -197,7 +197,7 @@ Every pointer and length the guest passes is checked against its linear memory b
   - A nested call is prepared, executed, and finalized exactly as a direct call: argument validation, `before_tool_call` and `after_tool_call` hooks, and plugin vetoes.
   - It also gets D24 permission evaluation, the approval prompt, the sandbox, the file mutation queue, and the session work gate.
   - An interactive approval prompt names the nested call and its script. In print mode a nested call meets the same preset as a direct one.
-- **Ordering.** When the agent executes tool calls sequentially, nested calls run exclusively, through Pi's exclusive queue: a call holding the queue does not wait on its own nested calls. Otherwise a script's `Promise.all` runs its calls concurrently, subject to the mutation queue.
+- **Ordering.** When the agent executes tool calls sequentially, nested calls run exclusively, through Pi's exclusive queue: a call holding the queue does not wait on its own nested calls. Otherwise a script's `Promise.all` runs its calls concurrently, subject to the mutation queue; the `codemode` tool starts at most 16 of one script's calls at a time and queues the rest in issue order, where Pi has no limit.
 - **Cancellation.**
   - Aborting the script cancels its running nested calls and awaits them before the tool result is written.
   - Calls still running when the script ends are cancelled, as Pi's description promises.
@@ -218,7 +218,7 @@ Every pointer and length the guest passes is checked against its linear memory b
   - A crash during a script leaves the run journal's interrupted-call notice, as for `bash`.
   - Its nested calls are each journaled by their own ids, so the recovery notice can say which nested calls had started.
 - **Terminal.**
-  - `bake-tui-view` renders a `codemode` call as Pi's renderer does: the script, then one line per nested call with its status and duration, updated live from the nested call events.
+  - `bake-tui-view` renders a `codemode` call as Pi's renderer does: the script, then one line per nested call with its status and duration, updated live from the tool's partial results (`details.calls`) and rebuilt from the logged result on replay; nested calls' own events never reach the transcript ([terminal design](tui-design.md#code-mode)).
   - Text lives in `copy.rs`.
   - The fullscreen and inline transcripts replay the same rows from the log.
 
@@ -320,7 +320,8 @@ Slices 1 and 2 touch nothing the model sees. Slice 3 changes no request while no
 - Re-check Pi's latest release when slice 1 starts. Record any change to `packages/codemode` or `extensions/codemode`, and to the `quickjs-wasi` pin.
 - Slices 1 to 3 (2026-10-19) ported Pi v1.3.0, `71023aec1546d6d677a65669c5665c0927ce0dd0`, the latest release when they started. `engine/` carries quickjs-wasi's license, QuickJS-NG v0.17.0's exact LICENSE, and wasi-libc's, musl's, and cloudlibc's notices from wasi-libc `165235bc467d`; the binary has no producers section, so the wasi-libc revision of the build is unknown. The release license bundle copies every `LICENSE-*` file under a Bake crate's immediate subdirectories.
 - Slice 3 decisions: tools gain a fifth `ToolContext` parameter rather than a task-local executor, because the codemode VM runs on its own thread; each nested call is a task its caller owns; nesting stops at 8 levels; `AgentTool::nested_callable` lets `codemode` exclude itself. `bake.run.v1` dispatch records gain an optional `parent_tool_call_id`.
-- Slice 4 notes: `max_concurrent_read_tools` does not cap read-only nested calls; the terminal does not yet show an approval's `parent_tool_call_id`.
+- Slice 4 notes: `max_concurrent_read_tools` does not cap read-only nested calls.
+- Slices 4 and 5 (2026-10-19): the tool follows Pi's `extensions/codemode` byte for byte in what the model sees, with these deviations: no `models` namespace or grammar (D42); every Bake tool is direct, so in `on` mode the description lists no tools, as Pi's would; MCP namespaces keep `-` (`mcp__my-server`); output budgets count characters, not UTF-16 units; namespaces sort by code point; at most 16 nested calls run at once; calls still queued when a script stops are listed as cancelled with the id `<call>/?`; a failed store write appends a note instead of failing the result. The hidden declarations of `only` mode are derived from the log: `only` is in effect exactly when the recorded `codemode` declaration contains `Nested tools:`. Reviews found and the slices fixed: scripts seeing descriptions with the `Codemode:` paragraph, nested ids in start order, Esc reporting calls as errors, and in the terminal an approval head that clipped its queue count. The terminal's block replaces 0.3's `run_code` script row.
 - The measurement program compiled with `cargo +1.99.0 build --release --offline` against the workspace's cached Wasmtime 49.0.3 sources. Slice 1 turns it into the engine's first tests instead of committing it.
 
 </details>

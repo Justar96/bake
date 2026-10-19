@@ -260,34 +260,66 @@ The mouse is on in fullscreen, with the TypeScript modes: presses, releases, and
 
 ## Code mode
 
-A `run_code` call, a program the model writes in TypeScript and runs in the confined QuickJS VM, is one transcript block like any call ([D8](#intentional-differences)), headed `Codemode`. It is drawn as the program it is, not as a batch of tool calls: the source is the body, each call site hangs under the line that makes its calls, and what went back to the model follows, apart. Only that last part re-enters the model's context; the calls stay on the harness side, which is the point of code mode.
+A `codemode` call is Pi's code mode ([D42](scope-00/support.md#decision-register), [design](code-mode.md)). The model writes a JavaScript script that calls other tools inside the confined QuickJS VM. It is one transcript block like any call ([D8](#intentional-differences)), headed `Codemode`, drawn after Pi v1.3.0's renderer (`extensions/codemode/renderer.ts`) in Bake's grammar. The block has three parts:
+
+- the script;
+- the calls it made, one row each;
+- what went back to the model.
+
+Only the last part re-enters the model's context; the nested calls stay on the harness side.
 
 ```
-  {} Codemode: Read every manifest, then build  14 calls · 1 failed
-  │ 1  const paths = await tools.glob({ pattern: "packages/*/package.json" });
-  │    ╰ ✓ tools.glob  packages/*/package.json  12 files
-  │ 2  const texts = await Promise.all(
-  │ 3    paths.map((path) => tools.read({ path }).catch(() => "")),
-  │    ╰ ✓ tools.read ×12  ━━━━━━━✗━━━━  11 done · 1 failed
-  │      ✗ packages/goal/package.json  Permission denied
-  │ 4  );
-  │ 5  console.log(`read ${texts.filter(Boolean).length} of ${paths.length}`);
-  │ 6  const { exitCode } = await tools.bash({ command: "bun run build" });
-  │    ╰ ✓ tools.bash  bun run build   exit 0
-  │ 7  return { manifests: paths.length, exitCode };
-
-  console  read 11 of 12
-  return   { manifests: 12, exitCode: 0 }
+  {} Codemode  10 calls · 1 failed · 1 cancelled
+  │ 1  const results = await Promise.allSettled(
+  │ 2    files.map((path) => tools.read({ path })),
+  │ 3  );
+  │
+  │ ⋯ 2 earlier calls
+  │ ✓ read  {"path":"f3"}  3ms
+  │ ✗ read  {"path":"f9"}  2ms
+  │   ENOENT: no such file
+  │ ⊘ bash  {"command":"yyyy…  1.5s
+  │   This operation was aborted
+  │
+  │ ==> text 1/2 <==
+  │ 9 of 10 read
 ```
 
-- **Head.** The script's own state mark, braces, `{}`, for the program it is: green done, red failed, white and blinking while it runs, two cells wide, so `Codemode` starts a cell after a call's tool name. Its call sites and every other call keep the state marks `✓`, `✗`, and `●`. Under `NO_COLOR` or with the classic frame colour cannot tell the states apart, so the head takes a call's mark. Then `Codemode` and its description, then how many calls it made; while it runs, how many are in flight, `13 calls · 9 running`; once it has ended, how many failed, in red; and its own status, such as an ` interrupted ` tag.
-- **Program.** Numbered from 1, the numbers dim, the code syntax-coloured with its indentation kept. Up to thirteen lines read whole. A longer program keeps its first two and last two lines and every line a call site hangs from, and counts each run of the rest as `⋯ N more lines`; the numbers keep their place. While the script runs, the gutter of a line whose calls are in flight carries an accent `▸` in place of its rule, so the reader sees where the program is.
-- **Call sites.** The calls a program made through one binding are one site, drawn under the first source line that names the binding, `╰` at the code column. The session log records which tool a call reached but not which line made it, so a binding named on several lines is drawn at the first, and calls through a binding no line names, as a computed `tools[name]` would be, hang after the source. A binding reads as the program wrote it, `tools.read`, or `tools["my-tool"]` for a name that is not an identifier, `tools.` dim and the name bold. A site of one call reads `╰ ✓ tools.glob  argument  note`, the note a size, an exit tag, or its error in red. A site of several, the fan-out code mode exists for, reads `╰ ✓ tools.read ×12`, then a meter with a cell per call in the order they were made, `━` green when done, `╌` dim while running, `✗` red when failed, `╳` yellow when an interruption stopped it (`=`, `-`, `x`, `/` with the classic frame), then a tally, `11 done · 1 failed`. The meter is drawn for up to 24 calls when it fits; the tally moves under the label when it does not fit beside it. Up to three failures are listed under the site with their errors, and the rest counted, `⋯ 2 more failed`. A call that succeeded never shows its output, because the program consumed it and the model never saw it.
-- **Back to the model.** After a blank row, labelled in the program's own terms: `console` before the lines it logged, in the output tone and previewed like any output, then `return` before the value it returned, coloured as TypeScript, or `error` before how it failed, in red. Nothing is drawn here while the script runs, because the runtime hands both back together.
-- **Interrupted.** Calls in flight end `interrupted`, counted in yellow on their site, and calls not yet started never appear. The site's mark is a failure and the head carries an ` interrupted ` tag, but stopped calls are not counted or listed as failures, so a failure of the program's own stays in view. Lines the program logged before it stopped are kept.
-- **Classic frame.** `` ` `` opens a call site and `>` marks the line in flight.
+- **Head.** The script's own state mark, `{}`, two cells wide:
+  - It is green when done, red when failed, and white and blinking while it runs.
+  - Under `NO_COLOR`, or with the classic frame, the head takes a call's mark instead.
+  - Then `Codemode` and how many calls the script made.
+  - While it runs, the head also says how many calls are running: `21 calls · 15 running`.
+  - Once the script has ended, the head adds how many calls failed (in red) and how many were cancelled, then `took X.Ys` from the result's `Wall time` line.
+  - The row reads no clock: the activity line already shows `running codemode · Ns`.
+- **Script.** The script's first ten wrapped rows, numbered from 1 with the numbers dim and the code coloured as JavaScript, then `⋯ N more lines`.
+- **Calls.** One row per nested call, in the order the script made it:
+  - The row holds the state mark (`●` running, `✓` done, `✗` failed, `⊘` cancelled; `/` for cancelled with the classic frame), the tool's name, its arguments as compact JSON cut at 80 characters, and its duration.
+  - A failed or cancelled call shows its error underneath, in red, at most two wrapped rows then `⋯ N more lines`. Pi shows the error only in its expanded view, and Bake has no expand key.
+  - The name column is at most a third of the width; a longer name takes one space before its arguments.
+  - The latest eight calls are shown and the earlier ones counted as `⋯ N earlier calls`. A count that would hide one row shows that row instead.
+- **Back to the model.**
+  - After a blank row comes the text the model received, without Pi's `Script completed` and `Wall time` header: its `==> text N/M <==` items and its `<console_output>` block.
+  - The text is in the output tone, or red when the script failed.
+  - It is cut after five wrapped rows with `⋯ N more lines`, and names the full output's file when the tool saved one.
+  - Nothing is drawn here while the script runs.
+- **Interrupted.** A script still running when its turn ends shows ` interrupted `. Its running calls become cancelled, and it has no output, because the tool returned no result.
+- **Source.**
+  - While the script runs, the rows come from the tool's partial results (`details.calls`).
+  - Once it settles, or when a session is resumed, they come from the logged result's details and content, so live and replayed transcripts read the same.
+  - Nested calls' own `tool_execution_*` events never reach the transcript.
+- **Approvals.** A nested call's approval prompt names the codemode call that asked, `from codemode <id>` with the id cut to twelve characters, after the queue count and only when it fits whole.
 
-The preview's sample session holds one finished script, and Ctrl+T runs a live one on a fixed timeline. These remain: approvals raised by a script's calls, and the session log as the source of the calls.
+The preview's sample session holds one finished script, and Ctrl+T runs a live one on a fixed timeline whose pool of concurrent calls is the tool's real limit, 16.
+
+0.3's `run_code` block is not ported, because D42 dropped `run_code`. These parts of it are gone:
+
+- calls grouped into one site per `tools.x` binding and hung under the source line naming it;
+- per-site meters, tallies, and failure lists;
+- the `▸` in-flight gutter mark;
+- source folding around call-site lines;
+- per-call notes such as file counts or exit tags;
+- the `console`, `return`, and `error` labels.
 
 ## Diffs
 
