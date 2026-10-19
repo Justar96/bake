@@ -289,6 +289,19 @@ export function contextMasking(events: readonly any[]) {
     removedBytes: committed.reduce((sum, event) => sum + event.removedBytes, 0) }
 }
 
+/**
+ * Tool calls a code-mode script made, by tool: starts that name a parent call.
+ * The top-level counters (`toolCalls`, `byTool`) leave these out, so a script
+ * that reads sixteen files counts once there and sixteen times here.
+ */
+export function nestedCalls(events: readonly any[]): Record<string, number> {
+  const counts: Record<string, number> = {}
+  for (const event of events) {
+    if (event.type === 'tool_execution_start' && event.parentToolCallId !== undefined) counts[event.toolName] = (counts[event.toolName] ?? 0) + 1
+  }
+  return counts
+}
+
 /** Same-response native read batches; execution-start events denote preparation and cannot measure overlap. */
 export function nativeReadBatches(events: readonly any[]) {
   const batches = events.filter(event => event.type === 'message_end' && event.message?.role === 'assistant')

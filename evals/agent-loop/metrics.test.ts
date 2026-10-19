@@ -1,7 +1,7 @@
 /** Loop-shape metrics over synthetic Bake and pi event streams. */
 import { describe, expect, test } from 'bun:test'
 import {
-  backgroundCompactions, backgroundStarts, type Call, compactions, contextMasking, editCheckSplits, excessRequests, isBareGlob, jsonModeCompactions, nativeReadBatches, nativeSummaryUsage, normalizeBake, normalizePi, orientationCalls, ranCheck,
+  backgroundCompactions, backgroundStarts, type Call, compactions, contextMasking, editCheckSplits, excessRequests, isBareGlob, jsonModeCompactions, nativeReadBatches, nativeSummaryUsage, nestedCalls, normalizeBake, normalizePi, orientationCalls, ranCheck,
   readsFile, requestsOverFloor, runawayAbort, shellEdits, skillLoads, verifiedBeforeFinal,
 } from './metrics.ts'
 
@@ -16,6 +16,17 @@ test('native experiment metrics count committed masking and same-response read b
   expect(nativeReadBatches([assistant(['read', 'read', 'ls', 'grep']), assistant(['read']),
     assistant(['read', 'edit']), assistant([]), { type: 'tool_execution_start', toolName: 'read' }]))
     .toEqual({ batches: 2, multiCallBatches: 1, calls: 5, maxCalls: 4 })
+})
+
+test('nested calls count the starts a code-mode script made, by tool', () => {
+  expect(nestedCalls([
+    { type: 'tool_execution_start', toolName: 'codemode', toolCallId: 'c1', args: {} },
+    { type: 'tool_execution_start', toolName: 'read', toolCallId: 'c1/1', parentToolCallId: 'c1', args: {} },
+    { type: 'tool_execution_start', toolName: 'read', toolCallId: 'c1/2', parentToolCallId: 'c1', args: {} },
+    { type: 'tool_execution_end', toolName: 'read', toolCallId: 'c1/2', parentToolCallId: 'c1' },
+    { type: 'tool_execution_start', toolName: 'bash', toolCallId: 'c1/3', parentToolCallId: 'c1', args: {} },
+  ])).toEqual({ read: 2, bash: 1 })
+  expect(nestedCalls([{ type: 'tool_execution_start', toolName: 'read', toolCallId: 'c1', args: {} }])).toEqual({})
 })
 let nextId = 0
 const call = (step: number, tool: string, input: Record<string, unknown> = {}): Call => ({ tool, input, callId: `c${nextId++}`, step })

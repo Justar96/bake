@@ -8,7 +8,7 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSy
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
-  checkCommandFor, checkpointCodes, compactionBudget, CONTEXT_WINDOWS, EXPLORE_ANSWER, EXTENDED_CASES, fixture, LONG_SESSION_BUDGET,
+  checkCommandFor, checkpointCodes, compactionBudget, CONTEXT_WINDOWS, EXPLORE_ANSWER, EXTENDED_CASES, FAN_OUT_LEDGERS, fanOutBalances, fixture, LONG_SESSION_BUDGET,
   INDEPENDENT_FACTS, INDEPENDENT_NOTES, MASKING_FACTS, maskingProbe, maxRequestsFor, noteNames, PI_COMPACTION, PI_CONTEXT_WINDOWS, PI_RESERVE_TOKENS, piCompactionFor, piContextWindowFor, prompts, REQUEST_FLOORS, requestFloorFor, SKILL_SCENARIOS, slowCheckLine, STANDARD_CASES, SUMMARY_TOOL_RESULT_CHARS, usesSkills, validate,
   type Fixture, type Outcome,
 } from './scenarios.ts'
@@ -350,6 +350,51 @@ describe('long_session', () => {
     expect(piWindow - (thresholdTokens + 1_300) - 4_096).toBeGreaterThanOrEqual(maxOutputTokens)
     // A split turn's prefix summary gets half the reserve, and the history summary 0.8 of it, capped by the route.
     expect(Math.min(Math.floor(0.5 * reserveTokens), maxOutputTokens)).toBe(maxOutputTokens)
+  })
+})
+
+describe('fan_out', () => {
+  /** A ledger's balance read back from its text, independently of the generator. */
+  const balanceOf = (text: string) => text.split('\n').reduce((sum, line) => {
+    const opening = /^opening (\d+)$/.exec(line)
+    const entry = /^t=\d{3} (credit|debit) (\d+) ref /.exec(line)
+    return opening ? sum + Number(opening[1]) : entry ? sum + (entry[1] === 'credit' ? 1 : -1) * Number(entry[2]) : sum
+  }, 0)
+
+  test('sixteen ledgers, about 39 KB, whose balances and total are what balances.txt must hold', () => {
+    const built = build('fan_out')
+    const names = readdirSync(join(built.workspace, 'ledgers')).sort()
+    expect(names).toEqual(FAN_OUT_LEDGERS.map(name => `${name}.log`))
+    const texts = names.map(name => readFileSync(join(built.workspace, 'ledgers', name), 'utf8'))
+    const bytes = texts.reduce((sum, text) => sum + Buffer.byteLength(text), 0)
+    expect(bytes).toBeGreaterThan(36_000)
+    expect(bytes).toBeLessThan(42_000)
+    for (const text of texts) {
+      expect(text.split('\n').filter(line => / (credit|debit) /.test(line))).toHaveLength(60)
+      // Memo figures look like amounts, so a sum over every number on a line is wrong.
+      expect(text.split('\n').filter(line => /^memo: .*\d/.test(line))).toHaveLength(10)
+    }
+    const balances = texts.map(balanceOf)
+    expect(fanOutBalances()).toEqual([...FAN_OUT_LEDGERS.map((name, index) => `${name}=${balances[index]}`), `total=${balances.reduce((sum, value) => sum + value, 0)}`])
+  })
+
+  test('succeeds only with every balance in order, the total, and the ledgers unchanged', () => {
+    const built = build('fan_out')
+    expect(validate('fan_out', built, outcome()).validated).toBe(false)
+    const expected = fanOutBalances()
+    writeFileSync(join(built.workspace, 'balances.txt'), [...expected.slice(0, -1).reverse(), expected.at(-1)].join('\n'))
+    expect(validate('fan_out', built, outcome()).validated).toBe(false)
+    writeFileSync(join(built.workspace, 'balances.txt'), expected.join('\r\n') + '\r\n')
+    expect(validate('fan_out', built, outcome())).toMatchObject({ validated: true, fixturesUnchanged: true, testExit: null })
+    expect(validate('fan_out', built, outcome({ code: 1 })).validated).toBe(false)
+    writeFileSync(join(built.workspace, 'ledgers/amber.log'), 'changed')
+    expect(validate('fan_out', built, outcome())).toMatchObject({ validated: false, fixturesUnchanged: false })
+  })
+
+  test('names no tool or method, and leaves room for one read per response', () => {
+    expect(prompts.fan_out).not.toMatch(/\b(read|bash|grep|script|codemode|parallel)\b/i)
+    expect(requestFloorFor('fan_out')).toBe(2)
+    expect(maxRequestsFor('fan_out')).toBeGreaterThanOrEqual(FAN_OUT_LEDGERS.length + 3)
   })
 })
 

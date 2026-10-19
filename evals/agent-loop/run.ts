@@ -11,8 +11,9 @@
  *              headless CLI. name=pi, or name=pi:<bin>, runs the installed pi
  *              coding agent, with its own prompt, tools, and DeepSeek route.
  * EVAL_MODELS  model ids or set names (default: standard and extended sets); a
- *              cliproxyapi id from ~/.bake/settings.yaml, or a DeepSeek id
- *              (deepseek/<id>, or a bare deepseek-* id the gateway lacks);
+ *              cliproxyapi id from ~/.bake/settings.yaml, which the gateway's
+ *              GET /v1/models must list before any sample runs, or a DeepSeek
+ *              id (deepseek/<id>, or a bare deepseek-* id the route lacks);
  *              a trailing @<effort> replaces the default effort
  * EVAL_CASES   scenario names or set names, `standard` or `extended` (default: the standard suite)
  * EVAL_ROSTER  `headless` (default) runs the headless bundle's tool configs; `tui`
@@ -42,7 +43,7 @@ import { reconcile } from './accounting.ts'
 import { compositionCheck, ROSTERS, systemPromptOf, type Roster } from './composition.ts'
 import { bakeCommand, bakeOverlay, mergeSettings, NATIVE_PERMISSIONS, nativeCommand, nativeSettings, nativeStaleWriter, parseArms, strayContextFiles, type Arm, type NativePermission } from './arms.ts'
 import {
-  backgroundCompactions, backgroundStarts, compactions, contextMasking, editCheckSplits, excessRequests, jsonModeCompactions, nativeReadBatches, nativeSummaryUsage, normalizeBake, normalizePi, orientationCalls, ranCheck,
+  backgroundCompactions, backgroundStarts, compactions, contextMasking, editCheckSplits, excessRequests, jsonModeCompactions, nativeReadBatches, nativeSummaryUsage, nestedCalls, normalizeBake, normalizePi, orientationCalls, ranCheck,
   requestsOverFloor, routingDecisions, runawayAbort, shellEdits, skillLoads, verifiedBeforeFinal,
 } from './metrics.ts'
 import {
@@ -60,13 +61,14 @@ const ARMS = parseArms(process.env.EVAL_ARMS ?? '', roster, process.env)
 const armNames = Object.keys(ARMS)
 if (armNames.length < 2) throw new Error('EVAL_ARMS needs at least two name=checkout pairs, for example base=.agents/worktrees/eval-base,candidate=.')
 /**
- * Named model sets; EVAL_MODELS may list set names, model ids, or both. The
- * gateway names Gemini models by tier, and the effort after `@` is the one
- * each is measured at.
+ * Named model sets; EVAL_MODELS may list set names, model ids, or both: the
+ * newest model of each lab the gateway serves, and DeepSeek's two through its
+ * own API. The effort after `@` replaces the default `medium` where a model
+ * offers none.
  */
 const MODEL_SETS: Record<string, string[]> = {
-  standard: ['gemini-3.8-flash-high@high', 'gemini-4-argon-high@medium', 'gpt-6.1-sol', 'claude-sonnet-5-5'],
-  extended: ['claude-opus-5-5', 'deepseek/deepseek-flash', 'deepseek/deepseek-v4-pro'],
+  standard: ['gemini-3.5-flash-lite', 'gemini-3-flash', 'gpt-6-sol', 'claude-sonnet-5'],
+  extended: ['claude-opus-5', 'kimi-k2.7-code@high', 'deepseek/deepseek-flash', 'deepseek/deepseek-v4-pro'],
 }
 const models = [...new Set((process.env.EVAL_MODELS ?? 'standard,extended').split(',').filter(Boolean)
   .flatMap(entry => MODEL_SETS[entry] ?? [entry]))]
@@ -258,6 +260,42 @@ function credential(name: string): string {
   if (!value) throw new Error(`pi arm: ${name} is neither set nor a reference in ${credentialFile}`)
   return value
 }
+
+/**
+ * The models the `cliproxyapi` gateway serves, each with the lab its listing
+ * names as owner. The gateway answers a model it does not serve with `400
+ * unknown provider for model`, though the local route may still list it, so
+ * the run asks once before any sample instead of spending a control pair on
+ * each such model.
+ */
+async function gatewayCatalog(): Promise<Map<string, string>> {
+  const base = override === undefined ? String(original.baseURL).replace(/\/$/, '') : new URL(override.baseUrl).origin + '/v1'
+  const origin = new URL(base).origin
+  const key = override?.apiKey ?? credential(original.apiKeyEnv ?? 'CLIPROXYAPI_API_KEY')
+  let response: Response
+  try {
+    response = await fetch(`${base}/models`, { headers: { authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(30_000) })
+  } catch (error) {
+    throw new Error(`gateway ${origin} did not answer GET /v1/models: ${(error as Error).message}`)
+  }
+  const text = await response.text()
+  if (!response.ok) throw new Error(`gateway ${origin} answered GET /v1/models with ${response.status}: ${text.slice(0, 300)}`)
+  let listed: unknown
+  try { listed = JSON.parse(text)?.data } catch {}
+  if (!Array.isArray(listed)) throw new Error(`gateway ${origin} answered GET /v1/models without a data list: ${text.slice(0, 300)}`)
+  return new Map(listed.filter(entry => typeof entry?.id === 'string')
+    .map(entry => [entry.id as string, typeof entry.owned_by === 'string' ? entry.owned_by : 'unknown']))
+}
+const gatewayRoutes = routes.filter(route => route.provider === 'cliproxyapi')
+const served = gatewayRoutes.length === 0 ? new Map<string, string>() : await gatewayCatalog()
+const unserved = gatewayRoutes.map(route => route.model).filter(model => !served.has(model))
+if (unserved.length > 0) {
+  const owners = [...new Set(served.values())].sort()
+    .map(owner => `${owner}: ${[...served].filter(([, by]) => by === owner).map(([id]) => id).sort().join(', ')}`)
+  throw new Error(`the gateway does not serve ${unserved.join(', ')}; it serves ${owners.join('; ') || 'nothing'}. Name served models in EVAL_MODELS, each with an entry in ${join(configHome, 'settings.yaml')}.`)
+}
+/** The lab behind a route: its gateway listing's owner, or DeepSeek for its own API. */
+const ownerOf = (route: Route) => route.provider === 'cliproxyapi' ? served.get(route.model)! : 'deepseek'
 for (const route of routes) if (routes.filter(other => other.model === route.model).length > 1) throw new Error(`EVAL_MODELS names ${route.model} through two providers`)
 const summaries: any[] = []
 const maxLogicalTokens = Number(process.env.EVAL_MAX_TOKENS ?? 5_000_000)
@@ -573,6 +611,7 @@ async function run(route: Route, scenario: string, trial: number, variant: strin
       backgroundCompactions: nativeRoute === undefined ? null : backgroundCompactions(events),
       contextMasking: nativeRoute === undefined ? null : contextMasking(events),
       nativeReadBatches: nativeRoute === undefined ? null : nativeReadBatches(events),
+      nestedCalls: jsonMode ? nestedCalls(events) : null,
       runawayAbort: runawayAbort([
         stderr, final,
         ...events.filter(event => event.type === 'unparsed').map(event => event.text),
@@ -632,7 +671,7 @@ writeFileSync(join(out, 'design.json'), JSON.stringify({
   revisions: Object.fromEntries(armNames.map(name => [name, revisionOf(ARMS[name]!)])),
   startedAt: new Date().toISOString(),
   node: Bun.spawnSync(['node', '--version']).stdout.toString().trim(), models: routes.map(route => route.model), cases, trials, roster,
-  routes: Object.fromEntries(routes.map(route => [route.model, { provider: route.provider, api: route.api, effort: route.effort }])),
+  routes: Object.fromEntries(routes.map(route => [route.model, { provider: route.provider, api: route.api, effort: route.effort, owner: ownerOf(route) }])),
   effort: 'each route\'s effort is in routes: medium by default, DeepSeek high (it has no medium), and an EVAL_MODELS @<effort> replaces either', maxOutputTokens: 8192, capMs: wallClockCaps().default, capMsByScenario: wallClockCaps(), maxRequests: requestCaps(), requestFloors: REQUEST_FLOORS, contextWindows: CONTEXT_WINDOWS, maxLogicalTokens,
   // What pi and bake-rs get for each forced window: Bake's threshold plus pi's default reserve, and Bake's retained tail.
   piContextWindows: PI_CONTEXT_WINDOWS,
@@ -667,7 +706,8 @@ for (const route of routes) {
         if (sample.composition?.ok === false) throw new Error(`${sample.label}: the rendered system prompt is not the shipped composition (${JSON.stringify(sample.composition)}); partial results retained`)
       }
       if (scenario === 'no_tools' && pair.every(sample => !sample.success && (sample.requests === 0 || sample.rawProviderUsage.some((request: any) => request.status !== 200)))) {
-        console.log(JSON.stringify({ model, blocked: 'both control samples failed before a usable response; remaining cells skipped' }))
+        const error = pair.flatMap(sample => sample.requestMetrics).find((request: any) => request.error !== undefined)?.error
+        console.log(JSON.stringify({ model, blocked: 'both control samples failed before a usable response; remaining cells skipped', ...error === undefined ? {} : { error: String(error).slice(0, 300) } }))
         modelBlocked = true; break
       }
     }

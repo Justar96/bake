@@ -129,6 +129,10 @@ async function smokeNativeArm(): Promise<void> {
   const injectedBeforeEdit: boolean[] = []
   const server = Bun.serve({ port: 0, hostname: '127.0.0.1',
     async fetch(request) {
+      // The evaluator's own listing check, before any sample; not an agent request.
+      if (request.method === 'GET' && new URL(request.url).pathname === '/v1/models') {
+        return Response.json({ object: 'list', data: [{ id: MODEL, object: 'model', owned_by: 'smoke' }] })
+      }
       const body = await request.json() as Json
       received.push({ path: new URL(request.url).pathname, authorization: request.headers.get('authorization'), model: body.model,
         leaked: JSON.stringify(body).includes(LEAK) })

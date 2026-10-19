@@ -13,8 +13,8 @@ import { COMPACTION_DEFAULTS } from '../../packages/compaction/compaction-basic/
 
 /** The standard suite every recorded version runs; `duplicate_recovery`, `reminder`, and the delegation cases are opt-in. */
 export const STANDARD_CASES = ['no_tools', 'ordinary_edit', 'path_discovery', 'stale_edit', 'unprompted_edit', 'multi_site_edit', 'multi_file_edit', 'shell_then_edit']
-/** Opt-in scenarios that stress what the standard suite cannot see: large files, exploration, verification habits, noisy output, background work, instructions, skills, ambiguous edits, and compaction. */
-export const EXTENDED_CASES = ['large_file_edit', 'explore_answer', 'test_fix_loop', 'unprompted_verify', 'noisy_failure', 'background_test', 'instructions_file', 'skill_check', 'skill_distractors', 'edit_recovery', 'long_session']
+/** Opt-in scenarios that stress what the standard suite cannot see: large files, exploration, verification habits, noisy output, background work, instructions, skills, ambiguous edits, compaction, and fan-out over many files. */
+export const EXTENDED_CASES = ['large_file_edit', 'explore_answer', 'test_fix_loop', 'unprompted_verify', 'noisy_failure', 'background_test', 'instructions_file', 'skill_check', 'skill_distractors', 'edit_recovery', 'long_session', 'fan_out']
 /** Named scenario sets; `EVAL_CASES` may list set names, scenario names, or both. */
 export const CASE_SETS: Record<string, string[]> = { standard: STANDARD_CASES, extended: EXTENDED_CASES }
 
@@ -39,6 +39,8 @@ export const INDEPENDENT_FACTS = ['alpha=3917', 'beta=6284', 'gamma=1059', 'delt
 /** An older unique observation that masking must retain throughout noisy search batches. */
 export const MASKING_FACTS = ['warehouse=HARBOR-73', 'currency=VIOLET-28', 'rounding=NEAREST-CENT']
 export const maskingProbe = (index: number) => `diagnostic-${String(index + 1).padStart(2, '0')}`
+/** The `fan_out` ledgers, one `ledgers/<name>.log` each, in the alphabetical order `balances.txt` lists them. */
+export const FAN_OUT_LEDGERS = ['amber', 'birch', 'cedar', 'dune', 'ember', 'fjord', 'grove', 'heath', 'iris', 'juniper', 'kestrel', 'lumen', 'maple', 'nimbus', 'orchid', 'prairie']
 
 export const prompts: Record<string, string> = {
   no_tools: 'Reply exactly TOKEN_CONTROL_OK. Do not call any tools.',
@@ -69,6 +71,7 @@ export const prompts: Record<string, string> = {
   long_session: `This task has three steps; finish all of them. 1. Read ${noteNames()[0]} with the read tool. Each of the ten notes holds one line that starts with "Checkpoint code:" and ends by naming the next note; read them one at a time in that chain until a note says it is the last. 2. Write codes.txt in this directory with the ten codes in chain order, one per line and nothing else. 3. ` + roundMoneyTask + ' Work only inside this fixture. Do not delegate, install packages, use the network, modify test.cjs, or make commits. Run node test.cjs to verify and give a brief final result.',
   background_compaction: chainedTask(20),
   independent_reads: `Read these four independent files using four read calls in the same assistant response: ${INDEPENDENT_NOTES.join(', ')}. Each holds one fact. Write facts.txt with those four fact lines in that order, then ${roundMoneyTask.replace('Fix', 'fix')} Do not change the notes.` + natural,
+  fan_out: 'Each file under ledgers/ is an independent daily ledger. A ledger\'s balance is its opening amount plus every credit entry minus every debit entry; memo lines are not entries. Write balances.txt with one line per ledger, <name>=<balance>, where name is the file name without .log, in alphabetical order, then a final line total=<the sum of all the balances>. Do not change the ledgers.' + scopeOnly,
   context_masking: `First read notes/requirements.txt and retain its three fact lines for the final artifact. Then inspect twenty diagnostic batches: start by calling grep with pattern "${maskingProbe(0)}" and path "diagnostics.log". Each batch's final matching line names the next pattern; call grep once per response and follow that chain until the final batch says DONE. Do not combine batches or read diagnostics.log with another tool. Finally write facts.txt with the three original fact lines in their original order and ${roundMoneyTask.replace('Fix', 'fix')} Do not change the requirements or diagnostics.` + natural,
 }
 
@@ -77,13 +80,15 @@ const REQUEST_CAPS: Record<string, number> = {
   delegation: 40, delegation_auto: 40,
   explore_answer: 20, test_fix_loop: 20, noisy_failure: 16, background_test: 20, edit_recovery: 16, long_session: 30, background_compaction: 46,
   context_masking: 46,
+  // Room for a run that lists the ledgers, reads them one per response, and writes the answer.
+  fan_out: 24,
 }
 /** The most model requests a sample may make before the proxy stops it. */
 export const maxRequestsFor = (scenario: string) => REQUEST_CAPS[scenario] ?? 14
 /** Every cap the design records: the default and each raised scenario. */
 export const requestCaps = () => ({ default: 14, ...REQUEST_CAPS })
 /** Scenarios whose wall-clock cap is above the default 180 s. */
-const WALL_CLOCK_CAPS: Record<string, number> = { background_test: 240_000, long_session: 360_000, background_compaction: 540_000, context_masking: 540_000 }
+const WALL_CLOCK_CAPS: Record<string, number> = { background_test: 240_000, long_session: 360_000, background_compaction: 540_000, context_masking: 540_000, fan_out: 300_000 }
 /** The wall-clock cap of one sample, in milliseconds. */
 export const capMsFor = (scenario: string) => WALL_CLOCK_CAPS[scenario] ?? 180_000
 /** Every wall-clock cap the design records. */
@@ -127,6 +132,8 @@ export const REQUEST_FLOORS: Record<string, number> = {
   background_compaction: 22,
   independent_reads: 3,
   context_masking: 22,
+  // One script or shell command that lists, reads, sums, and writes; final.
+  fan_out: 2,
 }
 /** The request floor of a scenario; one with none declared has floor 1, so its excess is every request after the first. */
 export const requestFloorFor = (scenario: string) => REQUEST_FLOORS[scenario] ?? 1
@@ -292,6 +299,32 @@ const twinCode = 'function roundMoney(value) {\n  return Math.floor(value * 100)
 const twinTests = fixedTests('src/money.js').replace("console.log('FIXTURE_PASS');", "const { truncateMoney } = require('./src/money.js');\nassert.equal(truncateMoney(1.239), 1.23); assert.equal(truncateMoney(2.999), 2.99);\nconsole.log('FIXTURE_PASS');")
 
 /** Deterministic checkpoint codes in chain order; long_session uses ten. */
+/** A deterministic amount in cents, 100 to 9,099, drawn from its seed. */
+const amountOf = (seed: string) => Number.parseInt(hash(seed).slice(0, 6), 16) % 9_000 + 100
+/** One `fan_out` ledger: its opening balance and sixty entries, every third a debit. */
+function ledgerBook(name: string) {
+  const opening = amountOf(`${name}-opening`) * 10
+  const entries = Array.from({ length: 60 }, (_, index) => ({ kind: index % 3 === 2 ? 'debit' : 'credit', cents: amountOf(`${name}-${index}`) }))
+  return { opening, entries }
+}
+/** A ledger's text: a header, its opening line, its entries, and a memo after every sixth entry whose figure is not an entry. */
+export function ledgerText(name: string): string {
+  const { opening, entries } = ledgerBook(name)
+  const lines = [`# ${name} ledger, day close 2026-03-14`, `opening ${opening}`]
+  entries.forEach((entry, index) => {
+    lines.push(`t=${String(index + 1).padStart(3, '0')} ${entry.kind} ${entry.cents} ref ${name.slice(0, 3).toUpperCase()}-${hash(`${name}-ref-${index}`).slice(0, 4)}`)
+    if (index % 6 === 5) lines.push(`memo: courier quoted ${amountOf(`${name}-memo-${index}`)} for a replacement, not booked`)
+  })
+  return lines.join('\n') + '\n'
+}
+/** The `balances.txt` lines `fan_out` expects: each ledger's balance in order, then their total. */
+export function fanOutBalances(): string[] {
+  const balances = FAN_OUT_LEDGERS.map(name => {
+    const { opening, entries } = ledgerBook(name)
+    return entries.reduce((sum, entry) => sum + (entry.kind === 'credit' ? entry.cents : -entry.cents), opening)
+  })
+  return [...FAN_OUT_LEDGERS.map((name, index) => `${name}=${balances[index]}`), `total=${balances.reduce((sum, balance) => sum + balance, 0)}`]
+}
 export function checkpointCodes(count = 10): string[] {
   return Array.from({ length: count }, (_, index) => 'CP-' + hash(`checkpoint-${index + 1}`).slice(0, 6).toUpperCase())
 }
@@ -442,6 +475,11 @@ export function fixture(root: string, scenario: string, options: FixtureOptions 
       write('diagnostics.log', diagnostics)
       return { workspace, file: 'src/money.js', protected: protect(workspace, ['notes/requirements.txt', 'diagnostics.log']) }
     }
+    case 'fan_out': {
+      const ledgers = FAN_OUT_LEDGERS.map(name => `ledgers/${name}.log`)
+      FAN_OUT_LEDGERS.forEach((name, index) => write(ledgers[index]!, ledgerText(name)))
+      return { workspace, file: 'balances.txt', protected: protect(workspace, ledgers) }
+    }
     case 'long_session':
     case 'background_compaction': {
       write('src/money.js', baseCode); write('test.cjs', fixedTests('src/money.js'))
@@ -529,6 +567,12 @@ export function validate(scenario: string, built: Fixture, outcome: Outcome, env
     return { validated, source, testsUnchanged: null, testExit: null, fixturesUnchanged: null }
   }
   const source = existsSync(join(workspace, file)) ? readFileSync(join(workspace, file), 'utf8') : ''
+  if (scenario === 'fan_out') {
+    const unchanged = fixturesUnchanged(built)
+    const lines = source.split(/\r?\n/).map(line => line.trim()).filter(Boolean)
+    const validated = outcome.code === 0 && unchanged !== false && lines.join('\n') === fanOutBalances().join('\n')
+    return { validated, source, testsUnchanged: null, testExit: null, fixturesUnchanged: unchanged }
+  }
   if (scenario === 'explore_answer') {
     return { validated: outcome.final.trim() === EXPLORE_ANSWER && treeDigest(workspace) === built.digest, source, testsUnchanged: null, testExit: null, fixturesUnchanged: null }
   }

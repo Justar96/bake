@@ -73,11 +73,24 @@ const COMPOSITION: Record<'base' | 'cand', Record<'headless' | 'tui', Json[]>> =
     ],
   },
 }
+/**
+ * The gateway's model listing, the one request the evaluator itself sends
+ * before any sample. It serves `fixture-model` but not `other-model`, which the
+ * route also lists; a test may replace the reply.
+ */
+const GATEWAY_LISTING = { object: 'list', data: [{ id: 'fixture-model', object: 'model', owned_by: 'fixture-lab' }, { id: 'unrouted-model', object: 'model', owned_by: 'other-lab' }] }
+let gatewayReply = () => Response.json(GATEWAY_LISTING)
+const gatewayRequests: { method: string; path: string; authorization: string | null }[] = []
+const gateway = Bun.serve({ port: 0, hostname: '127.0.0.1', fetch(request) {
+  gatewayRequests.push({ method: request.method, path: new URL(request.url).pathname, authorization: request.headers.get('authorization') })
+  return gatewayReply()
+} })
+afterAll(() => gateway.stop(true))
 const HOME_SETTINGS = `llm-pi-ai:
   providers:
     cliproxyapi:
       api: openai-responses
-      baseURL: http://gateway.invalid/v1
+      baseURL: ${gateway.url.origin}/v1
       apiKeyEnv: CLIPROXYAPI_API_KEY
       compat:
         sendSessionAffinityHeaders: true
@@ -440,7 +453,7 @@ function contract(roster: 'headless' | 'tui', setup: { models: string; effort: s
       })
       expect(design).toMatchObject({
         roster, models: ['fixture-model'], cases: setup.cases, trials: 1, gateway: null,
-        routes: { 'fixture-model': { provider: 'cliproxyapi', api: 'openai-responses', effort: setup.effort } },
+        routes: { 'fixture-model': { provider: 'cliproxyapi', api: 'openai-responses', effort: setup.effort, owner: 'fixture-lab' } },
         contextWindows: { long_session: 16_000 }, piContextWindows: { long_session: 29_184, background_compaction: 40_000 },
         piCompaction: { long_session: { reserveTokens: 16_384, keepRecentTokens: 2560 }, background_compaction: { reserveTokens: 16_384, keepRecentTokens: 2560 } },
       })
@@ -506,6 +519,36 @@ contract('tui', {
   env: { EVAL_EXTRA_BASE: JSON.stringify(EXTRA_BASE), EVAL_SETTINGS_BASE: SETTINGS_BASE },
   baseExtra: EXTRA_BASE,
   baseSettings: { provider: { strictTools: true }, sections: { 'fixture-section': { model: 'fixture-model' } } },
+})
+
+posix('the gateway listing', () => {
+  test('is asked for once, with the route\'s key, before any sample', async () => {
+    gatewayRequests.length = 0
+    const run = await evaluate({ roster: 'headless', models: 'fixture-model', cases: ['no_tools'] })
+    expect(run.code).toBe(0)
+    expect(gatewayRequests).toEqual([{ method: 'GET', path: '/v1/models', authorization: `Bearer ${CLIPROXY_KEY}` }])
+  }, 30_000)
+})
+
+test('a model the gateway does not serve stops the run before any sample, naming what it serves', async () => {
+  const run = await evaluate({ roster: 'headless', models: 'fixture-model,other-model', cases: ['ordinary_edit'] })
+  expect(run.code).not.toBe(0)
+  expect(run.stderr).toContain('the gateway does not serve other-model; it serves fixture-lab: fixture-model; other-lab: unrouted-model.')
+  expect(run.captures).toEqual([])
+  expect(run.outputs['design.json']).toBeUndefined()
+})
+
+test('a gateway that refuses its listing stops the run before any sample', async () => {
+  gatewayReply = () => Response.json({ error: 'Invalid API key' }, { status: 401 })
+  try {
+    const run = await evaluate({ roster: 'headless', models: 'fixture-model', cases: ['ordinary_edit'] })
+    expect(run.code).not.toBe(0)
+    expect(run.stderr).toContain(`gateway ${gateway.url.origin} answered GET /v1/models with 401: {"error":"Invalid API key"}`)
+    expect(run.stderr).not.toContain(CLIPROXY_KEY)
+    expect(run.captures).toEqual([])
+  } finally {
+    gatewayReply = () => Response.json(GATEWAY_LISTING)
+  }
 })
 
 test('an effort the model entry does not list stops the run before any sample', async () => {
