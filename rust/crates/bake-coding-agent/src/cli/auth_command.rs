@@ -620,10 +620,8 @@ mod tests {
     #[test]
     fn commands_and_their_flags_parse() {
         assert!(
-            parse_auth_command(&strings(&["-p", "hi"]))
-                .ok()
-                .expect("not auth")
-                .is_none()
+            matches!(parse_auth_command(&strings(&["-p", "hi"])), Ok(None)),
+            "not an auth command"
         );
         let command = parse_auth_command(&strings(&[
             "auth",

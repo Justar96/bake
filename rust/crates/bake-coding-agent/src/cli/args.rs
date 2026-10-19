@@ -462,7 +462,11 @@ pub fn unknown_flags_message(flags: &[(String, Option<String>)]) -> Option<Strin
 
 #[cfg(test)]
 mod tests {
-    //! Cases from Pi `test/args.test.ts` (v1.1.0) for the ported flags.
+    //! Cases from Pi `test/args.test.ts` (v1.3.0,
+    //! `71023aec1546d6d677a65669c5665c0927ce0dd0`) for every flag `bake-rs`
+    //! accepts, and for the flags it excludes, which it refuses as Pi
+    //! refuses an option no extension registered. Bake's own flags have
+    //! their own cases.
 
     use super::*;
 
@@ -759,6 +763,311 @@ mod tests {
             parse(&["--export"]).unknown_flags,
             [("export".into(), None)]
         );
+    }
+
+    // Pi `args.test.ts` "--version flag" and "--help flag": both are
+    // recorded, and a message beside them is still a message.
+    #[test]
+    fn version_and_help_are_recorded_beside_everything_else() {
+        for flag in ["--version", "-v", "-V"] {
+            assert!(parse(&[flag]).version, "{flag}");
+        }
+        for flag in ["--help", "-h"] {
+            assert!(parse(&[flag]).help, "{flag}");
+        }
+        let args = parse(&["--version", "--help", "some message"]);
+        assert!(args.version && args.help);
+        assert_eq!(args.messages, ["some message"]);
+    }
+
+    // Pi `args.test.ts` "--print flag": a prompt that opens with YAML
+    // frontmatter is a prompt, and an option after `-p` is not.
+    #[test]
+    fn print_takes_a_frontmatter_prompt_but_not_an_option() {
+        let prompt = "---\ntitle: hello\n---\nSay hi.";
+        let args = parse(&["-p", prompt]);
+        assert!(args.print);
+        assert_eq!(args.messages, [prompt]);
+        assert!(args.unknown_flags.is_empty());
+        let args = parse(&["-p", "--provider", "openai", "Say hi."]);
+        assert!(args.print);
+        assert_eq!(args.provider.as_deref(), Some("openai"));
+        assert_eq!(args.messages, ["Say hi."]);
+    }
+
+    // Pi `args.test.ts` "flags with values".
+    #[test]
+    fn flags_with_values() {
+        assert_eq!(
+            parse(&["--api-key", "sk-test-key"]).api_key.as_deref(),
+            Some("sk-test-key")
+        );
+        assert_eq!(
+            parse(&["--system-prompt", "You are a helpful assistant"])
+                .system_prompt
+                .as_deref(),
+            Some("You are a helpful assistant")
+        );
+        assert_eq!(
+            parse(&["--append-system-prompt", "Additional context"]).append_system_prompt,
+            ["Additional context"]
+        );
+        assert_eq!(
+            parse(&[
+                "--append-system-prompt",
+                "Context A",
+                "--append-system-prompt",
+                "Context B"
+            ])
+            .append_system_prompt,
+            ["Context A", "Context B"]
+        );
+        assert_eq!(
+            parse(&["--session", "/path/to/session.jsonl"])
+                .session
+                .as_deref(),
+            Some("/path/to/session.jsonl")
+        );
+        assert_eq!(
+            parse(&["--session-id", "orchestrated-session"])
+                .session_id
+                .as_deref(),
+            Some("orchestrated-session")
+        );
+        let forked = parse(&["--fork", "1234abcd"]);
+        assert_eq!(forked.fork.as_deref(), Some("1234abcd"));
+        assert!(forked.messages.is_empty());
+        assert_eq!(
+            parse(&["--session-dir", "/tmp/sessions"])
+                .session_dir
+                .as_deref(),
+            Some("/tmp/sessions")
+        );
+        assert_eq!(
+            parse(&["--models", "gpt-4o,claude-sonnet,gemini-pro"]).models,
+            Some(vec![
+                "gpt-4o".into(),
+                "claude-sonnet".into(),
+                "gemini-pro".into()
+            ])
+        );
+        // Pi issue #10334: empty entries are dropped.
+        assert_eq!(
+            parse(&["--models", "gpt-4o, ,claude-sonnet,"]).models,
+            Some(vec!["gpt-4o".into(), "claude-sonnet".into()])
+        );
+    }
+
+    // Pi `args.test.ts` "--mode flag" (issue #9045), for the two modes
+    // `bake-rs` runs: an invalid or missing value is an error and takes no
+    // other argument with it.
+    #[test]
+    fn mode_errors_take_no_other_argument() {
+        for mode in ["yaml", ""] {
+            let args = parse(&["--mode", mode, "--version"]);
+            assert_eq!(args.mode, None);
+            assert!(args.version);
+            assert!(args.messages.is_empty() && args.unknown_flags.is_empty());
+            assert_eq!(
+                args.diagnostics,
+                [Diagnostic::error(format!(
+                    "Invalid mode \"{mode}\". Valid values: text, json"
+                ))]
+            );
+        }
+        let args = parse(&["--mode", "--version"]);
+        assert_eq!(args.mode, None);
+        assert!(args.version);
+        assert!(args.unknown_flags.is_empty());
+        assert_eq!(
+            args.diagnostics,
+            [Diagnostic::error("--mode requires text or json")]
+        );
+        // The later value decides, and its error is reported.
+        assert_eq!(
+            parse(&["--mode", "json", "--mode", "yaml"]).diagnostics,
+            [Diagnostic::error(
+                "Invalid mode \"yaml\". Valid values: text, json"
+            )]
+        );
+    }
+
+    // Pi `args.test.ts` "--name flag": an empty value is kept for the
+    // caller to refuse, and a missing one is an error.
+    #[test]
+    fn name_keeps_an_empty_value_and_reports_a_missing_one() {
+        assert_eq!(
+            parse(&["--name", "my-session"]).name.as_deref(),
+            Some("my-session")
+        );
+        assert_eq!(
+            parse(&["-n", "quick-session"]).name.as_deref(),
+            Some("quick-session")
+        );
+        assert_eq!(parse(&["--name", ""]).name.as_deref(), Some(""));
+        assert_eq!(
+            normalize_session_name("  named session  ").as_deref(),
+            Some("named session")
+        );
+        assert_eq!(normalize_session_name("   "), None);
+        assert_eq!(
+            parse(&["--name"]).diagnostics,
+            [Diagnostic::error("--name requires a value")]
+        );
+        let args = parse(&[
+            "--name",
+            "named-run",
+            "--print",
+            "--model",
+            "gpt-4o",
+            "hello",
+        ]);
+        assert_eq!(args.name.as_deref(), Some("named-run"));
+        assert!(args.print);
+        assert_eq!(args.model.as_deref(), Some("gpt-4o"));
+        assert_eq!(args.messages, ["hello"]);
+    }
+
+    // Pi `args.test.ts` "--no-session flag": a session id is kept for the
+    // commands that persist nothing.
+    #[test]
+    fn a_session_id_survives_the_non_persisting_commands() {
+        for other in ["--help", "--list-models", "--no-session"] {
+            let args = parse(&["--session-id", "ephemeral-id", other]);
+            assert_eq!(args.session_id.as_deref(), Some("ephemeral-id"), "{other}");
+        }
+        assert!(parse(&["--session-id", "x", "--help"]).help);
+        assert_eq!(
+            parse(&["--session-id", "x", "--list-models"]).list_models,
+            Some(None)
+        );
+        assert!(parse(&["--session-id", "x", "--no-session"]).no_session);
+    }
+
+    // Pi `args.test.ts` "--no-context-files flag" and the tool flags Pi
+    // combines with explicit lists.
+    #[test]
+    fn context_and_tool_switches_combine() {
+        for flag in ["--no-context-files", "-nc"] {
+            assert!(parse(&[flag]).no_context_files, "{flag}");
+        }
+        for flags in [
+            vec!["--no-tools", "--tools", "read,bash"],
+            vec!["--no-builtin-tools", "--tools", "read,bash"],
+        ] {
+            let args = parse(&flags);
+            assert_eq!(
+                args.tools,
+                Some(vec!["read".into(), "bash".into()]),
+                "{flags:?}"
+            );
+            assert!(args.no_tools || args.no_builtin_tools);
+            assert!(args.diagnostics.is_empty(), "{flags:?}");
+        }
+        assert_eq!(
+            parse(&["-t", "+codemode,-write"]).tools,
+            Some(vec!["+codemode".into(), "-write".into()])
+        );
+        assert_eq!(
+            parse(&["-t", "+mcp__radius__*"]).diagnostics,
+            [Diagnostic::error(
+                "-t: +name and -name entries take exact tool names, not patterns: +mcp__radius__*"
+            )]
+        );
+    }
+
+    // Pi `args.test.ts` "messages and file args" and "complex
+    // combinations".
+    #[test]
+    fn messages_file_arguments_and_combinations() {
+        assert_eq!(parse(&["hello", "world"]).messages, ["hello", "world"]);
+        assert_eq!(
+            parse(&["@README.md", "@src/main.ts"]).file_args,
+            ["README.md", "src/main.ts"]
+        );
+        let mixed = parse(&["@file.txt", "explain this", "@image.png"]);
+        assert_eq!(mixed.file_args, ["file.txt", "image.png"]);
+        assert_eq!(mixed.messages, ["explain this"]);
+        let unknown = parse(&["--unknown-flag", "message"]);
+        assert!(unknown.messages.is_empty());
+        assert_eq!(
+            unknown.unknown_flags,
+            [("unknown-flag".into(), Some("message".into()))]
+        );
+        assert_eq!(
+            parse(&["--unknown-flag"]).unknown_flags,
+            [("unknown-flag".into(), None)]
+        );
+        assert_eq!(
+            parse(&["--unknown-flag=value"]).unknown_flags,
+            [("unknown-flag".into(), Some("value".into()))]
+        );
+        let args = parse(&[
+            "--provider",
+            "anthropic",
+            "--model",
+            "claude-sonnet",
+            "--print",
+            "--thinking",
+            "high",
+            "@prompt.md",
+            "Do the task",
+        ]);
+        assert_eq!(args.provider.as_deref(), Some("anthropic"));
+        assert_eq!(args.model.as_deref(), Some("claude-sonnet"));
+        assert!(args.print);
+        assert_eq!(args.thinking, Some(ModelThinkingLevel::High));
+        assert_eq!(args.file_args, ["prompt.md"]);
+        assert_eq!(args.messages, ["Do the task"]);
+    }
+
+    // Pi's extension and theme flags, and `--tui-mode`, are excluded from
+    // `bake-rs`: a long one becomes an unknown flag and a short one an
+    // unknown option, both of which the caller refuses
+    // ([`crate::cli::plan`]). `--ui-mode`, which Pi also does not take, is
+    // no different.
+    #[test]
+    fn pis_extension_theme_and_tui_mode_flags_are_not_recognized() {
+        for (flags, name, value) in [
+            (
+                vec!["--extension", "./my-extension.ts"],
+                "extension",
+                Some("./my-extension.ts"),
+            ),
+            (vec!["--no-extensions"], "no-extensions", None),
+            (
+                vec!["--theme", "./theme.json"],
+                "theme",
+                Some("./theme.json"),
+            ),
+            (vec!["--use-theme", "light"], "use-theme", Some("light")),
+            (vec!["--no-themes"], "no-themes", None),
+            (vec!["--tui-mode", "regular"], "tui-mode", Some("regular")),
+            (
+                vec!["--ui-mode", "fullscreen"],
+                "ui-mode",
+                Some("fullscreen"),
+            ),
+        ] {
+            let args = parse(&flags);
+            assert_eq!(
+                args.unknown_flags,
+                [(name.to_owned(), value.map(str::to_owned))],
+                "{flags:?}"
+            );
+            assert!(args.diagnostics.is_empty(), "{flags:?}");
+            assert_eq!(
+                unknown_flags_message(&args.unknown_flags).as_deref(),
+                Some(format!("Unknown option: --{name}").as_str())
+            );
+        }
+        for flag in ["-e", "-ne"] {
+            assert_eq!(
+                parse(&[flag, "./ext.ts"]).diagnostics,
+                [Diagnostic::error(format!("Unknown option: {flag}"))],
+                "{flag}"
+            );
+        }
     }
 
     #[test]

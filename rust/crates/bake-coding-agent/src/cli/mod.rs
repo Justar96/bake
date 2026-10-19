@@ -2239,6 +2239,46 @@ mod tests {
         assert_eq!(text(&errors), "");
     }
 
+    // The flags `bake-rs` excludes (Pi's extensions, themes, and
+    // `--tui-mode`) are refused before anything is loaded, with Pi's
+    // unknown-option message and its exit status.
+    #[test]
+    fn the_excluded_pi_flags_are_refused_as_unknown_options() {
+        for (flags, message) in [
+            (
+                vec!["--extension", "./ext.ts", "-p", "hi"],
+                "Error: Unknown option: --extension\n",
+            ),
+            (
+                vec!["--no-extensions"],
+                "Error: Unknown option: --no-extensions\n",
+            ),
+            (
+                vec!["--theme", "./dark.json"],
+                "Error: Unknown option: --theme\n",
+            ),
+            (
+                vec!["--use-theme", "light"],
+                "Error: Unknown option: --use-theme\n",
+            ),
+            (vec!["--no-themes"], "Error: Unknown option: --no-themes\n"),
+            (
+                vec!["--tui-mode", "regular"],
+                "Error: Unknown option: --tui-mode\n",
+            ),
+            (vec!["-e", "./ext.ts"], "Error: Unknown option: -e\n"),
+            (vec!["-ne"], "Error: Unknown option: -ne\n"),
+        ] {
+            let (stderr, errors) = sink();
+            assert_eq!(
+                plan(&strings(&flags), true, true, &stderr),
+                Action::Exit(1),
+                "{flags:?}"
+            );
+            assert_eq!(text(&errors), message, "{flags:?}");
+        }
+    }
+
     // Bake: the project-trust flags are parsed and then refused, with the
     // reason instead of `Unknown option`, and nothing is loaded first.
     #[test]

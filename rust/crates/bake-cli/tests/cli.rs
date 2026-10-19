@@ -192,6 +192,20 @@ fn external_command_examples_do_not_hide_agent_flags() {
 /// the agent's parser does not accept them. `--help` still names them.
 const AUTH_OPTIONS: &[&str] = &["--json", "--credentials", "--no-refresh", "--min-expiry"];
 
+/// Pi's options `bake-rs` excludes. The documentation names them to say
+/// they are refused, so the parser must not accept them and `--help` must
+/// not offer them.
+const EXCLUDED_PI_OPTIONS: &[&str] = &[
+    "--extension",
+    "-e",
+    "--no-extensions",
+    "-ne",
+    "--theme",
+    "--use-theme",
+    "--no-themes",
+    "--tui-mode",
+];
+
 #[test]
 fn flags_named_in_the_docs_are_accepted() {
     // Whole words, so `-c` does not pass inside `--continue`.
@@ -206,6 +220,22 @@ fn flags_named_in_the_docs_are_accepted() {
                 assert!(
                     help_text.contains(&flag),
                     "{topic} names {flag}, which --help omits"
+                );
+                continue;
+            }
+            if EXCLUDED_PI_OPTIONS.contains(&flag.as_str()) {
+                assert!(
+                    !help.contains(&flag),
+                    "{topic} calls {flag} excluded, but --help offers it"
+                );
+                let args = bake_coding_agent::cli::parse_args(&[flag.clone(), "x".into()]);
+                assert!(
+                    !args.unknown_flags.is_empty()
+                        || args
+                            .diagnostics
+                            .iter()
+                            .any(|diagnostic| diagnostic.message.contains("Unknown option")),
+                    "{topic} calls {flag} excluded, but bake-rs accepts it"
                 );
                 continue;
             }
