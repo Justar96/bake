@@ -50,10 +50,11 @@
 //! Unix trees are a new session and process group (`setsid` before `exec`);
 //! Windows trees are a kill-on-close job the process is born in
 //! (`PROC_THREAD_ATTRIBUTE_JOB_LIST`), with only its standard handles
-//! inherited and overlapped named pipes connected before creation. A
-//! descendant that leaves the tree (`setsid`, a job breakaway) is outside
-//! this ownership: the tree is cleanup, not containment, and D24's sandbox
-//! is the boundary.
+//! inherited and overlapped named pipes connected before creation. A Unix
+//! descendant that leaves the tree (`setsid`) is outside this ownership:
+//! the tree is cleanup, not containment, and D24's sandbox is the
+//! boundary. A Windows descendant cannot leave: the job allows no
+//! breakaway, and one from a job nested in it stays in it.
 //!
 //! On Windows the job and its account are `windows_job::Job`, public so
 //! that `bake-sandbox`'s synchronous Windows runner keeps its confined tree
