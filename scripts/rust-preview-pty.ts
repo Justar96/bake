@@ -1108,12 +1108,17 @@ class FakeModel {
       if (prompt.startsWith('READ ')) return sse(text(n, `Read it: ${toolOutput.split('\n')[0]}`))
       if (prompt.startsWith('MCP ')) return sse(text(n, `MCP said: ${toolOutput.split('\n')[0]}`))
       if (prompt.startsWith('BACKGROUND')) return sse(text(n, 'Started.'))
+      if (prompt.startsWith('CODEMODE')) return sse(text(n, 'Script ran.'))
       return sse(text(n, 'Slept.'))
     }
     if (prompt.startsWith('READ ')) return sse(call(n, 'read', { path: prompt.slice(5).trim() }))
     // `MCP <text>` calls the configured fixture server's `echo` tool.
     if (prompt.startsWith('MCP ')) return sse(call(n, 'mcp__fx__echo', { text: prompt.slice(4).trim() }))
     if (prompt.startsWith('SLEEP')) return sse(call(n, 'bash', { command: 'sleep 30' }))
+    // `CODEMODE` runs a script whose two nested calls read a file and run a command.
+    if (prompt.startsWith('CODEMODE')) {
+      return sse(call(n, 'codemode', { code: 'const [a, b] = await Promise.all([\n  tools.read({ path: "notes.txt" }),\n  tools.bash({ command: "echo nested-ok" }),\n]);\nreturn [a, b];' }))
+    }
     // `BACKGROUND` starts a shell that prints a line a second, then sleeps.
     if (prompt.startsWith('BACKGROUND')) {
       return sse(call(n, 'bash', { command: 'for i in 1 2 3 4 5 6 7 8 9; do echo bg-$i; sleep 1; done; sleep 60', run_in_background: true }))
@@ -1348,6 +1353,29 @@ await liveScenario('a live session streams an answer and a tool call, takes a se
   assert.equal(files.length, 1, '--continue started a new session file')
   assert.deepEqual(messageTexts(files[0] ?? [], 'user'), ['READ notes.txt', 'ECHO second prompt', 'ECHO picture [Image #1]', 'ECHO third'])
   assert.deepEqual(await readdir(world.project), ['notes.txt'], 'the session wrote into the project')
+})
+
+await liveScenario('a codemode call shows a row per nested call live, and the same rows replayed inline', async (world) => {
+  await writeFile(join(world.project, 'notes.txt'), 'alpha line\nbeta line\n')
+  const session = world.launch(['--tools', 'read,bash,codemode'])
+  await session.ready()
+  session.send('CODEMODE\r')
+  await session.wait('codemode block', () => session.screen.includes('Script ran.') && /^ {2}✓ Completed/mu.test(session.screen))
+  // The head, the script, then one row per nested call with its duration; the call's own events add no cards.
+  const rows = (screen: string): boolean => /(?:✓|\{\}) Codemode +2 calls · took \d+\.\ds/u.test(screen)
+    && /[│ ] 1 {2}const \[a, b\] = await Promise\.all\(\[/u.test(screen)
+    && /✓ read {2}\{"path":"notes\.txt"\} {2}\d+(?:ms|\.\ds)/u.test(screen)
+    && /✓ bash {2}\{"command":"echo nested-ok"\} {2}\d+(?:ms|\.\ds)/u.test(screen)
+  assert(rows(session.screen), `the codemode rows are missing\n${session.screen}`)
+  assert(!/✓ (?:Read|Bash):/u.test(session.screen), `a nested call drew its own card\n${session.screen}`)
+  await session.quit()
+  const [entries] = await sessionEntries(world.home)
+  assert(messageTexts(entries ?? [], 'toolResult').some(text => text.startsWith('Script completed\nWall time ')), 'the script result was not persisted')
+  // Resumed inline, the block replays from the session file with the same rows.
+  const resumed = world.launch(['--continue', '--tools', 'read,bash,codemode'], true)
+  await resumed.ready()
+  await resumed.wait('replayed codemode block', () => rows(resumed.history))
+  await resumed.quit()
 })
 
 await liveScenario('inline live session steers a held turn, cancels another, and returns the unsent steer', async (world) => {
