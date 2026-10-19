@@ -64,7 +64,7 @@ impl CodemodeHost for SessionCodemodeHost {
                 .map_err(|refused| refused.to_string())?;
             match written.await {
                 Ok(result) => result,
-                Err(error) => Err(format!("The codemode store could not be written: {error}")),
+                Err(error) => Err(error.to_string()),
             }
         })
     }

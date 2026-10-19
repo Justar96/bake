@@ -669,6 +669,56 @@ async fn runs_without_a_session_starting_from_an_empty_store() {
     assert_eq!(result.details, Some(json!({ "calls": [] })));
 }
 
+/// A host whose store cannot be written.
+struct UnwritableStore;
+
+impl CodemodeHost for UnwritableStore {
+    fn tool_namespace(&self, _name: &str) -> Option<CodemodeNamespace> {
+        None
+    }
+
+    fn tool_guidelines(&self, _name: &str) -> Vec<String> {
+        Vec::new()
+    }
+
+    fn load_store(&self) -> BoxFuture<'static, Result<bake_codemode::StoreValues, String>> {
+        Box::pin(async { Ok(bake_codemode::StoreValues::new()) })
+    }
+
+    fn append_store(
+        &self,
+        _data: CodemodeStoreEntryData,
+    ) -> BoxFuture<'static, Result<(), String>> {
+        Box::pin(async { Err("disk full".to_owned()) })
+    }
+
+    fn work(&self) -> Option<crate::owned_work::WorkGate> {
+        None
+    }
+}
+
+/// A store write that fails keeps the script's result and says so after
+/// its output.
+#[tokio::test]
+async fn a_failed_store_write_keeps_the_result() {
+    let result = execute_with(
+        "c".to_owned(),
+        json!({ "code": "store(\"count\", 1);\ntext(\"stored\");\nreturn 1;" }),
+        None,
+        AgentToolUpdateCallback::ignore(),
+        ToolContext::detached(),
+        Some(Arc::new(UnwritableStore)),
+        Admission::process(),
+    )
+    .await
+    .expect("result");
+    assert!(!result.is_error);
+    assert_eq!(
+        result_text(&result),
+        "==> text 1/2 <==\nstored\n==> text 2/2 <==\n1\n[The codemode store could not be written: disk full]"
+    );
+}
+
 /// Pi's "applies the timeout_ms option and rejects invalid options".
 #[tokio::test]
 async fn applies_the_timeout_option_and_rejects_invalid_options() {

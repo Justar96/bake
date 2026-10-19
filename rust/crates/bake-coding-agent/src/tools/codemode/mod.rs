@@ -141,6 +141,8 @@ pub trait CodemodeHost: Send + Sync {
     /// current branch ([`read_codemode_store`]).
     fn load_store(&self) -> BoxFuture<'static, Result<StoreValues, String>>;
     /// Appends a successful script's writes as one `codemode-store` entry.
+    /// An error is reported after the script's output as
+    /// `[The codemode store could not be written: <error>]`.
     fn append_store(&self, data: CodemodeStoreEntryData) -> BoxFuture<'static, Result<(), String>>;
     /// The session's gate, which owns the blocking work of a script: the
     /// engine's first compile and the files output is saved to.

@@ -949,16 +949,21 @@ pub(super) async fn execute_with(
     }
 
     let mut script_output = ran.output;
+    let mut store_failure = None;
     if let Ok(completion) = &ran.result {
         let writes = &completion.store_writes;
         if (!writes.set.is_empty() || !writes.delete.is_empty())
             && let Some(host) = &catalog.host
         {
-            host.append_store(CodemodeStoreEntryData {
-                set: writes.set.clone(),
-                delete: writes.delete.clone(),
-            })
-            .await?;
+            // The script's calls already ran, so a failed write is reported
+            // with its output instead of replacing it.
+            store_failure = host
+                .append_store(CodemodeStoreEntryData {
+                    set: writes.set.clone(),
+                    delete: writes.delete.clone(),
+                })
+                .await
+                .err();
         }
         // Pi's extension: a returned value is appended like `text()`.
         if let Some(value) = &completion.value {
@@ -969,6 +974,11 @@ pub(super) async fn execute_with(
         }
     }
     let mut items = format_output(&script_output);
+    if let Some(error) = store_failure {
+        items.push(Item::Text(format!(
+            "[The codemode store could not be written: {error}]"
+        )));
+    }
     if let Err(failure) = &ran.result {
         items.push(Item::Text(format!(
             "Script error:\n{}",
