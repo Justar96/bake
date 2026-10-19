@@ -65,11 +65,17 @@
 //! to [`McpTimings::startup_wait`] for servers still connecting, as Pi's
 //! `waitForDirectServers` does.
 //!
+//! A `codemode` script ([`crate::tools::codemode`]) calls MCP tools like
+//! any other: each tool declares Pi's `CallToolResult` output schema
+//! (`tools::mcp_result_schema`), so a script receives the result as the
+//! server sent it, and its server is its namespace
+//! ([`McpServers::tool_namespace`]).
+//!
 //! Not implemented: Streamable HTTP servers, OAuth, reconnecting a closed
 //! server (its tools are withdrawn instead), resources and their tools,
-//! prompts, server instructions and Pi's `mcp_servers` prompt section, code
-//! mode and tool search exposures, progress
-//! updates, the `/mcp` command, and the server log file.
+//! prompts, server instructions and Pi's `mcp_servers` prompt section, the
+//! `codemode`, `codemode-deferred`, and `deferred` exposures and tool search,
+//! progress updates, the `/mcp` command, and the server log file.
 
 pub mod config;
 pub mod home;
@@ -90,7 +96,7 @@ pub use config::{
     McpTransportConfig, load_mcp_config, parse_mcp_config,
 };
 pub use home::load_home_mcp_config;
-pub use names::{MCP_TOOL_PREFIX, public_tool_name};
+pub use names::{MCP_TOOL_PREFIX, mcp_namespace, public_tool_name};
 pub use tools::{MAX_DECLARATION_BYTES, MAX_TOOLS_PER_SERVER, MCP_OUTPUT_MAX_BYTES};
 
 use crate::owned_work::WorkGate;
@@ -363,6 +369,35 @@ impl McpServers {
             .flat_map(|slot| slot.tools.iter().cloned())
             .filter(|tool| self.shared.filter.allows(&tool.name))
             .collect()
+    }
+
+    /// The namespace of the published tool `name` for the `codemode` tool:
+    /// its server's [`mcp_namespace`], with the server's name as alias and
+    /// its `description`. Bake reads no server instructions.
+    pub(crate) fn tool_namespace(
+        &self,
+        name: &str,
+    ) -> Option<crate::tools::codemode::CodemodeNamespace> {
+        let slots = self.slots();
+        let slot = slots
+            .iter()
+            .find(|slot| slot.tools.iter().any(|tool| tool.name == name))?;
+        let server = &slot.entry.name;
+        Some(crate::tools::codemode::CodemodeNamespace {
+            namespace: bake_codemode::ToolNamespace {
+                name: mcp_namespace(server),
+                description: slot
+                    .entry
+                    .settings
+                    .description
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|description| !description.is_empty())
+                    .map(str::to_owned),
+                instructions: None,
+            },
+            aliases: vec![server.clone()],
+        })
     }
 
     /// The public names of the tools published now that the filter allows:

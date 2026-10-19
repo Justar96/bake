@@ -370,3 +370,40 @@ fn extensions_and_text_types_follow_pi() {
     assert!(!is_text_mime_type(Some("application/pdf")));
     assert!(!is_text_mime_type(None));
 }
+
+// Pi v1.3.0 "declares the CallToolResult scripts receive, keeping
+// references in the server's output schema".
+#[test]
+fn declares_the_call_tool_result_scripts_receive_keeping_references() {
+    let content = r#"content: Array<{ data?: string; mimeType?: string; text?: string; type: "text" | "image" | "audio" | "resource_link" | "resource"; [key: string]: unknown; }>; isError?: boolean;"#;
+    assert_eq!(
+        bake_codemode::render_tool_output_type(Some(&mcp_result_schema(None))),
+        format!("{{ {content} structuredContent?: unknown; [key: string]: unknown; }}")
+    );
+    let hit = json!({ "type": "object", "properties": { "id": { "type": "string" } }, "required": ["id"] });
+    let mut hit_v1 = hit.clone();
+    hit_v1["default"] = json!({ "$ref": "#/stays" });
+    let schema = mcp_result_schema(Some(&map(json!({
+        "type": "object",
+        "properties": {
+            "hits": { "type": "array", "items": { "$ref": "#/$defs/Hit~1v1" } },
+            "again": { "$ref": "#/properties/hits" },
+            "children": { "type": "array", "items": { "$ref": "#" } },
+            "default": { "$ref": "#/definitions/Hit" },
+            "remote": { "$ref": "https://example.com/schema.json" },
+        },
+        "required": ["hits"],
+        "$defs": { "Hit/v1": hit_v1 },
+        "definitions": { "Hit": hit },
+    }))));
+    assert_eq!(
+        schema["properties"]["structuredContent"]["$defs"]["Hit/v1"]["default"],
+        json!({ "$ref": "#/stays" })
+    );
+    assert_eq!(
+        bake_codemode::render_tool_output_type(Some(&schema)),
+        format!(
+            "{{ {content} structuredContent?: {{ again?: Array<{{ id: string; }}>; children?: Array<{{ again?: Array<{{ id: string; }}>; children?: Array<unknown>; default?: {{ id: string; }}; hits: Array<{{ id: string; }}>; remote?: unknown; }}>; default?: {{ id: string; }}; hits: Array<{{ id: string; }}>; remote?: unknown; }}; [key: string]: unknown; }}"
+        )
+    );
+}

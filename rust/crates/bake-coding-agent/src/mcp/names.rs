@@ -22,11 +22,10 @@ const HASH_LENGTH: usize = 12;
 /// The prefix every MCP tool name starts with.
 pub const MCP_TOOL_PREFIX: &str = "mcp__";
 
-/// The public name of `tool` on `server`.
-pub fn public_tool_name(server: &str, tool: &str) -> String {
-    let joined = format!("{MCP_TOOL_PREFIX}{server}__{tool}");
-    let mut normalized = String::with_capacity(joined.len());
-    for character in joined.chars() {
+/// `text` with each UTF-16 unit outside `[A-Za-z0-9_-]` replaced by `_`.
+fn normalize(text: &str) -> String {
+    let mut normalized = String::with_capacity(text.len());
+    for character in text.chars() {
         if character.is_ascii_alphanumeric() || matches!(character, '_' | '-') {
             normalized.push(character);
         } else {
@@ -36,6 +35,21 @@ pub fn public_tool_name(server: &str, tool: &str) -> String {
             }
         }
     }
+    normalized
+}
+
+/// The namespace of `server`'s tools for the `codemode` tool,
+/// `mcp__<server>`, normalized as public names are but never hashed: the
+/// prefix its tools' unhashed names share. Pi's `mcpNamespace` maps only
+/// `-` to `_`.
+pub fn mcp_namespace(server: &str) -> String {
+    normalize(&format!("{MCP_TOOL_PREFIX}{server}"))
+}
+
+/// The public name of `tool` on `server`.
+pub fn public_tool_name(server: &str, tool: &str) -> String {
+    let joined = format!("{MCP_TOOL_PREFIX}{server}__{tool}");
+    let normalized = normalize(&joined);
     if normalized == joined && normalized.len() <= MAX_PUBLIC_NAME_LENGTH {
         return normalized;
     }

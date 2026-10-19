@@ -87,6 +87,9 @@ pub(crate) struct PlannedTool {
     pub(crate) description: String,
     /// The input schema the model reads and the agent validates against.
     pub(crate) parameters: Value,
+    /// What scripts receive ([`mcp_result_schema`]); never sent to the
+    /// model.
+    pub(crate) output_schema: Value,
 }
 
 /// The tools of one listing the model will see, in the server's order,
@@ -130,6 +133,11 @@ pub(crate) fn plan_tools(
             name: public,
             description,
             parameters,
+            output_schema: mcp_result_schema(
+                tool.definition
+                    .get("outputSchema")
+                    .and_then(Value::as_object),
+            ),
         });
     }
     if planned.len() > MAX_TOOLS_PER_SERVER {
@@ -196,6 +204,7 @@ fn agent_tool(caller: Arc<Caller>, planned: PlannedTool) -> AgentTool {
         name,
         description,
         parameters,
+        output_schema,
     } = planned;
     let label = format!("{}/{tool}", caller.server);
     let mut agent_tool = AgentTool::new(
@@ -234,7 +243,104 @@ fn agent_tool(caller: Arc<Caller>, planned: PlannedTool) -> AgentTool {
     // A server's `readOnlyHint` is its own claim, not a promise Bake can
     // check, so no MCP call is rerun.
     agent_tool.replay = Some(ToolReplay::Never);
+    agent_tool.output_schema = Some(output_schema);
     agent_tool
+}
+
+/// Pi v1.3.0's `CONTENT_BLOCK_SCHEMA`.
+fn content_block_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "type": { "enum": ["text", "image", "audio", "resource_link", "resource"] },
+            "text": { "type": "string" },
+            "data": { "type": "string" },
+            "mimeType": { "type": "string" },
+        },
+        "required": ["type"],
+        "additionalProperties": true,
+    })
+}
+
+/// Keywords whose values are data, so a `$ref` key in them is not a
+/// reference.
+const SCHEMA_DATA_KEYWORDS: [&str; 4] = ["const", "enum", "default", "examples"];
+/// Keywords whose values map names to schemas, so their keys are names.
+const SCHEMA_MAP_KEYWORDS: [&str; 6] = [
+    "properties",
+    "patternProperties",
+    "dependentSchemas",
+    "dependencies",
+    "$defs",
+    "definitions",
+];
+
+/// Pi v1.3.0's `relocateSchema`: `schema` as the subschema at `pointer` of
+/// another, its local references (`#`, `#/$defs/Item`) rewritten to point
+/// below `pointer`.
+fn relocate_schema(schema: &Value, pointer: &str) -> Value {
+    match schema {
+        Value::Array(items) => Value::Array(
+            items
+                .iter()
+                .map(|item| relocate_schema(item, pointer))
+                .collect(),
+        ),
+        Value::Object(object) => Value::Object(
+            object
+                .iter()
+                .map(|(key, value)| {
+                    let relocated = match value {
+                        Value::String(reference)
+                            if key == "$ref"
+                                && (reference == "#" || reference.starts_with("#/")) =>
+                        {
+                            Value::String(format!("{pointer}{}", &reference[1..]))
+                        }
+                        _ if SCHEMA_DATA_KEYWORDS.contains(&key.as_str()) => value.clone(),
+                        Value::Object(map) if SCHEMA_MAP_KEYWORDS.contains(&key.as_str()) => {
+                            Value::Object(
+                                map.iter()
+                                    .map(|(name, subschema)| {
+                                        (name.clone(), relocate_schema(subschema, pointer))
+                                    })
+                                    .collect(),
+                            )
+                        }
+                        _ => relocate_schema(value, pointer),
+                    };
+                    (key.clone(), relocated)
+                })
+                .collect(),
+        ),
+        other => other.clone(),
+    }
+}
+
+/// Pi v1.3.0's `createMcpResultSchema`: the output schema of every MCP tool,
+/// the `CallToolResult` a codemode script receives (its structured content
+/// without `_meta`), with the tool's own `outputSchema` as
+/// `structuredContent`.
+pub(crate) fn mcp_result_schema(structured_content: Option<&Map<String, Value>>) -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "content": { "type": "array", "items": content_block_schema() },
+            // Servers may send structured content without declaring a
+            // schema for it, and it may be any JSON value.
+            "structuredContent": structured_content.map_or_else(
+                || json!({}),
+                |schema| relocate_schema(
+                    &Value::Object(schema.clone()),
+                    "#/properties/structuredContent",
+                ),
+            ),
+            "isError": { "type": "boolean" },
+        },
+        "required": ["content"],
+        // Fields newer protocol versions add.
+        "additionalProperties": true,
+    })
 }
 
 /// Pi's `convertMcpResult`.
