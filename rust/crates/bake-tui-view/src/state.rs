@@ -3724,12 +3724,7 @@ mod tests {
         let mut state = State::default();
         let rows = state.transcript.rows.len();
         let script = |state: &State| match &state.transcript.rows[rows] {
-            Row::Script {
-                state: script,
-                summary,
-                calls,
-                ..
-            } => (*script, summary.clone(), calls.len()),
+            Row::Codemode(script) => (script.state, script.summary.clone(), script.calls.len()),
             other => panic!("{other:?}"),
         };
         update(&mut state, Msg::Tick(Duration::from_millis(250)));
@@ -3753,13 +3748,9 @@ mod tests {
         press(&mut state, Key::Esc);
         assert_eq!(state.transcript.rows.len(), rows + 2);
         match &state.transcript.rows[rows + 1] {
-            Row::Script {
-                state: script,
-                summary,
-                ..
-            } => {
+            Row::Codemode(script) => {
                 assert_eq!(
-                    (*script, summary.as_deref()),
+                    (script.state, script.summary.as_deref()),
                     (CallState::Failed, Some("interrupted"))
                 );
             }

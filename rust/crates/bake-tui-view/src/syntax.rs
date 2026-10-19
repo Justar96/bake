@@ -1,7 +1,7 @@
-//! Syntax colour for the code the transcript shows: a code-mode script's
-//! source and result, a shell call's command, and the lines of an edit's
-//! diff. Program output and prose are never coloured, because they are not
-//! code in a known language.
+//! Syntax colour for the code the transcript shows: a code-mode script, a
+//! shell call's command, and the lines of an edit's diff. Program output
+//! and prose are never coloured, because they are not code in a known
+//! language.
 //!
 //! The lexers are small and line-based on purpose. They split a line into
 //! tokens without changing a byte of it, so colour can never change a cell

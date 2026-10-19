@@ -89,12 +89,8 @@ pub const BRANCH_SUMMARY_ROW: &str = "[branch] Branch summary";
 pub const SAMPLE_PHASES: &[&str] = &["thinking", "writing", "running bash", "running subagent +2"];
 /// The header's word while history is compacted, and the phases it steps through.
 pub const COMPACTING: &str = "Compacting history";
-/// The build a sample turn's script runs last, and its note once the turn
-/// completes or Esc stops it.
+/// The build a sample turn's script runs last.
 pub const SAMPLE_COMMAND: &str = "bun run build";
-/// What the script a sample turn runs is for.
-pub const SAMPLE_SCRIPT: &str = "Read every manifest, then build";
-pub const SAMPLE_DONE: &str = "exit 0";
 pub const INTERRUPTED_NOTE: &str = "interrupted";
 /// The titles of the cards whose tool names read poorly with only their
 /// first letter raised; any other tool's card takes its name that way.
@@ -134,22 +130,20 @@ pub const UNMODIFIED: &str = "unmodified lines";
 /// A call's line count when it has no summary of its own: `1 line`, `2 lines`.
 pub const LINE: &str = "line";
 pub const LINES: &str = "lines";
-/// Code mode: the label `run_code` calls draw under; the words of its call
-/// count, `13 calls · 1 failed` or `13 calls · 4 running`, and of a call
-/// site's tally, `11 done · 1 failed`; and the count of failures a site
-/// leaves unlisted.
-pub const SCRIPT: &str = "Codemode";
+/// Code mode: the title a `codemode` call draws under; the words of its
+/// head's status, `13 calls · 1 failed · 1 cancelled · took 0.4s` or
+/// `13 calls · 4 running`; the count of the calls it lists no longer,
+/// `⋯ 5 earlier calls`; and the file holding output it cut, Pi's
+/// `Full output:`.
+pub const CODEMODE: &str = "Codemode";
 pub const CALL: &str = "call";
 pub const CALLS: &str = "calls";
-pub const DONE: &str = "done";
 pub const FAILED: &str = "failed";
+pub const CANCELLED: &str = "cancelled";
 pub const RUNNING: &str = "running";
-pub const MORE_FAILED: &str = "more failed";
-/// What a program hands back to the model, named as the program wrote it:
-/// the lines it logged, the value it returned, or how it failed.
-pub const CONSOLE: &str = "console";
-pub const RETURN: &str = "return";
-pub const ERROR: &str = "error";
+pub const TOOK: &str = "took";
+pub const EARLIER_CALLS: &str = "earlier calls";
+pub const FULL_OUTPUT: &str = "Full output:";
 /// The transcript's hint row: its keys while following output, and the way
 /// back while reading history.
 pub const HINT_FOLLOWING: &[(&str, &str)] = &[("Wheel/PgUp", "scroll"), ("Ctrl+↑", "prompts")];

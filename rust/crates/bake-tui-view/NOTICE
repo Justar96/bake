@@ -20,6 +20,13 @@ named-only toggles on Ctrl+S and Ctrl+N, app.session.toggleSort and
 app.session.toggleNamedFilter in src/core/keybindings.ts, and its
 're:<pattern> regex · "phrase" exact' hint) is adapted in src/dialog.rs and
 src/render.rs.
+Release v1.3.0, revision 71023aec1546d6d677a65669c5665c0927ce0dd0.
+Adapted in src/codemode.rs: the codemode tool's renderer,
+src/extensions/codemode/renderer.ts (the script preview, one row per nested
+call with its status, arguments, duration, and error, the latest calls with a
+count of earlier ones, the output without the script header, previewed by
+wrapped rows, and the full output's file), with the cases of
+test/codemode-renderer.test.ts.
 --------------------------------------------------------------------------------
 MIT License
 
