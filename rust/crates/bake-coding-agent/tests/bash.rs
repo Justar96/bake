@@ -1006,7 +1006,10 @@ async fn shell_exit_settles_while_a_background_child_holds_the_pipes() {
 
 /// Pi `test/suite/regressions/5303-bash-output-truncation.test.ts`, with a
 /// real process: output a background child writes after the shell exits
-/// is still read while it keeps arriving.
+/// is still read while it keeps arriving. The child writes from its first
+/// instant and never pauses, so only the grace after its last line ends the
+/// read: a `$(seq ...)` list, computed before the first line, outlasted the
+/// 100 ms grace on a loaded macOS runner.
 #[cfg(unix)]
 #[tokio::test]
 async fn output_written_after_the_shell_exits_is_kept() {
@@ -1014,7 +1017,7 @@ async fn output_written_after_the_shell_exits_is_kept() {
     let tool = local_tool(&dir);
     let result = run(
         &tool,
-        json!({ "command": "(for i in $(seq 1 100000); do echo TICK$i; done) & echo HEAD" }),
+        json!({ "command": "(i=0; while [ $i -lt 100000 ]; do i=$((i+1)); echo TICK$i; done) & echo HEAD" }),
     )
     .await
     .unwrap();
@@ -1026,7 +1029,7 @@ async fn output_written_after_the_shell_exits_is_kept() {
     assert!(
         output.ends_with("TICK100000\n"),
         "{}",
-        &output[output.len() - 100..]
+        &output[output.len().saturating_sub(100)..]
     );
 }
 

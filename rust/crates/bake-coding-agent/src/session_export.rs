@@ -126,7 +126,8 @@ mod tests {
         assert_eq!(lines.len(), 4);
         assert_eq!(lines[0]["type"], "session");
         assert_eq!(lines[0]["version"], CURRENT_SESSION_VERSION);
-        assert_eq!(lines[0]["cwd"], "/work");
+        // The resolved directory: `/work`, or `D:\work` on Windows.
+        assert_eq!(lines[0]["cwd"], session.cwd());
         assert_eq!(lines[1]["parentId"], Value::Null);
         assert_eq!(lines[1]["message"]["content"], "one");
         assert_eq!(lines[2]["parentId"], first.as_str());

@@ -118,9 +118,11 @@ async fn the_bundle_includes_the_branch_only_when_asked() {
     let jsonl = with.session_jsonl.as_deref().expect("branch");
     assert!(jsonl.contains("question") && jsonl.contains("reply"));
     assert!(jsonl.contains("\"customType\":\"pi.share\""));
-    assert_eq!(with.metadata["session"]["cwd"], "/tmp");
+    // The session's resolved directory (`/tmp`, or `D:\tmp` on Windows).
+    let cwd = session.cwd();
+    assert_eq!(with.metadata["session"]["cwd"], cwd.as_str());
     // The issue's report never lists the directory.
-    assert_eq!(with.cwd, "/tmp");
+    assert_eq!(with.cwd, cwd);
     assert_eq!(with.home_dir.as_deref(), Some("/home/someone"));
     assert!(with.public_metadata()["session"].get("cwd").is_none());
     session.shutdown().await;
