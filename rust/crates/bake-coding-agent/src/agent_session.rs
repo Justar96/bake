@@ -93,6 +93,7 @@
 
 mod approval_history;
 mod background_compaction;
+mod codemode;
 mod context_masking;
 mod hooks;
 mod job_journal;
@@ -789,6 +790,11 @@ pub struct AgentSession {
     write_failure: Arc<Mutex<Option<String>>>,
     /// The MCP servers [`Self::start_mcp`] started, once it has.
     mcp: Arc<OnceLock<McpServers>>,
+    /// What the `codemode` tool reads of the session, and its loadout's.
+    codemode: Arc<codemode::SessionCodemodeHost>,
+    /// The declarations the active `codemode` tool's loadout hides from
+    /// requests.
+    hidden_declarations: codemode::HiddenDeclarations,
     /// The plugin dispatcher, when any plugin is registered.
     plugins: Option<Arc<VetoDispatcher>>,
     /// The external hooks [`Self::set_hooks`] installed, once it has.
@@ -1469,7 +1475,32 @@ impl AgentSession {
             return Err("The schedule tool names are reserved when schedules is enabled.".into());
         }
         let mut tools: Vec<Arc<AgentTool>> = tools.into_iter().map(run_in_order).collect();
-        // Pi's `_toolPromptGuidelines`.
+        // The session's own `codemode` tool, registered inactive, unless the
+        // caller gives one; its guideline joins the rules when it is active.
+        let own_codemode = !tools
+            .iter()
+            .any(|tool| tool.name == crate::tools::codemode::CODEMODE_TOOL_NAME);
+        let mut tool_prompts = tool_prompts;
+        if own_codemode
+            && !tool_prompts
+                .iter()
+                .any(|prompt| prompt.name == crate::tools::codemode::CODEMODE_TOOL_NAME)
+        {
+            tool_prompts.push(crate::tools::codemode::codemode_tool_prompt());
+        }
+        // Pi's `_toolPromptGuidelines`, which the codemode tool shows with
+        // the declarations it lists.
+        let tool_guidelines: Arc<std::collections::HashMap<String, Vec<String>>> = Arc::new(
+            tool_prompts
+                .iter()
+                .map(|prompt| {
+                    (
+                        prompt.name.clone(),
+                        normalize_prompt_guidelines(&prompt.guidelines),
+                    )
+                })
+                .collect(),
+        );
         for prompt in &tool_prompts {
             let guidelines = normalize_prompt_guidelines(&prompt.guidelines);
             if !guidelines.is_empty() {
@@ -1566,6 +1597,19 @@ impl AgentSession {
         if task_documents_enabled {
             tools.push(task_documents::tool(Arc::clone(&core)));
         }
+        let mcp: Arc<OnceLock<McpServers>> = Arc::default();
+        let codemode_host = Arc::new(codemode::SessionCodemodeHost {
+            core: Arc::clone(&core),
+            guidelines: tool_guidelines,
+            mcp: Arc::clone(&mcp),
+        });
+        if own_codemode {
+            tools.push(Arc::new(crate::tools::codemode::create_codemode_tool(
+                Some(Arc::clone(&codemode_host) as Arc<dyn crate::tools::codemode::CodemodeHost>),
+            )));
+        }
+        let hidden_declarations: codemode::HiddenDeclarations = Arc::default();
+        let hidden_in_requests = Arc::clone(&hidden_declarations);
         let schedules = schedules_enabled.then(|| Arc::new(schedules::Schedules::default()));
         if let Some(schedules) = &schedules {
             tools.extend(schedules::tools(&core, schedules));
@@ -1601,7 +1645,8 @@ impl AgentSession {
                 messages,
             },
             convert_to_llm: Some(hook::convert_to_llm(move |messages| {
-                let converted = convert_to_llm(messages);
+                let converted =
+                    codemode::hide_declarations(convert_to_llm(messages), &hidden_in_requests);
                 Box::pin(async move {
                     if block {
                         block_images(converted)
@@ -1749,7 +1794,9 @@ impl AgentSession {
             model_fallback_message: selection.fallback_message,
             queue: Arc::default(),
             write_failure: gap,
-            mcp: Arc::default(),
+            mcp,
+            codemode: codemode_host,
+            hidden_declarations,
             plugins,
             hooks: shared_hooks,
             tool_hooks,
@@ -3030,6 +3077,8 @@ impl AgentSession {
 
 #[cfg(test)]
 mod approval_tests;
+#[cfg(test)]
+mod codemode_tests;
 #[cfg(test)]
 mod control_tests;
 #[cfg(test)]

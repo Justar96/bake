@@ -592,21 +592,15 @@ struct QueuedCall {
     args: Option<Value>,
 }
 
-/// Runs one nested call and answers the script.
-async fn run_nested_call(
-    nested: NestedToolExecutor,
-    call: QueuedCall,
-    signal: AbortSignal,
-    handle: RunHandle,
-    records: Records,
-) {
-    let QueuedCall { id, tool, args } = call;
+/// Records a call as it starts, in the order calls start, and publishes
+/// the records; returns its place.
+fn record_start(records: &Records, call: &QueuedCall) -> usize {
     let index = {
         let mut calls = records.lock();
         calls.push(CodemodeNestedCall {
             id: format!("{}/?", records.caller_id),
-            name: tool.name.clone(),
-            args: preview_args(args.as_ref()),
+            name: call.tool.name.clone(),
+            args: preview_args(call.args.as_ref()),
             status: CodemodeNestedCallStatus::Running,
             duration_ms: None,
             error: None,
@@ -614,6 +608,19 @@ async fn run_nested_call(
         calls.len() - 1
     };
     records.publish();
+    index
+}
+
+/// Runs one nested call, recorded at `index`, and answers the script.
+async fn run_nested_call(
+    nested: NestedToolExecutor,
+    call: QueuedCall,
+    index: usize,
+    signal: AbortSignal,
+    handle: RunHandle,
+    records: Records,
+) {
+    let QueuedCall { id, tool, args } = call;
     let started = Instant::now();
     let outcome = nested
         .execute(
@@ -762,9 +769,11 @@ async fn run_script(
                 break;
             };
             let controller = AbortController::new();
+            let index = record_start(records, &call);
             running.spawn(run_nested_call(
                 nested.clone(),
                 call,
+                index,
                 controller.signal(),
                 handle.clone(),
                 records.clone(),

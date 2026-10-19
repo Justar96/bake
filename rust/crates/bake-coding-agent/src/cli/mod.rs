@@ -1326,6 +1326,9 @@ async fn build_session(args: &Args, build: Build) -> Result<Built, String> {
     if settings.schedules {
         available.extend(crate::agent_session::schedules::NAMES.map(str::to_owned));
     }
+    // The session's own `codemode` tool, registered inactive as in Pi:
+    // `--tools codemode` or `defaultTools` activates it.
+    available.push(crate::tools::codemode::CODEMODE_TOOL_NAME.to_owned());
     let mut defaults = settings.default_tools.clone().unwrap_or_else(|| {
         crate::tools::index::BAKE_DEFAULT_TOOL_NAMES
             .map(str::to_owned)

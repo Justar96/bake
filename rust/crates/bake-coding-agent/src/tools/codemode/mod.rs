@@ -43,10 +43,9 @@
 //!   as alias and its `description`; the characters Bake's MCP tool names
 //!   replace are replaced as there, where Pi maps only `-` to `_`. Bake reads
 //!   no server instructions, so namespaces carry none.
-//! - Text lengths (the output budget, the catalog's token estimate is the
-//!   exception) are counted in characters, where Pi counts UTF-16 units; the
-//!   catalog counts UTF-16 units as Pi does. Namespaces sort by code point,
-//!   where Pi uses `localeCompare`.
+//! - The output budget counts characters, where Pi counts UTF-16 units; the
+//!   catalog's token estimate counts UTF-16 units as Pi does. Namespaces
+//!   sort by code point, where Pi uses `localeCompare`.
 //! - At most [`MAX_CONCURRENT_NESTED_CALLS`] of a script's tool calls run at
 //!   once; the rest wait in the order the script made them. Pi starts every
 //!   call at once.

@@ -95,6 +95,8 @@ pub(super) struct PromptExecution {
     listeners: Arc<Listeners>,
     persist_error: Arc<Mutex<Option<String>>>,
     mcp: Arc<OnceLock<McpServers>>,
+    codemode: Arc<super::codemode::SessionCodemodeHost>,
+    hidden_declarations: super::codemode::HiddenDeclarations,
     hooks: hooks::SharedHooks,
     executions: SharedExecutions,
     runtime: tokio::runtime::Handle,
@@ -119,6 +121,8 @@ impl PromptExecution {
             listeners: Arc::clone(&session.listeners),
             persist_error: Arc::clone(&session.persist_error),
             mcp: Arc::clone(&session.mcp),
+            codemode: Arc::clone(&session.codemode),
+            hidden_declarations: Arc::clone(&session.hidden_declarations),
             hooks: Arc::clone(&session.hooks),
             executions: Arc::clone(&session.executions),
             runtime: session.runtime.clone(),
@@ -741,10 +745,22 @@ impl PromptExecution {
         if let Some(mcp) = self.mcp.get() {
             active.extend(mcp.tools());
         }
+        // The active `codemode` tool's descriptions and hidden declarations;
+        // without it, the tools as they are.
+        let (active, hidden) = super::codemode::apply_codemode_loadout(
+            active,
+            &read_settings(&self.settings),
+            &self.codemode,
+        );
         self.agent.set_tools(active);
+        *self
+            .hidden_declarations
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = hidden.clone();
         let mut options = self.prompt_options.clone();
         options.selected_tools = self.active_tool_names.clone();
-        options.hidden_tools = Vec::new();
+        // The rules match the declarations the request carries.
+        options.hidden_tools = hidden;
         let sections = build_system_prompt_sections(&options).map_err(|error| error.to_string())?;
         let systems: Vec<Message> = self
             .agent
