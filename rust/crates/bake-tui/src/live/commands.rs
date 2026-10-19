@@ -226,6 +226,29 @@ pub enum Release {
     Notified(Arc<tokio::sync::Notify>),
     /// The command's abort signal fires.
     Aborted,
+    /// Each hit takes the next release in turn; an exhausted list
+    /// releases at once.
+    Each(Arc<std::sync::Mutex<std::collections::VecDeque<Release>>>),
+}
+
+#[cfg(test)]
+impl Release {
+    /// Waits for this release, `signal` being the command's abort signal.
+    async fn wait(&self, signal: &AbortSignal) {
+        match self {
+            Release::Notified(release) => release.notified().await,
+            Release::Aborted => signal.cancelled().await,
+            Release::Each(each) => {
+                let next = each
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .pop_front();
+                if let Some(next) = next {
+                    Box::pin(next.wait(signal)).await;
+                }
+            }
+        }
+    }
 }
 
 impl Context {
@@ -1173,10 +1196,7 @@ async fn resume(context: &mut Context) -> Outcome {
     #[cfg(test)]
     if let Some(gate) = &context.commit_gate {
         let _ = gate.reached.send(());
-        match &gate.release {
-            Release::Notified(release) => release.notified().await,
-            Release::Aborted => context.signal.cancelled().await,
-        }
+        gate.release.wait(&context.signal).await;
     }
     let name = replacement
         .session
@@ -1258,10 +1278,7 @@ async fn tree(context: &mut Context) -> Outcome {
         #[cfg(test)]
         if let Some(gate) = &context.commit_gate {
             let _ = gate.reached.send(());
-            match &gate.release {
-                Release::Notified(release) => release.notified().await,
-                Release::Aborted => context.signal.cancelled().await,
-            }
+            gate.release.wait(&context.signal).await;
         }
         let navigated = match navigate(context, &id, options).await {
             Ok(navigated) => navigated,
@@ -1505,10 +1522,7 @@ async fn build_fork(
     #[cfg(test)]
     if let Some(gate) = &context.commit_gate {
         let _ = gate.reached.send(());
-        match &gate.release {
-            Release::Notified(release) => release.notified().await,
-            Release::Aborted => context.signal.cancelled().await,
-        }
+        gate.release.wait(&context.signal).await;
     }
     Ok((replacement, selected))
 }
@@ -1602,10 +1616,7 @@ async fn login(context: &mut Context) -> Outcome {
     #[cfg(test)]
     if let Some(gate) = &context.commit_gate {
         let _ = gate.reached.send(());
-        match &gate.release {
-            Release::Notified(release) => release.notified().await,
-            Release::Aborted => context.signal.cancelled().await,
-        }
+        gate.release.wait(&context.signal).await;
     }
     let runtime = context.session.model_runtime().clone();
     let committed = tokio::task::spawn_blocking(move || {

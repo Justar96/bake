@@ -38,10 +38,20 @@ fn background_commit_child() {
             let held: Box<dyn FnOnce() + Send> = Box::new(|| {
                 println!("{READY}");
                 std::io::stdout().flush().unwrap();
-                // EOF also terminates the helper if its parent goes away.
+                // Only EOF, when the parent goes away, ends the hold; a read
+                // error is reported and retried, never taken for EOF.
                 let mut line = String::new();
-                let _ = std::io::stdin().lock().read_line(&mut line);
-                std::process::exit(91);
+                loop {
+                    line.clear();
+                    match std::io::stdin().lock().read_line(&mut line) {
+                        Ok(0) => std::process::exit(91),
+                        Ok(_) => {}
+                        Err(error) => {
+                            eprintln!("held writer: stdin: {error}");
+                            std::thread::sleep(Duration::from_millis(10));
+                        }
+                    }
+                }
             });
             if after {
                 session.core.hooks().after_compaction_commit = Some(held);
@@ -110,7 +120,11 @@ impl Writer {
         #[cfg(unix)]
         {
             use std::os::unix::process::ExitStatusExt;
-            assert_eq!(status.signal(), Some(9), "parent SIGKILL ended the child");
+            assert_eq!(
+                status.signal(),
+                Some(9),
+                "parent SIGKILL ended the child: {status:?}"
+            );
         }
         #[cfg(windows)]
         assert_eq!(

@@ -1,8 +1,12 @@
 /** The download service serves the archives it holds and redirects the rest to their GitHub release. */
-import { afterEach, expect, test } from 'bun:test'
+import { afterEach, expect, setDefaultTimeout, test } from 'bun:test'
 import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+
+// Each test starts a Node server; a cold Windows runner took over Bun's
+// default 5 s to start the first one.
+setDefaultTimeout(30_000)
 
 const servers: ReturnType<typeof Bun.spawn>[] = []
 const roots: string[] = []

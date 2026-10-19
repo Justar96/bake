@@ -241,7 +241,15 @@ fn an_esc_before_a_summarizing_commit_interrupts_the_work() {
     let release = Arc::new(tokio::sync::Notify::new());
     let gate = commands::CommitGate {
         reached: reached_tx,
-        release: commands::Release::Notified(Arc::clone(&release)),
+        // The first hit waits for the test; the second for Esc's abort, so
+        // the command cannot pass its commit before Esc reaches the driver.
+        release: commands::Release::Each(Arc::new(std::sync::Mutex::new(
+            [
+                commands::Release::Notified(Arc::clone(&release)),
+                commands::Release::Aborted,
+            ]
+            .into(),
+        ))),
     };
     let (h, requests) = session_harness(&world, manager, Vec::new(), Some(gate));
     h.turn(1, "alpha");
@@ -280,7 +288,6 @@ fn an_esc_before_a_summarizing_commit_interrupts_the_work() {
     reached.recv_timeout(PATIENCE).expect("second choice held");
     // The answered prompt is the command's dialog: its cancel is Esc.
     h.choose_answer(prompt.id, DialogAnswer::Cancel);
-    release.notify_one();
     let updates = h.ended(4);
     assert_eq!(refused(&updates).as_deref(), Some(commands::CANCELLED));
     assert!(

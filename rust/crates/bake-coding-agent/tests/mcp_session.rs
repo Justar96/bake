@@ -1623,10 +1623,15 @@ async fn every_composed_tool_has_a_replay_class_no_request_carries(case: Arc<Cas
         &home.join("settings.json"),
         &json!({ "taskDocuments": true, "schedules": true, "subagents": true }).to_string(),
     );
-    write_owned(
-        &home.join("mcp.json"),
-        &json!({ "mcpServers": { "fixture": server_json(&case, "fixture", "") } }).to_string(),
-    );
+    // Windows refuses an existing `mcp.json` unread until its ACLs are
+    // checked (`mcp::home`), so the MCP half runs on Unix only.
+    let with_mcp = cfg!(unix);
+    if with_mcp {
+        write_owned(
+            &home.join("mcp.json"),
+            &json!({ "mcpServers": { "fixture": server_json(&case, "fixture", "") } }).to_string(),
+        );
+    }
     let faux = Arc::new(FauxProvider::new(FauxProviderOptions::default()));
     let requests: Arc<Mutex<Vec<TranscriptContext>>> = Arc::default();
     let seen = Arc::clone(&requests);
@@ -1683,8 +1688,10 @@ async fn every_composed_tool_has_a_replay_class_no_request_carries(case: Arc<Cas
     let session = Arc::new(started.session);
     case.keep(&session);
     session.apis().register(faux.clone());
-    let servers = session.mcp_servers().expect("the home's server");
-    wait_for(servers, "the server", |states| connected(&states[0], 1)).await;
+    if with_mcp {
+        let servers = session.mcp_servers().expect("the home's server");
+        wait_for(servers, "the server", |states| connected(&states[0], 1)).await;
+    }
     session.prompt("go", Vec::new()).await.expect("prompt");
 
     let tools = session.agent().tools();
@@ -1704,6 +1711,7 @@ async fn every_composed_tool_has_a_replay_class_no_request_carries(case: Arc<Cas
         .chain(
             FIXTURE_TOOLS
                 .iter()
+                .filter(|_| with_mcp)
                 .map(|name| ((*name).to_owned(), Some(ToolReplay::Never))),
         )
         .collect();
@@ -1741,7 +1749,8 @@ async fn every_composed_tool_has_a_replay_class_no_request_carries(case: Arc<Cas
     assert!(
         original
             .iter()
-            .all(|body| body.contains("mcp__fixture__echo") && body.contains("schedule_list")),
+            .all(|body| (!with_mcp || body.contains("mcp__fixture__echo"))
+                && body.contains("schedule_list")),
         "every body declares the tools"
     );
     let flipped = altered(|tool| {

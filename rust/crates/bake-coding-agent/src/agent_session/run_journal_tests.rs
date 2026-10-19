@@ -847,6 +847,31 @@ fn recoverable_run_crash_fixture() {
             let directory = directory.clone();
             FauxResponseStep::from_fn(move |_, _, _, _| halt(&directory))
         };
+        // The job-notice job, settled while the first answer is produced
+        // and ended before that answer returns, so its notice opens the
+        // next request instead of a job wait, which a restart refuses.
+        let settle = Arc::new(tokio::sync::Notify::new());
+        let fixture_jobs: Arc<std::sync::OnceLock<crate::jobs::JobRegistry>> = Arc::default();
+        let settle_then_answer = {
+            let (settle, fixture_jobs) = (Arc::clone(&settle), Arc::clone(&fixture_jobs));
+            FauxResponseStep::from_fn(move |_, _, _, _| {
+                let jobs = fixture_jobs.get().ok_or("no fixture job")?;
+                settle.notify_one();
+                // `block_in_place` hands this worker's queue, which holds
+                // the woken job, to another thread while this one waits.
+                tokio::task::block_in_place(|| {
+                    let bound = std::time::Instant::now() + Duration::from_secs(10);
+                    while !jobs.list().iter().all(|job| job.status.is_terminal()) {
+                        if std::time::Instant::now() >= bound {
+                            return Err("the fixture job never ended".to_owned());
+                        }
+                        std::thread::sleep(Duration::from_millis(1));
+                    }
+                    Ok(())
+                })?;
+                Ok(faux_assistant_message("complete"))
+            })
+        };
         h.faux.set_responses(match mode {
             "admission" | "timed" | "first-prompt" => vec![halting],
             "assistant" | "plain-assistant" | "pre-effect" | "dispatch" | "result" => {
@@ -854,7 +879,8 @@ fn recoverable_run_crash_fixture() {
             }
             "pre-read" | "read" => vec![tool_use("probe")],
             "retry" => vec![failure("overloaded_error"), halting],
-            "follow-up" | "job-notice" => vec![faux_assistant_message("complete").into(), halting],
+            "follow-up" => vec![faux_assistant_message("complete").into(), halting],
+            "job-notice" => vec![settle_then_answer, halting],
             "steer" => vec![tool_use("effect"), halting],
             "compaction" => vec![
                 tool_use("effect"),
@@ -881,9 +907,6 @@ fn recoverable_run_crash_fixture() {
             .unwrap(),
         );
         let _ = slot.set(Arc::downgrade(&session));
-        // A job that settles once the first answer ends, so its notice
-        // opens the run's next request.
-        let settle = Arc::new(tokio::sync::Notify::new());
         if mode == "job-notice" {
             let settled = Arc::clone(&settle);
             session
@@ -900,6 +923,7 @@ fn recoverable_run_crash_fixture() {
                     },
                 )
                 .unwrap();
+            let _ = fixture_jobs.set(session.jobs().clone());
         }
         let observe_mode = mode.to_owned();
         let _subscription = session.subscribe(move |event| {
@@ -917,12 +941,6 @@ fn recoverable_run_crash_fixture() {
                     "assistant" | "plain-assistant" => calls,
                     "result" => message.as_tool_result().is_some(),
                     "final" => message.as_assistant().is_some() && !calls,
-                    "job-notice" => {
-                        if message.as_assistant().is_some() {
-                            settle.notify_one();
-                        }
-                        false
-                    }
                     _ => false,
                 };
                 if here {
