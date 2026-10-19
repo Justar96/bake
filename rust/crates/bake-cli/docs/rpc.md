@@ -80,7 +80,7 @@ The commands `bake-rs` serves, with the data of a successful response:
 | `set_session_name` | `name` | none |
 | `get_commands` | | `{commands}` |
 
-`new_session`, `switch_session`, `fork`, and `clone` replace the session: the running one is shut down first, with its MCP servers and background work, and the new session's events then arrive on the same stream. Its setup warnings go to standard error. `cycle_model` steps through the models with a configured key, and reports `isScoped: false`, since a session keeps no `--models` scope to cycle. `get_commands` lists the prompt templates and skills a prompt can invoke, each with a `sourceInfo` whose `origin` is always `top-level`.
+`new_session`, `switch_session`, `fork`, and `clone` replace the session, one replacement at a time: a question the running session had put to the client is withdrawn and recorded as cancelled, its turn is stopped, and it is shut down with its MCP servers and background work; the new session's events then arrive on the same stream, and its tools ask the same client. Its setup warnings go to standard error. `cycle_model` steps through the models with a configured key, and reports `isScoped: false`, since a session keeps no `--models` scope to cycle. `get_commands` lists the prompt templates and skills a prompt can invoke, each with a `sourceInfo` whose `origin` is always `top-level`.
 
 These Pi commands are refused with a reason, because `bake-rs` has no equivalent:
 
@@ -94,13 +94,13 @@ These Pi commands are refused with a reason, because `bake-rs` has no equivalent
 Under `--approval ask`, a tool call that asks for wider access than the session's sandbox allows is put to the client as Pi's `extension_ui_request` with the `confirm` method, so a Pi client can answer it:
 
 ```json
-{"type":"extension_ui_request","id":"approval-1","method":"confirm","title":"Approve this tool call?","message":"bash (call call_1) requests: escalate sandbox to danger-full-access: install the dependency","approval":{"toolName":"bash","callId":"call_1","reason":"escalate sandbox to danger-full-access: install the dependency","arguments":{"command":"npm install"}}}
+{"type":"extension_ui_request","id":"approval-1-6b1f2c54-9f3a-4d27-8f41-0c6d9a2b7e55","method":"confirm","title":"Approve this tool call?","message":"bash (call call_1) requests: escalate sandbox to danger-full-access: install the dependency","approval":{"toolName":"bash","callId":"call_1","reason":"escalate sandbox to danger-full-access: install the dependency","arguments":{"command":"npm install"}}}
 ```
 
-`approval` is Bake's addition, so a client can show what would run; a Pi client ignores it. Answer with the request's `id`:
+`approval` is Bake's addition, so a client can show what would run; a Pi client ignores it. Answer with the request's `id`, which is fresh for each question and not to be guessed or constructed:
 
 ```json
-{"type":"extension_ui_response","id":"approval-1","confirmed":true}
+{"type":"extension_ui_response","id":"approval-1-6b1f2c54-9f3a-4d27-8f41-0c6d9a2b7e55","confirmed":true}
 ```
 
 - `confirmed: true` allows that one call, with the access it asked for. Nothing else is granted: no standing permission, preset, or later call changes, and a later call asks again.
@@ -117,7 +117,7 @@ A failed command answers once, with the reason:
 {"id":"req-3","type":"response","command":"set_model","success":false,"error":"Model not found: openai/none"}
 ```
 
-A line that is not JSON answers as a `parse` failure without an id, and a record whose `type` names no command answers `Unknown command: <type>`. A record whose member cannot be read answers that command with the reason it could not be read. A successful response covers the command only: a provider failure or an abort after a prompt was accepted appears in the events.
+A line that is not JSON answers as a `parse` failure without an id, and a record whose `type` names no command answers `Unknown command: <type>`. A record whose member cannot be read answers that command with the reason it could not be read. An `id` that is not a string is a `parse` failure too, and its command does not run, since the response could not repeat the id. A successful response covers the command only: a provider failure or an abort after a prompt was accepted appears in the events.
 
 ## Shutdown
 

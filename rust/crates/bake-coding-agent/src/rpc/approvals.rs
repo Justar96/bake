@@ -82,10 +82,16 @@ impl ApprovalBridge {
         let Some(prompt) = queue.first() else {
             return Vec::new();
         };
-        let id = request_id(prompt.generation);
-        if announced.insert(id.clone(), prompt.generation).is_some() {
+        // The request is announced once, which its generation decides: its
+        // id is fresh on every call.
+        if announced
+            .values()
+            .any(|generation| *generation == prompt.generation)
+        {
             return Vec::new();
         }
+        let id = request_id(prompt.generation);
+        announced.insert(id.clone(), prompt.generation);
         vec![request(&id, prompt)]
     }
 
@@ -107,9 +113,12 @@ impl ApprovalBridge {
     }
 }
 
-/// The `extension_ui_request` id a generation is announced under.
+/// The `extension_ui_request` id a generation is announced under: the
+/// generation, so a record names the request it decides, and a random
+/// UUID, as Pi's `crypto.randomUUID()` ids are, so no client can guess
+/// the id of a question it was not asked.
 fn request_id(generation: u64) -> String {
-    format!("approval-{generation}")
+    format!("approval-{generation}-{}", crate::session::id::uuid_v4())
 }
 
 /// What `response` decides: a withdrawal outranks a `confirmed` member, as
@@ -180,11 +189,13 @@ mod tests {
     fn announces_the_oldest_request_once_as_pis_confirm_record() {
         let bridge = bridge();
         let records = bridge.announce(&[prompt(1), prompt(2)]);
+        assert_eq!(records.len(), 1, "{records:?}");
+        let id = records[0]["id"].as_str().expect("an id").to_owned();
         assert_eq!(
             records,
             vec![json!({
                 "type": "extension_ui_request",
-                "id": "approval-1",
+                "id": id,
                 "method": "confirm",
                 "title": TITLE,
                 "message": "bash (call call_1) requests: escalate sandbox to danger-full-access: install",
@@ -201,13 +212,37 @@ mod tests {
         assert_eq!(bridge.announce(&[prompt(2)]).len(), 1);
     }
 
+    // Pi's request ids are `crypto.randomUUID()`: an id names its
+    // generation, and the rest of it is random, so a client cannot guess
+    // the id of a question it was not asked and answer it.
+    #[test]
+    fn a_requests_id_names_its_generation_and_is_unguessable() {
+        let first = request_id(1);
+        assert!(first.starts_with("approval-1-"), "{first}");
+        let random = first.trim_start_matches("approval-1-");
+        // A version 4 UUID, which `uuid_v4` formats.
+        assert_eq!(random.len(), 36, "{first}");
+        assert_ne!(random, request_id(1).trim_start_matches("approval-1-"));
+        // An answer to a guessed id settles nothing.
+        let bridge = bridge();
+        assert_eq!(bridge.announce(&[prompt(1)]).len(), 1);
+        assert!(!bridge.answer(&ExtensionUiResponse {
+            id: "approval-1".into(),
+            value: None,
+            confirmed: Some(true),
+            cancelled: None,
+        }));
+    }
+
     #[test]
     fn a_withdrawn_requests_id_answers_nothing() {
         let bridge = bridge();
-        assert_eq!(bridge.announce(&[prompt(1)]).len(), 1);
+        let records = bridge.announce(&[prompt(1)]);
+        assert_eq!(records.len(), 1);
+        let id = records[0]["id"].as_str().expect("an id").to_owned();
         assert!(bridge.announce(&[]).is_empty());
         assert!(!bridge.answer(&ExtensionUiResponse {
-            id: "approval-1".into(),
+            id,
             value: None,
             confirmed: Some(true),
             cancelled: None,

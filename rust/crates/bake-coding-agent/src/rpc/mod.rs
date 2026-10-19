@@ -114,14 +114,10 @@ pub async fn run_rpc_mode(session: AgentSession, options: RpcModeOptions) -> i32
         mut interrupt,
     } = options;
     let mut lines = input_lines(stdin);
-    let bridge = approvals
-        .as_ref()
-        .and_then(|broker| ApprovalBridge::connect(broker, &stdout));
-    let handler = Arc::new(Handler::new(session, stdout, stderr, bridge, factory));
+    let handler = Arc::new(Handler::new(session, stdout, stderr, approvals, factory));
     handler.subscribe();
     let mut rpc = Rpc {
         handler,
-        approvals,
         tasks: tokio::task::JoinSet::new(),
     };
     let status = loop {
@@ -156,11 +152,10 @@ fn input_lines(input: Box<dyn Read + Send>) -> tokio::sync::mpsc::UnboundedRecei
     receiver
 }
 
-/// The RPC loop: the state its command tasks share, the approval queue it
-/// closes, and the tasks themselves.
+/// The RPC loop: the state its command tasks share and the tasks
+/// themselves.
 struct Rpc {
     handler: Arc<Handler>,
-    approvals: Option<ApprovalBroker>,
     /// The command tasks, which answer their own commands. Each is owned
     /// until it ends, so shutdown awaits every response one can still
     /// write, and none is detached.
@@ -200,7 +195,7 @@ impl Rpc {
     /// shells, and plugin helpers and awaits their process trees, the
     /// command tasks are awaited, and the writer is flushed.
     async fn shutdown(mut self) {
-        if let Some(broker) = &self.approvals {
+        if let Some(broker) = &self.handler.approvals {
             broker.close();
         }
         // A replacement in flight finishes before the session is read, so
@@ -244,6 +239,9 @@ struct Handler {
     factory: Option<SessionFactory>,
     out: SharedWriter,
     stderr: SharedWriter,
+    /// The approval queue a replacement withdraws and shutdown closes
+    /// (D24); without one, every escalation fails closed.
+    approvals: Option<ApprovalBroker>,
     bridge: Option<Arc<ApprovalBridge>>,
     subscription: Mutex<Option<SessionSubscription>>,
     /// The one prompt waiting to learn that its run was admitted, under
@@ -275,14 +273,18 @@ impl Handler {
         session: AgentSession,
         out: SharedWriter,
         stderr: SharedWriter,
-        bridge: Option<Arc<ApprovalBridge>>,
+        approvals: Option<ApprovalBroker>,
         factory: Option<SessionFactory>,
     ) -> Self {
+        let bridge = approvals
+            .as_ref()
+            .and_then(|broker| ApprovalBridge::connect(broker, &out));
         Self {
             session: Mutex::new(Arc::new(session)),
             factory,
             out,
             stderr,
+            approvals,
             bridge,
             subscription: Mutex::new(None),
             run_started: Arc::new(Mutex::new(None)),
@@ -784,8 +786,10 @@ impl Handler {
     }
 
     /// Pi's `exportToHtml`: the page, written where the command asks or,
-    /// without a path, beside the working directory as
-    /// `bake-session-<session file>.html`, as Pi names its default.
+    /// without a path, in the working directory as
+    /// `bake-rs-session-<session file>.html`, the name `bake-rs --export`
+    /// gives it ([`crate::cli::export`]); Pi names both after its own
+    /// program.
     async fn export_html(
         &self,
         session: Arc<AgentSession>,
@@ -799,7 +803,7 @@ impl Handler {
                     .session_file()
                     .ok_or_else(|| crate::agent_session::share::EXPORT_IN_MEMORY.to_owned())?;
                 let stem = file.file_stem().unwrap_or_default().to_string_lossy();
-                Path::new(&cwd).join(format!("bake-session-{stem}.html"))
+                Path::new(&cwd).join(format!("bake-rs-session-{stem}.html"))
             }
         };
         tokio::task::spawn_blocking(move || {
@@ -873,7 +877,17 @@ impl Handler {
     /// still running on `previous` is not waited for: it runs to its end
     /// against the shut-down session and answers with its refusal, as it
     /// does against Pi's disposed session.
+    ///
+    /// The teardown follows [`Rpc::shutdown`], and Pi's `teardownCurrent`,
+    /// which aborts the run before it disposes the session: the questions
+    /// `previous` asked are withdrawn first, so each is refused and
+    /// recorded while that session still admits writes, then its run is
+    /// stopped, and only then is it shut down.
     async fn commit(&self, previous: Arc<AgentSession>, mut replacement: Replacement) {
+        if let Some(broker) = &self.approvals {
+            broker.cancel_pending();
+        }
+        previous.abort().await;
         previous.shutdown().await;
         let started = replacement.start_servers();
         let mut warnings = replacement.warnings;

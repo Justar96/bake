@@ -169,13 +169,33 @@ pub(super) fn start(
     out: &Output,
     approvals: Option<ApprovalBroker>,
 ) -> tokio::task::JoinHandle<i32> {
+    start_with(
+        session,
+        input,
+        out,
+        approvals,
+        None,
+        crate::cli::no_interrupt(),
+    )
+}
+
+/// Starts the loop with the factory the replacement commands need, or the
+/// interrupt a stop request arrives on.
+pub(super) fn start_with(
+    session: AgentSession,
+    input: Pipe,
+    out: &Output,
+    approvals: Option<ApprovalBroker>,
+    factory: Option<crate::cli::SessionFactory>,
+    interrupt: crate::cli::Interrupt,
+) -> tokio::task::JoinHandle<i32> {
     let options = RpcModeOptions {
         stdin: Box::new(input),
         stdout: writer(out),
         stderr: sink(),
         approvals,
-        factory: None,
-        interrupt: crate::cli::no_interrupt(),
+        factory,
+        interrupt,
     };
     tokio::spawn(async move { run_rpc_mode(session, options).await })
 }
@@ -562,9 +582,11 @@ async fn refuses_the_commands_bake_does_not_support() {
             "set_auto_retry",
             json!({ "id": "set_auto_retry", "type": "set_auto_retry", "enabled": false }),
         ),
+        // Pi's `new_session` takes the parent session's path; this one
+        // does not, and says so.
         (
             "new_session",
-            json!({ "id": "new_session", "type": "new_session" }),
+            json!({ "id": "new_session", "type": "new_session", "parentSession": "/tmp/p.jsonl" }),
         ),
     ] {
         input.send(command);
@@ -903,4 +925,164 @@ async fn only_one_idle_prompt_claims_the_next_run_start() {
     // The claim is free again once the run has ended.
     assert!(handler.claim_run_start(&session).0.is_some());
     session.shutdown().await;
+}
+
+// Bake: without a session factory, which only the real command line
+// builds, the commands that replace the session are refused rather than
+// answered as if they had replaced it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn replacement_commands_without_a_factory_are_refused() {
+    let dir = TempDir::new("rpc-no-factory");
+    let h = harness();
+    let session = session(&dir, &h).await;
+    let (input, pipe) = Input::new();
+    let out = Output(Arc::new(Mutex::new(Vec::new())));
+    let mode = start(session, pipe, &out, None);
+    for command in [
+        json!({ "id": "new", "type": "new_session" }),
+        json!({ "id": "fork", "type": "fork", "entryId": "a1" }),
+    ] {
+        let id = command["id"].as_str().expect("an id").to_owned();
+        input.send(command);
+        let refused = out.wait_for_response(&id).await;
+        assert_eq!(refused["success"], json!(false), "{refused}");
+        assert_eq!(
+            refused["error"],
+            json!("This session cannot be replaced."),
+            "{refused}"
+        );
+    }
+    input.close();
+    assert_eq!(mode.await.expect("the loop ends"), 0);
+}
+
+// Pi `rpc-mode.ts`'s signal handlers, which call `shutdown` while a
+// command may still be in flight, and Pi's status for `SIGTERM`, 143: the
+// stop request is taken up at once rather than after the running command,
+// and the command it stops answers before the loop returns.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_stop_request_during_a_held_compaction_exits_at_once() {
+    let dir = TempDir::new("rpc-stop-compacting");
+    let h = harness();
+    let session = compactable_session(&dir, &h).await;
+    let (input, pipe) = Input::new();
+    let out = Output(Arc::new(Mutex::new(Vec::new())));
+    let (stop, stopped) = tokio::sync::oneshot::channel();
+    let interrupt: crate::cli::Interrupt = Box::pin(async move { stopped.await.unwrap_or(0) });
+    let mode = start_with(session, pipe, &out, None, None, interrupt);
+    let _release = hold_a_compaction(&h, &input, &out).await;
+    stop.send(143).expect("the loop is waiting");
+    assert_eq!(mode.await.expect("the loop ends"), 143);
+    let compacted = out.responses("c");
+    assert_eq!(compacted.len(), 1, "{:?}", out.records());
+    assert_eq!(compacted[0]["error"], json!("Compaction cancelled"));
+}
+
+/// The session factory the replacement commands need, as the command line
+/// builds one, with no context files, skills, or prompt templates to load
+/// from the temporary home. Follows `bake-tui`'s
+/// `live/tests/sessions_live.rs`.
+pub(super) fn factory(dir: &TempDir) -> crate::cli::SessionFactory {
+    let home = dir.join("home");
+    std::fs::create_dir_all(&home).expect("home");
+    crate::cli::SessionFactory::new(
+        crate::cli::Args {
+            no_context_files: true,
+            no_skills: true,
+            no_prompt_templates: true,
+            ..crate::cli::Args::default()
+        },
+        home,
+        "bake-rs docs".into(),
+        Arc::new(bake_sandbox::provider::UnavailableProvider::new(None)),
+        None,
+    )
+}
+
+/// A session file of `dir`'s working directory, holding one answered turn
+/// and the faux model, for `switch_session` to open. Written by hand, as
+/// `bake-tui`'s `live/tests/sessions_live.rs` fixture is, so no session
+/// manager holds its writer lock.
+fn other_session_file(dir: &TempDir, id: &str) -> std::path::PathBuf {
+    let sessions = dir.join("sessions");
+    std::fs::create_dir_all(&sessions).expect("sessions");
+    let path = sessions.join(format!("{id}.jsonl"));
+    let cwd = dir.path().to_string_lossy().into_owned();
+    let lines = [
+        json!({ "type": "session", "version": 3, "id": id, "timestamp": "2026-01-01T00:00:00.000Z", "cwd": cwd }),
+        json!({ "type": "model_change", "id": "a1", "parentId": null,
+            "timestamp": "2026-01-01T00:00:01.000Z", "provider": "faux", "modelId": "faux-1" }),
+        json!({ "type": "message", "id": "a2", "parentId": "a1",
+            "timestamp": "2026-01-01T00:00:02.000Z",
+            "message": { "role": "user", "content": "the other session", "timestamp": 1_767_225_602_000_i64 } }),
+    ];
+    let body: String = lines.iter().map(|line| format!("{line}\n")).collect();
+    std::fs::write(&path, body).expect("the other session");
+    path
+}
+
+// Pi `rpc-mode.ts`'s `switch_session`, which calls `runtimeHost
+// .switchSession` and then `rebindSession`: the command answers
+// `{cancelled: false}`, the session it opened is the one the commands now
+// read, and that session's events arrive on the same stream.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn switch_session_replaces_the_session_and_rebinds_its_events() {
+    let dir = TempDir::new("rpc-switch");
+    let h = harness();
+    h.faux.set_responses(vec![
+        faux_assistant_message("from the other session").into(),
+    ]);
+    let session = session(&dir, &h).await;
+    let first = session.session_id();
+    let path = other_session_file(&dir, "01dddddd-other");
+    let (input, pipe) = Input::new();
+    let out = Output(Arc::new(Mutex::new(Vec::new())));
+    let mode = start_with(
+        session,
+        pipe,
+        &out,
+        None,
+        Some(factory(&dir)),
+        crate::cli::no_interrupt(),
+    );
+    input.send(json!({
+        "id": "sw",
+        "type": "switch_session",
+        "sessionPath": path.to_string_lossy(),
+    }));
+    let switched = out.wait_for_response("sw").await;
+    assert_eq!(switched["success"], json!(true), "{switched}");
+    assert_eq!(switched["data"], json!({ "cancelled": false }));
+
+    input.send(json!({ "id": "s", "type": "get_state" }));
+    let state = out.wait_for_response("s").await;
+    assert_eq!(
+        state["data"]["sessionId"],
+        json!("01dddddd-other"),
+        "{state}"
+    );
+    assert_ne!(state["data"]["sessionId"], json!(first));
+    assert_eq!(state["data"]["messageCount"], json!(1), "{state}");
+    assert_eq!(state["data"]["model"]["id"], json!("faux-1"), "{state}");
+
+    // The replacement's own run reaches the same stream.
+    input.send(json!({ "id": "p", "type": "prompt", "message": "and now" }));
+    assert_eq!(
+        out.wait_for_response("p").await["data"],
+        json!({ "disposition": "started" })
+    );
+    out.wait_for("agent_settled", |out| {
+        !out.of_kind("agent_settled").is_empty()
+    })
+    .await;
+    input.send(json!({ "id": "t", "type": "get_last_assistant_text" }));
+    assert_eq!(
+        out.wait_for_response("t").await["data"],
+        json!({ "text": "from the other session" })
+    );
+    input.close();
+    assert_eq!(mode.await.expect("the loop ends"), 0);
+    // The run was recorded in the session that was switched to.
+    let written = std::fs::read_to_string(&path).expect("the other session");
+    assert!(written.contains("and now"), "{written}");
 }

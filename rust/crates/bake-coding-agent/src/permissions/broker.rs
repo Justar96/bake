@@ -6,8 +6,10 @@
 //! request takes a fresh identity, the oldest is the one displayed and a
 //! later request cannot replace it, an answer settles only the displayed
 //! request it names, so a stale answer settles nothing, a request's own
-//! cancellation withdraws it, and closing settles every request as
-//! `cancelled` and fails later ones closed. The answer is `allowed-once` or
+//! cancellation withdraws it, [withdrawing the
+//! queue](ApprovalBroker::cancel_pending) settles every queued request as
+//! `cancelled` and keeps the frontend, and closing settles every request
+//! as `cancelled` and fails later ones closed. The answer is `allowed-once` or
 //! `rejected`, as `interactions.ts` decodes it, or `cancelled` for a
 //! withdrawal.
 //!
@@ -217,6 +219,23 @@ impl ApprovalBroker {
     pub fn close(&self) {
         // The listener goes with the phase, so nothing is announced.
         self.lock().close();
+    }
+
+    /// Withdraws the queue without disconnecting: every queued request is
+    /// `cancelled` and a later one is asked as before. A frontend that
+    /// replaces the session it asked for uses this, so each question the
+    /// old session asked is decided while that session can still record
+    /// the decision, and the next session asks the same frontend.
+    pub fn cancel_pending(&self) {
+        {
+            let mut inner = self.lock();
+            for waiting in inner.queue.drain(..) {
+                let _ = waiting.answer.send(EscalationOutcome::Cancelled);
+            }
+        }
+        // The frontend learns the queue is empty, so it forgets the
+        // request it was showing.
+        announce(&self.inner);
     }
 
     /// Whether the broker is closed.

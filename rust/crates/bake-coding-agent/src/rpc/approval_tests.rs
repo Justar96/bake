@@ -19,7 +19,7 @@ use bake_ai::{StopReason, TextContent, UserContentBlock};
 use bake_sandbox::{SandboxMode, UnavailableProvider};
 use serde_json::{Value, json};
 
-use super::tests::{Input, Output, start};
+use super::tests::{Input, Output, factory, start_with};
 use crate::agent_session::AgentSession;
 use crate::agent_session::tests::{harness, options};
 use crate::permissions::{
@@ -134,6 +134,12 @@ struct Case {
 }
 
 async fn case(name: &str, broker: ApprovalBroker) -> Case {
+    case_with(name, broker, false).await
+}
+
+/// As [`case`], with the session factory the replacement commands need
+/// when `replaceable`.
+async fn case_with(name: &str, broker: ApprovalBroker, replaceable: bool) -> Case {
     let dir = TempDir::new(name);
     let h = harness();
     h.faux.set_responses(vec![
@@ -155,7 +161,14 @@ async fn case(name: &str, broker: ApprovalBroker) -> Case {
     let file = session.session_file().expect("persisted");
     let (input, pipe) = Input::new();
     let out = Output(Arc::new(Mutex::new(Vec::new())));
-    let mode = start(session, pipe, &out, Some(broker));
+    let mode = start_with(
+        session,
+        pipe,
+        &out,
+        Some(broker),
+        replaceable.then(|| factory(&dir)),
+        crate::cli::no_interrupt(),
+    );
     input.send(json!({ "id": "p", "type": "prompt", "message": "write it" }));
     out.wait_for_response("p").await;
     Case {
@@ -254,4 +267,29 @@ async fn a_disconnected_client_leaves_the_call_refused() {
     let approvals = approvals(&case.file);
     assert_eq!(approvals.len(), 2, "{approvals:?}");
     assert_eq!(approvals[1]["outcome"], json!("cancelled"));
+}
+
+// Bake (D24) with Pi's `teardownCurrent`, which aborts the run before it
+// disposes the session: a command that replaces the session withdraws the
+// questions the replaced session asked, so each is decided and recorded
+// while that session still admits writes, and its call never runs. The
+// broker stays open for the new session's own questions.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_replacement_withdraws_the_question_the_old_session_asked() {
+    let case = case_with("rpc-replace-asked", ApprovalBroker::new(), true).await;
+    asked(&case.out).await;
+    case.input
+        .send(json!({ "id": "new", "type": "new_session" }));
+    let replaced = case.out.wait_for_response("new").await;
+    assert_eq!(replaced["success"], json!(true), "{replaced}");
+    assert_eq!(replaced["data"], json!({ "cancelled": false }));
+    case.input.close();
+    assert_eq!(case.mode.await.expect("the loop ends"), 0);
+    assert!(!case.marker.exists(), "the withdrawn call ran");
+    let approvals = approvals(&case.file);
+    assert_eq!(approvals.len(), 2, "{approvals:?}");
+    assert_eq!(approvals[0]["kind"], json!("asked"));
+    assert_eq!(approvals[1]["kind"], json!("decided"));
+    assert_eq!(approvals[1]["outcome"], json!("cancelled"));
+    assert_eq!(approvals[0]["id"], approvals[1]["id"]);
 }

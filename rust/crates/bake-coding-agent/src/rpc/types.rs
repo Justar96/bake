@@ -291,13 +291,26 @@ pub fn read_record(line: &str) -> Record {
             ));
         }
     };
-    if !value.is_object() {
+    let Some(object) = value.as_object() else {
         // Pi reads the record's `type` from a non-object too, and reports
         // the `undefined` it finds.
         return Record::Invalid(error_response(
             None,
             UNDEFINED,
             &format!("Unknown command: {UNDEFINED}"),
+        ));
+    };
+    // A response repeats the command's `id` as it arrived, so an `id`
+    // that is not a string is refused rather than handled under no id:
+    // the client could not correlate its answer.
+    if object
+        .get("id")
+        .is_some_and(|id| !(id.is_string() || id.is_null()))
+    {
+        return Record::Invalid(error_response(
+            None,
+            "parse",
+            "Failed to parse command: id must be a string",
         ));
     }
     let envelope: Envelope = serde_json::from_value(value.clone()).unwrap_or_default();
@@ -461,6 +474,38 @@ mod tests {
                 "{line}"
             );
         }
+    }
+
+    // A response repeats its command's `id`, so an `id` that is not a
+    // string is a parse failure and its command does not run: it could
+    // not be answered under the id it was sent with. A missing or null
+    // `id` is Pi's `undefined`, which a command may carry.
+    #[test]
+    fn an_id_that_is_not_a_string_runs_nothing() {
+        for line in [
+            r#"{"id":7,"type":"get_state"}"#,
+            r#"{"id":{"n":1},"type":"abort"}"#,
+            r#"{"id":["1"],"type":"extension_ui_response"}"#,
+        ] {
+            assert_eq!(
+                read_record(line),
+                Record::Invalid(json!({
+                    "type": "response",
+                    "command": "parse",
+                    "success": false,
+                    "error": "Failed to parse command: id must be a string",
+                })),
+                "{line}"
+            );
+        }
+        assert_eq!(
+            read_record(r#"{"id":null,"type":"abort"}"#),
+            Record::Command(None, RpcCommand::Abort)
+        );
+        assert_eq!(
+            read_record(r#"{"type":"abort"}"#),
+            Record::Command(None, RpcCommand::Abort)
+        );
     }
 
     #[test]
