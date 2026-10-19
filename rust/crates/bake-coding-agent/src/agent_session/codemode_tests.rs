@@ -345,6 +345,38 @@ async fn requests_without_active_codemode_are_unchanged() {
     assert!(prompt.contains("Use read to examine files instead of cat or sed."));
 }
 
+/// The loadout's hidden tools add to the ones the caller's prompt options
+/// hide, whose rules stay out of the system prompt with code mode active.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_loadout_keeps_the_callers_hidden_tools() {
+    for active in [&["read", "echo"][..], &["read", "echo", "codemode"]] {
+        let fx = Fixture::new("codemode-hidden-tools");
+        let read = read_definition(&fx.ws());
+        let store = SessionManager::create(
+            &fx.ws().to_string_lossy(),
+            Some(&fx.dir.join("sessions")),
+            NewSessionOptions::default(),
+        )
+        .expect("store");
+        let mut options = options(&fx.h, store, &fx.ws().to_string_lossy());
+        options.tools = vec![Arc::new(read.tool.clone()), Arc::new(echo())];
+        options.tool_prompts = vec![read.prompt()];
+        options.active_tool_names = active.iter().map(|name| (*name).to_owned()).collect();
+        options.system_prompt.hidden_tools = vec!["read".to_owned()];
+        let session = AgentSession::create(options).await.expect("session");
+        fx.h.faux
+            .append_responses(vec![fx.recording(faux_assistant_message("ok"))]);
+        prompt(&session).await;
+        let requests = fx.requests.lock().unwrap().clone();
+        session.shutdown().await;
+        let system = get_current_system_prompt(requests[0].messages());
+        assert!(
+            !system.contains("Use read to examine files"),
+            "{active:?}: {system}"
+        );
+    }
+}
+
 /// Pi's "presents callable tools per codemode.mode", through the session:
 /// with `on` declared tools say how scripts call them; with `only` they are
 /// listed in `codemode` and left out of requests and the rules, while the

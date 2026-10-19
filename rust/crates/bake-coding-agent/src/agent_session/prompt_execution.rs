@@ -759,8 +759,9 @@ impl PromptExecution {
             .unwrap_or_else(PoisonError::into_inner) = hidden.clone();
         let mut options = self.prompt_options.clone();
         options.selected_tools = self.active_tool_names.clone();
-        // The rules match the declarations the request carries.
-        options.hidden_tools = hidden;
+        // The rules match the declarations the request carries, which
+        // leave out the caller's hidden tools too.
+        options.hidden_tools.extend(hidden);
         let sections = build_system_prompt_sections(&options).map_err(|error| error.to_string())?;
         let systems: Vec<Message> = self
             .agent
