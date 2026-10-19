@@ -1115,9 +1115,10 @@ class FakeModel {
     // `MCP <text>` calls the configured fixture server's `echo` tool.
     if (prompt.startsWith('MCP ')) return sse(call(n, 'mcp__fx__echo', { text: prompt.slice(4).trim() }))
     if (prompt.startsWith('SLEEP')) return sse(call(n, 'bash', { command: 'sleep 30' }))
-    // `CODEMODE` runs a script whose two nested calls read a file and run a command.
+    // `CODEMODE` runs a script whose two nested calls read a file and run a
+    // command that holds until the scenario creates `go` in the project.
     if (prompt.startsWith('CODEMODE')) {
-      return sse(call(n, 'codemode', { code: 'const [a, b] = await Promise.all([\n  tools.read({ path: "notes.txt" }),\n  tools.bash({ command: "echo nested-ok" }),\n]);\nreturn [a, b];' }))
+      return sse(call(n, 'codemode', { code: 'const [a, b] = await Promise.all([\n  tools.read({ path: "notes.txt" }),\n  tools.bash({ command: "until [ -e go ]; do sleep 0.1; done" }),\n]);\nreturn [a, b];' }))
     }
     // `BACKGROUND` starts a shell that prints a line a second, then sleeps.
     if (prompt.startsWith('BACKGROUND')) {
@@ -1360,12 +1361,20 @@ await liveScenario('a codemode call shows a row per nested call live, and the sa
   const session = world.launch(['--tools', 'read,bash,codemode'])
   await session.ready()
   session.send('CODEMODE\r')
+  // While the bash call holds, the partial results draw the settled read and the running bash.
+  const command = String.raw`\{"command":"until \[ -e go \]; do sleep 0\.1; done"\}`
+  await session.wait('codemode call running', () => /Codemode +2 calls · 1 running/u.test(session.screen)
+    && /✓ read {2}\{"path":"notes\.txt"\} {2}\d+(?:ms|\.\ds)/u.test(session.screen)
+    // The running mark blinks, so this waits for a frame that shows it.
+    && new RegExp(`● bash {2}${command}`, 'u').test(session.screen))
+  assert(!session.screen.includes('Script ran.'), `the script settled while its bash call held\n${session.screen}`)
+  await writeFile(join(world.project, 'go'), '')
   await session.wait('codemode block', () => session.screen.includes('Script ran.') && /^ {2}✓ Completed/mu.test(session.screen))
   // The head, the script, then one row per nested call with its duration; the call's own events add no cards.
   const rows = (screen: string): boolean => /(?:✓|\{\}) Codemode +2 calls · took \d+\.\ds/u.test(screen)
     && /[│ ] 1 {2}const \[a, b\] = await Promise\.all\(\[/u.test(screen)
     && /✓ read {2}\{"path":"notes\.txt"\} {2}\d+(?:ms|\.\ds)/u.test(screen)
-    && /✓ bash {2}\{"command":"echo nested-ok"\} {2}\d+(?:ms|\.\ds)/u.test(screen)
+    && new RegExp(`✓ bash {2}${command} {2}\\d+(?:ms|\\.\\ds)`, 'u').test(screen)
   assert(rows(session.screen), `the codemode rows are missing\n${session.screen}`)
   assert(!/✓ (?:Read|Bash):/u.test(session.screen), `a nested call drew its own card\n${session.screen}`)
   await session.quit()
