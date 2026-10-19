@@ -575,6 +575,13 @@ pub(crate) fn hang(
         .collect()
 }
 
+/// How many rows [`hang`] and [`hang_runs`] wrap `text` into, without
+/// drawing them.
+pub(crate) fn hang_rows(text: &str, width: usize, indent: usize) -> usize {
+    let room = width.saturating_sub(indent).max(1);
+    editor::layout(text, 0, room + 1).rows.len()
+}
+
 /// `text` with each tab turned into the spaces to its next stop, so the
 /// lexer's byte ranges and the drawn cells agree.
 fn expand_tabs(text: &str) -> String {

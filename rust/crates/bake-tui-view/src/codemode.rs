@@ -147,6 +147,20 @@ fn clean_lines(text: &str) -> Vec<String> {
     text.lines().map(clean).collect()
 }
 
+/// `lines` without the blank lines at either end.
+fn trimmed(lines: &[String]) -> &[String] {
+    let blank = |line: &String| line.trim().is_empty();
+    let start = lines
+        .iter()
+        .position(|line| !blank(line))
+        .unwrap_or(lines.len());
+    let end = lines
+        .iter()
+        .rposition(|line| !blank(line))
+        .map_or(start, |i| i + 1);
+    &lines[start..end]
+}
+
 /// The block's rows: its head, the script, the calls, and the output.
 pub(crate) fn present(script: &Codemode, width: usize, look: Look) -> Vec<Line<'static>> {
     let quiet = if script.state == CallState::Failed {
@@ -253,22 +267,47 @@ fn status(script: &Codemode, look: Look) -> Vec<Span<'static>> {
     parts
 }
 
-/// Keeps the first `limit` of `rows`, and counts the rest on a row of
-/// their own, as Pi's `VisualLinePreview` keeps a start: it counts wrapped
-/// rows, not lines, since one long line can fill a screen. A count would
-/// stand for one row is that row, as in the transcript's other previews.
+/// The first `limit` rows `build` makes of `lines`, and a count of the
+/// rest on a row opening with `lead`, as Pi's `VisualLinePreview` keeps a
+/// start: it counts wrapped rows, not lines, since one long line can fill a
+/// screen. A count that would stand for one row is that row, as in the
+/// transcript's other previews.
+///
+/// `build` makes the rows of line `i`, wrapped at `width` less `indent`, and
+/// is called in order, so a lexer it carries sees every line before the
+/// one it draws. Once the rows run past what is shown it is not called
+/// again: the lines after are only measured, so a long script or output
+/// costs its count, not its drawing.
 fn keep(
-    mut rows: Vec<Line<'static>>,
+    lines: &[String],
     limit: usize,
+    width: usize,
+    indent: usize,
     look: Look,
-    gutter: &dyn Fn() -> Vec<Span<'static>>,
+    lead: &dyn Fn() -> Vec<Span<'static>>,
+    mut build: impl FnMut(usize, &str) -> Vec<Line<'static>>,
 ) -> Vec<Line<'static>> {
-    if rows.len() > limit + 1 {
-        let hidden = rows.len() - limit;
+    let mut rows = Vec::new();
+    let mut built = 0;
+    while built < lines.len() && rows.len() <= limit + 1 {
+        rows.extend(build(built, &lines[built]));
+        built += 1;
+    }
+    let total = rows.len()
+        + lines[built..]
+            .iter()
+            .map(|line| transcript::hang_rows(line, width, indent))
+            .sum::<usize>();
+    if total > limit + 1 {
         rows.truncate(limit);
-        let mut spans = gutter();
+        let mut spans = lead();
         spans.push(Span::styled(
-            format!("{} {hidden} {}", look.marks().more, copy::MORE_LINES),
+            format!(
+                "{} {} {}",
+                look.marks().more,
+                total - limit,
+                copy::MORE_LINES
+            ),
             transcript::dim(),
         ));
         rows.push(Line::from(spans));
@@ -291,30 +330,28 @@ fn source(
     let digits = lines.len().to_string().len();
     // Code starts after the gutter, the number, and two cells.
     let column = BODY + digits + 2;
-    // Lexed in order, every line, so a comment opened on one line still
-    // colours the lines after it.
+    // Lexed in order, every line drawn, so a comment opened on one line
+    // still colours the lines after it.
     let mut carry = Carry::default();
-    let mut rows = Vec::new();
-    for (i, line) in lines.iter().enumerate() {
-        let runs = transcript::code_runs(line, Some(Lang::TypeScript), &mut carry, look.tones);
-        let mut lead = gutter();
-        lead.push(Span::styled(
-            format!("{:>digits$}  ", i + 1),
-            transcript::dim(),
-        ));
-        let mut rest = gutter();
-        rest.push(transcript::pad(digits + 2));
-        rows.extend(transcript::hang_runs(
-            line,
-            &runs,
-            Style::new(),
-            width,
-            column,
-            lead,
-            rest,
-        ));
-    }
-    keep(rows, CODE_PREVIEW_LINES, look, gutter)
+    keep(
+        &lines,
+        CODE_PREVIEW_LINES,
+        width,
+        column,
+        look,
+        gutter,
+        |i, line| {
+            let runs = transcript::code_runs(line, Some(Lang::TypeScript), &mut carry, look.tones);
+            let mut lead = gutter();
+            lead.push(Span::styled(
+                format!("{:>digits$}  ", i + 1),
+                transcript::dim(),
+            ));
+            let mut rest = gutter();
+            rest.push(transcript::pad(digits + 2));
+            transcript::hang_runs(line, &runs, Style::new(), width, column, lead, rest)
+        },
+    )
 }
 
 /// A call's mark: a running dot that blinks, a check, a cross, or the
@@ -441,16 +478,8 @@ fn output(
     gutter: &dyn Fn() -> Vec<Span<'static>>,
 ) -> Vec<Line<'static>> {
     let lines: Vec<String> = script.output.iter().map(|line| clean(line)).collect();
-    let blank = |line: &&String| line.trim().is_empty();
-    let start = lines
-        .iter()
-        .position(|line| !blank(&line))
-        .unwrap_or(lines.len());
-    let end = lines
-        .iter()
-        .rposition(|line| !blank(&line))
-        .map_or(start, |i| i + 1);
-    if start == end {
+    let lines = trimmed(&lines);
+    if lines.is_empty() {
         return Vec::new();
     }
     let style = if script.state == CallState::Failed {
@@ -458,11 +487,15 @@ fn output(
     } else {
         transcript::output_tone(look.tones)
     };
-    let rows = lines[start..end]
-        .iter()
-        .flat_map(|line| transcript::hang(line, width, BODY, gutter(), gutter(), style))
-        .collect();
-    let mut rows = keep(rows, OUTPUT_PREVIEW_LINES, look, gutter);
+    let mut rows = keep(
+        lines,
+        OUTPUT_PREVIEW_LINES,
+        width,
+        BODY,
+        look,
+        gutter,
+        |_, line| transcript::hang(line, width, BODY, gutter(), gutter(), style),
+    );
     if let Some(path) = &script.full_output_path {
         rows.extend(transcript::hang(
             &format!("{} {}", copy::FULL_OUTPUT, clean(path)),
@@ -685,6 +718,46 @@ mod tests {
             },
         );
         assert_eq!(classic[2], "  | / bash  {}");
+    }
+
+    #[test]
+    fn a_long_script_and_output_draw_only_what_they_show() {
+        let mut long = script(CallState::Done);
+        long.code = std::iter::once("/* opened".to_owned())
+            .chain((2..=10_000).map(|n| format!("step{n}();")))
+            .collect::<Vec<_>>()
+            .join("\n");
+        // Each output line wraps into two rows of 36 cells.
+        long.output = (1..=10_000).map(|n| format!("{n:0>40}")).collect();
+        long.full_output_path = Some("/tmp/out.txt".into());
+        let lines = render(long.clone(), 40, PLAIN);
+        assert_eq!(lines.len(), 1 + 11 + 1 + 6 + 1);
+        assert_eq!(lines[1], "  │     1  /* opened");
+        assert_eq!(lines[10], "  │    10  step10();");
+        assert_eq!(lines[11], "  │ ⋯ 9990 more lines");
+        assert_eq!(lines[13], format!("  │ {}", "0".repeat(36)));
+        assert_eq!(lines[14], "  │ 0001");
+        assert_eq!(lines[16], "  │ 0002");
+        assert_eq!(lines[18], "  │ ⋯ 19995 more lines");
+        assert_eq!(lines[19], "  │ Full output: /tmp/out.txt");
+        // Lexed in order: the comment the first line opens colours the next.
+        let colour = Look {
+            tones: Tones::TrueColor,
+            ..PLAIN
+        };
+        let drawn = present_rows(&[Row::Codemode(long)], 0, 40, colour);
+        let style = |row: usize| drawn[row].spans.last().map(|span| span.style);
+        assert_eq!(style(2), style(1));
+        // Lines past the shown rows are measured, never drawn.
+        let lines: Vec<String> = (0..10_000).map(|n| n.to_string()).collect();
+        let mut drawn = 0;
+        let rows = keep(&lines, 5, 40, BODY, PLAIN, &Vec::new, |_, line| {
+            drawn += 1;
+            vec![Line::raw(line.to_owned())]
+        });
+        assert_eq!(drawn, 7);
+        assert_eq!(rows.len(), 6);
+        assert_eq!(rows[5].to_string(), "⋯ 9995 more lines");
     }
 
     #[test]
