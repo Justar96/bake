@@ -523,3 +523,61 @@ async fn a_pending_caller_update_does_not_block_closing_its_nested_calls() {
             .any(|event| matches!(event, AgentEvent::ToolExecutionUpdate { tool_call_id, .. } if tool_call_id == "c1"))
     );
 }
+
+/// With `max_concurrent_read_tools`, a nested call to a tool that is not
+/// read-only runs exclusively, one at a time, as the loop runs such a
+/// batch; read-only nested calls run concurrently, beside them and without
+/// the read limit, which caps the model's batches only.
+#[tokio::test(start_paused = true)]
+async fn nested_calls_under_max_concurrent_read_tools() {
+    let reads = Arc::new(Concurrency::default());
+    let writes = Arc::new(Concurrency::default());
+    let mut read = slow("read", Arc::clone(&reads));
+    read.read_only = true;
+    let write = slow("write", Arc::clone(&writes));
+    let script = caller("script", |ctx, _| async move {
+        let run = |name: &'static str| {
+            let ctx = ctx.clone();
+            async move {
+                ctx.nested()
+                    .execute(name, json!({}), NestedToolCallOptions::default())
+                    .await
+            }
+        };
+        let outcomes = tokio::join!(
+            run("read"),
+            run("write"),
+            run("read"),
+            run("write"),
+            run("read")
+        );
+        assert!(
+            [outcomes.0, outcomes.1, outcomes.2, outcomes.3, outcomes.4]
+                .iter()
+                .all(|outcome| !outcome.is_error)
+        );
+        Ok(AgentToolResult::default())
+    });
+    let mut config = config();
+    config.max_concurrent_read_tools = std::num::NonZeroUsize::new(1);
+    let stream = agent_loop(
+        vec![user("go")],
+        context(vec![read, write, script]),
+        config,
+        None,
+        Some(tools_then_done(vec![call("c1", "script", json!({}))])),
+    );
+    tokio::time::timeout(Duration::from_secs(10), drain(&stream))
+        .await
+        .expect("no deadlock");
+    let messages = stream.result().await.unwrap();
+    let nested = messages
+        .iter()
+        .find_map(AgentMessage::as_tool_result)
+        .and_then(|result| result.nested_calls.clone())
+        .unwrap();
+    assert_eq!(nested.calls.len(), 5);
+    assert!(nested.calls.iter().all(|call| call.status == "ok"));
+    assert_eq!(writes.max.load(Ordering::SeqCst), 1);
+    assert_eq!(reads.max.load(Ordering::SeqCst), 3);
+}

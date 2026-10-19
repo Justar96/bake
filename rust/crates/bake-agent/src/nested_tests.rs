@@ -534,7 +534,14 @@ async fn a_call_held_unpolled_neither_blocks_close_nor_keeps_the_queue() {
 /// mid-call, and later calls of that caller get no task.
 #[tokio::test(start_paused = true)]
 async fn dropping_the_abort_guard_ends_calls_that_ignore_their_signal() {
-    let stuck = tool("stuck", |_, _, _| Box::pin(std::future::pending()));
+    let signals = Arc::new(Mutex::new(Vec::new()));
+    let stuck = AgentTool::new("stuck", "stuck", "stuck", json!({ "type": "object" }), {
+        let signals = Arc::clone(&signals);
+        move |_id, _args, signal, _update, _ctx| {
+            signals.lock().unwrap().extend(signal);
+            Box::pin(std::future::pending())
+        }
+    });
     let (runner, _) = create_runner(vec![stuck], false);
     let call = runner.executor("call", None);
     let guard = call.abort_on_drop();
@@ -553,6 +560,10 @@ async fn dropping_the_abort_guard_ends_calls_that_ignore_their_signal() {
         .unwrap();
     assert_eq!(outcome.tool_call.id, "call/1");
     assert_eq!(text(&outcome), "Operation aborted");
+    // Work the tool handed off sees the abort.
+    let signals = signals.lock().unwrap().clone();
+    assert_eq!(signals.len(), 1);
+    assert!(signals[0].aborted());
     let later = tokio::time::timeout(
         WAIT,
         call.execute("stuck", json!({}), NestedToolCallOptions::default()),

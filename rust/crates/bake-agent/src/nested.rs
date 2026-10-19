@@ -25,7 +25,8 @@
 //! - Exclusivity follows the loop's own rule for running a batch one call
 //!   at a time: a nested call runs exclusively when the agent executes
 //!   sequentially, when its tool is sequential, or, with
-//!   `max_concurrent_read_tools`, when its tool is not read-only.
+//!   `max_concurrent_read_tools`, when its tool is not read-only. That
+//!   limit's cap on concurrent reads applies to the model's batches only.
 //! - A calling tool's nested calls cannot outlive it. Each runs as a task
 //!   its caller's scope owns, so a future the tool holds without polling
 //!   neither stalls the call nor keeps the exclusive queue. When the
@@ -805,6 +806,7 @@ async fn outcome(
         }))
     };
     let signal = controller.signal();
+    let unsettled = AbortUnsettled(Some(controller.clone()));
     let running = run_tool_call_in(
         &tool_call,
         &site.callable,
@@ -820,11 +822,32 @@ async fn outcome(
         &updates,
     );
     tokio::pin!(running);
-    tokio::select! {
+    let outcome = tokio::select! {
         outcome = &mut running => outcome,
         () = &mut cancelled => {
             controller.abort();
             running.await
+        }
+    };
+    unsettled.settled();
+    outcome
+}
+
+/// Aborts a nested call's signal if the call is dropped before it settles,
+/// as when its task is ended, so work the tool handed to an owner (such as
+/// a blocking worker) sees the abort.
+struct AbortUnsettled(Option<AbortController>);
+
+impl AbortUnsettled {
+    fn settled(mut self) {
+        self.0 = None;
+    }
+}
+
+impl Drop for AbortUnsettled {
+    fn drop(&mut self) {
+        if let Some(controller) = self.0.take() {
+            controller.abort();
         }
     }
 }
