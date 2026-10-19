@@ -94,13 +94,37 @@ pub(crate) fn write_bytes(memory: &mut [u8], ptr: u32, bytes: &[u8]) -> GuestRes
 }
 
 /// Decodes WTF-8, as `quickjs-wasi`'s `decodeWtf8`: QuickJS encodes a lone
-/// surrogate as a 3-byte sequence, which a Rust string cannot hold, so each
-/// becomes U+FFFD. Other invalid bytes become U+FFFD as well.
+/// surrogate as the 3-byte sequence `ED [A0-BF] [80-BF]`, which a Rust string
+/// cannot hold, so each becomes one U+FFFD and the text keeps its UTF-16
+/// length, which the output limits count. Other invalid bytes become U+FFFD
+/// as `String::from_utf8_lossy` replaces them.
 pub(crate) fn decode_wtf8(bytes: &[u8]) -> String {
-    match std::str::from_utf8(bytes) {
-        Ok(text) => text.to_owned(),
-        Err(_) => String::from_utf8_lossy(bytes).into_owned(),
+    if let Ok(text) = std::str::from_utf8(bytes) {
+        return text.to_owned();
     }
+    let mut decoded = String::with_capacity(bytes.len());
+    let mut copied = 0;
+    let mut index = 0;
+    while index < bytes.len() {
+        // 0xED never continues a sequence, so it always starts one here.
+        let surrogate = bytes[index] == 0xed
+            && bytes
+                .get(index + 1)
+                .is_some_and(|byte| (0xa0..=0xbf).contains(byte))
+            && bytes
+                .get(index + 2)
+                .is_some_and(|byte| (0x80..=0xbf).contains(byte));
+        if surrogate {
+            decoded.push_str(&String::from_utf8_lossy(&bytes[copied..index]));
+            decoded.push('\u{fffd}');
+            index += 3;
+            copied = index;
+        } else {
+            index += 1;
+        }
+    }
+    decoded.push_str(&String::from_utf8_lossy(&bytes[copied..]));
+    decoded
 }
 
 /// The exports the driver calls, checked against these signatures when the
@@ -397,9 +421,16 @@ mod tests {
     #[test]
     fn decodes_lone_surrogates_as_replacement_characters() {
         assert_eq!(decode_wtf8("é😀".as_bytes()), "é😀");
+        // One U+FFFD per lone surrogate, so UTF-16 lengths stay equal.
         assert_eq!(
-            decode_wtf8(&[b'a', 0xed, 0xa0, 0x80, b'b']),
-            "a\u{fffd}\u{fffd}\u{fffd}b"
+            decode_wtf8(&[b'a', 0xed, 0xa0, 0x80, b'b', 0xed, 0xbf, 0xbf]),
+            "a\u{fffd}b\u{fffd}"
+        );
+        // Other invalid bytes, including a truncated surrogate, are replaced
+        // as `from_utf8_lossy` replaces them.
+        assert_eq!(
+            decode_wtf8(&[0xff, 0xe2, 0x82, 0xac, 0xed, 0xa0]),
+            "\u{fffd}€\u{fffd}\u{fffd}"
         );
     }
 }

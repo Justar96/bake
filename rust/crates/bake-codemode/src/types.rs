@@ -4,6 +4,7 @@
 //! decoding moved here from `runtime/execution.ts`.
 
 use std::fmt;
+use std::sync::Arc;
 use std::time::Duration;
 
 use serde_json::{Map, Value};
@@ -17,6 +18,11 @@ pub const DEFAULT_HEAP_BYTES: u32 = 256 << 20;
 /// for the allocator's own overhead; growing past it ends the run as
 /// [`Failure::OutOfMemory`].
 pub const DEFAULT_LINEAR_MEMORY_BYTES: usize = 320 << 20;
+/// The most calls a script may have waiting for results; the next one fails
+/// the run as [`Failure::Protocol`]. Bake 0.3's `maxPendingCalls`. Pi has no
+/// limit, but a script that calls in a loop without awaiting would otherwise
+/// fill the heap with calls the VM can never settle.
+pub const MAX_PENDING_CALLS: usize = 128;
 /// QuickJS's guard on its own stack, `quickjs-wasi`'s `MAX_STACK_SIZE`: deep
 /// recursion is a catchable `RangeError`.
 pub const MAX_STACK_BYTES: u32 = 512 * 1024;
@@ -266,8 +272,9 @@ pub enum Event {
         /// Calls issued so far.
         issued: u32,
     },
-    /// The run ended; always the last event.
-    Done(Outcome),
+    /// The run ended; always the last event. Shared, so a large return value
+    /// is not copied when [`crate::Run::next`] reports it again.
+    Done(Arc<Outcome>),
 }
 
 /// Keys the script changed with `store()`. Only successful scripts report
@@ -317,7 +324,8 @@ pub enum Failure {
     },
     /// The run was aborted.
     Aborted {
-        /// `Execution aborted`.
+        /// `Execution aborted`, or the message given to
+        /// [`crate::Run::abort_with`].
         message: String,
     },
     /// The guest's linear memory reached its limit.
@@ -332,8 +340,8 @@ pub enum Failure {
         message: String,
     },
     /// The VM failed outside the script's control: a malformed bridge
-    /// message, a guest pointer outside its memory, or a trap (Pi's `sandbox`
-    /// kind).
+    /// message, a guest pointer outside its memory, a trap, or a call past
+    /// [`MAX_PENDING_CALLS`] (Pi's `sandbox` kind).
     Protocol {
         /// What failed.
         message: String,

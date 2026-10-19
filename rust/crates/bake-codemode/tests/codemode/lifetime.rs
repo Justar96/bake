@@ -94,16 +94,18 @@ async fn settles_abort_timeout_and_drop_and_the_thread_exits() {
         match end {
             End::Abort | End::Timeout => {
                 if matches!(end, End::Abort) {
-                    run.abort();
+                    run.abort_with("cancelled");
                 }
                 let event = tokio::time::timeout(BOUND, run.next()).await;
                 let Ok(Event::Done(outcome)) = event else {
                     panic!("{end:?}: {event:?}");
                 };
                 match end {
-                    End::Abort => assert!(
-                        matches!(outcome.result, Err(Failure::Aborted { .. })),
-                        "{outcome:?}"
+                    End::Abort => assert_eq!(
+                        outcome.result,
+                        Err(Failure::Aborted {
+                            message: "cancelled".to_owned()
+                        })
                     ),
                     _ => assert_eq!(
                         outcome.result,

@@ -19,9 +19,12 @@ pub const QUICKJS_WASM_SHA256: &str =
     "d4c9375f2b1ca4dc95f72c8aa2982a7a9951ac8011490d79c6582df732b4bbd9";
 /// The `quickjs-wasi` release the binary comes from.
 pub const QUICKJS_WASI_VERSION: &str = "3.6.2";
-/// Wasmtime's limit on the Wasm stack, below the script thread's 8 MiB; the
-/// QuickJS stack guard trips long before it.
-const MAX_WASM_STACK: usize = 4 << 20;
+/// Wasmtime's limit on the Wasm stack, below the script thread's 40 MiB.
+/// QuickJS's stack guard measures only the C stack in linear memory, and a
+/// built-in such as `JSON.parse` or `JSON.stringify` of deeply nested data
+/// uses far more native stack per byte of it: 8 MiB still traps on nested
+/// arrays at the guard's depth, 12 MiB does not; 32 MiB leaves a margin.
+const MAX_WASM_STACK: usize = 32 << 20;
 
 /// The module's imports, exactly: module, name, and signature.
 const EXPECTED_IMPORTS: [(&str, &str, &str); 12] = [
@@ -105,7 +108,10 @@ static ENGINE: OnceLock<Result<CodemodeEngine, EngineError>> = OnceLock::new();
 
 impl CodemodeEngine {
     /// The process's engine, compiling it on first use (about half a second
-    /// in a release build).
+    /// in a release build). The first call blocks the calling thread while
+    /// Cranelift compiles, as does any call made meanwhile: on an async
+    /// runtime, make it from a blocking task such as
+    /// `tokio::task::spawn_blocking`.
     ///
     /// # Errors
     ///
@@ -311,6 +317,7 @@ pub(crate) mod tests {
     fn the_embedded_engine_is_the_pinned_binary() {
         assert_eq!(QUICKJS_WASM.len(), 637_405);
         assert_eq!(sha256(QUICKJS_WASM), QUICKJS_WASM_SHA256);
+        assert!(include_str!("../engine/PROVENANCE").contains(QUICKJS_WASM_SHA256));
     }
 
     #[test]

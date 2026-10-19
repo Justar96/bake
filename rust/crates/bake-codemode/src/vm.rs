@@ -400,6 +400,8 @@ impl Driver {
 
     /// Settles call `id` in the prelude, then runs the script until it waits again.
     fn apply(&mut self, delivery: &Delivery) -> GuestResult<()> {
+        let state = self.store.data_mut();
+        state.settled = state.settled.saturating_add(1);
         let (ok, payload, properties) = match &delivery.result {
             Ok(value) => (true, value.as_ref().map(Value::to_string), None),
             Err(error) => (

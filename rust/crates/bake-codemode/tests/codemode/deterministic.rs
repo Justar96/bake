@@ -3,6 +3,7 @@
 //! a durable host can replay it. Pi runs each case on its worker and remote
 //! sandboxes; Bake has one place a VM runs.
 
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use bake_codemode::{
@@ -121,7 +122,7 @@ impl Recorded {
                     self.events.push(format!("idle {seq}"));
                 }
                 Event::Output(item) => self.output.push(item),
-                Event::Done(outcome) => self.outcome = Some(outcome),
+                Event::Done(outcome) => self.outcome = Some(Arc::unwrap_or_clone(outcome)),
             }
         }
     }
@@ -496,11 +497,13 @@ async fn ends_with_an_error_the_script_cannot_catch_when_the_caller_aborts() {
         Options::default(),
     );
     recorded.pump(|recorded| recorded.calls.len() == 1).await;
-    recorded.run.abort();
+    recorded.run.abort_with("diverged");
     let outcome = recorded.result().await;
-    assert!(
-        matches!(outcome.result, Err(Failure::Aborted { .. })),
-        "{outcome:?}"
+    assert_eq!(
+        outcome.result,
+        Err(Failure::Aborted {
+            message: "diverged".to_owned()
+        })
     );
     assert!(recorded.output.is_empty());
     assert_eq!(

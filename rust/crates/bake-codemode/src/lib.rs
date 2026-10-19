@@ -31,7 +31,7 @@
 //! ```
 //!
 //! [`CodemodeEngine`] is compiled once per process. Each [`Run`] owns one OS
-//! thread with an 8 MiB stack; dropping it aborts the script and joins the
+//! thread with a 40 MiB stack; dropping it aborts the script and joins the
 //! thread. A script stops at its deadline or [`Run::abort`] through
 //! Wasmtime's epoch interruption (so long built-ins stop too), QuickJS's
 //! interrupt poll, and checks between promise job batches. QuickJS's heap is
@@ -67,7 +67,7 @@ pub use identifier::to_codemode_identifier;
 pub use prelude::{
     MAX_OUTPUT_CHARS, MAX_OUTPUT_ITEMS, MAX_STORE_TOTAL_CHARS, MAX_STORE_VALUE_CHARS,
 };
-pub use run::{Run, SCRIPT_THREAD_STACK_BYTES};
+pub use run::{Run, RunHandle, SCRIPT_THREAD_STACK_BYTES};
 pub use source::{CODEMODE_OPTIONS_PREFIX, MAX_TIMEOUT_MS, Source, SourceError, SourceOptions};
 pub use tool_search::{
     Bm25Ranker, DEFAULT_TOOL_SEARCH_LIMIT, ToolNamespace, ToolSearchDocument, ToolSearchMatch,
@@ -76,6 +76,7 @@ pub use tool_search::{
 pub use types::{
     AnswerError, CallError, CallResult, Completion, DEFAULT_HEAP_BYTES,
     DEFAULT_LINEAR_MEMORY_BYTES, Deterministic, During, EngineError, Event, ExecuteRequest,
-    ExitHook, Failure, GlobalDeclaration, HostCall, Limits, MAX_STACK_BYTES, Outcome, OutputItem,
-    ScriptError, StartError, StoreValues, StoreWrites, ToolDeclaration, discovery_globals,
+    ExitHook, Failure, GlobalDeclaration, HostCall, Limits, MAX_PENDING_CALLS, MAX_STACK_BYTES,
+    Outcome, OutputItem, ScriptError, StartError, StoreValues, StoreWrites, ToolDeclaration,
+    discovery_globals,
 };

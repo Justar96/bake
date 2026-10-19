@@ -14,9 +14,10 @@
 //! end. The end unwinds the guest with a trap, so nothing the script queued
 //! after it runs, as Pi's host stops the VM on `done`.
 
+use std::borrow::Cow;
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicU8, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::{Map, Value};
@@ -29,7 +30,8 @@ use crate::guest::{
 use crate::js::utf16_len;
 use crate::prelude::{MAX_OUTPUT_CHARS, MAX_OUTPUT_ITEMS};
 use crate::types::{
-    Completion, During, Event, Failure, HostCall, Outcome, OutputItem, ScriptError, StoreWrites,
+    Completion, During, Event, Failure, HostCall, MAX_PENDING_CALLS, Outcome, OutputItem,
+    ScriptError, StoreWrites,
 };
 
 /// WASI `errno` values.
@@ -48,22 +50,32 @@ pub(crate) enum StopReason {
     TimedOut = 2,
 }
 
-/// The stop flag and deadline one run's thread, its owner, and the engine's
-/// epoch callback share.
+/// The message of an abort without one, Pi's default.
+pub(crate) const ABORTED_MESSAGE: &str = "Execution aborted";
+
+/// The stop flag and deadline one run's thread, its owner, its deadline
+/// watchdog, and the engine's epoch callback share.
 pub(crate) struct RunControl {
     stop: AtomicU8,
+    abort_message: Mutex<Option<String>>,
     deadline: Option<Instant>,
     timeout: Option<Duration>,
     engine: Engine,
+    /// Set when the script thread has its outcome; wakes the watchdog.
+    finished: Mutex<bool>,
+    wake: Condvar,
 }
 
 impl RunControl {
     pub(crate) fn new(engine: Engine, timeout: Option<Duration>) -> Self {
         Self {
             stop: AtomicU8::new(0),
+            abort_message: Mutex::new(None),
             deadline: timeout.and_then(|timeout| Instant::now().checked_add(timeout)),
             timeout,
             engine,
+            finished: Mutex::new(false),
+            wake: Condvar::new(),
         }
     }
 
@@ -74,10 +86,59 @@ impl RunControl {
     /// Records `reason` unless another came first, then bumps the engine's
     /// epoch so a running guest reaches its epoch check.
     pub(crate) fn stop(&self, reason: StopReason) {
-        let _ = self
+        self.stop_with(reason, None);
+    }
+
+    /// [`RunControl::stop`], with the abort's message when this stop is the
+    /// first.
+    pub(crate) fn stop_with(&self, reason: StopReason, message: Option<String>) {
+        let mut abort_message = self
+            .abort_message
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let first = self
             .stop
-            .compare_exchange(0, reason as u8, Ordering::SeqCst, Ordering::SeqCst);
+            .compare_exchange(0, reason as u8, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok();
+        if first {
+            *abort_message = message;
+        }
+        drop(abort_message);
         self.engine.increment_epoch();
+    }
+
+    /// Stops the run at its deadline whether or not anything else is
+    /// running: the guest may be inside one long built-in that neither polls
+    /// QuickJS's interrupt handler nor returns to the driver, and only an
+    /// epoch increment reaches it. Returns once the deadline passed or the
+    /// script thread called [`RunControl::finish`].
+    pub(crate) fn watch_deadline(&self) {
+        let Some(deadline) = self.deadline else {
+            return;
+        };
+        let mut finished = self.finished.lock().unwrap_or_else(PoisonError::into_inner);
+        loop {
+            if *finished {
+                return;
+            }
+            let now = Instant::now();
+            if now >= deadline {
+                drop(finished);
+                self.stop(StopReason::TimedOut);
+                return;
+            }
+            finished = self
+                .wake
+                .wait_timeout(finished, deadline - now)
+                .unwrap_or_else(PoisonError::into_inner)
+                .0;
+        }
+    }
+
+    /// Releases the deadline watchdog: the script thread has its outcome.
+    pub(crate) fn finish(&self) {
+        *self.finished.lock().unwrap_or_else(PoisonError::into_inner) = true;
+        self.wake.notify_all();
     }
 
     pub(crate) fn stopped(&self) -> bool {
@@ -104,7 +165,12 @@ impl RunControl {
     pub(crate) fn failure(&self) -> Option<Failure> {
         match self.stop.load(Ordering::SeqCst) {
             1 => Some(Failure::Aborted {
-                message: "Execution aborted".to_owned(),
+                message: self
+                    .abort_message
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .clone()
+                    .unwrap_or_else(|| ABORTED_MESSAGE.to_owned()),
             }),
             2 => Some(Failure::Timeout {
                 message: format!(
@@ -316,6 +382,8 @@ pub(crate) struct HostState {
     deterministic: bool,
     /// Calls the script has issued, tools and globals.
     pub(crate) issued: u32,
+    /// Calls whose answers the VM has applied; `issued - settled` calls wait.
+    pub(crate) settled: u32,
     output_chars: usize,
     output_items: usize,
     /// Set while the driver asks the prelude whether the script stalled.
@@ -368,6 +436,7 @@ impl HostState {
             book: setup.book,
             deterministic: setup.deterministic.is_some(),
             issued: 0,
+            settled: 0,
             output_chars: 0,
             output_items: 0,
             checking_stall: false,
@@ -611,7 +680,67 @@ fn bridge_broken(what: &str) -> GuestError {
 }
 
 fn parse_bridge_json(json: &str, what: &str) -> GuestResult<Value> {
-    serde_json::from_str(json).map_err(|_| bridge_broken(&format!("{what} is not valid JSON")))
+    serde_json::from_str(&replace_lone_surrogate_escapes(json))
+        .map_err(|_| bridge_broken(&format!("{what} is not valid JSON")))
+}
+
+/// The four hex digits of a `\uXXXX` escape starting at `at`.
+fn unicode_escape(bytes: &[u8], at: usize) -> Option<u16> {
+    let digits = bytes.get(at..at + 6)?.strip_prefix(b"\\u")?;
+    let text = std::str::from_utf8(digits).ok()?;
+    u16::from_str_radix(text, 16).ok()
+}
+
+/// Rewrites each `\uD800`-`\uDFFF` escape in a JSON string that is not half
+/// of a high-low pair to `\uFFFD`. QuickJS's `JSON.stringify` escapes a lone
+/// surrogate, as JavaScript requires, and JavaScript's `JSON.parse` accepts
+/// it, but a Rust string cannot hold one and `serde_json` refuses the escape.
+/// Strings leaving the VM unescaped turn lone surrogates into U+FFFD too
+/// ([`crate::guest::decode_wtf8`]).
+pub(crate) fn replace_lone_surrogate_escapes(json: &str) -> Cow<'_, str> {
+    let bytes = json.as_bytes();
+    let mut replaced: Option<String> = None;
+    let mut copied = 0;
+    let mut in_string = false;
+    let mut index = 0;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'"' => {
+                in_string = !in_string;
+                index += 1;
+            }
+            b'\\' if in_string => {
+                let Some(unit) = unicode_escape(bytes, index) else {
+                    // Any other escape is two bytes; a malformed one is left
+                    // for the parser to refuse.
+                    index += 2;
+                    continue;
+                };
+                let low = unicode_escape(bytes, index + 6);
+                let paired = (0xd800..=0xdbff).contains(&unit)
+                    && low.is_some_and(|low| (0xdc00..=0xdfff).contains(&low));
+                if paired {
+                    index += 12;
+                } else if (0xd800..=0xdfff).contains(&unit) {
+                    let out = replaced.get_or_insert_with(|| String::with_capacity(json.len()));
+                    out.push_str(&json[copied..index]);
+                    out.push_str("\\uFFFD");
+                    index += 6;
+                    copied = index;
+                } else {
+                    index += 6;
+                }
+            }
+            _ => index += 1,
+        }
+    }
+    match replaced {
+        Some(mut out) => {
+            out.push_str(&json[copied..]);
+            Cow::Owned(out)
+        }
+        None => Cow::Borrowed(json),
+    }
 }
 
 /// Pi's `parseStoreWrites`: `[[key, json], [key]]`.
@@ -706,6 +835,16 @@ fn host_call(
                 return Err(GuestError::Protocol(format!("a call has the id {id}")));
             }
             let id = id as u32;
+            // A script that issues calls without awaiting them never lets
+            // the VM apply an answer, so its calls, answers, and promises
+            // would pile up until the heap limit; Bake 0.3's codemode
+            // runtime failed such a run the same way (`maxPendingCalls`).
+            let waiting = caller.data().issued.saturating_sub(caller.data().settled);
+            if waiting as usize >= MAX_PENDING_CALLS {
+                return Err(GuestError::Protocol(format!(
+                    "The script has {MAX_PENDING_CALLS} calls waiting for results, the most a run allows; await calls before making more"
+                )));
+            }
             let name = required(
                 string_arg(caller, &exports, bridge.scratch, arg(2), None)?,
                 "call name",
@@ -1177,6 +1316,42 @@ mod tests {
         assert_eq!(
             writes.map(|writes| (Value::Object(writes.set), writes.delete)),
             Some((serde_json::json!({ "a": 1 }), vec!["b".to_owned()]))
+        );
+    }
+
+    #[test]
+    fn replaces_only_escaped_lone_surrogates_inside_strings() {
+        let cases = [
+            (r#""\ud83d""#, r#""\uFFFD""#),
+            (r#""\uDC00x""#, r#""\uFFFDx""#),
+            (
+                r#"["\ud800\ud800", "\udfff\ud83d"]"#,
+                r#"["\uFFFD\uFFFD", "\uFFFD\uFFFD"]"#,
+            ),
+            // A high surrogate followed by a non-surrogate escape or text.
+            (r#""\ud800\u0041\ud800a""#, r#""\uFFFD\u0041\uFFFDa""#),
+            (r#""é\ud800""#, r#""é\uFFFD""#),
+        ];
+        for (json, expected) in cases {
+            assert_eq!(replace_lone_surrogate_escapes(json), expected, "{json}");
+        }
+        for unchanged in [
+            r#""\ud83d\ude00""#,
+            r#""\\ud800""#,
+            r#""\"\ud83d\ude00\\""#,
+            r#"{"a": "\u00e9", "b": 1}"#,
+            // Malformed escapes are left for the parser to refuse.
+            r#""\ud8""#,
+            r#""\"#,
+        ] {
+            assert!(
+                matches!(replace_lone_surrogate_escapes(unchanged), Cow::Borrowed(text) if text == unchanged),
+                "{unchanged}"
+            );
+        }
+        assert_eq!(
+            parse_bridge_json(r#"{"\ud800": ["\udfff", "😀"]}"#, "test").ok(),
+            Some(serde_json::json!({ "\u{fffd}": ["\u{fffd}", "😀"] }))
         );
     }
 

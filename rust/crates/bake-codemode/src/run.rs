@@ -19,10 +19,11 @@ use crate::types::{
 };
 use crate::vm::{Command, Delivery, Script, ScriptInput, run_script};
 
-/// The script thread's stack: QuickJS's 512 KiB stack guard and Wasmtime's
-/// Wasm stack limit both fit on it, so deep recursion is a catchable
-/// `RangeError` and never overflows the host stack.
-pub const SCRIPT_THREAD_STACK_BYTES: usize = 8 << 20;
+/// The script thread's stack: Wasmtime's 32 MiB Wasm stack limit and the
+/// host's own frames fit on it, so QuickJS's 512 KiB stack guard makes deep
+/// recursion a catchable `RangeError` and nothing overflows the host stack.
+/// It is reserved address space; only the pages a script uses are committed.
+pub const SCRIPT_THREAD_STACK_BYTES: usize = 40 << 20;
 
 /// Names a global may not take: the prelude's own globals.
 const RESERVED_GLOBALS: [&str; 9] = [
@@ -37,25 +38,45 @@ const RESERVED_GLOBALS: [&str; 9] = [
     "load",
 ];
 
-/// A running script. It is the only handle to the script's thread: dropping
-/// it aborts the script and joins the thread (on a blocking task when a Tokio
-/// runtime is current, otherwise in place), so no script outlives its run.
+/// A running script. It owns the script's thread: dropping it aborts the
+/// script and joins the thread (on a blocking task when a Tokio runtime is
+/// current, otherwise in place), so no script outlives its run.
+/// [`Run::handle`] gives tasks that answer calls or abort the run a handle of
+/// their own.
 pub struct Run {
     events: UnboundedReceiver<Event>,
-    commands: Sender<Command>,
-    book: Arc<Mutex<CallBook>>,
-    control: Arc<RunControl>,
-    deterministic: bool,
+    handle: RunHandle,
     thread: Option<JoinHandle<()>>,
-    done: Option<Outcome>,
+    done: Option<Arc<Outcome>>,
 }
 
 impl std::fmt::Debug for Run {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("Run")
-            .field("deterministic", &self.deterministic)
+            .field("deterministic", &self.handle.deterministic)
             .field("done", &self.done)
+            .finish_non_exhaustive()
+    }
+}
+
+/// A cloneable handle that answers a [`Run`]'s calls and aborts it, for tasks
+/// that execute calls while another owns the `Run` and awaits its events. It
+/// does not keep the script alive: once the `Run` is dropped, answers are
+/// ignored.
+#[derive(Clone)]
+pub struct RunHandle {
+    commands: Sender<Command>,
+    book: Arc<Mutex<CallBook>>,
+    control: Arc<RunControl>,
+    deterministic: bool,
+}
+
+impl std::fmt::Debug for RunHandle {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("RunHandle")
+            .field("deterministic", &self.deterministic)
             .finish_non_exhaustive()
     }
 }
@@ -168,25 +189,61 @@ pub(crate) fn start(
         commands: command_receiver,
     };
     let thread_book = Arc::clone(&book);
+    let thread_control = Arc::clone(&control);
     let thread = std::thread::Builder::new()
         .name("bake-codemode".to_owned())
         .stack_size(SCRIPT_THREAD_STACK_BYTES)
         .spawn(move || {
             let _guard = guard;
-            let outcome = run_script(input);
+            let outcome = run_with_deadline(input, &thread_control);
             lock(&thread_book).finished = true;
-            let _ = event_sender.send(Event::Done(outcome));
+            let _ = event_sender.send(Event::Done(Arc::new(outcome)));
         })
         .map_err(|error| StartError::Thread(error.to_string()))?;
     Ok(Run {
         events,
-        commands,
-        book,
-        control,
-        deterministic: request.deterministic.is_some(),
+        handle: RunHandle {
+            commands,
+            book,
+            control,
+            deterministic: request.deterministic.is_some(),
+        },
         thread: Some(thread),
         done: None,
     })
+}
+
+/// The deadline watchdog's stack; it only waits on a condition variable.
+const WATCHDOG_STACK_BYTES: usize = 64 << 10;
+
+/// Runs the script with a watchdog thread that stops it at its deadline, so
+/// the deadline holds while nothing awaits [`Run::next`]. The watchdog is
+/// joined before the script thread exits.
+fn run_with_deadline(input: ScriptInput, control: &Arc<RunControl>) -> Outcome {
+    let watchdog = match control.deadline() {
+        None => None,
+        Some(_) => {
+            let watched = Arc::clone(control);
+            let spawned = std::thread::Builder::new()
+                .name("bake-codemode-deadline".to_owned())
+                .stack_size(WATCHDOG_STACK_BYTES)
+                .spawn(move || watched.watch_deadline());
+            match spawned {
+                Ok(watchdog) => Some(watchdog),
+                Err(error) => {
+                    return Outcome::failed(Failure::Protocol {
+                        message: format!("The script's deadline thread could not start: {error}"),
+                    });
+                }
+            }
+        }
+    };
+    let outcome = run_script(input);
+    control.finish();
+    if let Some(watchdog) = watchdog {
+        let _ = watchdog.join();
+    }
+    outcome
 }
 
 fn check_request(request: &ExecuteRequest) -> Result<(), StartError> {
@@ -229,46 +286,76 @@ fn check_request(request: &ExecuteRequest) -> Result<(), StartError> {
 
 impl Run {
     /// The next event: calls and output as the script makes them, then one
-    /// [`Event::Done`], which every later call returns again.
+    /// [`Event::Done`], which every later call returns again (the same
+    /// [`Arc`], not a copy).
     ///
-    /// The run's deadline (`timeout_ms`) is enforced here as well as on the
-    /// script's thread, so a long built-in such as a backtracking regular
-    /// expression stops at it; with a deadline this must be awaited on a
-    /// Tokio runtime with the time driver.
+    /// The run's deadline (`timeout_ms`) is enforced by the run's own
+    /// threads, whether or not this is awaited; it needs no Tokio timer.
     pub async fn next(&mut self) -> Event {
         if let Some(done) = &self.done {
-            return Event::Done(done.clone());
+            return Event::Done(Arc::clone(done));
         }
-        loop {
-            let received = match self.control.deadline() {
-                Some(deadline) if !self.control.stopped() => {
-                    match tokio::time::timeout_at(deadline.into(), self.events.recv()).await {
-                        Ok(received) => received,
-                        Err(_) => {
-                            self.stop(StopReason::TimedOut);
-                            continue;
-                        }
-                    }
-                }
-                _ => self.events.recv().await,
-            };
-            return match received {
-                Some(Event::Done(outcome)) => {
-                    self.done = Some(outcome.clone());
-                    Event::Done(outcome)
-                }
-                Some(event) => event,
-                None => {
-                    let outcome = Outcome::failed(Failure::Protocol {
-                        message: "The script thread ended without an outcome".to_owned(),
-                    });
-                    self.done = Some(outcome.clone());
-                    Event::Done(outcome)
-                }
-            };
-        }
+        let outcome = match self.events.recv().await {
+            Some(Event::Done(outcome)) => outcome,
+            Some(event) => return event,
+            None => Arc::new(Outcome::failed(Failure::Protocol {
+                message: "The script thread ended without an outcome".to_owned(),
+            })),
+        };
+        self.done = Some(Arc::clone(&outcome));
+        Event::Done(outcome)
     }
 
+    /// A handle that answers calls and aborts the run without owning it.
+    pub fn handle(&self) -> RunHandle {
+        self.handle.clone()
+    }
+
+    /// Answers call `id`; see [`RunHandle::answer`].
+    ///
+    /// # Errors
+    ///
+    /// As [`RunHandle::answer`].
+    pub fn answer(&self, id: u32, result: CallResult) -> Result<(), AnswerError> {
+        self.handle.answer(id, result)
+    }
+
+    /// Answers call `id` as result number `seq`; see
+    /// [`RunHandle::answer_in_order`].
+    ///
+    /// # Errors
+    ///
+    /// As [`RunHandle::answer_in_order`].
+    pub fn answer_in_order(
+        &self,
+        seq: u32,
+        now_ms: f64,
+        id: u32,
+        result: CallResult,
+    ) -> Result<(), AnswerError> {
+        self.handle.answer_in_order(seq, now_ms, id, result)
+    }
+
+    /// Whether the run has its outcome: [`Run::next`] returned
+    /// [`Event::Done`], or the thread decided it and calls can no longer be
+    /// answered.
+    pub fn finished(&self) -> bool {
+        self.done.is_some() || lock(&self.handle.book).finished
+    }
+
+    /// Aborts the script with an error it cannot catch; see
+    /// [`RunHandle::abort`].
+    pub fn abort(&self) {
+        self.handle.abort();
+    }
+
+    /// Aborts the script, reporting `message`; see [`RunHandle::abort_with`].
+    pub fn abort_with(&self, message: impl Into<String>) {
+        self.handle.abort_with(message);
+    }
+}
+
+impl RunHandle {
     /// Answers call `id`. Answers for a run that has its outcome are ignored.
     ///
     /// # Errors
@@ -338,21 +425,21 @@ impl Run {
         Ok(())
     }
 
-    /// Whether the run has its outcome: [`Run::next`] returned
-    /// [`Event::Done`], or the thread decided it and calls can no longer be
-    /// answered.
-    pub fn finished(&self) -> bool {
-        self.done.is_some() || lock(&self.book).finished
-    }
-
     /// Aborts the script with an error it cannot catch; [`Run::next`] then
-    /// returns [`Failure::Aborted`] unless the script already ended.
+    /// returns [`Failure::Aborted`] with the message `Execution aborted`
+    /// unless the script already ended.
     pub fn abort(&self) {
-        self.stop(StopReason::Aborted);
+        self.stop(StopReason::Aborted, None);
     }
 
-    fn stop(&self, reason: StopReason) {
-        self.control.stop(reason);
+    /// [`RunHandle::abort`], reporting `message` instead, as Pi reports an
+    /// abort signal's reason. Only the first stop's message counts.
+    pub fn abort_with(&self, message: impl Into<String>) {
+        self.stop(StopReason::Aborted, Some(message.into()));
+    }
+
+    fn stop(&self, reason: StopReason, message: Option<String>) {
+        self.control.stop_with(reason, message);
         self.send(Command::Stop);
     }
 
@@ -364,7 +451,7 @@ impl Run {
 
 impl Drop for Run {
     fn drop(&mut self) {
-        self.stop(StopReason::Aborted);
+        self.handle.abort();
         let Some(thread) = self.thread.take() else {
             return;
         };

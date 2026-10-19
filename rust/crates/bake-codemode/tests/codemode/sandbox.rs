@@ -756,32 +756,66 @@ async fn terminates_a_microtask_spinning_loop_on_timeout() {
     );
 }
 
-/// Pi's "aborts via signal and cancels in-flight calls", with `Run::abort`.
+/// The next event of `run` that is not a call, within [`BOUND`].
+async fn done(run: &mut bake_codemode::Run) -> Arc<bake_codemode::Outcome> {
+    loop {
+        match tokio::time::timeout(BOUND, run.next()).await {
+            Ok(Event::Call(_)) => {}
+            Ok(Event::Done(outcome)) => return outcome,
+            other => panic!("{other:?}"),
+        }
+    }
+}
+
+/// Pi's "aborts via signal and cancels in-flight calls", with `Run::abort`
+/// and `Run::abort_with` for the signal and its reason. Cancelling the
+/// call's own work is the host's (the harness sets its flag on the outcome).
 #[tokio::test]
 async fn aborts_and_leaves_in_flight_calls_to_the_host() {
-    let mut run = crate::harness::start(
-        "await tools.hang(); return 'never'",
-        &Setup::tools(vec![tool("hang", |_| Ok(None))]),
+    let setup = Setup::tools(vec![tool("hang", |_| Ok(None))]);
+    let mut first = crate::harness::start("await tools.hang(); return 'never'", &setup);
+    let event = tokio::time::timeout(BOUND, first.next()).await;
+    let Ok(Event::Call(first_call)) = event else {
+        panic!("{event:?}");
+    };
+    assert_eq!(first_call.name(), "hang");
+
+    // A run aborted with a reason as it starts reports the reason.
+    let mut cancelled = crate::harness::start("await tools.hang()", &setup);
+    cancelled.abort_with("user cancelled");
+    assert_eq!(
+        done(&mut cancelled).await.result,
+        Err(Failure::Aborted {
+            message: "user cancelled".to_owned()
+        })
     );
-    let event = tokio::time::timeout(BOUND, run.next()).await;
+
+    let mut second = crate::harness::start("await tools.hang(); return 'never'", &setup);
+    let event = tokio::time::timeout(BOUND, second.next()).await;
     let Ok(Event::Call(call)) = event else {
         panic!("{event:?}");
     };
     assert_eq!(call.name(), "hang");
-    run.abort();
-    let event = tokio::time::timeout(BOUND, run.next()).await;
-    let Ok(Event::Done(outcome)) = event else {
-        panic!("{event:?}");
-    };
+    second.abort();
     assert_eq!(
-        outcome.result,
+        done(&mut second).await.result,
         Err(Failure::Aborted {
             message: "Execution aborted".to_owned()
         })
     );
     // The call can no longer be answered; the answer is ignored.
-    assert_eq!(run.answer(call.id(), Ok(None)), Ok(()));
-    assert!(run.finished());
+    assert_eq!(second.answer(call.id(), Ok(None)), Ok(()));
+    assert!(second.finished());
+
+    // Pi's `close()` aborts what still runs with "Sandbox closed".
+    assert!(!first.finished());
+    first.abort_with("Sandbox closed");
+    assert_eq!(
+        done(&mut first).await.result,
+        Err(Failure::Aborted {
+            message: "Sandbox closed".to_owned()
+        })
+    );
 }
 
 // #10283: the host keeps all output, so a script that prints in a loop must not grow it without bound.

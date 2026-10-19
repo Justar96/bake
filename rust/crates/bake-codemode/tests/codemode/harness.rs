@@ -10,8 +10,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use bake_codemode::{
-    CallError, CodemodeEngine, Completion, Event, ExecuteRequest, Failure, GlobalDeclaration,
-    HostCall, Limits, Outcome, OutputItem, Run, ScriptError, StoreValues, ToolDeclaration,
+    AnswerError, CallError, CodemodeEngine, Completion, Event, ExecuteRequest, Failure,
+    GlobalDeclaration, HostCall, Limits, Outcome, OutputItem, Run, ScriptError, StoreValues,
+    ToolDeclaration,
 };
 use serde_json::Value;
 use tokio::task::JoinSet;
@@ -207,7 +208,9 @@ pub async fn execute(code: &str, setup: Setup) -> Execution {
 
 async fn execute_unbounded(code: &str, setup: &Setup) -> Execution {
     let mut run = start(code, setup);
-    let mut tasks: JoinSet<(u32, Result<Option<Value>, String>)> = JoinSet::new();
+    // Each call's task answers through its own handle, as a host whose
+    // nested calls run apart from the loop that owns the run would.
+    let mut tasks: JoinSet<(u32, bool, Result<(), AnswerError>)> = JoinSet::new();
     let mut output = Vec::new();
     let mut calls: Vec<CallRecord> = Vec::new();
     let mut records: HashMap<u32, usize> = HashMap::new();
@@ -231,11 +234,14 @@ async fn execute_unbounded(code: &str, setup: &Setup) -> Execution {
                     let cancelled = Arc::new(AtomicBool::new(false));
                     flags.insert(id, Arc::clone(&cancelled));
                     let name = call.name().to_owned();
+                    let handle = run.handle();
                     tasks.spawn(async move {
-                        match execute {
-                            Some(execute) => (id, execute(args, cancelled).await),
-                            None => (id, Err(format!("Unknown tool \"{name}\""))),
-                        }
+                        let result = match execute {
+                            Some(execute) => execute(args, cancelled).await,
+                            None => Err(format!("Unknown tool \"{name}\"")),
+                        };
+                        let ok = result.is_ok();
+                        (id, ok, handle.answer(id, result.map_err(CallError::new)))
                     });
                 }
                 Event::Output(item) => output.push(item),
@@ -244,17 +250,17 @@ async fn execute_unbounded(code: &str, setup: &Setup) -> Execution {
                         flag.store(true, Ordering::SeqCst);
                     }
                     tasks.abort_all();
+                    let outcome = Arc::unwrap_or_clone(outcome);
                     return Execution { outcome, output, calls };
                 }
                 Event::Started { .. } | Event::Idle { .. } => {}
             },
             Some(joined) = tasks.join_next(), if !tasks.is_empty() => {
-                let Ok((id, result)) = joined else { continue };
+                let Ok((id, ok, answer)) = joined else { continue };
                 flags.remove(&id);
                 if let Some(index) = records.get(&id) {
-                    calls[*index].status = if result.is_ok() { CallStatus::Ok } else { CallStatus::Error };
+                    calls[*index].status = if ok { CallStatus::Ok } else { CallStatus::Error };
                 }
-                let answer = run.answer(id, result.map_err(CallError::new));
                 assert!(answer.is_ok(), "{answer:?}");
             }
         }
