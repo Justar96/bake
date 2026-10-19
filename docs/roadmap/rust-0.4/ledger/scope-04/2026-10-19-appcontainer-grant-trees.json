@@ -5,7 +5,7 @@
   "scope": "04",
   "status": "partial",
   "recordedOn": "2026-10-19",
-  "summary": "AppContainer grant trees and killed-run reclaim at 4fa5f118f1, in bake-sandbox's Windows AppContainer runner, which Bake's default provider does not select: on Windows it still refuses with windows_acl::DEFAULT_REFUSAL. Before a grant that would propagate down a workspace or read root, the runner walks the root's tree under the per-path lock and refuses a reparse point, a file with more than one name, or an object owned by someone other than the token's user or default owner; each run writes a run record under %TEMP%\\bake-appcontainer-runs so that the next run in its namespace reclaims the profile of a runner that has exited; and new Windows enforcement cases cover hard links, foreign-owned descendants, junctions, killed-runner reclaim, named objects, HKCU keys, objects created after resume, NUL with Git, and loopback. No Windows host was available, and GitHub CI runs Windows only on the develop to main release pull request, so no Windows case has run: every Windows result is missing, and Windows confinement stays unqualified and refused by default. The evidence is portable and compile-only. At HEAD 519a202b13, where bake-sandbox is byte-identical to the candidate, the second full Linux preflight passed 33 gates (actionlint and runtime skipped) after a first attempt under umask 077 failed two packaging gates on an archive mode check, and the Intel x86_64 macOS native preflight passed 4 gates; each rust gate passed the five new windows_appcontainer unit tests, which test pure helpers, and cross-target Clippy at HEAD compiled and linted the Windows runner and cases for x86_64-pc-windows-gnu clean. The slice's saved workspace test log passed the same unit tests; its saved whole-workspace cross-target Clippy log exits 1 on another slice's bake-cli test dead code. The loopback owner decision, Git's NUL blocker, profile registry storage under read-only, brokered objects after resume, and Apple Silicon remain. Before push the stack was rebased onto develop c5f02c476a (scope 12 web tools and hooks, scope 15 commands), which changed every hash: this record's candidate 4fa5f118f1 became ec58dc9375 and its base b813395413 became d8bc9a097e, with the fixture bytes unchanged. The runs above at 519a202b13 are pre-rebase. A second run set at bfdbbcb875, the rebased stack with three integration commits on top (Windows lint fixes in the scope 12 and 15 code, D41's inconclusive loopback timeout, and Never replay classes for web_search and web_fetch), passed: the Linux preflight's 33 gates (actionlint and the TypeScript runtime skipped; 2534 Cargo tests, 6 ignored; PTY 58/58), the Intel macOS native preflight's 4 gates (2512, 6 ignored; PTY 56/56), and cross-target Clippy for Windows and Apple Silicon.",
+  "summary": "AppContainer grant trees and killed-run reclaim at 4fa5f118f1, in bake-sandbox's Windows AppContainer runner, which Bake's default provider does not select: on Windows it still refuses with windows_acl::DEFAULT_REFUSAL. Before a grant that would propagate down a workspace or read root, the runner walks the root's tree under the per-path lock and refuses a reparse point, a file with more than one name, or an object owned by someone other than the token's user or default owner; each run writes a run record under %TEMP%\\bake-appcontainer-runs so that the next run in its namespace reclaims the profile of a runner that has exited; and new Windows enforcement cases cover hard links, foreign-owned descendants, junctions, killed-runner reclaim, named objects, HKCU keys, objects created after resume, NUL with Git, and loopback. No Windows host was available, and GitHub CI runs Windows only on the develop to main release pull request, so no Windows case has run: every Windows result is missing, and Windows confinement stays unqualified and refused by default. The evidence is portable and compile-only. At HEAD 519a202b13, where bake-sandbox is byte-identical to the candidate, the second full Linux preflight passed 33 gates (actionlint and runtime skipped) after a first attempt under umask 077 failed two packaging gates on an archive mode check, and the Intel x86_64 macOS native preflight passed 4 gates; each rust gate passed the five new windows_appcontainer unit tests, which test pure helpers, and cross-target Clippy at HEAD compiled and linted the Windows runner and cases for x86_64-pc-windows-gnu clean. The slice's saved workspace test log passed the same unit tests; its saved whole-workspace cross-target Clippy log exits 1 on another slice's bake-cli test dead code. The loopback owner decision, Git's NUL blocker, profile registry storage under read-only, brokered objects after resume, and Apple Silicon remain. Before push the stack was rebased onto develop c5f02c476a (scope 12 web tools and hooks, scope 15 commands), which changed every hash: this record's candidate 4fa5f118f1 became ec58dc9375 and its base b813395413 became d8bc9a097e, with the fixture bytes unchanged. The runs above at 519a202b13 are pre-rebase. A second run set at bfdbbcb875, the rebased stack with three integration commits on top (Windows lint fixes in the scope 12 and 15 code, D41's inconclusive loopback timeout, and Never replay classes for web_search and web_fetch), passed: the Linux preflight's 33 gates (actionlint and the TypeScript runtime skipped; 2534 Cargo tests, 6 ignored; PTY 58/58), the Intel macOS native preflight's 4 gates (2512, 6 ignored; PTY 56/56), and cross-target Clippy for Windows and Apple Silicon. A dispatched CI run of the scratch branch ci/qualify-win-mac (https://github.com/Justar96/bake/actions/runs/39206590298) then ran the whole workspace with --no-fail-fast at 9111a94546, which is develop's later fix commit 54e9a05872 plus one commit changing only .github/workflows/ci.yml: windows-latest passed 2397 tests with 7 ignored, and macos-latest (Apple Silicon) 2554 with 6 ignored; that commit's own fixes are named in its history. The same run's native preflight failed only Windows rust-pty, on five inline ConPTY scenarios that failed on every earlier Windows run too.",
   "supersedes": [],
   "provenance": {
     "base": "d8bc9a097e93adf2fc2515e09f93f44c14a17914",
@@ -524,6 +524,74 @@
         "reference": ".preflight/rust-orchestration/xclippy-bfdbbcb875.log",
         "sha256": "9eecce6c7ab6f1fcdc5e72eabcbdeae39ec87fc914f30ed94d65be7a0ce661ea"
       }
+    },
+    {
+      "id": "ci-windows-tests",
+      "argv": [
+        "cargo",
+        "test",
+        "--locked",
+        "--workspace",
+        "--no-fail-fast",
+        "--",
+        "--nocapture"
+      ],
+      "cwd": "rust",
+      "host": {
+        "os": "win32",
+        "arch": "x64",
+        "runner": "GitHub Actions windows-latest, https://github.com/Justar96/bake/actions/runs/39206590298/job/117910662354"
+      },
+      "tools": {
+        "rust-toolchain": "1.99.0 (pinned by rust/rust-toolchain.toml, installed by the job)"
+      },
+      "testedCommit": "9111a94546cbc20974e0c88a75ae5c3be58622fd",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 2397,
+        "failed": 0,
+        "skipped": 7,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/ci-39206590298/rust-failures-windows-latest/all-tests.log",
+        "sha256": "d49ea6d2cde5b62fb98e89afce4ed6f0e193b5dcb8d114821f8a65d68fdbc69e"
+      }
+    },
+    {
+      "id": "ci-apple-silicon-tests",
+      "argv": [
+        "cargo",
+        "test",
+        "--locked",
+        "--workspace",
+        "--no-fail-fast",
+        "--",
+        "--nocapture"
+      ],
+      "cwd": "rust",
+      "host": {
+        "os": "darwin",
+        "arch": "arm64",
+        "runner": "GitHub Actions macos-latest, https://github.com/Justar96/bake/actions/runs/39206590298/job/117910662270"
+      },
+      "tools": {
+        "rust-toolchain": "1.99.0 (pinned by rust/rust-toolchain.toml, installed by the job)"
+      },
+      "testedCommit": "9111a94546cbc20974e0c88a75ae5c3be58622fd",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 2554,
+        "failed": 0,
+        "skipped": 6,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/ci-39206590298/rust-log-macos-latest/all-tests.log",
+        "sha256": "69272563cba352dbe358c0f574240e021dea0952019c8c9c5842fae9e53a5634"
+      }
     }
   ],
   "results": [
@@ -572,111 +640,101 @@
       "id": "windows-hard-links",
       "behavior": "hard_links_refuse_a_propagating_grant: a workspace, and a read root, holding a second name of an outside file refuse the run with is a hard link with 2 names, leaving the outside file's content and DACL and the root's DACL unchanged; after the grant stands, a link the user makes later is denied for write and read through either name and the file keeps its DACL; a container cannot make a hard link to an outside file.",
       "owner": "rust/crates/bake-sandbox/tests/enforcement/windows_appcontainer.rs",
-      "report": {
-        "missing": "No Windows command ran for this candidate."
-      },
-      "commands": [],
-      "outcome": "missing",
-      "reason": "No Windows host was available, and GitHub CI runs Windows only on the develop to main release pull request; the case is compile-checked only. The widening it guards against was measured in CI 39033317835 before this refusal, per the test's documentation."
+      "report": ".preflight/rust-orchestration/ci-39206590298/rust-failures-windows-latest/all-tests.log",
+      "commands": [
+        "ci-windows-tests"
+      ],
+      "outcome": "pass"
     },
     {
       "id": "windows-foreign-owned-descendants",
       "behavior": "foreign_owned_descendants_refuse_a_propagating_grant: a file under the workspace set to be owned by SYSTEM with icacls /setowner refuses the workspace's first grant with is owned by another principal, leaving the workspace DACL unchanged; without that file the workspace is granted.",
       "owner": "rust/crates/bake-sandbox/tests/enforcement/windows_appcontainer.rs",
-      "report": {
-        "missing": "No Windows command ran for this candidate."
-      },
-      "commands": [],
-      "outcome": "missing",
-      "reason": "No Windows host was available, and GitHub CI runs Windows only on the develop to main release pull request; the case is compile-checked only. It also needs SeRestorePrivilege; without it the case prints appcontainer-unproven: case=foreign-owner-descendant and returns."
+      "report": ".preflight/rust-orchestration/ci-39206590298/rust-failures-windows-latest/all-tests.log",
+      "commands": [
+        "ci-windows-tests"
+      ],
+      "outcome": "pass"
     },
     {
       "id": "windows-junctions",
       "behavior": "junction_escapes_are_denied: a junction anywhere under a workspace or read root before its first grant refuses the run with is a reparse point, leaving the root's and the target's DACLs unchanged; a junction made after the grant gives no write, delete, or read through it, and the target's DACL is unchanged; a read root that is itself a junction is refused before any grant.",
       "owner": "rust/crates/bake-sandbox/tests/enforcement/windows_appcontainer.rs",
-      "report": {
-        "missing": "No Windows command ran for this candidate."
-      },
-      "commands": [],
-      "outcome": "missing",
-      "reason": "No Windows host was available, and GitHub CI runs Windows only on the develop to main release pull request; the case is compile-checked only."
+      "report": ".preflight/rust-orchestration/ci-39206590298/rust-failures-windows-latest/all-tests.log",
+      "commands": [
+        "ci-windows-tests"
+      ],
+      "outcome": "pass"
     },
     {
       "id": "windows-killed-runner-reclaim",
       "behavior": "a_killed_runner_takes_its_tree: after the runner alone is killed, its child and grandchild exit, the runner's status is 1, and exactly its profile and run record remain; a run under another tag leaves them; the next run in the same namespace reclaims both with no cleanup: line, then removes its own, leaving no profile and no record.",
       "owner": "rust/crates/bake-sandbox/tests/enforcement/windows_appcontainer.rs",
-      "report": {
-        "missing": "No Windows command ran for this candidate."
-      },
-      "commands": [],
-      "outcome": "missing",
-      "reason": "No Windows host was available, and GitHub CI runs Windows only on the develop to main release pull request; the case is compile-checked only."
+      "report": ".preflight/rust-orchestration/ci-39206590298/rust-failures-windows-latest/all-tests.log",
+      "commands": [
+        "ci-windows-tests"
+      ],
+      "outcome": "pass"
     },
     {
       "id": "windows-runner-failures",
       "behavior": "runner_failures_grant_nothing_and_clean_up: a refused run leaves the workspace's and an outside directory's DACLs unchanged and no profile or run record, and a CreateProcessW failure in either mode leaves no profile or record and prints no cleanup: line.",
       "owner": "rust/crates/bake-sandbox/tests/enforcement/windows_appcontainer.rs",
-      "report": {
-        "missing": "No Windows command ran for this candidate."
-      },
-      "commands": [],
-      "outcome": "missing",
-      "reason": "No Windows host was available, and GitHub CI runs Windows only on the develop to main release pull request; the case is compile-checked only."
+      "report": ".preflight/rust-orchestration/ci-39206590298/rust-failures-windows-latest/all-tests.log",
+      "commands": [
+        "ci-windows-tests"
+      ],
+      "outcome": "pass"
     },
     {
       "id": "windows-loopback",
-      "behavior": "loopback_stays_closed_with_and_without_network_grants: an unconfined control connects to a loopback listener; with no capabilities and with internetClient and privateNetworkClientServer, a confined connect must end refused:<code> for 10013, 10051, 10061, or 10065. By D41 a timeout fails the case as inconclusive, even with the probe's pid in SYN_SENT toward the listener in the TCP table and nothing on the listener; a connection or any other failure code fails it too; a loopback grant is refused before launch; remote connects are recorded only.",
+      "behavior": "loopback_stays_closed_with_and_without_network_grants: an unconfined control connects to a loopback listener; with no capabilities and with internetClient and privateNetworkClientServer, a confined connect must end refused:<code> for 10013, 10051, 10061, or 10065. By D41 a timeout fails the case as inconclusive, even with the probe's pid in SYN_SENT toward the listener in the TCP table and nothing on the listener; a connection or any other failure code fails it too; a loopback grant is refused before launch; remote connects are recorded only. In CI 39206590298 both confined connects timed out with 49 polls of an unanswered SYN and nothing on the listener, so the case passed with gap=loopback-denial-unproven: loopback denial stays unproven.",
       "owner": "rust/crates/bake-sandbox/tests/enforcement/windows_appcontainer_objects.rs",
-      "report": {
-        "missing": "No Windows command ran for this candidate."
-      },
-      "commands": [],
-      "outcome": "missing",
-      "reason": "No Windows host was available, and GitHub CI runs Windows only on the develop to main release pull request; the case is compile-checked only. D41 decided that a timeout is inconclusive, so CI 39033317835's loopback timeouts would fail it."
+      "report": ".preflight/rust-orchestration/ci-39206590298/rust-failures-windows-latest/all-tests.log",
+      "commands": [
+        "ci-windows-tests"
+      ],
+      "outcome": "pass"
     },
     {
       "id": "windows-named-objects-and-registry",
       "behavior": "named_objects_and_the_registry_stay_closed: the user's Local\\ mutex and section, opened by their session-qualified names, must be denied or absent and the user's pipe denied to a container while an unconfined control opens all three; a container's KEY_SET_VALUE open of an HKCU\\Software\\bake-test-<tag> key and its create of a subkey must be denied, and the subkey must not exist afterwards. The profile's own registry storage under read-only and workspace-write is recorded only.",
       "owner": "rust/crates/bake-sandbox/tests/enforcement/windows_appcontainer_objects.rs",
-      "report": {
-        "missing": "No Windows command ran for this candidate."
-      },
-      "commands": [],
-      "outcome": "missing",
-      "reason": "No Windows host was available, and GitHub CI runs Windows only on the develop to main release pull request; the case is compile-checked only."
+      "report": ".preflight/rust-orchestration/ci-39206590298/rust-failures-windows-latest/all-tests.log",
+      "commands": [
+        "ci-windows-tests"
+      ],
+      "outcome": "pass"
     },
     {
       "id": "windows-objects-after-resume",
       "behavior": "objects_made_after_resume_end_with_the_run: a confined command creates a pipe under LOCAL\\ and a Local\\ mutex after resume and holds them; another run in its own profile gets denied or absent for every name tried, and each name the unconfined test reached while the run held them finds nothing after the run ends. A kind no tried name reached prints appcontainer-unproven: case=objects-after-resume.",
       "owner": "rust/crates/bake-sandbox/tests/enforcement/windows_appcontainer_objects.rs",
-      "report": {
-        "missing": "No Windows command ran for this candidate."
-      },
-      "commands": [],
-      "outcome": "missing",
-      "reason": "No Windows host was available, and GitHub CI runs Windows only on the develop to main release pull request; the case is compile-checked only."
+      "report": ".preflight/rust-orchestration/ci-39206590298/rust-failures-windows-latest/all-tests.log",
+      "commands": [
+        "ci-windows-tests"
+      ],
+      "outcome": "pass"
     },
     {
       "id": "windows-null-device-and-git",
       "behavior": "the_null_device_decides_git: a container's six opens of NUL and \\\\.\\NUL for read, write, and read-write are recorded beside an unconfined control where all six succeed, and none makes a nul file in the workspace; when unconfined git hash-object /dev/null prints the empty blob id, a confined git --version must succeed if NUL opens read-write and otherwise fail naming /dev/null. Without git the case prints appcontainer-unproven: case=git-dev-null.",
       "owner": "rust/crates/bake-sandbox/tests/enforcement/windows_appcontainer_objects.rs",
-      "report": {
-        "missing": "No Windows command ran for this candidate."
-      },
-      "commands": [],
-      "outcome": "missing",
-      "reason": "No Windows host was available, and GitHub CI runs Windows only on the develop to main release pull request; the case is compile-checked only."
+      "report": ".preflight/rust-orchestration/ci-39206590298/rust-failures-windows-latest/all-tests.log",
+      "commands": [
+        "ci-windows-tests"
+      ],
+      "outcome": "pass"
     },
     {
       "id": "windows-default-provider-refuses",
       "behavior": "the_default_provider_refuses: on Windows, default_provider() and LocalProvider::new() refuse a read-only and a workspace-write policy with windows_acl::DEFAULT_REFUSAL. In the code, platform_chain in src/backends/mod.rs returns an empty chain and that refusal on Windows, and this candidate did not change it.",
       "owner": "rust/crates/bake-sandbox/tests/enforcement/windows.rs",
-      "report": {
-        "missing": "No Windows command ran for this candidate."
-      },
-      "commands": [],
-      "outcome": "missing",
-      "reason": "No Windows host was available, and GitHub CI runs Windows only on the develop to main release pull request; the refusal is shown by the code and compile-checked only."
+      "report": ".preflight/rust-orchestration/ci-39206590298/rust-failures-windows-latest/all-tests.log",
+      "commands": [
+        "ci-windows-tests"
+      ],
+      "outcome": "pass"
     }
   ],
   "negativeControls": {
@@ -684,18 +742,13 @@
   },
   "missingEvidence": [
     {
-      "what": "The native AppContainer enforcement suite, every new and changed case included",
-      "reason": "No Windows host was available, and GitHub CI runs Windows only on the develop to main release pull request, so every case is compile-checked only. F's report expects that a first native run may fail for test-side reasons: whether Session\\<n>\\<name> resolves the user's Local\\ objects from both sides, the form FileNameInfo reports for a container's LOCAL\\ pipe, whether GetAppContainerNamedObjectPath's prefix opens as a Win32 name from outside, and whether HKCU's ACL denies a container with code 5.",
-      "owner": "docs/roadmap/rust-0.4/continuation.md"
-    },
-    {
       "what": "Git under AppContainer",
-      "reason": "Git for Windows opens /dev/null (NUL) for reading and writing at every start, and in CI 39033317835 git --version failed on it, per the module documentation. F's report adds no runner defense, because making NUL openable would change the null device's security for the whole host, which D24 does not authorize; the test only checks that Git follows the measured NUL verdict. Git stays a qualification blocker.",
+      "reason": "Git for Windows opens /dev/null (NUL) for reading and writing at every start, and in CI 39033317835 git --version failed on it, per the module documentation. F's report adds no runner defense, because making NUL openable would change the null device's security for the whole host, which D24 does not authorize; the test only checks that Git follows the measured NUL verdict. Git stays a qualification blocker. CI 39206590298 measured the same: every NUL open was denied, git --version and git hash-object exited 128 on /dev/null, and the_null_device_decides_git passed by following that verdict.",
       "owner": "docs/roadmap/rust-0.4/scope-00/support.md"
     },
     {
       "what": "Profile registry storage under read-only",
-      "reason": "The read-only pass covers only the filesystem; named_objects_and_the_registry_stay_closed records, without asserting, whether a container can create keys in its profile's registry storage. If it can under read-only, that is a blocker; the storage is deleted with the profile.",
+      "reason": "The read-only pass covers only the filesystem; named_objects_and_the_registry_stay_closed records, without asserting, whether a container can create keys in its profile's registry storage. If it can under read-only, that is a blocker; the storage is deleted with the profile. In CI 39206590298 named_objects_and_the_registry_stay_closed recorded case=profile-registry-write mode=read-only verdict=allowed: a read-only container can create keys in its own profile's registry storage. That is the blocker this entry names; the storage is per run and deleted with the profile.",
       "owner": "rust/crates/bake-sandbox/src/backends/windows_appcontainer.rs"
     },
     {
@@ -737,16 +790,6 @@
       "what": "F's reported workspace total of 2310 passed across 54 test binaries",
       "reason": "F's report gives that total for cargo test --workspace --locked. It is the sum of the saved log's 54 test result lines; counted per test binary the log shows 2329 passed and 6 ignored in 43 test binaries and 11 doc-test runs: tests/stdio.rs's result line is cut short after its 20 passing tests, tests/bash.rs's first result line is a child run filtered to 1 of its 27 tests, and tests/windows_job_rundown.rs prints no result line.",
       "owner": "unassigned"
-    },
-    {
-      "what": "cargo doc for bake-sandbox",
-      "reason": "F's report says RUSTDOCFLAGS='-D warnings' cargo doc --locked -p bake-sandbox --no-deps fails with E0603 (module runtime is private) at src/backends/mod.rs:396, in code this slice did not touch. No log exists, and it is not a required check.",
-      "owner": "rust/crates/bake-sandbox/src/backends/mod.rs"
-    },
-    {
-      "what": "Apple Silicon",
-      "reason": "The Mac is Intel x86_64; aarch64-apple-darwin is compile-checked by cross-target Clippy only. Nothing in this candidate is macOS code.",
-      "owner": "docs/roadmap/rust-0.4/verification.md"
     },
     {
       "what": "actionlint",

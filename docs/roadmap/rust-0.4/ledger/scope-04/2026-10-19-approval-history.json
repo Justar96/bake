@@ -5,7 +5,7 @@
   "scope": "04",
   "status": "partial",
   "recordedOn": "2026-10-19",
-  "summary": "Approval history at 72b43cd2cc: each sandbox escalation that needs approval writes D24's approval/asked and approval/decided events as synced Pi custom entries of type bake.approval, the request before anyone is asked and the answer before an allowed-once call runs; permissions::history folds them into an audit trail that grants nothing. The tests ran in the rust gates at HEAD 519a202b13, where the approval code and both test files are byte-identical to the candidate: the second full Linux preflight passed 33 gates (actionlint and runtime skipped) after a first attempt under umask 077 failed two packaging gates on an archive mode check, and the Intel x86_64 macOS native preflight passed 4 gates; each rust gate passed the 15 agent_session::approval_tests and the 9 permissions::history::tests. Write failures are injected at the durable write seam, and the kill test kills a held child after its answer is synced. The worker's saved slice-branch logs show a passing workspace test run that includes both test sets, a cross-target Clippy of bake-coding-agent with no diagnostic, a whole-workspace one that exits 1 on another slice's bake-cli test dead code, and one run and one round of 8 concurrent copies of the approval tests, where B's report states 80 runs and 3 rounds; its four mutation controls left no log. Windows (compile-checked only), Apple Silicon, kills between the two entries or inside write or fsync, real ENOSPC or EIO, and Auto review remain. Before push the stack was rebased onto develop c5f02c476a (scope 12 web tools and hooks, scope 15 commands), which changed every hash: this record's candidate 72b43cd2cc became 8fdc5e13b1 and its base 50079d17c2 became 8c3ba99a6e, with the fixture bytes unchanged. The runs above at 519a202b13 are pre-rebase. A second run set at bfdbbcb875, the rebased stack with three integration commits on top (Windows lint fixes in the scope 12 and 15 code, D41's inconclusive loopback timeout, and Never replay classes for web_search and web_fetch), passed: the Linux preflight's 33 gates (actionlint and the TypeScript runtime skipped; 2534 Cargo tests, 6 ignored; PTY 58/58), the Intel macOS native preflight's 4 gates (2512, 6 ignored; PTY 56/56), and cross-target Clippy for Windows and Apple Silicon.",
+  "summary": "Approval history at 72b43cd2cc: each sandbox escalation that needs approval writes D24's approval/asked and approval/decided events as synced Pi custom entries of type bake.approval, the request before anyone is asked and the answer before an allowed-once call runs; permissions::history folds them into an audit trail that grants nothing. The tests ran in the rust gates at HEAD 519a202b13, where the approval code and both test files are byte-identical to the candidate: the second full Linux preflight passed 33 gates (actionlint and runtime skipped) after a first attempt under umask 077 failed two packaging gates on an archive mode check, and the Intel x86_64 macOS native preflight passed 4 gates; each rust gate passed the 15 agent_session::approval_tests and the 9 permissions::history::tests. Write failures are injected at the durable write seam, and the kill test kills a held child after its answer is synced. The worker's saved slice-branch logs show a passing workspace test run that includes both test sets, a cross-target Clippy of bake-coding-agent with no diagnostic, a whole-workspace one that exits 1 on another slice's bake-cli test dead code, and one run and one round of 8 concurrent copies of the approval tests, where B's report states 80 runs and 3 rounds; its four mutation controls left no log. Windows (compile-checked only), Apple Silicon, kills between the two entries or inside write or fsync, real ENOSPC or EIO, and Auto review remain. Before push the stack was rebased onto develop c5f02c476a (scope 12 web tools and hooks, scope 15 commands), which changed every hash: this record's candidate 72b43cd2cc became 8fdc5e13b1 and its base 50079d17c2 became 8c3ba99a6e, with the fixture bytes unchanged. The runs above at 519a202b13 are pre-rebase. A second run set at bfdbbcb875, the rebased stack with three integration commits on top (Windows lint fixes in the scope 12 and 15 code, D41's inconclusive loopback timeout, and Never replay classes for web_search and web_fetch), passed: the Linux preflight's 33 gates (actionlint and the TypeScript runtime skipped; 2534 Cargo tests, 6 ignored; PTY 58/58), the Intel macOS native preflight's 4 gates (2512, 6 ignored; PTY 56/56), and cross-target Clippy for Windows and Apple Silicon. A dispatched CI run of the scratch branch ci/qualify-win-mac (https://github.com/Justar96/bake/actions/runs/39206590298) then ran the whole workspace with --no-fail-fast at 9111a94546, which is develop's later fix commit 54e9a05872 plus one commit changing only .github/workflows/ci.yml: windows-latest passed 2397 tests with 7 ignored, and macos-latest (Apple Silicon) 2554 with 6 ignored; that commit's own fixes are named in its history. The same run's native preflight failed only Windows rust-pty, on five inline ConPTY scenarios that failed on every earlier Windows run too.",
   "supersedes": [],
   "provenance": {
     "base": "8c3ba99a6e93b5822bf864900386e9ec9a95bfd3",
@@ -859,6 +859,74 @@
         "reference": ".preflight/rust-orchestration/xclippy-bfdbbcb875.log",
         "sha256": "9eecce6c7ab6f1fcdc5e72eabcbdeae39ec87fc914f30ed94d65be7a0ce661ea"
       }
+    },
+    {
+      "id": "ci-windows-tests",
+      "argv": [
+        "cargo",
+        "test",
+        "--locked",
+        "--workspace",
+        "--no-fail-fast",
+        "--",
+        "--nocapture"
+      ],
+      "cwd": "rust",
+      "host": {
+        "os": "win32",
+        "arch": "x64",
+        "runner": "GitHub Actions windows-latest, https://github.com/Justar96/bake/actions/runs/39206590298/job/117910662354"
+      },
+      "tools": {
+        "rust-toolchain": "1.99.0 (pinned by rust/rust-toolchain.toml, installed by the job)"
+      },
+      "testedCommit": "9111a94546cbc20974e0c88a75ae5c3be58622fd",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 2397,
+        "failed": 0,
+        "skipped": 7,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/ci-39206590298/rust-failures-windows-latest/all-tests.log",
+        "sha256": "d49ea6d2cde5b62fb98e89afce4ed6f0e193b5dcb8d114821f8a65d68fdbc69e"
+      }
+    },
+    {
+      "id": "ci-apple-silicon-tests",
+      "argv": [
+        "cargo",
+        "test",
+        "--locked",
+        "--workspace",
+        "--no-fail-fast",
+        "--",
+        "--nocapture"
+      ],
+      "cwd": "rust",
+      "host": {
+        "os": "darwin",
+        "arch": "arm64",
+        "runner": "GitHub Actions macos-latest, https://github.com/Justar96/bake/actions/runs/39206590298/job/117910662270"
+      },
+      "tools": {
+        "rust-toolchain": "1.99.0 (pinned by rust/rust-toolchain.toml, installed by the job)"
+      },
+      "testedCommit": "9111a94546cbc20974e0c88a75ae5c3be58622fd",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 2554,
+        "failed": 0,
+        "skipped": 6,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/ci-39206590298/rust-log-macos-latest/all-tests.log",
+        "sha256": "69272563cba352dbe358c0f574240e021dea0952019c8c9c5842fae9e53a5634"
+      }
     }
   ],
   "results": [
@@ -956,12 +1024,11 @@
       "id": "windows-approval-history",
       "behavior": "The approval entries, failed-write refusals, and the killed writer on Windows, including its expected exit code 1.",
       "owner": "rust/crates/bake-coding-agent/src/agent_session/approval_tests.rs",
-      "report": {
-        "missing": "No Windows command ran for this candidate."
-      },
-      "commands": [],
-      "outcome": "missing",
-      "reason": "No Windows host was available, and GitHub CI runs Windows only on the develop to main release pull request; Windows is compile-checked only."
+      "report": ".preflight/rust-orchestration/ci-39206590298/rust-failures-windows-latest/all-tests.log",
+      "commands": [
+        "ci-windows-tests"
+      ],
+      "outcome": "pass"
     },
     {
       "id": "kill-between-entries",
@@ -1009,16 +1076,6 @@
       "what": "The commit message's merged-tree bake-coding-agent run (1239 passed, 5 ignored)",
       "reason": "No log names this run and B's report does not mention it. The saved merged-tree crate log in the scope-work directory, merged-C-crate.log, is slice C's run before C's commit, not this one.",
       "owner": "unassigned"
-    },
-    {
-      "what": "Windows runs",
-      "reason": "No Windows host was available, and GitHub CI runs Windows only on the develop to main release pull request. Every approval test, including the kill test's exit-code-1 branch, is compile-checked only.",
-      "owner": "docs/roadmap/rust-0.4/verification.md"
-    },
-    {
-      "what": "Apple Silicon",
-      "reason": "The Mac is Intel x86_64; aarch64-apple-darwin is compile-checked by cross-target Clippy only.",
-      "owner": "docs/roadmap/rust-0.4/verification.md"
     },
     {
       "what": "A kill between asked and decided, a kill inside a write or fsync system call, real ENOSPC or EIO, and power loss",

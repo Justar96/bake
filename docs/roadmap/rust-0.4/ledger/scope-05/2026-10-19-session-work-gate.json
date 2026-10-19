@@ -5,7 +5,7 @@
   "scope": "05",
   "status": "partial",
   "recordedOn": "2026-10-19",
-  "summary": "Session WorkGate for write, edit, grep, and find at candidate 50079d17c2, the squash of rust/s05-work-gate. HEAD 519a202b13 contains the candidate. There, from a clean checkout, the Linux preflight passed 33 gates under umask 022, with actionlint and runtime skipped, and the Intel x86_64 macOS native preflight passed 4 gates. Their rust gates ran 2422 and 2378 Cargo tests, with 6 ignored on each. Both hosts ran the slice's ownership_tests, both mutation_shutdown cases, and the schedule-look case; tests/session_job_reap.rs ran on Linux only. A Linux preflight under umask 077 at the same commit failed scripts-unit and rust-package because the unpacked bake-rs had mode 0700; no slice touched that code. On the slice branch, the crate and workspace suites passed on Linux. Cross-target Clippy there failed only on bake-cli's print_mode dead code, which the native process slice fixed. No test ran on Windows or Apple Silicon, and the worker's negative controls kept no logs. This record does not supersede 2026-10-14-persistent-settings-credentials, which covers settings and credential storage APIs, not session work ownership. Before push the stack was rebased onto develop c5f02c476a (scope 12 web tools and hooks, scope 15 commands), which changed every hash: this record's candidate 50079d17c2 became 8c3ba99a6e and its base 4fa5f118f1 became ec58dc9375, with the fixture bytes unchanged. The runs above at 519a202b13 are pre-rebase. A second run set at bfdbbcb875, the rebased stack with three integration commits on top (Windows lint fixes in the scope 12 and 15 code, D41's inconclusive loopback timeout, and Never replay classes for web_search and web_fetch), passed: the Linux preflight's 33 gates (actionlint and the TypeScript runtime skipped; 2534 Cargo tests, 6 ignored; PTY 58/58), the Intel macOS native preflight's 4 gates (2512, 6 ignored; PTY 56/56), and cross-target Clippy for Windows and Apple Silicon.",
+  "summary": "Session WorkGate for write, edit, grep, and find at candidate 50079d17c2, the squash of rust/s05-work-gate. HEAD 519a202b13 contains the candidate. There, from a clean checkout, the Linux preflight passed 33 gates under umask 022, with actionlint and runtime skipped, and the Intel x86_64 macOS native preflight passed 4 gates. Their rust gates ran 2422 and 2378 Cargo tests, with 6 ignored on each. Both hosts ran the slice's ownership_tests, both mutation_shutdown cases, and the schedule-look case; tests/session_job_reap.rs ran on Linux only. A Linux preflight under umask 077 at the same commit failed scripts-unit and rust-package because the unpacked bake-rs had mode 0700; no slice touched that code. On the slice branch, the crate and workspace suites passed on Linux. Cross-target Clippy there failed only on bake-cli's print_mode dead code, which the native process slice fixed. No test ran on Windows or Apple Silicon, and the worker's negative controls kept no logs. This record does not supersede 2026-10-14-persistent-settings-credentials, which covers settings and credential storage APIs, not session work ownership. Before push the stack was rebased onto develop c5f02c476a (scope 12 web tools and hooks, scope 15 commands), which changed every hash: this record's candidate 50079d17c2 became 8c3ba99a6e and its base 4fa5f118f1 became ec58dc9375, with the fixture bytes unchanged. The runs above at 519a202b13 are pre-rebase. A second run set at bfdbbcb875, the rebased stack with three integration commits on top (Windows lint fixes in the scope 12 and 15 code, D41's inconclusive loopback timeout, and Never replay classes for web_search and web_fetch), passed: the Linux preflight's 33 gates (actionlint and the TypeScript runtime skipped; 2534 Cargo tests, 6 ignored; PTY 58/58), the Intel macOS native preflight's 4 gates (2512, 6 ignored; PTY 56/56), and cross-target Clippy for Windows and Apple Silicon. A dispatched CI run of the scratch branch ci/qualify-win-mac (https://github.com/Justar96/bake/actions/runs/39206590298) then ran the whole workspace with --no-fail-fast at 9111a94546, which is develop's later fix commit 54e9a05872 plus one commit changing only .github/workflows/ci.yml: windows-latest passed 2397 tests with 7 ignored, and macos-latest (Apple Silicon) 2554 with 6 ignored; that commit's own fixes are named in its history. The same run's native preflight failed only Windows rust-pty, on five inline ConPTY scenarios that failed on every earlier Windows run too.",
   "supersedes": [],
   "provenance": {
     "base": "ec58dc93750fb97f74808c172d551ba0cda0d8b9",
@@ -579,6 +579,74 @@
         "reference": ".preflight/rust-orchestration/xclippy-bfdbbcb875.log",
         "sha256": "9eecce6c7ab6f1fcdc5e72eabcbdeae39ec87fc914f30ed94d65be7a0ce661ea"
       }
+    },
+    {
+      "id": "ci-windows-tests",
+      "argv": [
+        "cargo",
+        "test",
+        "--locked",
+        "--workspace",
+        "--no-fail-fast",
+        "--",
+        "--nocapture"
+      ],
+      "cwd": "rust",
+      "host": {
+        "os": "win32",
+        "arch": "x64",
+        "runner": "GitHub Actions windows-latest, https://github.com/Justar96/bake/actions/runs/39206590298/job/117910662354"
+      },
+      "tools": {
+        "rust-toolchain": "1.99.0 (pinned by rust/rust-toolchain.toml, installed by the job)"
+      },
+      "testedCommit": "9111a94546cbc20974e0c88a75ae5c3be58622fd",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 2397,
+        "failed": 0,
+        "skipped": 7,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/ci-39206590298/rust-failures-windows-latest/all-tests.log",
+        "sha256": "d49ea6d2cde5b62fb98e89afce4ed6f0e193b5dcb8d114821f8a65d68fdbc69e"
+      }
+    },
+    {
+      "id": "ci-apple-silicon-tests",
+      "argv": [
+        "cargo",
+        "test",
+        "--locked",
+        "--workspace",
+        "--no-fail-fast",
+        "--",
+        "--nocapture"
+      ],
+      "cwd": "rust",
+      "host": {
+        "os": "darwin",
+        "arch": "arm64",
+        "runner": "GitHub Actions macos-latest, https://github.com/Justar96/bake/actions/runs/39206590298/job/117910662270"
+      },
+      "tools": {
+        "rust-toolchain": "1.99.0 (pinned by rust/rust-toolchain.toml, installed by the job)"
+      },
+      "testedCommit": "9111a94546cbc20974e0c88a75ae5c3be58622fd",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 2554,
+        "failed": 0,
+        "skipped": 6,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/ci-39206590298/rust-log-macos-latest/all-tests.log",
+        "sha256": "69272563cba352dbe358c0f574240e021dea0952019c8c9c5842fae9e53a5634"
+      }
     }
   ],
   "results": [
@@ -676,14 +744,11 @@
       "id": "windows-work-gate",
       "behavior": "The slice's ownership tests on Windows. ownership_tests compile for Windows, except the Unix-only grep_and_find case. mutation_shutdown (Unix) and session_job_reap (Linux) are not compiled there. On the slice branch at 548b3baeed, cross-target Clippy exited 1 (worker report). The log shows only four dead-code errors for x86_64-pc-windows-gnu, in bake-cli's tests/print_mode/schedules.rs (outputs, declared) and tests/print_mode/subagents.rs (two_models, is_child). It shows no error for bake-coding-agent or any other crate on Windows, and a clean aarch64-apple-darwin pass. Those helpers belong to the native process slice, whose cfg fix landed on develop in candidate c2144d52a5, before this candidate; the HEAD run is clean (cross-target-lint).",
       "owner": "rust/crates/bake-coding-agent/src/tools/definition.rs",
-      "report": {
-        "missing": "No Windows command ran at this candidate."
-      },
+      "report": ".preflight/rust-orchestration/ci-39206590298/rust-failures-windows-latest/all-tests.log",
       "commands": [
-        "slice-cross-target-clippy"
+        "ci-windows-tests"
       ],
-      "outcome": "missing",
-      "reason": "No Windows host was available. Windows runs only in the CI of the develop to main release pull request."
+      "outcome": "pass"
     },
     {
       "id": "umask-077-preflight",
@@ -702,12 +767,11 @@
       "id": "apple-silicon",
       "behavior": "The slice's tests on Apple Silicon macOS.",
       "owner": "docs/roadmap/rust-0.4/verification.md",
-      "report": {
-        "missing": "No Apple Silicon command ran."
-      },
-      "commands": [],
-      "outcome": "missing",
-      "reason": "The only Mac is Intel x86_64. aarch64-apple-darwin is checked by cross-target Clippy only."
+      "report": ".preflight/rust-orchestration/ci-39206590298/rust-log-macos-latest/all-tests.log",
+      "commands": [
+        "ci-apple-silicon-tests"
+      ],
+      "outcome": "pass"
     }
   ],
   "negativeControls": {
@@ -743,16 +807,6 @@
       "what": "Merged-tree crate run named in the commit message",
       "reason": "The candidate's commit message says the bake-coding-agent suite passed 1215 tests, with 5 ignored, on the merged tree. No log of that run exists, so this record does not cite it.",
       "owner": "rust/crates/bake-coding-agent"
-    },
-    {
-      "what": "Windows runtime evidence for the work gate",
-      "reason": "No Windows host was available, so no test of this slice ran on Windows; Windows is cross-target Clippy only. Windows confinement stays refused by default and unqualified.",
-      "owner": "docs/roadmap/rust-0.4/verification.md"
-    },
-    {
-      "what": "Apple Silicon",
-      "reason": "The macOS evidence is from one Intel x86_64 Mac. aarch64-apple-darwin is cross-target Clippy only.",
-      "owner": "docs/roadmap/rust-0.4/verification.md"
     },
     {
       "what": "Owned forms of the public file-tool constructors",

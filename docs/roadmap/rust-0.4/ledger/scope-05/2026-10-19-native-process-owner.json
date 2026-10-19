@@ -5,7 +5,7 @@
   "scope": "05",
   "status": "partial",
   "recordedOn": "2026-10-19",
-  "summary": "Native process owner qualification at candidate c2144d52a5, the squash of rust/s05-native-process-qual (064128eefc, 13b504bfb9, 6f50e695d8, from branch point 568a6acfa1). The candidate changes tests only: tests/process_macos.rs, the macOS counterpart of the Linux-only tests/process_reap.rs; a nested-job case in tests/process_windows.rs; and #[cfg(unix)] on bake-cli's print_mode test helpers. No product code changed. HEAD 519a202b13 contains the candidate. There, from a clean checkout, the Intel x86_64 macOS native preflight passed 4 gates, and its rust gate ran process_macos's 10 cases, with its 2 subprocess bodies ignored. The Linux preflight passed 33 gates under umask 022, with actionlint and runtime skipped; under umask 077 it failed scripts-unit and rust-package on the unpacked bake-rs binary's mode, which no slice touched. On the slice branch, process_macos passed in seven more Mac runs, and Linux Clippy, the Linux workspace tests, and cross-target Clippy passed. The first Mac run failed in the build on the runner's open-file limit. No Windows test ran, so the nested-job case and the README's 'a job breakaway' phrase it questions are unverified. Apple Silicon is cross-target Clippy only, and the worker's negative controls kept no logs. This record does not supersede 2026-10-14-persistent-settings-credentials, which covers settings and credential storage APIs, not process ownership. Before push the stack was rebased onto develop c5f02c476a (scope 12 web tools and hooks, scope 15 commands), which changed every hash: this record's candidate c2144d52a5 became 97d2c60707 and its base 4703b27537 became c5f02c476a, with the fixture bytes unchanged. The runs above at 519a202b13 are pre-rebase. A second run set at bfdbbcb875, the rebased stack with three integration commits on top (Windows lint fixes in the scope 12 and 15 code, D41's inconclusive loopback timeout, and Never replay classes for web_search and web_fetch), passed: the Linux preflight's 33 gates (actionlint and the TypeScript runtime skipped; 2534 Cargo tests, 6 ignored; PTY 58/58), the Intel macOS native preflight's 4 gates (2512, 6 ignored; PTY 56/56), and cross-target Clippy for Windows and Apple Silicon.",
+  "summary": "Native process owner qualification at candidate c2144d52a5, the squash of rust/s05-native-process-qual (064128eefc, 13b504bfb9, 6f50e695d8, from branch point 568a6acfa1). The candidate changes tests only: tests/process_macos.rs, the macOS counterpart of the Linux-only tests/process_reap.rs; a nested-job case in tests/process_windows.rs; and #[cfg(unix)] on bake-cli's print_mode test helpers. No product code changed. HEAD 519a202b13 contains the candidate. There, from a clean checkout, the Intel x86_64 macOS native preflight passed 4 gates, and its rust gate ran process_macos's 10 cases, with its 2 subprocess bodies ignored. The Linux preflight passed 33 gates under umask 022, with actionlint and runtime skipped; under umask 077 it failed scripts-unit and rust-package on the unpacked bake-rs binary's mode, which no slice touched. On the slice branch, process_macos passed in seven more Mac runs, and Linux Clippy, the Linux workspace tests, and cross-target Clippy passed. The first Mac run failed in the build on the runner's open-file limit. No Windows test ran, so the nested-job case and the README's 'a job breakaway' phrase it questions are unverified. Apple Silicon is cross-target Clippy only, and the worker's negative controls kept no logs. This record does not supersede 2026-10-14-persistent-settings-credentials, which covers settings and credential storage APIs, not process ownership. Before push the stack was rebased onto develop c5f02c476a (scope 12 web tools and hooks, scope 15 commands), which changed every hash: this record's candidate c2144d52a5 became 97d2c60707 and its base 4703b27537 became c5f02c476a, with the fixture bytes unchanged. The runs above at 519a202b13 are pre-rebase. A second run set at bfdbbcb875, the rebased stack with three integration commits on top (Windows lint fixes in the scope 12 and 15 code, D41's inconclusive loopback timeout, and Never replay classes for web_search and web_fetch), passed: the Linux preflight's 33 gates (actionlint and the TypeScript runtime skipped; 2534 Cargo tests, 6 ignored; PTY 58/58), the Intel macOS native preflight's 4 gates (2512, 6 ignored; PTY 56/56), and cross-target Clippy for Windows and Apple Silicon. A dispatched CI run of the scratch branch ci/qualify-win-mac (https://github.com/Justar96/bake/actions/runs/39206590298) then ran the whole workspace with --no-fail-fast at 9111a94546, which is develop's later fix commit 54e9a05872 plus one commit changing only .github/workflows/ci.yml: windows-latest passed 2397 tests with 7 ignored, and macos-latest (Apple Silicon) 2554 with 6 ignored; that commit's own fixes are named in its history. The same run's native preflight failed only Windows rust-pty, on five inline ConPTY scenarios that failed on every earlier Windows run too.",
   "supersedes": [],
   "provenance": {
     "base": "c5f02c476aa3844dadda0e57adfef5a6e60395cc",
@@ -740,6 +740,74 @@
         "reference": ".preflight/rust-orchestration/xclippy-bfdbbcb875.log",
         "sha256": "9eecce6c7ab6f1fcdc5e72eabcbdeae39ec87fc914f30ed94d65be7a0ce661ea"
       }
+    },
+    {
+      "id": "ci-windows-tests",
+      "argv": [
+        "cargo",
+        "test",
+        "--locked",
+        "--workspace",
+        "--no-fail-fast",
+        "--",
+        "--nocapture"
+      ],
+      "cwd": "rust",
+      "host": {
+        "os": "win32",
+        "arch": "x64",
+        "runner": "GitHub Actions windows-latest, https://github.com/Justar96/bake/actions/runs/39206590298/job/117910662354"
+      },
+      "tools": {
+        "rust-toolchain": "1.99.0 (pinned by rust/rust-toolchain.toml, installed by the job)"
+      },
+      "testedCommit": "9111a94546cbc20974e0c88a75ae5c3be58622fd",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 2397,
+        "failed": 0,
+        "skipped": 7,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/ci-39206590298/rust-failures-windows-latest/all-tests.log",
+        "sha256": "d49ea6d2cde5b62fb98e89afce4ed6f0e193b5dcb8d114821f8a65d68fdbc69e"
+      }
+    },
+    {
+      "id": "ci-apple-silicon-tests",
+      "argv": [
+        "cargo",
+        "test",
+        "--locked",
+        "--workspace",
+        "--no-fail-fast",
+        "--",
+        "--nocapture"
+      ],
+      "cwd": "rust",
+      "host": {
+        "os": "darwin",
+        "arch": "arm64",
+        "runner": "GitHub Actions macos-latest, https://github.com/Justar96/bake/actions/runs/39206590298/job/117910662270"
+      },
+      "tools": {
+        "rust-toolchain": "1.99.0 (pinned by rust/rust-toolchain.toml, installed by the job)"
+      },
+      "testedCommit": "9111a94546cbc20974e0c88a75ae5c3be58622fd",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 2554,
+        "failed": 0,
+        "skipped": 6,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/ci-39206590298/rust-log-macos-latest/all-tests.log",
+        "sha256": "69272563cba352dbe358c0f574240e021dea0952019c8c9c5842fae9e53a5634"
+      }
     }
   ],
   "results": [
@@ -826,15 +894,11 @@
       "id": "windows-process-owner",
       "behavior": "The Windows process owner's cases in tests/process_windows.rs: powershell_paths_are_quoted, a_normal_exit_leaves_its_background_running, an_abort_ends_and_awaits_the_whole_job, the_owners_death_before_detach_ends_the_tree, and the candidate's an_abort_ends_a_nested_job_and_nothing_breaks_away. helper_case and nested_case are #[ignore] subprocess bodies. The file is #![cfg(windows)], so both HEAD rust gates ran its binary with 0 tests. In the new case, PowerShell starts nested_case inside the call's kill-on-close job. The helper asks for a child with CREATE_BREAKAWAY_FROM_JOB and expects it to be refused. It then creates a job that allows breakaway, assigns itself to it, and starts one child there and one with CREATE_BREAKAWAY_FROM_JOB. After the abort, the test requires the call to return aborted and killed with both nested children already exited. The expectations come from Microsoft's Nested Jobs and Process Creation Flags pages. The expected ERROR_ACCESS_DENIED (5) is the worker's prediction: the page names no error code. The file compiles and lints for x86_64-pc-windows-gnu (cross-target Clippy at HEAD and at the slice head). The candidate adds Win32_System_JobObjects to the windows-sys Windows dev-dependency.",
       "owner": "rust/crates/bake-coding-agent/tests/process_windows.rs",
-      "report": {
-        "missing": "No Windows command ran at this candidate."
-      },
+      "report": ".preflight/rust-orchestration/ci-39206590298/rust-failures-windows-latest/all-tests.log",
       "commands": [
-        "cross-target-clippy",
-        "slice-cross-target-clippy"
+        "ci-windows-tests"
       ],
-      "outcome": "missing",
-      "reason": "No Windows host was available. Windows runs only in the CI of the develop to main release pull request."
+      "outcome": "pass"
     },
     {
       "id": "umask-077-preflight",
@@ -864,12 +928,11 @@
       "id": "apple-silicon",
       "behavior": "The process owner's tests on Apple Silicon macOS.",
       "owner": "docs/roadmap/rust-0.4/verification.md",
-      "report": {
-        "missing": "No Apple Silicon command ran."
-      },
-      "commands": [],
-      "outcome": "missing",
-      "reason": "The only Mac is Intel x86_64. aarch64-apple-darwin is checked by cross-target Clippy only."
+      "report": ".preflight/rust-orchestration/ci-39206590298/rust-log-macos-latest/all-tests.log",
+      "commands": [
+        "ci-apple-silicon-tests"
+      ],
+      "outcome": "pass"
     }
   ],
   "negativeControls": {
@@ -905,21 +968,6 @@
       "what": "The worker's pre-commit checks",
       "reason": "The report lists runs without logs. xclippy -p bake-cli failed with four Windows errors before the fix and was clean after it. Clippy and fmt passed for bake-cli. The print_mode schedules:: and subagents:: filter passed 3 tests. For bake-coding-agent, Linux Clippy and aarch64-apple-darwin Clippy passed before the macOS commit, and x86_64-pc-windows-gnu Clippy passed before the Windows commit.",
       "owner": "rust/crates/bake-cli/tests/print_mode/schedules.rs"
-    },
-    {
-      "what": "Whether 'a job breakaway' belongs in the bake-process description",
-      "reason": "rust/README.md line 160, the bake-process row, lists 'a job breakaway' among the ways a descendant leaves the owned tree. The crate docs in rust/crates/bake-process/src/lib.rs line 54 say the same. But windows_job.rs set_kill_on_close sets only JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, documented as 'the only limit set on it'. Per Microsoft's Process Creation Flags page, a breakaway then needs JOB_OBJECT_LIMIT_BREAKAWAY_OK, which this job never sets, so a breakaway from it should be refused. The phrase may be wrong. Confirming that needs a Windows run of an_abort_ends_a_nested_job_and_nothing_breaks_away, which has not happened, so the text is unchanged.",
-      "owner": "rust/README.md"
-    },
-    {
-      "what": "Windows runtime evidence for the process owner",
-      "reason": "No Windows host was available, so no case in tests/process_windows.rs has run: not the three earlier cases, not the path-quoting test, and not the new nested-job case. If the owner's ledger does not count nested jobs' processes, the new case would fail with 'the call returned while a nested job's process ran'. Windows confinement stays refused by default and unqualified.",
-      "owner": "rust/crates/bake-coding-agent/tests/process_windows.rs"
-    },
-    {
-      "what": "Apple Silicon",
-      "reason": "The macOS evidence is from one Intel x86_64 Mac (XNU 12377, macOS 26.7.1). aarch64-apple-darwin is cross-target Clippy only.",
-      "owner": "docs/roadmap/rust-0.4/verification.md"
     },
     {
       "what": "A macOS counterpart of process_reap.rs's pid-1 case",

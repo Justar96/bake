@@ -5,7 +5,7 @@
   "scope": "03",
   "status": "partial",
   "recordedOn": "2026-10-19",
-  "summary": "Session writer kills at b813395413, run at develop 519a202b13, which contains it with nothing under rust/crates/bake-coding-agent/src/session/ changed. The Linux preflight passed 33 gates (actionlint and the TypeScript runtime gate skipped) on its second attempt, under umask 022; the first, under umask 077, failed scripts-unit and rust-package because the unpacked bake-rs had mode 0700. The Intel x86_64 macOS native preflight passed its 4 gates. On Linux, RLIMIT_FSIZE stops a child writer inside the write system call of a single append, of each line of a three-line group, and of a migration's temporary file, before the first byte, after one, half way, and before the newline: the default SIGXFSZ kills it, or, with the signal ignored or caught, the kernel's EFBIG returns. /dev/full returns a real ENOSPC with nothing written. On Linux and Intel macOS, a child is SIGKILLed at each of six steps of a v2 migration and of a branched-session write, and the target holds exactly its old or its new bytes. This record covers another part of scope 03. It fills gaps that the 2026-10-14 storage and 2026-10-17 group-append records list as missing without correcting what they observed, so it supersedes neither. The worker's own runs and its four mutation checks left no logs. Kills inside write on macOS and Windows, any Windows run, EIO, a file system filling up, power loss, and the in-place rewrite remain. Before push the stack was rebased onto develop c5f02c476a (scope 12 web tools and hooks, scope 15 commands), which changed every hash: this record's candidate b813395413 became d8bc9a097e and its base c2144d52a5 became 97d2c60707, with the fixture bytes unchanged. The runs above at 519a202b13 are pre-rebase. A second run set at bfdbbcb875, the rebased stack with three integration commits on top (Windows lint fixes in the scope 12 and 15 code, D41's inconclusive loopback timeout, and Never replay classes for web_search and web_fetch), passed: the Linux preflight's 33 gates (actionlint and the TypeScript runtime skipped; 2534 Cargo tests, 6 ignored; PTY 58/58), the Intel macOS native preflight's 4 gates (2512, 6 ignored; PTY 56/56), and cross-target Clippy for Windows and Apple Silicon.",
+  "summary": "Session writer kills at b813395413, run at develop 519a202b13, which contains it with nothing under rust/crates/bake-coding-agent/src/session/ changed. The Linux preflight passed 33 gates (actionlint and the TypeScript runtime gate skipped) on its second attempt, under umask 022; the first, under umask 077, failed scripts-unit and rust-package because the unpacked bake-rs had mode 0700. The Intel x86_64 macOS native preflight passed its 4 gates. On Linux, RLIMIT_FSIZE stops a child writer inside the write system call of a single append, of each line of a three-line group, and of a migration's temporary file, before the first byte, after one, half way, and before the newline: the default SIGXFSZ kills it, or, with the signal ignored or caught, the kernel's EFBIG returns. /dev/full returns a real ENOSPC with nothing written. On Linux and Intel macOS, a child is SIGKILLed at each of six steps of a v2 migration and of a branched-session write, and the target holds exactly its old or its new bytes. This record covers another part of scope 03. It fills gaps that the 2026-10-14 storage and 2026-10-17 group-append records list as missing without correcting what they observed, so it supersedes neither. The worker's own runs and its four mutation checks left no logs. Kills inside write on macOS and Windows, any Windows run, EIO, a file system filling up, power loss, and the in-place rewrite remain. Before push the stack was rebased onto develop c5f02c476a (scope 12 web tools and hooks, scope 15 commands), which changed every hash: this record's candidate b813395413 became d8bc9a097e and its base c2144d52a5 became 97d2c60707, with the fixture bytes unchanged. The runs above at 519a202b13 are pre-rebase. A second run set at bfdbbcb875, the rebased stack with three integration commits on top (Windows lint fixes in the scope 12 and 15 code, D41's inconclusive loopback timeout, and Never replay classes for web_search and web_fetch), passed: the Linux preflight's 33 gates (actionlint and the TypeScript runtime skipped; 2534 Cargo tests, 6 ignored; PTY 58/58), the Intel macOS native preflight's 4 gates (2512, 6 ignored; PTY 56/56), and cross-target Clippy for Windows and Apple Silicon. A dispatched CI run of the scratch branch ci/qualify-win-mac (https://github.com/Justar96/bake/actions/runs/39206590298) then ran the whole workspace with --no-fail-fast at 9111a94546, which is develop's later fix commit 54e9a05872 plus one commit changing only .github/workflows/ci.yml: windows-latest passed 2397 tests with 7 ignored, and macos-latest (Apple Silicon) 2554 with 6 ignored; that commit's own fixes are named in its history. The same run's native preflight failed only Windows rust-pty, on five inline ConPTY scenarios that failed on every earlier Windows run too.",
   "supersedes": [],
   "provenance": {
     "base": "97d2c607076b1ec99efeb51a159930f12dfb23c0",
@@ -422,6 +422,74 @@
         "reference": ".preflight/rust-orchestration/xclippy-bfdbbcb875.log",
         "sha256": "9eecce6c7ab6f1fcdc5e72eabcbdeae39ec87fc914f30ed94d65be7a0ce661ea"
       }
+    },
+    {
+      "id": "ci-windows-tests",
+      "argv": [
+        "cargo",
+        "test",
+        "--locked",
+        "--workspace",
+        "--no-fail-fast",
+        "--",
+        "--nocapture"
+      ],
+      "cwd": "rust",
+      "host": {
+        "os": "win32",
+        "arch": "x64",
+        "runner": "GitHub Actions windows-latest, https://github.com/Justar96/bake/actions/runs/39206590298/job/117910662354"
+      },
+      "tools": {
+        "rust-toolchain": "1.99.0 (pinned by rust/rust-toolchain.toml, installed by the job)"
+      },
+      "testedCommit": "9111a94546cbc20974e0c88a75ae5c3be58622fd",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 2397,
+        "failed": 0,
+        "skipped": 7,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/ci-39206590298/rust-failures-windows-latest/all-tests.log",
+        "sha256": "d49ea6d2cde5b62fb98e89afce4ed6f0e193b5dcb8d114821f8a65d68fdbc69e"
+      }
+    },
+    {
+      "id": "ci-apple-silicon-tests",
+      "argv": [
+        "cargo",
+        "test",
+        "--locked",
+        "--workspace",
+        "--no-fail-fast",
+        "--",
+        "--nocapture"
+      ],
+      "cwd": "rust",
+      "host": {
+        "os": "darwin",
+        "arch": "arm64",
+        "runner": "GitHub Actions macos-latest, https://github.com/Justar96/bake/actions/runs/39206590298/job/117910662270"
+      },
+      "tools": {
+        "rust-toolchain": "1.99.0 (pinned by rust/rust-toolchain.toml, installed by the job)"
+      },
+      "testedCommit": "9111a94546cbc20974e0c88a75ae5c3be58622fd",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 2554,
+        "failed": 0,
+        "skipped": 6,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/ci-39206590298/rust-log-macos-latest/all-tests.log",
+        "sha256": "69272563cba352dbe358c0f574240e021dea0952019c8c9c5842fae9e53a5634"
+      }
     }
   ],
   "results": [
@@ -548,18 +616,17 @@
       },
       "commands": [],
       "outcome": "missing",
-      "reason": "On macOS, whether XNU shortens a write that crosses RLIMIT_FSIZE or refuses it whole is unverified; Windows has no equivalent limit."
+      "reason": "Windows has no equivalent of RLIMIT_FSIZE. On macOS the limit cannot stop a writer at a chosen byte: measured on macOS 26.7.1 (Intel), it is checked against an O_APPEND descriptor's offset rather than the file's end, so a fresh append descriptor on a file already at the limit writes past it with no signal (kernel_write_tests.rs's module documentation)."
     },
     {
       "id": "windows-rewrite-and-group-kills",
       "behavior": "The rewrite kill tests, the seam test, and the group kill test on Windows, including the Windows exit code of a killed child.",
       "owner": "rust/crates/bake-coding-agent/src/session/manager/rewrite_tests.rs",
-      "report": {
-        "missing": "No Windows command ran at this candidate or at 519a202b13."
-      },
-      "commands": [],
-      "outcome": "missing",
-      "reason": "No Windows host was available, so these tests are compile-checked only (cross-target-compile); GitHub CI runs Windows only on the develop to main release pull request."
+      "report": ".preflight/rust-orchestration/ci-39206590298/rust-failures-windows-latest/all-tests.log",
+      "commands": [
+        "ci-windows-tests"
+      ],
+      "outcome": "pass"
     }
   ],
   "negativeControls": {
@@ -570,11 +637,6 @@
       "what": "Kill inside write on macOS and Windows",
       "reason": "kernel_write_tests are cfg(target_os = \"linux\"); macOS's handling of a write crossing RLIMIT_FSIZE is unverified, and Windows has no such limit.",
       "owner": "rust/crates/bake-coding-agent/src/session/manager/kernel_write_tests.rs"
-    },
-    {
-      "what": "Windows runs of the rewrite, seam, and group kill tests",
-      "reason": "No Windows host was available; the tests are compile-checked only. GitHub CI runs Windows only on the develop to main release pull request.",
-      "owner": "docs/roadmap/rust-0.4/verification.md"
     },
     {
       "what": "Real EIO, a file system filling up, and partial writes or fsync errors from a full file system",
