@@ -3736,7 +3736,7 @@ mod tests {
             state.next_change(),
             Some(activity::BEAT.min(Duration::from_millis(350)))
         );
-        // Calls arrive on the clock: the glob settles, and the reads start.
+        // Calls arrive on the clock: the `find` settles, and the reads start.
         update(&mut state, Msg::Tick(Duration::from_millis(650)));
         assert_eq!(script(&state), (CallState::Running, None, 1 + live::POOL));
         chord(&mut state, Key::Char('t'), Mods::CTRL);
