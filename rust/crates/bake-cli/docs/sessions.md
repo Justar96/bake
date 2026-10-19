@@ -22,7 +22,7 @@ A resumed session keeps its model, thinking level, and permission unless a flag 
 
 ## Exporting a session
 
-`bake-rs --export <session-file> [output.html]` writes a session file as one self-contained web page and exits: every entry of the file, including branches you left, viewable in a browser without a network connection. Unlike `/share`, which runs inside a session, the page holds no system prompt and no tool definitions, because no session is set up to supply them. Without an output path the page is written to `bake-rs-session-<session file name>.html` in the working directory. The command reads no settings, credentials, or network, and needs no Bake home; a missing or empty session file is an error with status 1, and so is a session another run is writing. The session file itself is never changed.
+`bake-rs --export <session-file> [output.html]` writes a session file as one self-contained web page and exits: every entry of the file, including branches you left, viewable in a browser without a network connection. Unlike `/share`, which runs inside a session, the page holds no system prompt and no tool definitions, because no session is set up to supply them. Without an output path the page is written to `bake-rs-session-<session file name>.html` in the working directory. The command reads no settings, credentials, or network, and needs no Bake home; a missing or empty session file is an error with status 1. The session file itself is never changed: it is read without taking its lock, so a session another run is writing is exported as it stands at that moment.
 
 ## Recovering a selected run
 

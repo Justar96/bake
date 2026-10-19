@@ -644,7 +644,10 @@ fn the_resume_flag_opens_the_picker_before_the_first_prompt() {
 }
 
 // A cancelled startup picker leaves the new session in place, and its
-// held prompt runs there.
+// held prompt runs there. Nobody typed the picker's command, so the cancel
+// gives nothing back to the composer: no `Returned` and no `Refused`, the
+// two updates that would put text or a notice there
+// ([`bake_tui_view::state`]'s `prepend_to_draft`).
 #[test]
 fn a_cancelled_startup_picker_keeps_the_new_session() {
     let world = World::new("startup-resume-cancel");
@@ -671,7 +674,14 @@ fn a_cancelled_startup_picker_keeps_the_new_session() {
     );
     let dialog = h.next_dialog();
     h.choose_answer(dialog.id, DialogAnswer::Cancel);
-    h.until_turn_end();
+    let updates = h.until_turn_end();
+    assert!(
+        !updates.iter().any(|update| matches!(
+            update,
+            RuntimeUpdate::Returned(_) | RuntimeUpdate::Refused { .. }
+        )),
+        "the cancelled picker reached the composer: {updates:#?}"
+    );
     h.stop();
     assert_eq!(texts(&fresh, "user"), ["after"]);
     assert_eq!(h_requests(&requests), 1);

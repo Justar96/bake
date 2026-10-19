@@ -2002,6 +2002,17 @@ await liveScenario('-r opens the session picker before the first prompt, which t
   const files = await sessionEntries(world.home)
   assert.equal(files.length, 1, '-r left a file for the session it did not use')
   assert.deepEqual(messageTexts(files[0] ?? [], 'user'), ['ECHO alpha', 'ECHO gamma'])
+
+  // Nobody typed the startup picker's command, so Esc gives nothing back:
+  // the composer stays empty and shows no notice.
+  const cancelled = world.launch(['-r'])
+  await sheetReady(cancelled, 'Resume session')
+  cancelled.send('\x1b')
+  await cancelled.wait('startup picker cancelled', () => !cancelled.screen.includes('Resume session')
+    && cancelled.screen.includes('❯ Type a draft'))
+  assert(!cancelled.screen.includes('/resume') && !cancelled.screen.includes('Cancelled'), cancelled.screen)
+  await cancelled.quit()
+  assert.equal((await sessionEntries(world.home)).length, 1, 'the cancelled picker left a file')
 })
 
 /** Blank rows between the last row holding `text` and the composer's top edge. */

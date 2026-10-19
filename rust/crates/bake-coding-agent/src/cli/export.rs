@@ -12,11 +12,15 @@
 //! `bake-rs-session-<input file name without .jsonl>.html`, in the working
 //! directory.
 //!
-//! Deviation from Pi: an empty input file is refused with Pi's
+//! Deviation from Pi: the input is read without the file's writer lock, as
+//! a reader may ([`crate::session`]), and its entries are exported from a
+//! manager held in memory. Pi opens the input with `SessionManager.open`,
+//! which takes the lock, repairs a missing final newline, and rewrites a
+//! file in an older version; an export never writes to the file it reads,
+//! and a session another process is writing is exported as it stands. An
+//! empty input file is refused with Pi's
 //! [`EXPORT_NOTHING_YET`](crate::agent_session::share::EXPORT_NOTHING_YET)
-//! message instead of being opened. Pi's `SessionManager.open`, and this
-//! port's, give an empty session file a header and write it; an export
-//! never writes to the file it reads.
+//! message, where Pi's open would give it a header and write it.
 
 use std::path::{Path, PathBuf};
 
@@ -24,8 +28,8 @@ use serde_json::Value;
 
 use crate::agent_session::share::EXPORT_NOTHING_YET;
 use crate::export_html::{self, SessionData};
-use crate::session::SessionManager;
 use crate::session::paths::{normalize_path, resolve_path};
+use crate::session::{NewSessionOptions, SessionError, SessionManager, load_entries_from_file};
 
 /// Pi's `exportFromFile`: the session at `input` as HTML at `output`, or at
 /// Pi's default name beside the working directory. Returns the path
@@ -42,7 +46,15 @@ pub fn export_from_file(input: &str, output: Option<&str>) -> Result<PathBuf, St
     {
         return Err(EXPORT_NOTHING_YET.to_owned());
     }
-    let session = SessionManager::open(&resolved, None, None).map_err(|error| error.to_string())?;
+    // Read lock-free, then export from memory: an older version's entries
+    // are migrated for the page alone, and the file is left as it is.
+    let entries = load_entries_from_file(&resolved)
+        .map_err(|error| format!("{}: {error}", resolved.display()))?;
+    if entries.is_empty() {
+        return Err(SessionError::NotASession(resolved).to_string());
+    }
+    let session = SessionManager::in_memory(None, NewSessionOptions::default(), entries)
+        .map_err(|error| error.to_string())?;
     let data = SessionData {
         header: session
             .header()
@@ -134,6 +146,66 @@ mod tests {
             Err(EXPORT_NOTHING_YET.to_owned())
         );
         assert_eq!(std::fs::read(&empty).expect("still empty").len(), 0);
+    }
+
+    // Bake: a reader repairs nothing and locks nothing, so an input whose
+    // last line has no final newline keeps its bytes and gets no `.lock`
+    // sidecar (`session::file`'s `Repair::Never`).
+    #[test]
+    fn an_input_without_a_final_newline_keeps_its_bytes_and_takes_no_lock() {
+        let root = TempDir::new("export-unterminated");
+        let input = root.join("2026-01-01T00-00-00-000Z_s2.jsonl");
+        let header = serde_json::json!({
+            "type": "session", "version": 3, "id": "s2",
+            "timestamp": "2026-01-01T00:00:00.000Z", "cwd": root.path().to_string_lossy(),
+        });
+        let message = serde_json::json!({
+            "type": "message", "id": "a1", "parentId": null,
+            "timestamp": "2026-01-01T00:00:01.000Z",
+            "message": { "role": "user", "content": "hi", "timestamp": 1 },
+        });
+        let content = format!("{header}\n{message}");
+        write(&input, &content);
+        let output = root.join("out.html");
+        export_from_file(&input.to_string_lossy(), Some(&output.to_string_lossy()))
+            .expect("export");
+        assert_eq!(
+            std::fs::read_to_string(&input).expect("read again"),
+            content
+        );
+        let names: Vec<String> = std::fs::read_dir(root.path())
+            .expect("listing")
+            .map(|entry| {
+                entry
+                    .expect("entry")
+                    .file_name()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .filter(|name| name.ends_with(".lock"))
+            .collect();
+        assert_eq!(names, Vec::<String>::new());
+    }
+
+    // Bake: the export reads without the writer lock, so a session another
+    // writer holds is exported as it stands.
+    #[test]
+    fn a_session_a_writer_holds_is_exported() {
+        let root = TempDir::new("export-held");
+        let input = write_session(root.path());
+        let before = std::fs::read(&input).expect("read");
+        let held = SessionManager::open(&input, Some(root.path()), None).expect("writer");
+        let output = root.join("out.html");
+        let written = export_from_file(&input.to_string_lossy(), Some(&output.to_string_lossy()))
+            .expect("export while held");
+        assert_eq!(written, output);
+        assert!(
+            std::fs::read_to_string(&output)
+                .expect("page")
+                .starts_with("<!DOCTYPE html>")
+        );
+        assert_eq!(std::fs::read(&input).expect("read again"), before);
+        drop(held);
     }
 
     #[test]

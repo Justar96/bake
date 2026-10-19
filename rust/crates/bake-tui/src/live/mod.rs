@@ -565,15 +565,12 @@ impl Driver {
         }
         // `--resume` opens the session picker before the first prompt; the
         // prompts wait in `held` until it ends, so the replacement it
-        // chooses is not refused for prompts that wait.
+        // chooses is not refused for prompts that wait. Nobody typed it, so
+        // it carries no text: a cancelled picker gives nothing back to the
+        // composer ([`Self::refuse`]).
         if self.resume {
             self.resume = false;
-            self.command(
-                None,
-                format!("/{}", commands::RESUME),
-                commands::RESUME,
-                String::new(),
-            );
+            self.command(None, String::new(), commands::RESUME, String::new());
         } else {
             self.waiting.append(&mut self.held);
             if let Some(next) = self.waiting.pop_front() {
@@ -706,11 +703,18 @@ impl Driver {
     }
 
     fn refuse(&self, id: Option<u64>, text: String, reason: String) {
-        self.send(match id {
-            Some(id) => RuntimeUpdate::Refused { id, reason },
-            // A command-line prompt has no draft; its text comes back.
-            None => RuntimeUpdate::Returned(vec![text]),
-        });
+        match id {
+            Some(id) => {
+                self.send(RuntimeUpdate::Refused { id, reason });
+            }
+            // A command-line prompt has no draft; its text comes back. The
+            // startup picker has no text, so nothing comes back and no
+            // notice shows.
+            None if !text.trim().is_empty() => {
+                self.send(RuntimeUpdate::Returned(vec![text]));
+            }
+            None => {}
+        }
     }
 
     fn begin(&mut self, prompt: Queued) -> Running {
