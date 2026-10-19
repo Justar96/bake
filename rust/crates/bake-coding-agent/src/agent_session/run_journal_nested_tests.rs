@@ -102,7 +102,16 @@ async fn nested_calls_are_journaled_by_their_own_ids_after_their_parent() {
 
 /// A run interrupted while its call `p` ran: `p` and the nested calls in
 /// `nested` (id and parent) were dispatched, and no result was written.
-fn interrupted_in_nested_call(manager: &mut SessionManager, nested: &[(&str, &str)]) {
+fn interrupted_in_nested_call(manager: &mut SessionManager, nested: &[(&str, &str)]) -> String {
+    interrupted_in_nested_call_of(manager, None, nested)
+}
+
+/// [`interrupted_in_nested_call`] with `p` dispatched as `replay`.
+fn interrupted_in_nested_call_of(
+    manager: &mut SessionManager,
+    replay: Option<&str>,
+    nested: &[(&str, &str)],
+) -> String {
     checkpoint_input(manager, "selected", 3, false);
     let assistant = manager
         .append_message(faux_assistant_blocks(
@@ -115,18 +124,23 @@ fn interrupted_in_nested_call(manager: &mut SessionManager, nested: &[(&str, &st
         "selected",
         json!({"kind":"message","entry_id":assistant}),
     );
+    let mut dispatch = json!({"kind":"dispatch","assistant_entry_id":assistant,"tool_call_id":"p","tool_name":"script"});
+    if let Some(replay) = replay {
+        dispatch["replay"] = json!(replay);
+    }
+    append_fact(manager, "selected", dispatch);
+    for (id, parent) in nested {
+        nested_dispatch(manager, &assistant, id, parent);
+    }
+    assistant
+}
+
+fn nested_dispatch(manager: &mut SessionManager, assistant: &str, id: &str, parent: &str) {
     append_fact(
         manager,
         "selected",
-        json!({"kind":"dispatch","assistant_entry_id":assistant,"tool_call_id":"p","tool_name":"script"}),
+        json!({"kind":"dispatch","assistant_entry_id":assistant,"tool_call_id":id,"tool_name":"effect","replay":"safe","parent_tool_call_id":parent}),
     );
-    for (id, parent) in nested {
-        append_fact(
-            manager,
-            "selected",
-            json!({"kind":"dispatch","assistant_entry_id":assistant,"tool_call_id":id,"tool_name":"effect","replay":"safe","parent_tool_call_id":parent}),
-        );
-    }
 }
 
 #[tokio::test]
@@ -179,4 +193,70 @@ async fn a_nested_dispatch_without_its_parent_is_refused() {
             "{inspected}"
         );
     }
+}
+
+/// A `Safe` call, recorded `Safe`, would rerun on resume; one that made a
+/// nested call is not, since a rerun has no agent to serve its nested
+/// calls: the run needs reconciliation and nothing runs.
+#[tokio::test]
+async fn a_safe_call_with_a_nested_dispatch_is_not_rerun() {
+    let dir = TempDir::new("run-journal-nested-safe");
+    let mut manager = file_session(&dir);
+    interrupted_in_nested_call_of(&mut manager, Some("safe"), &[("p/1", "p")]);
+    let h = harness(200_000);
+    let script_runs = Arc::new(AtomicUsize::new(0));
+    let effect_runs = Arc::new(AtomicUsize::new(0));
+    let mut script = (*counted("script", &script_runs)).clone();
+    script.replay = Some(bake_agent::ToolReplay::Safe);
+    let mut options = options(&h, manager, Settings::default());
+    options.tools = vec![Arc::new(script), counted("effect", &effect_runs)];
+    options.active_tool_names = vec!["script".into(), "effect".into()];
+    let session = AgentSession::create(options).await.unwrap();
+    let state = session.inspect_run("selected").unwrap();
+    let resumed = session.resume_run("selected").await;
+    session.shutdown().await;
+    assert_eq!(
+        state.disposition,
+        RunRecoveryDisposition::NeedsReconciliation {
+            reason: "a recorded tool dispatch has no durable result; its external effect may already have occurred".into()
+        }
+    );
+    assert!(resumed.unwrap_err().contains("needs reconciliation"));
+    assert_eq!(script_runs.load(Ordering::SeqCst), 0);
+    assert_eq!(effect_runs.load(Ordering::SeqCst), 0);
+    assert_eq!(h.faux.call_count(), 0);
+}
+
+/// A nested call's dispatch is written before it runs, so before its
+/// model-issued call's result; one recorded after that result is refused.
+#[tokio::test]
+async fn a_nested_dispatch_after_its_parents_result_is_refused() {
+    let dir = TempDir::new("run-journal-nested-late");
+    let mut manager = file_session(&dir);
+    let assistant = interrupted_in_nested_call(&mut manager, &[("p/1", "p")]);
+    let result = manager
+        .append_message(bake_ai::ToolResultMessage {
+            tool_call_id: "p".into(),
+            tool_name: "script".into(),
+            content: vec![UserContentBlock::Text(TextContent::new("done"))],
+            timestamp: 2,
+            ..Default::default()
+        })
+        .unwrap();
+    append_fact(
+        &mut manager,
+        "selected",
+        json!({"kind":"message","entry_id":result}),
+    );
+    nested_dispatch(&mut manager, &assistant, "p/2", "p");
+    let h = harness(200_000);
+    let session = AgentSession::create(options(&h, manager, Settings::default()))
+        .await
+        .unwrap();
+    let inspected = session.inspect_run("selected").unwrap_err();
+    session.shutdown().await;
+    assert!(
+        inspected.contains("nested dispatch follows its model-issued call's result"),
+        "{inspected}"
+    );
 }

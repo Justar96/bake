@@ -24,11 +24,13 @@ impl Selected {
     /// Pi Durable's replay rule: the run continues after rerunning its
     /// unresolved calls only when every one names a tool whose class
     /// (`replay_of`) is `Safe` now and, if it was dispatched, was recorded
-    /// `Safe` then. Nothing reruns unless all of them may.
+    /// `Safe` then. Nothing reruns unless all of them may, and none may
+    /// that made a nested call.
     pub fn resolve(&mut self, replay_of: impl Fn(&str) -> Option<ToolReplay>) -> Vec<Rerun> {
         let eligible = !self.reruns.is_empty()
             && self.reruns.iter().all(|rerun| {
-                replay_of(&rerun.call.name) == Some(ToolReplay::Safe)
+                !rerun.nested
+                    && replay_of(&rerun.call.name) == Some(ToolReplay::Safe)
                     && rerun
                         .dispatched
                         .is_none_or(|recorded| recorded == Some(ToolReplay::Safe))
@@ -124,9 +126,13 @@ pub(super) fn project(session: &SessionManager, run_id: &str) -> Result<Selected
     let mut acknowledged = HashSet::new();
     let mut resumes = 0_u64;
     let mut dispatches: HashMap<(String, String), Dispatched> = HashMap::new();
-    // Nested calls, by assistant and id, with the resumptions before each;
-    // evidence only: the model-issued call governs recovery.
-    let mut nested_dispatches: HashMap<(String, String), u64> = HashMap::new();
+    // Nested calls, by assistant and id, with the resumptions before each
+    // and the model-issued call below which they ran; evidence only: the
+    // model-issued call governs recovery.
+    let mut nested_dispatches: HashMap<(String, String), (u64, String)> = HashMap::new();
+    // The branch position of the last nested dispatch below each
+    // model-issued call, by assistant and id.
+    let mut last_nested: HashMap<(String, String), usize> = HashMap::new();
     let mut terminal = None;
     let by_id: HashMap<_, _> = entries
         .iter()
@@ -176,23 +182,29 @@ pub(super) fn project(session: &SessionManager, run_id: &str) -> Result<Selected
                 };
                 let key = (assistant_entry_id.clone(), tool_call_id.clone());
                 let parent_key = (assistant_entry_id.clone(), parent.clone());
-                let parent_dispatched = dispatches.contains_key(&parent_key)
-                    || nested_dispatches.contains_key(&parent_key);
+                let root = if dispatches.contains_key(&parent_key) {
+                    Some(parent.clone())
+                } else {
+                    nested_dispatches
+                        .get(&parent_key)
+                        .map(|(_, root)| root.clone())
+                };
                 let repeat = nested_dispatches
                     .get(&key)
-                    .is_some_and(|earlier| *earlier == resumes);
-                if *at <= start
-                    || *at >= *index
-                    || !acknowledged.contains(assistant_entry_id)
-                    || !parent_dispatched
-                    || repeat
-                {
+                    .is_some_and(|(earlier, _)| *earlier == resumes);
+                let Some(root) = root.filter(|_| {
+                    *at > start
+                        && *at < *index
+                        && acknowledged.contains(assistant_entry_id)
+                        && !repeat
+                }) else {
                     return Err(
                         "Run nested dispatch has no earlier parent dispatch or repeats an identity"
                             .into(),
                     );
-                }
-                nested_dispatches.insert(key, resumes);
+                };
+                last_nested.insert((assistant_entry_id.clone(), root.clone()), *index);
+                nested_dispatches.insert(key, (resumes, root));
             }
             Event::Dispatch {
                 assistant_entry_id,
@@ -359,6 +371,9 @@ pub(super) fn project(session: &SessionManager, run_id: &str) -> Result<Selected
             {
                 return Err("Run dispatch follows its tool result".into());
             }
+            if last_nested.get(&key).is_some_and(|at| *at > index) {
+                return Err("Run nested dispatch follows its model-issued call's result".into());
+            }
             // A result synced immediately before its journal acknowledgement
             // is sufficient evidence for the recorded dispatch.
             unowned |= !ack && !dispatches.contains_key(&key);
@@ -386,6 +401,7 @@ pub(super) fn project(session: &SessionManager, run_id: &str) -> Result<Selected
                         dispatched: dispatches
                             .get(&(id.clone(), call.id.clone()))
                             .map(|dispatched| dispatched.replay),
+                        nested: last_nested.contains_key(&(id.clone(), call.id.clone())),
                     })
                 }
                 _ => None,

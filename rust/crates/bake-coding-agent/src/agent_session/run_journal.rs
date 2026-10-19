@@ -24,10 +24,13 @@
 //! journaled by its own id (`<caller id>/<n>`) under the same assistant,
 //! with `parent_tool_call_id` naming the call that made it; the field is
 //! absent on a model-issued call's dispatch. A nested dispatch is accepted
-//! only after its parent's dispatch in the same run, and it is evidence of
-//! which nested calls started: it is never rerun, and recovery's
-//! uncertainty is the model-issued call's, which has no result until its
-//! nested calls settle.
+//! only after its parent's dispatch in the same run and before the
+//! model-issued call's result, and it is evidence of which nested calls
+//! started: it is never rerun, and recovery's uncertainty is the
+//! model-issued call's, which has no result until its nested calls settle.
+//! A call with any nested dispatch under it is never rerun either, even a
+//! `Safe` one: a rerun has no agent to serve its nested calls, and its
+//! script's effects are its nested calls'. Its run needs reconciliation.
 
 mod projection;
 
@@ -177,6 +180,8 @@ pub(super) struct Rerun {
     /// The class recorded with the call's latest dispatch, or `None` when
     /// the call was never dispatched.
     dispatched: Option<Option<ToolReplay>>,
+    /// Whether a nested dispatch was recorded under the call.
+    nested: bool,
 }
 
 impl Rerun {
