@@ -34,8 +34,8 @@ pub use agent_loop::{
     run_agent_loop, run_agent_loop_continue, run_tool_call,
 };
 pub use nested::{
-    NESTED_CALL_LIMITS, NESTED_CALLER_FINISHED, NESTED_CALLS_UNAVAILABLE, NestedCallLimits,
-    NestedCallSummary, NestedToolCallOptions, NestedToolExecutor,
+    MAX_NESTED_CALL_DEPTH, NESTED_CALL_LIMITS, NESTED_CALLER_FINISHED, NESTED_CALLS_UNAVAILABLE,
+    NestedCallLimits, NestedCallSummary, NestedToolCallOptions, NestedToolExecutor,
 };
 pub use run_control::{
     AdmissionObserver, BudgetLimit, ModelCallAdmission, ModelCallKind, RunControl, RunLimits,

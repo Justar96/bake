@@ -395,6 +395,10 @@ pub struct AgentTool {
     /// replay policy, or remote tool annotations. Wrappers that add effects
     /// must clear this declaration. It is not sent to the model.
     pub read_only: bool,
+    /// Whether other tools may run this one through [`ToolContext::nested`];
+    /// set by default. A tool that runs other tools, such as code mode,
+    /// clears it so it cannot call itself. It is not sent to the model.
+    pub nested_callable: bool,
 }
 
 impl AgentTool {
@@ -430,6 +434,7 @@ impl AgentTool {
             replay: None,
             execution_mode: None,
             read_only: false,
+            nested_callable: true,
         }
     }
 
@@ -451,6 +456,7 @@ impl fmt::Debug for AgentTool {
             .field("label", &self.label)
             .field("execution_mode", &self.execution_mode)
             .field("read_only", &self.read_only)
+            .field("nested_callable", &self.nested_callable)
             .finish_non_exhaustive()
     }
 }

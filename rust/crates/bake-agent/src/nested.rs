@@ -9,7 +9,7 @@
 //! `<caller id>/<n>` and runs through the loop's own pipeline, exactly as a
 //! model-issued call: argument preparation and validation,
 //! `before_tool_call`, execution, and `after_tool_call`, against the run's
-//! tools. Its `tool_execution_*` events carry `parent_tool_call_id`; it
+//! tools whose [`AgentTool::nested_callable`] is set. Its `tool_execution_*` events carry `parent_tool_call_id`; it
 //! never enters the transcript. The calls below one model-issued call, at
 //! every depth, are recorded on that call's tool result as `nested_calls`
 //! (bounded by [`NESTED_CALL_LIMITS`]), and their usage is added to its
@@ -34,6 +34,19 @@
 //!   finalizes the caller's result; if the loop is dropped instead, the
 //!   tasks are ended at once. A nested call also stops when the caller's
 //!   signal aborts, and an aborted call ends before `before_tool_call`.
+//! - A call's own [`NestedToolCallOptions::signal`] adds to the caller's
+//!   signal instead of replacing it: Pi's call follows the calling tool's
+//!   signal only by default.
+//! - Calls resolve against the batch's tools, copied with its transcript
+//!   and assistant message when a tool first makes a nested call, and the
+//!   hooks see that transcript. Pi resolves against the session's callable
+//!   tools at each call, including tools exposed only to code mode or
+//!   deferred, and its hooks see the agent's live messages.
+//! - Calls nest at most [`MAX_NESTED_CALL_DEPTH`] levels below the
+//!   model-issued call, and a tool whose [`AgentTool::nested_callable`] is
+//!   cleared is not callable (and not among [`NestedToolExecutor::tools`]),
+//!   so a tool that runs others need not reach itself. Pi has no depth limit
+//!   and selects callable tools by exposure.
 //! - Arguments that are not a JSON object (or null) fail validation without
 //!   reaching the hooks, since a tool call's arguments are an object; their
 //!   record keeps only their size.
@@ -89,6 +102,10 @@ pub const NESTED_CALL_LIMITS: NestedCallLimits = NestedCallLimits {
 
 /// Pi's error text for a nested call where no agent runs the tool.
 pub const NESTED_CALLS_UNAVAILABLE: &str = "Nested tool calls are not available in this context";
+
+/// The most levels nested calls go below their model-issued call: `c1/1` is
+/// one level, `c1/1/1` two. A deeper call is refused.
+pub const MAX_NESTED_CALL_DEPTH: usize = 8;
 
 /// The error text of a nested call made after its caller settled.
 pub const NESTED_CALLER_FINISHED: &str =
@@ -226,6 +243,8 @@ pub struct NestedToolCallOptions {
 struct CallSite {
     context: AgentContext,
     assistant_message: AssistantMessage,
+    /// The context's tools that nested calls may run.
+    callable: Vec<Arc<AgentTool>>,
 }
 
 /// Asks the loop for its call site.
@@ -240,6 +259,12 @@ impl CallSiteSnapshot {
         Self(Arc::new(CallSite {
             context: context.clone(),
             assistant_message: assistant_message.clone(),
+            callable: context
+                .tools
+                .iter()
+                .filter(|tool| tool.nested_callable)
+                .cloned()
+                .collect(),
         }))
     }
 }
@@ -340,6 +365,7 @@ impl NestedToolCallRunner {
                 runner: Arc::clone(self),
                 scope: CallScope::new(Arc::new(Mutex::new(NestedCallRecorder::new())), false),
                 signal,
+                depth: 1,
             })),
         }
     }
@@ -441,6 +467,8 @@ struct Bound {
     scope: Arc<CallScope>,
     /// The calling tool's signal, the default of its nested calls.
     signal: Option<AbortSignal>,
+    /// The nesting level of the calls this executor makes.
+    depth: usize,
 }
 
 /// Aborts the tasks of an executor's nested calls when dropped. The loop
@@ -489,12 +517,13 @@ impl NestedToolExecutor {
     }
 
     /// The tools [`Self::execute`] can call, Pi's `ctx.tools`: the tools of
-    /// the run, as the model-issued calls see them. Empty where no agent
-    /// runs the caller.
+    /// the run, as the model-issued calls see them, whose
+    /// [`AgentTool::nested_callable`] is set. Empty where no agent runs the
+    /// caller.
     pub async fn tools(&self) -> Vec<Arc<AgentTool>> {
         match &self.bound {
             Some(bound) => match bound.runner.pipeline.site().await {
-                Some(site) => site.context.tools.clone(),
+                Some(site) => site.callable.clone(),
                 None => Vec::new(),
             },
             None => Vec::new(),
@@ -526,6 +555,14 @@ impl NestedToolExecutor {
         let Some(runtime) = &bound.runner.runtime else {
             return self.refused(name, NESTED_CALLS_UNAVAILABLE);
         };
+        if bound.depth > MAX_NESTED_CALL_DEPTH {
+            return self.refused(
+                name,
+                &format!(
+                    "Nested tool calls are limited to {MAX_NESTED_CALL_DEPTH} levels below the model's tool call"
+                ),
+            );
+        }
         let Some(running) = bound.scope.enter() else {
             return self.refused(name, NESTED_CALLER_FINISHED);
         };
@@ -689,7 +726,7 @@ async fn outcome(
     let Some(site) = pipeline.site().await else {
         return immediate(tool_call, NESTED_CALLER_FINISHED);
     };
-    let tool = find_tool(&site.context.tools, name);
+    let tool = find_tool(&site.callable, name);
     tool_call.arguments = match args {
         Value::Object(arguments) => arguments,
         other => {
@@ -750,6 +787,7 @@ async fn outcome(
                 bound.scope.holds_queue || exclusive,
             ),
             signal: Some(controller.signal()),
+            depth: bound.depth + 1,
         })),
     };
     let on_update = options.on_update;
@@ -769,7 +807,7 @@ async fn outcome(
     let signal = controller.signal();
     let running = run_tool_call_in(
         &tool_call,
-        &site.context.tools,
+        &site.callable,
         &site.assistant_message,
         &site.context,
         ToolCallHooks {

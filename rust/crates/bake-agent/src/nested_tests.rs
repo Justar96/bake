@@ -641,3 +641,84 @@ async fn an_aborted_call_does_not_reach_before_tool_call() {
 
     assert_eq!(*seen.lock().unwrap(), ["holder/1"]);
 }
+
+/// A tool that calls itself goes no deeper than `MAX_NESTED_CALL_DEPTH`
+/// levels; the call beyond that is refused.
+#[tokio::test(start_paused = true)]
+async fn nested_calls_stop_at_the_depth_limit() {
+    let refusals = Arc::new(Mutex::new(Vec::new()));
+    let recurse = tool("recurse", {
+        let refusals = Arc::clone(&refusals);
+        move |_id, _update, ctx| {
+            let refusals = Arc::clone(&refusals);
+            Box::pin(async move {
+                let outcome = ctx
+                    .nested()
+                    .execute("recurse", json!({}), NestedToolCallOptions::default())
+                    .await;
+                if outcome.is_error {
+                    refusals
+                        .lock()
+                        .unwrap()
+                        .push((outcome.tool_call.id.clone(), text(&outcome)));
+                }
+                Ok(AgentToolResult::default())
+            })
+        }
+    });
+    let (runner, _) = create_runner(vec![recurse], false);
+    let call = runner.executor("call", None);
+    let outcome = call
+        .execute("recurse", json!({}), NestedToolCallOptions::default())
+        .await;
+    assert!(!outcome.is_error);
+    let deepest = format!("call{}", "/1".repeat(MAX_NESTED_CALL_DEPTH));
+    assert_eq!(
+        *refusals.lock().unwrap(),
+        [(
+            format!("{deepest}/0"),
+            format!(
+                "Nested tool calls are limited to {MAX_NESTED_CALL_DEPTH} levels below the model's tool call"
+            )
+        )]
+    );
+    let calls = call
+        .take_summary()
+        .and_then(|summary| summary.calls)
+        .unwrap();
+    assert_eq!(calls.calls.len(), MAX_NESTED_CALL_DEPTH);
+    assert_eq!(
+        calls.calls.last().map(|call| call.id.as_str()),
+        Some(deepest.as_str())
+    );
+}
+
+/// A tool whose `nested_callable` is cleared, as code mode's, cannot be
+/// called by another tool, itself included, and is not listed.
+#[tokio::test(start_paused = true)]
+async fn a_tool_not_nested_callable_is_neither_listed_nor_run() {
+    let ran = Arc::new(AtomicUsize::new(0));
+    let mut script = tool("script", {
+        let ran = Arc::clone(&ran);
+        move |_id, _update, _ctx| {
+            ran.fetch_add(1, Ordering::SeqCst);
+            empty()
+        }
+    });
+    script.nested_callable = false;
+    let (runner, _) = create_runner(vec![script, tool("echo", |_, _, _| empty())], false);
+    let call = runner.executor("call", None);
+    let names: Vec<_> = call
+        .tools()
+        .await
+        .iter()
+        .map(|tool| tool.name.clone())
+        .collect();
+    assert_eq!(names, ["echo"]);
+    let outcome = call
+        .execute("script", json!({}), NestedToolCallOptions::default())
+        .await;
+    assert!(outcome.is_error);
+    assert_eq!(text(&outcome), "Tool script not found");
+    assert_eq!(ran.load(Ordering::SeqCst), 0);
+}
