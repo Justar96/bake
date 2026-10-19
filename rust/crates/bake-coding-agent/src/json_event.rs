@@ -80,21 +80,25 @@ pub fn agent_event_json(event: &AgentEvent) -> Value {
             tool_call_id,
             tool_name,
             args,
+            parent_tool_call_id,
         } => {
             out.insert("toolCallId".into(), tool_call_id.clone().into());
             out.insert("toolName".into(), tool_name.clone().into());
             out.insert("args".into(), args.clone());
+            insert_parent(&mut out, parent_tool_call_id.as_deref());
         }
         AgentEvent::ToolExecutionUpdate {
             tool_call_id,
             tool_name,
             args,
             partial_result,
+            parent_tool_call_id,
         } => {
             out.insert("toolCallId".into(), tool_call_id.clone().into());
             out.insert("toolName".into(), tool_name.clone().into());
             out.insert("args".into(), args.clone());
             out.insert("partialResult".into(), to_value(partial_result));
+            insert_parent(&mut out, parent_tool_call_id.as_deref());
         }
         AgentEvent::ToolExecutionEnd {
             tool_call_id,
@@ -102,6 +106,7 @@ pub fn agent_event_json(event: &AgentEvent) -> Value {
             result,
             is_error,
             duration_ms,
+            parent_tool_call_id,
         } => {
             out.insert("toolCallId".into(), tool_call_id.clone().into());
             out.insert("toolName".into(), tool_name.clone().into());
@@ -110,9 +115,17 @@ pub fn agent_event_json(event: &AgentEvent) -> Value {
             if let Some(duration) = duration_ms {
                 out.insert("durationMs".into(), (*duration).into());
             }
+            insert_parent(&mut out, parent_tool_call_id.as_deref());
         }
     }
     Value::Object(out)
+}
+
+/// Pi's `parentToolCallId`, last, on the events of a nested call.
+fn insert_parent(out: &mut Map<String, Value>, parent_tool_call_id: Option<&str>) {
+    if let Some(parent) = parent_tool_call_id {
+        out.insert("parentToolCallId".into(), parent.into());
+    }
 }
 
 /// Pi's `toJsonEvent` over a session event.
@@ -365,9 +378,23 @@ mod tests {
                 tool_call_id: "c".into(),
                 tool_name: "t".into(),
                 args: json!({ "a": 1 }),
+                parent_tool_call_id: None,
             })
             .to_string(),
             r#"{"type":"tool_execution_start","toolCallId":"c","toolName":"t","args":{"a":1}}"#
+        );
+        // Pi's nested-call events end with `parentToolCallId`.
+        assert_eq!(
+            agent_event_json(&AgentEvent::ToolExecutionEnd {
+                tool_call_id: "c/1".into(),
+                tool_name: "t".into(),
+                result: bake_agent::AgentToolResult::text("ok"),
+                is_error: false,
+                duration_ms: Some(3),
+                parent_tool_call_id: Some("c".into()),
+            })
+            .to_string(),
+            r#"{"type":"tool_execution_end","toolCallId":"c/1","toolName":"t","result":{"content":[{"type":"text","text":"ok"}]},"isError":false,"durationMs":3,"parentToolCallId":"c"}"#
         );
         assert_eq!(
             session_event_json(&SessionEvent::AgentSettled {

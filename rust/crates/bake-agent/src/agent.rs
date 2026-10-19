@@ -1384,10 +1384,20 @@ async fn process_event(inner: &Inner, event: AgentEvent, signal: &AbortSignal) {
                 shared.streaming_message = None;
                 shared.messages.push(message.clone());
             }
-            AgentEvent::ToolExecutionStart { tool_call_id, .. } => {
+            // Nested calls are not the model's pending calls, as in Pi,
+            // whose session emits them past the agent.
+            AgentEvent::ToolExecutionStart {
+                tool_call_id,
+                parent_tool_call_id: None,
+                ..
+            } => {
                 shared.pending_tool_calls.insert(tool_call_id.clone());
             }
-            AgentEvent::ToolExecutionEnd { tool_call_id, .. } => {
+            AgentEvent::ToolExecutionEnd {
+                tool_call_id,
+                parent_tool_call_id: None,
+                ..
+            } => {
                 shared.pending_tool_calls.remove(tool_call_id);
             }
             AgentEvent::TurnEnd { message, .. } => {
@@ -1401,6 +1411,8 @@ async fn process_event(inner: &Inner, event: AgentEvent, signal: &AbortSignal) {
             AgentEvent::AgentEnd { .. } => shared.streaming_message = None,
             AgentEvent::AgentStart
             | AgentEvent::TurnStart
+            | AgentEvent::ToolExecutionStart { .. }
+            | AgentEvent::ToolExecutionEnd { .. }
             | AgentEvent::ToolExecutionUpdate { .. } => {}
         }
     }

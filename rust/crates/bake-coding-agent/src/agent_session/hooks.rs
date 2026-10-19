@@ -258,6 +258,7 @@ pub(super) fn before_tool_call(
                 tool_call,
                 args,
                 context: agent_context,
+                parent_tool_call_id,
             } = context;
             if let Some(plugins) = plugins {
                 let decision = plugins(
@@ -266,6 +267,7 @@ pub(super) fn before_tool_call(
                         tool_call,
                         args: &mut *args,
                         context: agent_context,
+                        parent_tool_call_id,
                     },
                     signal.clone(),
                 )

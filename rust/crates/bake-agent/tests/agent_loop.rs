@@ -1803,6 +1803,7 @@ async fn run_tool_call_validates_runs_hooks_and_reports_failures() {
         on_update: Some(AgentToolUpdateCallback::new(move |partial| {
             u.lock().unwrap().push(partial)
         })),
+        parent_tool_call_id: None,
     };
     let run = |id: &str, name: &str, args: Value| {
         let call = tool_call(id, name, args);
@@ -1883,6 +1884,7 @@ async fn run_tool_call_after_hook_replaces_or_drops_structured_content() {
                 })),
                 signal: None,
                 on_update: None,
+                parent_tool_call_id: None,
             },
         )
         .await;
@@ -2358,6 +2360,7 @@ async fn failing_preparation_and_synchronously_panicking_hooks_become_error_resu
         after_tool_call: Some(after),
         signal: None,
         on_update: None,
+        parent_tool_call_id: None,
     };
     for (value, message) in [
         ("reject", "cannot prepare"),

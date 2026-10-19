@@ -11,6 +11,10 @@ test/e2e.test.ts),
 and the tool-argument coercion and validation of
 packages/ai/src/utils/validation.ts with its test (test/validation.test.ts).
 Not ported: packages/agent/src/proxy.ts.
+
+Release v1.3.0, revision 71023aec1546d6d677a65669c5665c0927ce0dd0.
+Ported: packages/coding-agent/src/core/nested-tool-calls.ts with its test
+(test/nested-tool-calls.test.ts), hosted by the agent loop (src/nested.rs).
 --------------------------------------------------------------------------------
 MIT License
 

@@ -22,6 +22,9 @@
 //!   them exactly.
 //! - [`agent_loop`] runs on a spawned Tokio task that the returned
 //!   [`AgentLoopStream`] owns: dropping the stream cancels the run.
+//! - Each tool runs with a [`ToolContext`] whose executor runs nested tool
+//!   calls through this loop's pipeline, as Pi v1.3.0's session does
+//!   ([`crate::nested`]); a call's tool result records its nested calls.
 
 use std::any::Any;
 use std::fmt;
@@ -40,7 +43,7 @@ use bake_ai::{
 };
 use serde_json::{Value, json};
 
-use crate::nested::NestedToolExecutor;
+use crate::nested::{CallSiteSnapshot, NestedPipeline, NestedToolCallRunner, NestedToolExecutor};
 use crate::stream_fn::default_stream_fn;
 use crate::types::{
     AfterToolCall, AfterToolCallContext, AgentContext, AgentEvent, AgentEventSink, AgentLoopConfig,
@@ -845,6 +848,7 @@ async fn fail_tool_calls_from_truncated_message(
             )),
             is_error: true,
             duration_ms: None,
+            nested: None,
         };
         emit_tool_execution_end(&finalized, sink).await;
         let message = create_tool_result_message(&finalized);
@@ -857,15 +861,15 @@ async fn fail_tool_calls_from_truncated_message(
     }
 }
 
-fn find_tool<'t>(tools: &'t [Arc<AgentTool>], name: &str) -> Option<&'t Arc<AgentTool>> {
+pub(crate) fn find_tool<'t>(tools: &'t [Arc<AgentTool>], name: &str) -> Option<&'t Arc<AgentTool>> {
     tools.iter().find(|tool| tool.name == name)
 }
 
 /// The tool-call hooks of a config or of [`RunToolCallOptions`].
 #[derive(Clone, Copy)]
-struct ToolCallHooks<'h> {
-    before: Option<&'h BeforeToolCall>,
-    after: Option<&'h AfterToolCall>,
+pub(crate) struct ToolCallHooks<'h> {
+    pub before: Option<&'h BeforeToolCall>,
+    pub after: Option<&'h AfterToolCall>,
 }
 
 impl<'h> ToolCallHooks<'h> {
@@ -896,20 +900,102 @@ async fn execute_tool_calls(
         )
     });
     let hooks = ToolCallHooks::of(config);
-    if config.tool_execution == ToolExecutionMode::Sequential || has_sequential_tool_call {
-        execute_tool_calls_sequential(context, assistant_message, tool_calls, hooks, signal, sink)
-            .await
-    } else {
-        execute_tool_calls_parallel(
-            context,
-            assistant_message,
-            tool_calls,
-            hooks,
-            signal,
-            sink,
-            config.max_concurrent_read_tools,
+    let (requests, mut site_requests) = tokio::sync::mpsc::unbounded_channel();
+    let nested = NestedToolCallRunner::new(NestedPipeline::new(
+        requests,
+        config.before_tool_call.clone(),
+        config.after_tool_call.clone(),
+        Arc::clone(sink),
+        config.tool_execution,
+        config.max_concurrent_read_tools,
+    ));
+    let batch = Batch {
+        context,
+        assistant_message,
+        hooks,
+        signal,
+        sink,
+        nested: &nested,
+    };
+    let executing = async {
+        if config.tool_execution == ToolExecutionMode::Sequential || has_sequential_tool_call {
+            execute_tool_calls_sequential(&batch, tool_calls).await
+        } else {
+            execute_tool_calls_parallel(&batch, tool_calls, config.max_concurrent_read_tools).await
+        }
+    };
+    tokio::pin!(executing);
+    // Nested calls copy the batch's context and assistant message only when
+    // a tool first makes one.
+    loop {
+        tokio::select! {
+            biased;
+            executed = &mut executing => return executed,
+            Some(reply) = site_requests.recv() => {
+                let _ = reply.send(CallSiteSnapshot::new(context, assistant_message));
+            }
+        }
+    }
+}
+
+/// What every call of one batch runs with.
+struct Batch<'b> {
+    context: &'b AgentContext,
+    assistant_message: &'b AssistantMessage,
+    hooks: ToolCallHooks<'b>,
+    signal: Option<&'b AbortSignal>,
+    sink: &'b AgentEventSink,
+    nested: &'b Arc<NestedToolCallRunner>,
+}
+
+impl Batch<'_> {
+    async fn prepare(&self, tool_call: &ToolCall) -> Preparation {
+        prepare_tool_call(
+            self.context,
+            self.assistant_message,
+            tool_call,
+            self.hooks,
+            self.signal,
+            &self.context.tools,
+            None,
         )
         .await
+    }
+
+    /// Executes and finalizes a prepared model-issued call, with the record
+    /// of the nested calls it made.
+    async fn run_prepared(
+        &self,
+        tool_call: &ToolCall,
+        tool: &AgentTool,
+        args: &Value,
+    ) -> AgentToolCallOutcome {
+        let updates = tool_update_sink(tool_call, self.sink);
+        let nested = self
+            .nested
+            .executor(tool_call.id.clone(), self.signal.cloned());
+        let executed = execute_prepared_tool_call(
+            tool,
+            tool_call,
+            args,
+            self.signal,
+            &updates,
+            ToolContext::new(nested.clone()),
+        )
+        .await;
+        let mut finalized = finalize_executed_tool_call(
+            self.context,
+            self.assistant_message,
+            tool_call,
+            args,
+            executed,
+            self.hooks,
+            self.signal,
+            None,
+        )
+        .await;
+        finalized.nested = nested.take_summary();
+        finalized
     }
 }
 
@@ -918,55 +1004,26 @@ fn is_aborted(signal: Option<&AbortSignal>) -> bool {
 }
 
 async fn execute_tool_calls_sequential(
-    context: &AgentContext,
-    assistant_message: &AssistantMessage,
+    batch: &Batch<'_>,
     tool_calls: &[ToolCall],
-    hooks: ToolCallHooks<'_>,
-    signal: Option<&AbortSignal>,
-    sink: &AgentEventSink,
 ) -> ExecutedToolCallBatch {
+    let Batch { signal, sink, .. } = *batch;
     let mut finalized_calls = Vec::new();
     let mut messages = Vec::new();
 
     for tool_call in tool_calls {
         emit_tool_execution_start(tool_call, sink).await;
-        let preparation = prepare_tool_call(
-            context,
-            assistant_message,
-            tool_call,
-            hooks,
-            signal,
-            &context.tools,
-        )
-        .await;
+        let preparation = batch.prepare(tool_call).await;
         let finalized = match preparation {
             Preparation::Immediate { result, is_error } => AgentToolCallOutcome {
                 tool_call: tool_call.clone(),
                 result,
                 is_error,
                 duration_ms: None,
+                nested: None,
             },
             Preparation::Prepared { tool, args } => {
-                let updates = tool_update_sink(tool_call, sink);
-                let executed = execute_prepared_tool_call(
-                    &tool,
-                    tool_call,
-                    &args,
-                    signal,
-                    &updates,
-                    unavailable_context(tool_call),
-                )
-                .await;
-                finalize_executed_tool_call(
-                    context,
-                    assistant_message,
-                    tool_call,
-                    &args,
-                    executed,
-                    hooks,
-                    signal,
-                )
-                .await
+                batch.run_prepared(tool_call, &tool, &args).await
             }
         };
 
@@ -988,27 +1045,16 @@ async fn execute_tool_calls_sequential(
 }
 
 async fn execute_tool_calls_parallel(
-    context: &AgentContext,
-    assistant_message: &AssistantMessage,
+    batch: &Batch<'_>,
     tool_calls: &[ToolCall],
-    hooks: ToolCallHooks<'_>,
-    signal: Option<&AbortSignal>,
-    sink: &AgentEventSink,
     max_concurrent: Option<std::num::NonZeroUsize>,
 ) -> ExecutedToolCallBatch {
+    let Batch { signal, sink, .. } = *batch;
     let mut entries: Vec<BoxFuture<'_, AgentToolCallOutcome>> = Vec::new();
 
     for tool_call in tool_calls {
         emit_tool_execution_start(tool_call, sink).await;
-        let preparation = prepare_tool_call(
-            context,
-            assistant_message,
-            tool_call,
-            hooks,
-            signal,
-            &context.tools,
-        )
-        .await;
+        let preparation = batch.prepare(tool_call).await;
         match preparation {
             Preparation::Immediate { result, is_error } => {
                 let finalized = AgentToolCallOutcome {
@@ -1016,6 +1062,7 @@ async fn execute_tool_calls_parallel(
                     result,
                     is_error,
                     duration_ms: None,
+                    nested: None,
                 };
                 emit_tool_execution_end(&finalized, sink).await;
                 entries.push(Box::pin(std::future::ready(finalized)));
@@ -1030,30 +1077,12 @@ async fn execute_tool_calls_parallel(
                             result: create_error_tool_result("Operation aborted"),
                             is_error: true,
                             duration_ms: None,
+                            nested: None,
                         };
                         emit_tool_execution_end(&finalized, sink).await;
                         return finalized;
                     }
-                    let updates = tool_update_sink(tool_call, sink);
-                    let executed = execute_prepared_tool_call(
-                        &tool,
-                        tool_call,
-                        &args,
-                        signal,
-                        &updates,
-                        unavailable_context(tool_call),
-                    )
-                    .await;
-                    let finalized = finalize_executed_tool_call(
-                        context,
-                        assistant_message,
-                        tool_call,
-                        &args,
-                        executed,
-                        hooks,
-                        signal,
-                    )
-                    .await;
+                    let finalized = batch.run_prepared(tool_call, &tool, &args).await;
                     emit_tool_execution_end(&finalized, sink).await;
                     finalized
                 }));
@@ -1199,6 +1228,7 @@ async fn prepare_tool_call(
     hooks: ToolCallHooks<'_>,
     signal: Option<&AbortSignal>,
     tools: &[Arc<AgentTool>],
+    parent_tool_call_id: Option<&str>,
 ) -> Preparation {
     let Some(tool) = find_tool(tools, &tool_call.name) else {
         return immediate_error(format!("Tool {} not found", tool_call.name));
@@ -1226,6 +1256,7 @@ async fn prepare_tool_call(
                     tool_call,
                     args: &mut args,
                     context,
+                    parent_tool_call_id,
                 },
                 signal.cloned(),
             )
@@ -1262,7 +1293,8 @@ async fn prepare_tool_call(
 }
 
 /// Receives a tool's partial results.
-type ToolUpdateSink<'s> = dyn Fn(AgentToolResult) -> BoxFuture<'s, ()> + Send + Sync + 's;
+pub(crate) type ToolUpdateSink<'s> =
+    dyn Fn(AgentToolResult) -> BoxFuture<'s, ()> + Send + Sync + 's;
 
 fn tool_update_sink<'s>(
     tool_call: &'s ToolCall,
@@ -1276,6 +1308,7 @@ fn tool_update_sink<'s>(
                 tool_name: tool_call.name.clone(),
                 args: Value::Object(tool_call.arguments.clone()),
                 partial_result,
+                parent_tool_call_id: None,
             },
         ))
     })
@@ -1287,7 +1320,7 @@ struct ExecutedToolCallOutcome {
     duration_ms: u64,
 }
 
-fn elapsed_ms(started: tokio::time::Instant) -> u64 {
+pub(crate) fn elapsed_ms(started: tokio::time::Instant) -> u64 {
     let millis = started.elapsed().as_secs_f64() * 1000.0;
     // Pi rounds `performance.now()` differences.
     millis.round() as u64
@@ -1318,6 +1351,7 @@ async fn execute_prepared_tool_call(
     let mut emitting: Option<BoxFuture<'_, ()>> = None;
     let started = tokio::time::Instant::now();
     let execute = Arc::clone(&tool.execute);
+    let nested = ctx.nested().clone();
     let future = catch_unwind(AssertUnwindSafe(|| {
         execute(
             tool_call.id.clone(),
@@ -1358,6 +1392,9 @@ async fn execute_prepared_tool_call(
     // it sent are done emitting.
     let duration_ms = elapsed_ms(started);
     accepting.store(false, Ordering::SeqCst);
+    // Nothing the tool started outlives it: its nested calls still running
+    // are aborted, and its result waits for them.
+    nested.close().await;
     updates.close();
     if let Some(emit) = emitting.take() {
         emit.await;
@@ -1383,6 +1420,7 @@ async fn execute_prepared_tool_call(
 }
 
 /// Pi's `finalizeExecutedToolCall`: applies `afterToolCall`.
+#[allow(clippy::too_many_arguments)]
 async fn finalize_executed_tool_call(
     context: &AgentContext,
     assistant_message: &AssistantMessage,
@@ -1391,6 +1429,7 @@ async fn finalize_executed_tool_call(
     executed: ExecutedToolCallOutcome,
     hooks: ToolCallHooks<'_>,
     signal: Option<&AbortSignal>,
+    parent_tool_call_id: Option<&str>,
 ) -> AgentToolCallOutcome {
     let mut result = executed.result;
     let mut is_error = executed.is_error;
@@ -1405,6 +1444,7 @@ async fn finalize_executed_tool_call(
                     result: &result,
                     is_error,
                     context,
+                    parent_tool_call_id,
                 },
                 signal.cloned(),
             )
@@ -1449,6 +1489,7 @@ async fn finalize_executed_tool_call(
         result,
         is_error,
         duration_ms: Some(executed.duration_ms),
+        nested: None,
     }
 }
 
@@ -1466,6 +1507,7 @@ async fn emit_tool_execution_start(tool_call: &ToolCall, sink: &AgentEventSink) 
             tool_call_id: tool_call.id.clone(),
             tool_name: tool_call.name.clone(),
             args: Value::Object(tool_call.arguments.clone()),
+            parent_tool_call_id: None,
         },
     )
     .await;
@@ -1480,19 +1522,30 @@ async fn emit_tool_execution_end(finalized: &AgentToolCallOutcome, sink: &AgentE
             result: finalized.result.clone(),
             is_error: finalized.is_error,
             duration_ms: finalized.duration_ms,
+            parent_tool_call_id: None,
         },
     )
     .await;
 }
 
+/// Pi's `createToolResultMessage`, with the record of the call's nested
+/// calls and their usage, which Pi's session adds at `message_start`.
 fn create_tool_result_message(finalized: &AgentToolCallOutcome) -> ToolResultMessage {
+    let nested = finalized.nested.as_ref();
+    let usage = match (
+        finalized.result.usage,
+        nested.and_then(|nested| nested.usage),
+    ) {
+        (Some(own), Some(nested)) => Some(own.combine(&nested)),
+        (own, nested) => own.or(nested),
+    };
     ToolResultMessage {
         tool_call_id: finalized.tool_call.id.clone(),
         tool_name: finalized.tool_call.name.clone(),
         content: finalized.result.content.clone(),
         details: finalized.result.details.clone(),
-        usage: finalized.result.usage,
-        nested_calls: None,
+        usage,
+        nested_calls: nested.and_then(|nested| nested.calls.clone()),
         is_error: finalized.is_error,
         timestamp: bake_ai::now_ms(),
         duration_ms: finalized.duration_ms,
@@ -1533,12 +1586,19 @@ pub struct RunToolCallOptions<'a> {
     pub signal: Option<AbortSignal>,
     /// Receives partial results.
     pub on_update: Option<AgentToolUpdateCallback>,
+    /// Passed to the hooks: the tool call that made this one, when it is a
+    /// nested call.
+    pub parent_tool_call_id: Option<String>,
 }
 
 /// Pi's `runToolCall`: runs one call through argument preparation, schema
 /// validation, `beforeToolCall`, execution, and `afterToolCall`, with no
-/// events and no messages. Tools that call other tools use it so the hooks
-/// apply to those calls too. Failures come back as `is_error` outcomes.
+/// events and no messages. Failures come back as `is_error` outcomes.
+///
+/// No agent serves the call's nested calls: its tool's
+/// [`ToolContext::nested`] refuses them. Tools that call other tools use
+/// [`ToolContext::nested`], which runs them through this pipeline with the
+/// agent's hooks.
 pub async fn run_tool_call(
     tool_call: &ToolCall,
     options: RunToolCallOptions<'_>,
@@ -1547,14 +1607,49 @@ pub async fn run_tool_call(
         before: options.before_tool_call.as_ref(),
         after: options.after_tool_call.as_ref(),
     };
-    let signal = options.signal.as_ref();
-    let preparation = prepare_tool_call(
-        options.context,
+    let on_update = options.on_update.clone();
+    let updates = move |partial: AgentToolResult| -> BoxFuture<'static, ()> {
+        if let Some(on_update) = &on_update {
+            on_update.update(partial);
+        }
+        Box::pin(async {})
+    };
+    run_tool_call_in(
+        tool_call,
+        options.tools,
         options.assistant_message,
+        options.context,
+        hooks,
+        options.signal.as_ref(),
+        options.parent_tool_call_id.as_deref(),
+        unavailable_context(tool_call),
+        &updates,
+    )
+    .await
+}
+
+/// [`run_tool_call`] with the tool executing in `ctx` and its updates sent
+/// to `updates`.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn run_tool_call_in(
+    tool_call: &ToolCall,
+    tools: &[Arc<AgentTool>],
+    assistant_message: &AssistantMessage,
+    context: &AgentContext,
+    hooks: ToolCallHooks<'_>,
+    signal: Option<&AbortSignal>,
+    parent_tool_call_id: Option<&str>,
+    ctx: ToolContext,
+    updates: &ToolUpdateSink<'_>,
+) -> AgentToolCallOutcome {
+    let preparation = prepare_tool_call(
+        context,
+        assistant_message,
         tool_call,
         hooks,
         signal,
-        options.tools,
+        tools,
+        parent_tool_call_id,
     )
     .await;
     let (tool, args) = match preparation {
@@ -1564,34 +1659,21 @@ pub async fn run_tool_call(
                 result,
                 is_error,
                 duration_ms: None,
+                nested: None,
             };
         }
         Preparation::Prepared { tool, args } => (tool, args),
     };
-    let on_update = options.on_update.clone();
-    let updates = move |partial: AgentToolResult| -> BoxFuture<'static, ()> {
-        if let Some(on_update) = &on_update {
-            on_update.update(partial);
-        }
-        Box::pin(async {})
-    };
-    let executed = execute_prepared_tool_call(
-        &tool,
-        tool_call,
-        &args,
-        signal,
-        &updates,
-        unavailable_context(tool_call),
-    )
-    .await;
+    let executed = execute_prepared_tool_call(&tool, tool_call, &args, signal, updates, ctx).await;
     finalize_executed_tool_call(
-        options.context,
-        options.assistant_message,
+        context,
+        assistant_message,
         tool_call,
         &args,
         executed,
         hooks,
         signal,
+        parent_tool_call_id,
     )
     .await
 }

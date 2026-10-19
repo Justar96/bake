@@ -659,6 +659,7 @@ impl PromptExecution {
                     tool_call_id: call.id.clone(),
                     tool_name: call.name.clone(),
                     args: serde_json::Value::Object(call.arguments.clone()),
+                    parent_tool_call_id: None,
                 }));
             let abort = bake_ai::AbortController::new();
             let outcome = {
@@ -672,6 +673,7 @@ impl PromptExecution {
                         after_tool_call: self.tool_hooks.after.clone(),
                         signal: Some(abort.signal()),
                         on_update: None,
+                        parent_tool_call_id: None,
                     },
                 );
                 tokio::pin!(running);
@@ -690,6 +692,7 @@ impl PromptExecution {
                     result: outcome.result.clone(),
                     is_error: outcome.is_error,
                     duration_ms: outcome.duration_ms,
+                    parent_tool_call_id: None,
                 }));
             // Pi's `createToolResultMessage`.
             let message: LiveMessage = bake_ai::ToolResultMessage {

@@ -24,7 +24,7 @@ use serde::Serialize;
 use serde::ser::Serializer;
 use serde_json::Value;
 
-use crate::nested::NestedToolExecutor;
+use crate::nested::{NestedCallSummary, NestedToolExecutor};
 
 /// A boxed, sendable future.
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
@@ -269,6 +269,10 @@ pub struct AgentToolCallOutcome {
     /// Milliseconds `execute` took on a monotonic clock; `None` when the tool
     /// did not run.
     pub duration_ms: Option<u64>,
+    /// The calls the tool made through [`ToolContext::nested`], at every
+    /// depth, for a model-issued call; `None` for a nested call, whose own
+    /// calls are recorded on the model-issued call.
+    pub nested: Option<NestedCallSummary>,
 }
 
 /// Streams a tool's partial results, Pi's `AgentToolUpdateCallback`.
@@ -504,6 +508,9 @@ pub struct BeforeToolCallContext<'a> {
     pub args: &'a mut Value,
     /// The context when the call is prepared.
     pub context: &'a AgentContext,
+    /// For a nested call, the id of the tool call that made it, Pi's
+    /// `parentToolCallId`; `None` for a model-issued call.
+    pub parent_tool_call_id: Option<&'a str>,
 }
 
 /// What [`AgentLoopConfig::after_tool_call`] sees, Pi's
@@ -522,6 +529,9 @@ pub struct AfterToolCallContext<'a> {
     pub is_error: bool,
     /// The context when the call is finalized.
     pub context: &'a AgentContext,
+    /// For a nested call, the id of the tool call that made it, Pi's
+    /// `parentToolCallId`; `None` for a model-issued call.
+    pub parent_tool_call_id: Option<&'a str>,
 }
 
 /// A completed turn, Pi's `AgentTurnContext` and `PrepareNextTurnContext`.
@@ -765,6 +775,8 @@ pub enum AgentEvent {
         tool_name: String,
         /// The raw arguments.
         args: Value,
+        /// For a nested call, the id of the calling tool call.
+        parent_tool_call_id: Option<String>,
     },
     /// A tool reported a partial result.
     ToolExecutionUpdate {
@@ -776,6 +788,8 @@ pub enum AgentEvent {
         args: Value,
         /// The partial result.
         partial_result: AgentToolResult,
+        /// For a nested call, the id of the calling tool call.
+        parent_tool_call_id: Option<String>,
     },
     /// A tool call finished.
     ToolExecutionEnd {
@@ -789,6 +803,8 @@ pub enum AgentEvent {
         is_error: bool,
         /// Milliseconds `execute` took; `None` when the tool did not run.
         duration_ms: Option<u64>,
+        /// For a nested call, the id of the calling tool call.
+        parent_tool_call_id: Option<String>,
     },
 }
 

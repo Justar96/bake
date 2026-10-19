@@ -272,10 +272,25 @@ impl Projector {
                 }
                 None => Vec::new(),
             },
+            // A nested call is not the model's call; Pi's interactive mode
+            // skips its events too.
+            AgentEvent::ToolExecutionStart {
+                parent_tool_call_id: Some(_),
+                ..
+            }
+            | AgentEvent::ToolExecutionUpdate {
+                parent_tool_call_id: Some(_),
+                ..
+            }
+            | AgentEvent::ToolExecutionEnd {
+                parent_tool_call_id: Some(_),
+                ..
+            } => Vec::new(),
             AgentEvent::ToolExecutionStart {
                 tool_call_id,
                 tool_name,
                 args,
+                parent_tool_call_id: None,
             } => {
                 if !self.running.iter().any(|(id, _)| id == tool_call_id) {
                     self.running.push((tool_call_id.clone(), tool_name.clone()));
@@ -1265,6 +1280,7 @@ mod tests {
             tool_call_id: "x".into(),
             tool_name: "bash".into(),
             args: json!({"command": "sleep 9"}),
+            parent_tool_call_id: None,
         }));
         let updates = projector.finish();
         assert_eq!(
@@ -1278,6 +1294,46 @@ mod tests {
                 output: Vec::new(),
             }])]
         );
+        assert_eq!(projector.finish(), []);
+    }
+
+    #[test]
+    fn nested_call_events_change_nothing() {
+        let mut projector = Projector::default();
+        projector.begin(None);
+        let nested = |event: AgentEvent| match event {
+            AgentEvent::ToolExecutionStart {
+                tool_call_id,
+                tool_name,
+                args,
+                ..
+            } => AgentEvent::ToolExecutionStart {
+                tool_call_id,
+                tool_name,
+                args,
+                parent_tool_call_id: Some("c".into()),
+            },
+            AgentEvent::ToolExecutionEnd {
+                tool_call_id,
+                tool_name,
+                result,
+                is_error,
+                duration_ms,
+                ..
+            } => AgentEvent::ToolExecutionEnd {
+                tool_call_id,
+                tool_name,
+                result,
+                is_error,
+                duration_ms,
+                parent_tool_call_id: Some("c".into()),
+            },
+            other => other,
+        };
+        let start = nested(start("c/1", "bash", json!({"command": "ls"})));
+        assert_eq!(projector.apply(&SessionEvent::Agent(&start)), []);
+        let end = nested(end("c/1", "bash", "ok", None));
+        assert_eq!(projector.apply(&SessionEvent::Agent(&end)), []);
         assert_eq!(projector.finish(), []);
     }
 
@@ -1359,6 +1415,7 @@ mod tests {
             tool_call_id: id.into(),
             tool_name: tool.into(),
             args,
+            parent_tool_call_id: None,
         }
     }
 
@@ -1372,6 +1429,7 @@ mod tests {
             },
             is_error: false,
             duration_ms: None,
+            parent_tool_call_id: None,
         }
     }
 
@@ -1585,6 +1643,7 @@ mod tests {
                 tool_name: "job_output".into(),
                 args: wait,
                 partial_result: AgentToolResult::text("tick"),
+                parent_tool_call_id: None,
             },
         ));
         assert_eq!(

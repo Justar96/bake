@@ -519,6 +519,30 @@ pub struct Usage {
 }
 
 impl Usage {
+    /// The sum of two usages, Pi's `combineUsage`: the optional token splits
+    /// are kept when either side reports them.
+    pub fn combine(&self, other: &Usage) -> Usage {
+        let optional = |a: Option<u64>, b: Option<u64>| {
+            (a.is_some() || b.is_some()).then(|| a.unwrap_or(0).saturating_add(b.unwrap_or(0)))
+        };
+        Usage {
+            input: self.input.saturating_add(other.input),
+            output: self.output.saturating_add(other.output),
+            cache_read: self.cache_read.saturating_add(other.cache_read),
+            cache_write: self.cache_write.saturating_add(other.cache_write),
+            cache_write_1h: optional(self.cache_write_1h, other.cache_write_1h),
+            reasoning: optional(self.reasoning, other.reasoning),
+            total_tokens: self.total_tokens.saturating_add(other.total_tokens),
+            cost: UsageCost {
+                input: self.cost.input + other.cost.input,
+                output: self.cost.output + other.cost.output,
+                cache_read: self.cost.cache_read + other.cost.cache_read,
+                cache_write: self.cost.cache_write + other.cost.cache_write,
+                total: self.cost.total + other.cost.total,
+            },
+        }
+    }
+
     /// `input + output + cache_read + cache_write`, saturating at
     /// `u64::MAX` because providers report these counts.
     pub fn component_sum(&self) -> u64 {

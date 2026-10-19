@@ -35,7 +35,7 @@ use bake_ai::utils::text::assistant_text;
 use bake_ai::{
     AbortSignal, AssistantContentBlock, AssistantMessage, CacheRetention, Context, Message, Model,
     ModelThinkingLevel, ProviderHeaders, SimpleStreamOptions, StopReason, TextContent,
-    TranscriptContext, Usage, UsageCost, UserContent, UserContentBlock, UserMessage,
+    TranscriptContext, Usage, UserContent, UserContentBlock, UserMessage,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -1220,27 +1220,9 @@ pub fn prepare_compaction(
 // Main compaction function
 // ============================================================================
 
-/// Pi's `combineUsage`.
+/// Pi's `combineUsage`; see [`Usage::combine`].
 pub fn combine_usage(first: &Usage, second: &Usage) -> Usage {
-    let optional = |a: Option<u64>, b: Option<u64>| {
-        (a.is_some() || b.is_some()).then(|| a.unwrap_or(0).saturating_add(b.unwrap_or(0)))
-    };
-    Usage {
-        input: first.input.saturating_add(second.input),
-        output: first.output.saturating_add(second.output),
-        cache_read: first.cache_read.saturating_add(second.cache_read),
-        cache_write: first.cache_write.saturating_add(second.cache_write),
-        cache_write_1h: optional(first.cache_write_1h, second.cache_write_1h),
-        reasoning: optional(first.reasoning, second.reasoning),
-        total_tokens: first.total_tokens.saturating_add(second.total_tokens),
-        cost: UsageCost {
-            input: first.cost.input + second.cost.input,
-            output: first.cost.output + second.cost.output,
-            cache_read: first.cost.cache_read + second.cost.cache_read,
-            cache_write: first.cost.cache_write + second.cost.cache_write,
-            total: first.cost.total + second.cost.total,
-        },
-    }
+    first.combine(second)
 }
 
 /// Pi's `generateTurnPrefixSummary`: a checkpoint of the split turn's
