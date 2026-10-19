@@ -6,7 +6,7 @@ This page designs code mode for `bake-rs`: a `codemode` tool whose input is a mo
 
 The model surface is Pi's `codemode` tool, ported under [D22](scope-00/support.md#decision-register). The engine is the same QuickJS-NG WebAssembly binary Pi runs, executed by the Wasmtime the workspace already pins, inside the `bake-rs` process. Bake writes its own WASI shim and its own driver for the binary's C API, so code mode adds no Rust crate and no JavaScript runtime. Nested calls run through the session's ordinary tool pipeline, so [D24](scope-00/support.md#decision-register)'s permissions, approvals, and sandbox apply to every call a script makes.
 
-**Status: designed 2026-10-19, not implemented.** [D42](scope-00/support.md#decision-register) records the choices, and supersedes D17. [D43](scope-00/support.md#decision-register) defers the rest of the native plugin API beyond 0.4.0, so code mode is the remaining scope 12 work after HTTP MCP.
+**Status: slices 1 to 3 implemented 2026-10-19; the tool (slice 4) is not.** `bake-codemode` is the engine and script environment, and `bake_agent::nested` runs nested calls; no `bake-rs` tool uses them yet, so no request changes. [D42](scope-00/support.md#decision-register) records the choices, and supersedes D17. [D43](scope-00/support.md#decision-register) defers the rest of the native plugin API beyond 0.4.0, so code mode is the remaining scope 12 work after HTTP MCP.
 
 ## Table of Contents
 
@@ -110,24 +110,29 @@ Wasmtime core module ── quickjs.wasm (vendored, pinned by SHA-256)
 `bake-codemode`'s public API is small and synchronous at its core:
 
 ```rust
-pub struct CodemodeEngine { /* compiled Module, shared, compiled once per process */ }
+pub struct CodemodeEngine { /* compiled Module, compiled once per process */ }
 pub struct ExecuteRequest { pub source: Source, pub tools: Vec<ToolDeclaration>,
-                            pub store: StoreValues, pub limits: Limits }
-pub enum HostCall { Tool { id: u32, name: String, args: Value }, Discovery { .. } }
-pub enum Event { Call(HostCall), Output(OutputItem), Done(Outcome) }
+                            pub globals: Vec<GlobalDeclaration>, pub store: StoreValues,
+                            pub limits: Limits, pub deterministic: Option<Deterministic>,
+                            pub on_exit: Option<ExitHook> }
+pub enum HostCall { Tool { id: u32, name: String, args: Option<Value> },
+                    Global { id: u32, name: String, args: Option<Value> } }   // discovery
+pub enum Event { Started { fingerprint: String }, Call(HostCall), Output(OutputItem),
+                 Idle { seq: u32, issued: u32 }, Done(Arc<Outcome>) }
 
 impl CodemodeEngine {
-    /// Starts the script on its own thread; `Run` is the only handle to it.
+    pub fn get() -> Result<&'static Self, EngineError>;   // blocks on first use
     pub fn start(&self, request: ExecuteRequest) -> Result<Run, StartError>;
 }
 impl Run {
-    pub async fn next(&mut self) -> Event;            // calls, output, then one Done
-    pub fn answer(&self, id: u32, result: Result<Value, String>);
-    pub fn abort(&self);                              // epoch trap; awaited by next()
+    pub async fn next(&mut self) -> Event;               // calls and output, then Done
+    pub fn handle(&self) -> RunHandle;                    // cloneable: answer, abort
+    pub fn answer(&self, id: u32, result: CallResult) -> Result<(), AnswerError>;
+    pub fn abort_with(&self, message: impl Into<String>); // abort() says "Execution aborted"
 }
 ```
 
-`Run` owns its thread. Dropping a `Run` aborts the script and joins the thread on a blocking task, so no thread outlives its tool call; this follows the [defensive patterns](../../defensive-patterns.md) for owned work. `Outcome` carries the completion value or a typed failure: `Exception`, `Timeout`, `Aborted`, `OutOfMemory`, `OutputLimit`, `NeverSettles`, or `Protocol`. The tool layer turns it into Pi's result text.
+`Run` owns its thread. Dropping a `Run` aborts the script and joins the thread, in place outside Tokio and on a blocking task inside it, so no thread outlives its tool call; this follows the [defensive patterns](../../defensive-patterns.md) for owned work. `Outcome` carries the completion value or a typed failure: `Exception`, `Timeout`, `Aborted`, `OutOfMemory`, `OutputLimit`, `NeverSettles`, or `Protocol`. The tool layer turns it into Pi's result text.
 
 ## Engine
 
@@ -147,14 +152,14 @@ impl Run {
 | `wasi_snapshot_preview1.fd_close`, `fd_seek`, `fd_fdstat_get` | Return `EBADF`; the guest has no descriptors |
 | `env.host_call` | Dispatches the prelude's host functions: tool calls, output items, discovery, and the store |
 | `env.host_interrupt` | Returns the abort flag, which QuickJS polls between opcodes |
-| `env.host_promise_rejection` | Records unhandled rejections for the outcome |
+| `env.host_promise_rejection` | Frees the values; unhandled rejections are not recorded, as with Pi's VM |
 | `env.host_module_normalize`, `env.host_module_load` | Refuse; scripts have no modules |
 | `env.host_get_timezone_offset` | Returns 0: scripts run in UTC, as Pi's deterministic mode does |
 
 Every pointer and length the guest passes is checked against its linear memory before the host reads, and a bad one fails the run as `Protocol`. Rust never panics on guest input.
 
 **Driver.**
-- The driver calls the module's `qjs_*` exports: `qjs_init`, `qjs_eval`, `qjs_new_host_function`, `qjs_promise_state`, `qjs_execute_pending_job`, and the value and property functions.
+- The driver calls the module's `qjs_*` exports: `qjs_init`, `qjs_eval`, `qjs_new_host_function`, `qjs_execute_pending_job`, and the value, property, and promise functions. It checks every export's signature when the module compiles.
 - It ports the subset of `quickjs-wasi`'s `index.js` that Pi's `vm.ts` uses, with its MIT notice.
 - The prelude is Pi's `prelude-source.ts`, carried as a JavaScript asset with Pi's notice, and evaluated before the script.
 - The driver follows `vm.ts`'s contract:
@@ -169,12 +174,13 @@ Every pointer and length the guest passes is checked against its linear memory b
   - `host_interrupt` answers QuickJS's own interrupt poll, which ends the script with an error it cannot catch.
   - Between job batches, the driver checks the abort flag itself, as Pi does for `while (true) await null`.
 - Built-ins are compiled Wasm too, so a long regex or `indexOf` stops at the deadline. Pi's Bun workers cannot stop such built-ins ([Measurements](#measurements)).
-- One process-wide ticker thread is not needed: aborts and deadlines increment the epoch directly from the tool layer's timer.
+- One process-wide ticker thread is not needed. An abort increments the epoch directly; a run with a deadline has a small watchdog thread that stops it at the deadline even when nobody polls `Run::next`, and the script thread joins it before exiting.
 
 **Memory and stack.**
 - `qjs_set_memory_limit` caps the QuickJS heap at 256 MiB, so an allocation beyond it is a catchable `InternalError: out of memory`, as in Pi.
 - `StoreLimits` caps the module's linear memory slightly above that: 320 MiB with one memory and one table. A growth past it fails, and the run ends as `OutOfMemory` instead of the host running out.
-- `qjs_set_max_stack_size` (512 KiB, Pi's `MAX_STACK_SIZE`) stays below `max_wasm_stack`. The script thread is started with an 8 MiB stack, so deep recursion is a catchable `RangeError`.
+- `qjs_set_max_stack_size` (512 KiB, Pi's `MAX_STACK_SIZE`) stays below `max_wasm_stack` (32 MiB) on a 40 MiB script thread. Measured: 1e5-deep `JSON.parse`, `JSON.stringify`, `String()`, and `eval` trapped the Wasm stack at 4 and 8 MiB and are a catchable `RangeError` from 12 MiB.
+- At most `MAX_PENDING_CALLS` (128) calls may wait for results. A script that issues calls without awaiting them never lets the VM take an answer, so the next call fails the run as `Protocol`, telling the script to await calls first, as Bake 0.3's `maxPendingCalls` did. Pi has no such limit.
 
 **Deterministic mode.**
 - The shim already owns every source of nondeterminism: clocks, randomness, and the time zone.
@@ -224,7 +230,7 @@ Every pointer and length the guest passes is checked against its linear memory b
 | Script escapes QuickJS | Wasm linear memory; the host checks every pointer the guest passes | Bounds tests on every `env` import with forged pointers and lengths |
 | Infinite loops, long built-ins, job floods | Epoch trap, `host_interrupt`, and the driver's batch checks | Loop, regex-backtracking, and `while (true) await null` cases end within the deadline and after an abort |
 | Memory exhaustion | The QuickJS heap limit, then `StoreLimits` on linear memory | An allocation loop ends as `out of memory`; a growth past the store limit ends the run while the process keeps working |
-| Deep recursion | QuickJS stack guard below `max_wasm_stack`, on an 8 MiB thread | Recursion fails as a catchable `RangeError` |
+| Deep recursion and nesting | QuickJS stack guard below a 32 MiB `max_wasm_stack`, on a 40 MiB thread | Recursion and 1e5-deep JSON fail as a catchable `RangeError` |
 | Output and store floods | The prelude's limits, checked again by the host before it allocates | Pi's limit cases, ported |
 | A never-settling script | Detection after each drain | Pi's never-settles case, ported |
 | A script that outlives its call | `Run` owns and joins its thread; aborted nested calls are awaited | A teardown test asserts no thread or nested call survives the tool result |
@@ -260,7 +266,7 @@ Measured 2026-10-19 on Linux x86_64 (Intel Core i9-14900KS), Rust 1.99.0, Wasmti
 | `while(true){}` | Trapped at 1.500 s |
 | `/(a+)+b/.test('a'.repeat(40))`, backtracking inside a built-in | Trapped at 1.500 s |
 
-The module's imports are exactly the twelve in the [Engine](#engine) table. Debug builds compile more slowly; slice 1 records the debug compile time and keeps tests on one shared `CodemodeEngine`.
+The module's imports are exactly the twelve in the [Engine](#engine) table. In slice 1 a debug build compiled it in about 0.64 s, and the tests share one `CodemodeEngine`.
 
 ## Tests
 
@@ -312,6 +318,9 @@ Slices 1 and 2 touch nothing the model sees. Slice 3 changes no request while no
 <summary>Working context for maintainers — click to expand</summary>
 
 - Re-check Pi's latest release when slice 1 starts. Record any change to `packages/codemode` or `extensions/codemode`, and to the `quickjs-wasi` pin.
+- Slices 1 to 3 (2026-10-19) ported Pi v1.3.0, `71023aec1546d6d677a65669c5665c0927ce0dd0`, the latest release when they started. `engine/` carries quickjs-wasi's license, QuickJS-NG v0.17.0's exact LICENSE, and wasi-libc's, musl's, and cloudlibc's notices from wasi-libc `165235bc467d`; the binary has no producers section, so the wasi-libc revision of the build is unknown. The release license bundle copies every `LICENSE-*` file under a Bake crate's immediate subdirectories.
+- Slice 3 decisions: tools gain a fifth `ToolContext` parameter rather than a task-local executor, because the codemode VM runs on its own thread; each nested call is a task its caller owns; nesting stops at 8 levels; `AgentTool::nested_callable` lets `codemode` exclude itself. `bake.run.v1` dispatch records gain an optional `parent_tool_call_id`.
+- Slice 4 notes: `max_concurrent_read_tools` does not cap read-only nested calls; the terminal does not yet show an approval's `parent_tool_call_id`.
 - The measurement program compiled with `cargo +1.99.0 build --release --offline` against the workspace's cached Wasmtime 49.0.3 sources. Slice 1 turns it into the engine's first tests instead of committing it.
 
 </details>
