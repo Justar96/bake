@@ -111,6 +111,9 @@ Options:
                             then DSH_OFFLINE, set to 1, true, or yes)
       --verbose             Accepted and without effect: bake-rs has no quiet
                             startup to force, and always reports its startup
+  -a, --approve             Refused, with the reason: Pi's project trust is
+  -na, --no-approve         not ported, so a project's own files are always
+                            loaded. --approval sets the approval policy
   -h, --help                Show this help
   -v, --version             Show the version
 

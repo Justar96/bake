@@ -324,6 +324,9 @@ pub fn plan(
     if let Some(message) = unknown_flags_message(&parsed.unknown_flags) {
         return Action::Exit(error(stderr, &message));
     }
+    if parsed.project_trust_override.is_some() {
+        return Action::Exit(error(stderr, PROJECT_TRUST_REFUSED));
+    }
     if let Some(message) = validate_fork_flags(&parsed) {
         return Action::Exit(error(stderr, &message));
     }
@@ -558,6 +561,16 @@ enum SessionStartError {
     Error(String),
     Plain(String),
 }
+
+/// Why `--approve` and `--no-approve` are refused. Pi's project trust
+/// decides whether a project's own files are loaded, and `bake-rs` has no
+/// such decision: a project's `AGENTS.md` files
+/// ([`crate::system_prompt`]), its `.agents/skills` ([`crate::skills`]),
+/// and its `.bake/prompts` ([`crate::prompt_templates`]) are always
+/// loaded, and it reads no project settings ([`crate::settings`]) and no
+/// project `mcp.json` ([`crate::mcp`]). Bake's `--approval` is a different
+/// thing: the session's approval policy (D24).
+pub const PROJECT_TRUST_REFUSED: &str = "--approve and --no-approve need project trust, which bake-rs does not have: a project's AGENTS.md, .agents/skills, and .bake/prompts are always loaded, and no project settings or mcp.json is read. For the session's approval policy, see --approval";
 
 /// `BAKE_OFFLINE`, read before [`DSH_OFFLINE_ENV`].
 pub const BAKE_OFFLINE_ENV: &str = "BAKE_OFFLINE";
@@ -2223,6 +2236,26 @@ mod tests {
             Action::Interactive(_)
         ));
         assert_eq!(text(&errors), "");
+    }
+
+    // Bake: the project-trust flags are parsed and then refused, with the
+    // reason instead of `Unknown option`, and nothing is loaded first.
+    #[test]
+    fn the_project_trust_flags_are_refused() {
+        for flags in [
+            vec!["-a"],
+            vec!["--approve", "-p", "hi"],
+            vec!["-na"],
+            vec!["--no-approve", "task"],
+        ] {
+            let (stderr, errors) = sink();
+            assert_eq!(
+                plan(&strings(&flags), true, true, &stderr),
+                Action::Exit(1),
+                "{flags:?}"
+            );
+            assert_eq!(text(&errors), format!("Error: {PROJECT_TRUST_REFUSED}\n"));
+        }
     }
 
     // Pi's `offlineMode`, with Bake's variable names: the flag, then

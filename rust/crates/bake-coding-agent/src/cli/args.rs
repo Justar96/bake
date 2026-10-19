@@ -9,6 +9,15 @@
 //! ([`crate::mcp::home`]), and `--export` writes a session file as HTML
 //! ([`crate::cli::export`]).
 //!
+//! `--approve` (`-a`) and `--no-approve` (`-na`) parse to
+//! [`Args::project_trust_override`] and are then refused: Pi's project
+//! trust, which decides whether a project's own files are loaded, is not
+//! ported ([`crate::settings`]), so there is no decision for them to
+//! override. They are parsed rather than left unknown so the refusal says
+//! that, and so `-a` is not read as an unknown short option. Bake's
+//! `--approval` is a different thing: the session's approval policy (D24,
+//! [`crate::permissions`]).
+//!
 //! `--verbose` is accepted and changes nothing. Pi's flag forces verbose
 //! startup over its `quietStartup` setting; `bake-rs` has no such setting
 //! and no quiet startup, so its startup already reports what Pi's verbose
@@ -92,6 +101,11 @@ pub struct Args {
     /// `--verbose`: force verbose startup. `bake-rs` has no quiet startup
     /// to override, so nothing changes; see the module documentation.
     pub verbose: bool,
+    /// Pi's `projectTrustOverride`: `--approve` (`-a`) is `Some(true)` and
+    /// `--no-approve` (`-na`) is `Some(false)`. `bake-rs` has no project
+    /// trust, so [`crate::cli::plan`] refuses both; see the module
+    /// documentation.
+    pub project_trust_override: Option<bool>,
     /// `--provider`.
     pub provider: Option<String>,
     /// `--model`.
@@ -321,6 +335,8 @@ pub fn parse_args(args: &[String]) -> Args {
             "--no-mcp" => result.no_mcp = true,
             "--offline" => result.offline = true,
             "--verbose" => result.verbose = true,
+            "--approve" | "-a" => result.project_trust_override = Some(true),
+            "--no-approve" | "-na" => result.project_trust_override = Some(false),
             "--export" if next.is_some() => {
                 result.export = next.map(str::to_owned);
                 i += 1;
@@ -681,6 +697,23 @@ mod tests {
             unknown_flags_message(&args.unknown_flags).as_deref(),
             Some("Unknown options: --flag, --other")
         );
+    }
+
+    // Pi `args.ts`: the project-trust flags take no value, and the last
+    // one wins. `bake-rs` refuses them later ([`crate::cli::plan`]).
+    #[test]
+    fn project_trust_flags_parse_to_one_override() {
+        assert_eq!(parse(&["-p", "hi"]).project_trust_override, None);
+        for flag in ["--approve", "-a"] {
+            assert_eq!(parse(&[flag]).project_trust_override, Some(true));
+        }
+        for flag in ["--no-approve", "-na"] {
+            assert_eq!(parse(&[flag]).project_trust_override, Some(false));
+        }
+        let args = parse(&["-a", "-na", "-p", "hi"]);
+        assert_eq!(args.project_trust_override, Some(false));
+        assert_eq!(args.messages, ["hi"]);
+        assert!(args.diagnostics.is_empty() && args.unknown_flags.is_empty());
     }
 
     // Pi `args.ts`: `--verbose` takes no value. `bake-rs` accepts it and
