@@ -30,6 +30,7 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::activity::Tones;
 use crate::copy;
+use crate::editor;
 use crate::shell_output;
 use crate::syntax::{Carry, Lang};
 use crate::transcript::{self, BODY, CallState, Look, RAIL};
@@ -380,6 +381,46 @@ fn args_preview(args: &str) -> String {
     format!("{kept}...")
 }
 
+/// `text` on the row `first` opens, after its cells, then wrapped at
+/// `width` less `indent` on rows opening with `rest`; so a call's arguments
+/// go on beside a name that runs past the shared column, and keep the
+/// column's room on the rows after.
+fn hang_beside(
+    text: &str,
+    width: usize,
+    indent: usize,
+    mut first: Vec<Span<'static>>,
+    rest: Vec<Span<'static>>,
+    style: Style,
+) -> Vec<Line<'static>> {
+    let used: usize = first.iter().map(Span::width).sum();
+    let room = width.saturating_sub(used);
+    let end = if room == 0 {
+        0
+    } else {
+        editor::layout(text, 0, room + 1)
+            .rows
+            .first()
+            .map_or(0, |row| row.end)
+    };
+    let (beside, after) = (text[..end].trim_end(), text[end..].trim_start());
+    if !beside.is_empty() {
+        first.push(Span::styled(beside.to_owned(), style));
+    }
+    let mut lines = vec![Line::from(first)];
+    if !after.is_empty() {
+        lines.extend(transcript::hang(
+            after,
+            width,
+            indent,
+            rest.clone(),
+            rest,
+            style,
+        ));
+    }
+    lines
+}
+
 /// The latest [`CALL_PREVIEW_COUNT`] calls, one row each: its mark, its
 /// name, its arguments, and its duration, and a failed or cancelled call's
 /// first [`ERROR_PREVIEW_ROWS`] rows of error under its name. Earlier calls
@@ -407,22 +448,27 @@ fn calls(
         rows.push(Line::from(spans));
     }
     let names: Vec<String> = shown.iter().map(|call| clean(&call.name)).collect();
-    // The arguments of every row start in one column.
-    let column = names.iter().map(|name| name.width()).max().unwrap_or(0) + 2;
+    // The arguments of every row start in one column, at most a third of
+    // the width wide, so one long name such as an MCP tool's leaves the
+    // other rows their room. A name past it takes one space, as Pi's
+    // `name args`.
+    let longest = names.iter().map(|name| name.width()).max().unwrap_or(0);
+    let column = (longest + 2).min(width / 3);
     for (call, name) in shown.iter().zip(names) {
         let (mark, mark_style) = nested_mark(call.status, look);
         let mut first = gutter();
         first.extend([Span::styled(mark, mark_style), transcript::pad(1)]);
         let name_at = BODY + mark.width() + 1;
         let indent = name_at + column;
+        let gap = column.saturating_sub(name.width()).max(1);
         first.push(Span::styled(
             name.clone(),
             Style::new().add_modifier(Modifier::BOLD),
         ));
-        first.push(transcript::pad(column - name.width()));
+        first.push(transcript::pad(gap));
         let mut rest = gutter();
         rest.push(transcript::pad(indent - BODY));
-        let mut row = transcript::hang(
+        let mut row = hang_beside(
             &args_preview(&call.args),
             width,
             indent,
@@ -747,6 +793,44 @@ mod tests {
         assert_eq!(
             render(short, 40, PLAIN)[3..],
             ["  │   one", "  │   two", "  │   three"]
+        );
+    }
+
+    #[test]
+    fn a_long_name_takes_one_space_and_leaves_the_other_rows_their_column() {
+        let mut ran = script(CallState::Done);
+        ran.calls = vec![
+            call("read", r#"{"path":"a"}"#, NestedStatus::Ok, Some(5)),
+            call(
+                "mcp__github__list_issues",
+                r#"{"repo":"bake","state":"open"}"#,
+                NestedStatus::Ok,
+                Some(12),
+            ),
+        ];
+        let lines = render(ran, 40, PLAIN);
+        // The column is a third of 40 cells, so `read` keeps one row.
+        assert_eq!(lines[2], r#"  │ ✓ read         {"path":"a"}  5ms"#);
+        // The long name takes one space, its arguments go on beside it, and
+        // the rows after keep the column.
+        assert_eq!(
+            lines[3..],
+            [
+                r#"  │ ✓ mcp__github__list_issues {"repo":""#,
+                r#"  │                bake","state":"open"}"#,
+                "  │                12ms",
+            ]
+        );
+        // A name wider than the row puts its arguments under it.
+        let mut wide = script(CallState::Done);
+        wide.calls = vec![call(&"n".repeat(50), "{}", NestedStatus::Ok, None)];
+        let lines = render(wide, 40, PLAIN);
+        assert_eq!(
+            lines[2..],
+            [
+                format!("  │ ✓ {}", "n".repeat(50)),
+                "  │                {}".to_owned()
+            ]
         );
     }
 
