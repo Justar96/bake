@@ -585,9 +585,10 @@ impl Records {
     }
 }
 
-/// A tool call the script made that has not started.
+/// A tool call the script made that has not started, recorded at `index`.
 struct QueuedCall {
     id: u32,
+    index: usize,
     tool: Arc<AgentTool>,
     args: Option<Value>,
 }
@@ -601,15 +602,16 @@ struct StartedCall {
     started: Instant,
 }
 
-/// Records a call as it starts, in the order calls start, and publishes
-/// the records; returns its place.
-fn record_start(records: &Records, call: &QueuedCall) -> usize {
+/// Records a call when the script makes it, as Pi does, so a call that
+/// never leaves the queue is still listed; publishes the records and
+/// returns its place.
+fn record_call(records: &Records, tool: &AgentTool, args: Option<&Value>) -> usize {
     let index = {
         let mut calls = records.lock();
         calls.push(CodemodeNestedCall {
             id: format!("{}/?", records.caller_id),
-            name: call.tool.name.clone(),
-            args: preview_args(call.args.as_ref()),
+            name: tool.name.clone(),
+            args: preview_args(args),
             status: CodemodeNestedCallStatus::Running,
             duration_ms: None,
             error: None,
@@ -778,8 +780,12 @@ async fn run_script(
                 break;
             };
             let controller = AbortController::new();
-            let index = record_start(records, &call);
-            let QueuedCall { id, tool, args } = call;
+            let QueuedCall {
+                id,
+                index,
+                tool,
+                args,
+            } = call;
             let started = Instant::now();
             // Started here, not in the task, so nested ids follow the order
             // the script made its calls.
@@ -810,7 +816,10 @@ async fn run_script(
             event = run.next() => match event {
                 Event::Call(HostCall::Tool { id, name, args }) => {
                     match catalog.tools.iter().find(|tool| tool.name == name) {
-                        Some(tool) => queue.push_back(QueuedCall { id, tool: Arc::clone(tool), args }),
+                        Some(tool) => {
+                            let index = record_call(records, tool, args.as_ref());
+                            queue.push_back(QueuedCall { id, index, tool: Arc::clone(tool), args });
+                        }
                         None => {
                             let _ = handle.answer(id, Err(CallError::new(format!("Tool {name} not found"))));
                         }
@@ -836,7 +845,7 @@ async fn run_script(
         }
     };
     // Calls still running when the script ends are cancelled and awaited;
-    // waiting ones never start.
+    // waiting ones never start, and their records read cancelled.
     queue.clear();
     for controller in &controllers {
         controller.abort();

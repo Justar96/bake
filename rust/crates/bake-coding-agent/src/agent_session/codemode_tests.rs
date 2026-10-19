@@ -30,7 +30,9 @@ use crate::plugins::tests::{Scripted, block};
 use crate::session::NewSessionOptions;
 use crate::test_support::TempDir;
 use crate::tools::bash::BashToolOptions;
-use crate::tools::codemode::{CODEMODE_STORE_ENTRY_TYPE, CodemodeMode};
+use crate::tools::codemode::{
+    CODEMODE_STORE_ENTRY_TYPE, CodemodeMode, MAX_CONCURRENT_NESTED_CALLS,
+};
 use crate::tools::definition::ToolDefinition;
 use crate::tools::index::{ToolsOptions, create_all_tool_definitions, create_bash_tool_definition};
 
@@ -1089,6 +1091,40 @@ async fn an_abort_reports_running_nested_calls_cancelled() {
             "wait".to_owned(),
             "cancelled".to_owned()
         ))
+    );
+}
+
+/// Calls beyond the running limit are recorded when the script makes
+/// them: after an abort, those that never started are listed as cancelled
+/// in the details and the failure summary, as Pi lists them.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_abort_lists_the_calls_that_never_started() {
+    let fx = Fixture::new("codemode-abort-queued");
+    let started = Arc::new(AtomicUsize::new(0));
+    let session = Arc::new(
+        fx.session(vec![waiting(&started)], &["wait", "codemode"])
+            .await,
+    );
+    let total = MAX_CONCURRENT_NESTED_CALLS + 4;
+    fx.script(
+        &format!("await Promise.all(Array.from({{ length: {total} }}, () => tools.wait({{}})));"),
+        "c1",
+    );
+    let result = abort_after_starts(session, &started, MAX_CONCURRENT_NESTED_CALLS).await;
+    assert_eq!(started.load(Ordering::SeqCst), MAX_CONCURRENT_NESTED_CALLS);
+    let expected: Vec<(String, String, String)> = (1..=MAX_CONCURRENT_NESTED_CALLS)
+        .map(|n| format!("c1/{n}"))
+        .chain(std::iter::repeat_n("c1/?".to_owned(), 4))
+        .map(|id| (id, "wait".to_owned(), "cancelled".to_owned()))
+        .collect();
+    assert_eq!(calls(&result), expected);
+    let text = result_text(&result);
+    let summary = vec!["wait (cancelled)"; total].join(", ");
+    assert!(
+        text.ends_with(&format!(
+            "Tool calls made before the failure (they are not undone): {summary}"
+        )),
+        "{text}"
     );
 }
 

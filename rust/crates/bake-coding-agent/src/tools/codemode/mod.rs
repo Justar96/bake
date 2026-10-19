@@ -48,7 +48,9 @@
 //!   sort by code point, where Pi uses `localeCompare`.
 //! - At most [`MAX_CONCURRENT_NESTED_CALLS`] of a script's tool calls run at
 //!   once; the rest wait in the order the script made them. Pi starts every
-//!   call at once.
+//!   call at once. Every call is recorded when the script makes it, so one
+//!   still waiting when the script ends is listed as cancelled, with the id
+//!   `<codemode call id>/?`.
 //! - An Esc abort reports `Script aborted: This operation was aborted`, the
 //!   message of the default reason of Pi's aborted signal.
 
