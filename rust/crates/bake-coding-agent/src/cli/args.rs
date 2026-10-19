@@ -9,6 +9,12 @@
 //! ([`crate::mcp::home`]), and `--export` writes a session file as HTML
 //! ([`crate::cli::export`]).
 //!
+//! `--verbose` is accepted and changes nothing. Pi's flag forces verbose
+//! startup over its `quietStartup` setting; `bake-rs` has no such setting
+//! and no quiet startup, so its startup already reports what Pi's verbose
+//! startup reports: the session file, the model fallback, every setup
+//! warning, and each MCP server's failure.
+//!
 //! Bake adds `--permission <preset>`, `--sandbox <mode>`, and
 //! `--approval <policy>`, which select the session's permission (D24) the
 //! way Pi's `--thinking` selects its thinking level, and `--inline`, which
@@ -83,6 +89,9 @@ pub struct Args {
     /// `--offline`: run no startup network operation. The environment can
     /// set it too ([`crate::cli::offline_mode`]).
     pub offline: bool,
+    /// `--verbose`: force verbose startup. `bake-rs` has no quiet startup
+    /// to override, so nothing changes; see the module documentation.
+    pub verbose: bool,
     /// `--provider`.
     pub provider: Option<String>,
     /// `--model`.
@@ -311,6 +320,7 @@ pub fn parse_args(args: &[String]) -> Args {
             "--no-context-files" | "-nc" => result.no_context_files = true,
             "--no-mcp" => result.no_mcp = true,
             "--offline" => result.offline = true,
+            "--verbose" => result.verbose = true,
             "--export" if next.is_some() => {
                 result.export = next.map(str::to_owned);
                 i += 1;
@@ -670,6 +680,24 @@ mod tests {
         assert_eq!(
             unknown_flags_message(&args.unknown_flags).as_deref(),
             Some("Unknown options: --flag, --other")
+        );
+    }
+
+    // Pi `args.ts`: `--verbose` takes no value. `bake-rs` accepts it and
+    // starts the same session; nothing else in `Args` changes.
+    #[test]
+    fn verbose_flag_is_accepted_and_changes_nothing_else() {
+        assert!(!parse(&["-p", "hi"]).verbose);
+        let args = parse(&["--verbose", "-p", "hi"]);
+        assert!(args.verbose);
+        assert_eq!(args.messages, ["hi"]);
+        assert!(args.diagnostics.is_empty() && args.unknown_flags.is_empty());
+        assert_eq!(
+            Args {
+                verbose: false,
+                ..args.clone()
+            },
+            parse(&["-p", "hi"])
         );
     }
 

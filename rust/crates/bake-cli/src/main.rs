@@ -109,6 +109,8 @@ Options:
       --approval <policy>   ask or never
       --offline             Run no startup network operation (BAKE_OFFLINE,
                             then DSH_OFFLINE, set to 1, true, or yes)
+      --verbose             Accepted and without effect: bake-rs has no quiet
+                            startup to force, and always reports its startup
   -h, --help                Show this help
   -v, --version             Show the version
 

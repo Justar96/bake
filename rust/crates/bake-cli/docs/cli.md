@@ -45,6 +45,8 @@ bake-rs --mode json -p "List the tests" > events.jsonl
 - `--append-system-prompt <text|path>` appends literal text or a file's contents to the system prompt. Give it more than once to join several parts with blank lines.
 - `--prompt-template <path>` loads a Markdown prompt template file or directory (repeatable); `-np`, `--no-prompt-templates` skips the default `prompts/` directories (`$BAKE_HOME/prompts` and `<cwd>/.bake/prompts`). A prompt starting with `/<name> [args...]` expands that template (`$1`, `$2`, `$@`, `$ARGUMENTS`, `${N:-default}`, `${@:N}`, `${@:N:L}`).
 
+- `--verbose` is accepted and does nothing. Pi's flag forces verbose startup over its `quietStartup` setting; bake-rs has no such setting and no quiet startup, so it always reports the session file, a model fallback, every setup warning, and each MCP server's failure.
+
 Model flags are in `bake-rs docs models`, session flags in `bake-rs docs sessions`, context flags in `bake-rs docs context`, permission flags in `bake-rs docs permissions`, `--no-mcp` in `bake-rs docs mcp`, and `--skill`, `--no-skills`, and `/skill:<name>` prompts in `bake-rs docs skills`.
 
 ## Tools
