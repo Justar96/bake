@@ -9,6 +9,11 @@
 test_tool = "nextest"
 additional_cargo_args = ["--locked"]
 
+# Scratch copies skip gitignored files; cargo-mutants otherwise skips only the
+# top-level target directory and would copy nested build output such as
+# rust/fuzz/target into every copy.
+gitignore = true
+
 # Test code, test servers, and fixtures are not product logic; cargo-mutants
 # already skips `#[cfg(test)]` items, and these globs also cover the files
 # such modules live in. The hostile plugin fixture is committed as Wasm, so

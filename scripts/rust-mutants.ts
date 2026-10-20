@@ -124,8 +124,12 @@ export interface MutantsRun {
 }
 
 const isCodemodePath = (path: string): boolean => path.startsWith(CODEMODE_DIR)
-/** A glob that does not start at a crate directory, such as `**\/lib.rs`, can match files in either run. */
-const mayMatchCodemode = (path: string): boolean => isCodemodePath(path) || !/^(crates|plugins)\//u.test(path)
+/**
+ * A glob that does not name one crate directory, such as `**\/lib.rs` or
+ * `crates/*\/src/lib.rs`, can match files in either run.
+ */
+const mayMatchCodemode = (path: string): boolean =>
+  isCodemodePath(path) || !/^(crates|plugins)\//u.test(path) || /[*?[{]/u.test(path.split('/').slice(0, 2).join('/'))
 
 /**
  * Split the scope into a nextest run of every package but bake-codemode and a
@@ -167,7 +171,10 @@ export function planMutantsRuns(
         ...otherPackages.flatMap(name => ['--package', name]),
         '--exclude', `${CODEMODE_DIR}**`,
         // A package without tests then reports its mutants as missed instead of failing the baseline.
-        ...options.list ? [] : ['--cargo-test-arg=--no-tests=pass'],
+        // The workspace nextest profile sets fail-fast = false, and plain --fail-fast still waits
+        // for running tests; either way a mutant that fails some tests and hangs others is
+        // reported as a timeout instead of caught. Stop and kill the run at its first failure.
+        ...options.list ? [] : ['--cargo-test-arg=--no-tests=pass', '--cargo-test-arg=--max-fail=1:immediate'],
       ],
     })
   }

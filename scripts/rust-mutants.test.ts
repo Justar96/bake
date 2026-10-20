@@ -100,7 +100,7 @@ describe('Rust mutation plan', () => {
     const [workspace, codemode] = runs
     expect(workspace?.args).toEqual([
       'mutants', '--in-diff', '/out/diff.patch', '--jobs', '2', '--output', '/out/workspace',
-      '--exclude', 'crates/bake-codemode/**', '--cargo-test-arg=--no-tests=pass',
+      '--exclude', 'crates/bake-codemode/**', '--cargo-test-arg=--no-tests=pass', '--cargo-test-arg=--max-fail=1:immediate',
     ])
     expect(codemode?.args).toEqual([
       'mutants', '--in-diff', '/out/diff.patch', '--jobs', '2', '--output', '/out/codemode',
@@ -125,6 +125,8 @@ describe('Rust mutation plan', () => {
 
     const glob = planMutantsRuns(options({ files: ['**/lib.rs'] }), undefined, undefined, out)
     expect(glob.map(run => run.name)).toEqual(['workspace', 'codemode'])
+    const crateGlob = planMutantsRuns(options({ files: ['crates/*/src/lib.rs'] }), undefined, undefined, out)
+    expect(crateGlob.map(run => run.name)).toEqual(['workspace', 'codemode'])
 
     const packages = planMutantsRuns(options({ packages: ['bake-ai', CODEMODE_PACKAGE] }), undefined, undefined, out)
     expect(packages[0]?.args).toEqual(expect.arrayContaining(['--package', 'bake-ai']))
