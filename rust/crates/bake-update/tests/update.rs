@@ -576,7 +576,8 @@ async fn a_check_only_run_installs_nothing() {
 }
 
 /// The Windows pointer form: `current.txt` and `previous.txt` hold the
-/// version and a newline, and the same switch and rollback work.
+/// version and a CRLF, as `install.ps1` writes it, and the same switch
+/// and rollback work.
 #[tokio::test]
 async fn the_version_file_pointer_switches_and_rolls_back() {
     let target = host_target().expect("a Bake release platform");
@@ -591,11 +592,11 @@ async fn the_version_file_pointer_switches_and_rolls_back() {
     ));
     assert_eq!(
         std::fs::read_to_string(fixture.dir.path().join("current.txt")).expect("current.txt"),
-        "2.0.0\n"
+        "2.0.0\r\n"
     );
     assert_eq!(
         std::fs::read_to_string(fixture.dir.path().join("previous.txt")).expect("previous.txt"),
-        "1.0.0\n"
+        "1.0.0\r\n"
     );
     assert_eq!(
         updater.rollback().expect("the rollback"),
@@ -606,7 +607,7 @@ async fn the_version_file_pointer_switches_and_rolls_back() {
     );
     assert_eq!(
         std::fs::read_to_string(fixture.dir.path().join("current.txt")).expect("current.txt"),
-        "1.0.0\n"
+        "1.0.0\r\n"
     );
     assert_eq!(fixture.root().previous(), Some("2.0.0".to_owned()));
 }

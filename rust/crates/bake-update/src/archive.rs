@@ -244,9 +244,16 @@ mod tests {
     fn an_archive_unpacks_its_files_with_their_modes() {
         let dir = temp_dir("archive-ok");
         let archive = dir.path().join("release.tar.gz");
+        // The archive a release of this host carries: `bake.exe` on Windows,
+        // where that name alone is an executable.
+        let executable = if cfg!(windows) {
+            "bin/bake.exe"
+        } else {
+            "bin/bake"
+        };
         fs::write(
             &archive,
-            tar_gz(&[("bin/bake", b"#!/bin/sh\n"), ("LICENSE", b"MIT\n")]),
+            tar_gz(&[(executable, b"#!/bin/sh\n"), ("LICENSE", b"MIT\n")]),
         )
         .expect("archive");
         let into = dir.path().join("unpacked");
@@ -266,7 +273,7 @@ mod tests {
                     .mode()
                     & 0o777
             };
-            assert_eq!(mode("bin/bake"), 0o755);
+            assert_eq!(mode(executable), 0o755);
             assert_eq!(mode("LICENSE"), 0o644);
         }
     }

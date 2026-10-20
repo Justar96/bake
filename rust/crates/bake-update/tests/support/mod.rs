@@ -218,8 +218,15 @@ pub fn command_script(version: &str, target: &str, code: i32) -> String {
 /// script above.
 pub fn release_archive(version: &str, target: &str, reported: &str, code: i32) -> Vec<u8> {
     let script = command_script(reported, target, code);
+    // On Windows only `bin/bake.exe` is a release's command, so that is the
+    // name a release unpacked there must carry; the script runs on Unix.
+    let executable = if cfg!(windows) {
+        "bin/bake.exe"
+    } else {
+        "bin/bake"
+    };
     tar_gz(&[
-        ("bin/bake", script.as_bytes()),
+        (executable, script.as_bytes()),
         ("LICENSE", b"MIT\n"),
         (
             "THIRD_PARTY_NOTICES.md",

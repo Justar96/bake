@@ -3,7 +3,7 @@
 //! ```text
 //! <root>/releases/<version>/   one unpacked archive each
 //! <root>/current              Unix: a relative link to releases/<version>
-//! <root>/current.txt          Windows: that version and a newline
+//! <root>/current.txt          Windows: that version and a CRLF
 //! <root>/previous             the release a rollback returns to
 //! <root>/install.lock         held by every install, update, and rollback
 //! <root>/links.json           the command links the installer made
@@ -45,7 +45,8 @@ pub enum Pointer {
     /// Unix: `current` and `previous`, relative symbolic links.
     Link,
     /// Windows: `current.txt` and `previous.txt`, each the version and a
-    /// newline. Tests use this form on any host.
+    /// CRLF, as `install.ps1` and the 0.3 updater write it, because
+    /// `bake.cmd` reads it with `set /p`. Tests use this form on any host.
     File,
 }
 
@@ -187,7 +188,7 @@ impl Root {
         ));
         let written = match self.pointer {
             Pointer::Link => write_link(&format!("{RELEASES}/{version}"), &temp),
-            Pointer::File => fs::write(&temp, format!("{version}\n")),
+            Pointer::File => fs::write(&temp, format!("{version}\r\n")),
         };
         written.map_err(|error| {
             UpdateError::Install(format!("could not write {}: {error}", temp.display()))
@@ -309,9 +310,10 @@ mod tests {
         fs::create_dir_all(root.releases()).expect("releases");
         assert_eq!(root.current(), None);
         root.point_at(Name::Current, "0.4.0").expect("current");
+        // CRLF, the line ending install.ps1 writes and `bake.cmd` reads.
         assert_eq!(
             fs::read_to_string(root.pointer_path(Name::Current)).expect("pointer"),
-            "0.4.0\n"
+            "0.4.0\r\n"
         );
         assert_eq!(root.current(), Some("0.4.0".to_owned()));
         root.point_at(Name::Current, "0.4.1").expect("replaced");

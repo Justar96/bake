@@ -230,21 +230,16 @@ pub fn archive_name(version: &str, target: &str) -> String {
     format!("bake-rs-v{version}-{target}.tar.gz")
 }
 
-/// Whether `value` is an RFC 3339 instant in UTC, as the manifest writes
-/// it: `YYYY-MM-DDTHH:MM:SSZ`, with optional fractional seconds.
+/// Whether `value` is the instant a manifest states: `YYYY-MM-DDTHH:MM:SSZ`,
+/// UTC with second precision and a real calendar date.
+///
+/// The writer (`scripts/release/native-manifest.ts`) and both installer
+/// grammars accept exactly this form, so no fraction, offset, or rolled-over
+/// date such as `2026-02-31T00:00:00Z` is a published instant.
 fn is_published_instant(value: &str) -> bool {
-    let Some(body) = value.strip_suffix('Z') else {
+    let Some(stamp) = value.strip_suffix('Z') else {
         return false;
     };
-    let (stamp, fraction) = match body.split_once('.') {
-        None => (body, None),
-        Some((stamp, fraction)) => (stamp, Some(fraction)),
-    };
-    if fraction.is_some_and(|fraction| {
-        fraction.is_empty() || fraction.len() > 9 || !fraction.bytes().all(|b| b.is_ascii_digit())
-    }) {
-        return false;
-    }
     let Some((date, time)) = stamp.split_once('T') else {
         return false;
     };
@@ -259,7 +254,7 @@ fn is_published_instant(value: &str) -> bool {
         }
         text.parse().ok()
     };
-    let (Some(_year), Some(month), Some(day)) = (
+    let (Some(year), Some(month), Some(day)) = (
         number(parts[0], 4),
         number(parts[1], 2),
         number(parts[2], 2),
@@ -274,11 +269,21 @@ fn is_published_instant(value: &str) -> bool {
         return false;
     };
     (1..=12).contains(&month)
-        && (1..=31).contains(&day)
+        && (1..=days_in_month(year, month)).contains(&day)
         && hour < 24
         && minute < 60
-        // A leap second is a real instant a publisher may stamp.
-        && second < 61
+        && second < 60
+}
+
+/// How many days `month` has in `year`, by the proleptic Gregorian calendar.
+fn days_in_month(year: u32, month: u32) -> u32 {
+    match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400)) => 29,
+        2 => 28,
+        _ => 0,
+    }
 }
 
 /// Whether one of `keys` signed `bytes`.
@@ -414,18 +419,29 @@ mod tests {
     fn published_instants_are_utc_and_bounded() {
         for value in [
             "2026-10-20T00:00:00Z",
-            "2026-01-02T23:59:60Z",
-            "2026-10-20T12:30:05.123Z",
+            "2026-01-02T23:59:59Z",
+            "2024-02-29T12:30:05Z",
+            "2000-02-29T00:00:00Z",
         ] {
             assert!(is_published_instant(value), "{value}");
         }
+        // The writer and both installer grammars accept this one form, so a
+        // fraction, a leap second, and a date that exists only by rollover
+        // are refused by every reader alike.
         for value in [
             "2026-10-20T00:00:00",
             "2026-10-20T00:00:00+02:00",
             "2026-13-20T00:00:00Z",
             "2026-10-32T00:00:00Z",
+            "2026-02-31T00:00:00Z",
+            "2026-02-29T00:00:00Z",
+            "1900-02-29T00:00:00Z",
+            "2026-04-31T00:00:00Z",
+            "2026-10-00T00:00:00Z",
             "2026-10-20T24:00:00Z",
             "2026-10-20T00:60:00Z",
+            "2026-01-02T23:59:60Z",
+            "2026-10-20T12:30:05.123Z",
             "2026-10-20 00:00:00Z",
             "26-10-20T00:00:00Z",
             "2026-10-20T00:00:00.Z",
