@@ -253,6 +253,7 @@ describe.skipIf(PWSH === undefined)('the Windows installer', () => {
     const shim = readFileSync(join(binDir, 'bake.cmd'), 'utf8')
     expect(shim).toContain('set /p BAKE_CURRENT=<"%BAKE_NATIVE_ROOT%\\current.txt"')
     expect(shim).toContain(root)
+    // `bake.cmd` is the only command the native install makes (D45).
     expect(existsSync(join(binDir, 'bake-rs.cmd'))).toBe(false)
     // The 0.3 launcher is kept as a backup, and dsh is untouched.
     expect(readFileSync(join(binDir, 'dsh.cmd'), 'utf8')).toBe(legacyLauncher)

@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Build `bake-rs` with the pinned Cargo toolchain and archive it for this
+ * Build `bake` with the pinned Cargo toolchain and archive it for this
  * host: a preview of the native 0.4 package layout, not a release.
  *
  * The archive holds the binary, the repository license and notices, the
@@ -13,7 +13,7 @@
  * documentation must match the sources, before and after the archive is
  * unpacked; only then does the archive replace the destination, by rename,
  * so a failed run leaves an earlier archive as it was. The output lives
- * under `.artifacts/bake-rs-release/`, apart from the TypeScript release's
+ * under `.artifacts/bake-native-release/`, apart from the TypeScript release's
  * `.artifacts/bake-release/` and `distribution/host/public/`, and nothing
  * here signs, publishes, installs, or links a command.
  *
@@ -33,13 +33,13 @@ import {
 } from './native-licenses.ts'
 import { tarEntries, SHARED_WRITE } from './permissions.ts'
 
-/** The five release platforms, as Node names them; `bake-rs --self-check` uses the same names. */
+/** The five release platforms, as Node names them; `bake --self-check` uses the same names. */
 export const RUST_TARGETS = ['darwin-arm64', 'darwin-x64', 'linux-arm64', 'linux-x64', 'win32-x64'] as const
 export type RustTarget = typeof RUST_TARGETS[number]
 
-/** The record `bake-rs --self-check` prints, schema 1 (`rust/crates/bake-cli/src/self_check.rs`). */
+/** The record `bake --self-check` prints, schema 1 (`rust/crates/bake-cli/src/self_check.rs`). */
 export interface SelfCheckRecord {
-  readonly kind: 'bake-rs-self-check'
+  readonly kind: 'bake-self-check'
   readonly schema: 1
   readonly version: string
   readonly runtime: 'rust'
@@ -79,7 +79,7 @@ export interface TargetLicenses {
 }
 
 export interface PackOptions {
-  /** The built `bake-rs` executable. */
+  /** The built `bake` executable. */
   readonly binary: string
   /** The repository root, for `LICENSE` and `THIRD_PARTY_NOTICES.md`. */
   readonly root: string
@@ -130,11 +130,12 @@ export function hostTarget(): string {
 }
 
 /**
- * The prefix of every native archive's name, which keeps it apart from the
- * TypeScript `bake-v…` archives. The native publication route matches it, so a
- * rename of the archive is one edit here.
+ * The prefix of every native archive's name, which the 0.3 archives share,
+ * so only an archive's layout tells the two routes' bytes apart
+ * (`native-archive.ts`). The native publication route matches this prefix, so
+ * a rename of the archive is one edit here.
  */
-export const NATIVE_ARCHIVE_PREFIX = 'bake-rs-'
+export const NATIVE_ARCHIVE_PREFIX = 'bake-'
 
 /** The native archive's name, under {@link NATIVE_ARCHIVE_PREFIX}. */
 export function archiveName(version: string, target: RustTarget): string {
@@ -147,7 +148,7 @@ function sha256(bytes: Uint8Array | string): string {
 
 /**
  * The SHA-256 of every `*.md` file in `dir`, by file name without `.md`,
- * which is how `bake-rs --self-check` names its topics.
+ * which is how `bake --self-check` names its topics.
  */
 export function docsDigests(dir: string): Record<string, string> {
   const digests: Record<string, string> = {}
@@ -162,7 +163,7 @@ export function docsDigests(dir: string): Record<string, string> {
 }
 
 /**
- * Parse and check `bake-rs --self-check`'s standard output against what this
+ * Parse and check `bake --self-check`'s standard output against what this
  * build must report.
  * @throws naming the first difference: not exactly one JSON line, another
  * kind, schema, or member set, or a version, target, or documentation hash
@@ -180,7 +181,7 @@ export function parseSelfCheck(stdout: string, expected: Expected): SelfCheckRec
   const record = value as Record<string, unknown>
   const keys = Object.keys(record).sort()
   if (keys.join() !== RECORD_KEYS.join()) throw new Error(`The self-check record has members ${keys.join(', ')}, not ${RECORD_KEYS.join(', ')}`)
-  if (record.kind !== 'bake-rs-self-check') throw new Error(`The self-check record's kind is ${JSON.stringify(record.kind)}`)
+  if (record.kind !== 'bake-self-check') throw new Error(`The self-check record's kind is ${JSON.stringify(record.kind)}`)
   if (record.schema !== 1) throw new Error(`The self-check record's schema is ${JSON.stringify(record.schema)}; this packager reads schema 1`)
   if (record.runtime !== 'rust') throw new Error(`The self-check record's runtime is ${JSON.stringify(record.runtime)}`)
   if (record.version !== expected.version) throw new Error(`The binary reports version ${JSON.stringify(record.version)}; Cargo builds ${expected.version}`)
@@ -261,11 +262,11 @@ interface Ran { readonly code: number; readonly stdout: string; readonly stderr:
  * exit are awaited before the temporary directory is removed or an error is
  * reported. Only the immediate child is killed: a descendant that escapes
  * keeps running, though it can no longer hold this run open through the
- * pipes. `bake-rs --version` and `--self-check` start no process.
+ * pipes. `bake --version` and `--self-check` start no process.
  */
 async function runIsolated(binary: string, args: readonly string[], timeoutMs: number): Promise<Ran> {
   const command = `${basename(binary)} ${args.join(' ')}`
-  const scratch = mkdtempSync(join(tmpdir(), 'bake-rs-pack-run-'))
+  const scratch = mkdtempSync(join(tmpdir(), 'bake-pack-run-'))
   try {
     const home = join(scratch, 'home')
     const path = join(scratch, 'path')
@@ -311,11 +312,11 @@ async function runIsolated(binary: string, args: readonly string[], timeoutMs: n
  */
 export async function checkBinary(binary: string, expected: Expected, timeoutMs = 30_000): Promise<SelfCheckRecord> {
   const version = await runIsolated(binary, ['--version'], timeoutMs)
-  if (version.code !== 0 || version.stdout !== `bake-rs ${expected.version}\n`) {
-    throw new Error(`bake-rs --version exited ${version.code} with ${JSON.stringify(version.stdout.slice(0, 200))}; expected "bake-rs ${expected.version}"`)
+  if (version.code !== 0 || version.stdout !== `bake ${expected.version}\n`) {
+    throw new Error(`bake --version exited ${version.code} with ${JSON.stringify(version.stdout.slice(0, 200))}; expected "bake ${expected.version}"`)
   }
   const check = await runIsolated(binary, ['--self-check'], timeoutMs)
-  if (check.code !== 0) throw new Error(`bake-rs --self-check exited ${check.code}: ${check.stderr.trim().slice(0, 500)}`)
+  if (check.code !== 0) throw new Error(`bake --self-check exited ${check.code}: ${check.stderr.trim().slice(0, 500)}`)
   return parseSelfCheck(check.stdout, expected)
 }
 
@@ -396,7 +397,7 @@ export function targetLicenses(
   if (own === undefined) fail(`has no ${target} text`)
   if (own?.triple !== triple || own?.file !== `${target}/${BUNDLE_FILE}`) fail(`lists ${target} as ${JSON.stringify(own?.triple)} at ${JSON.stringify(own?.file)}, not ${triple} at ${target}/${BUNDLE_FILE}`)
   const text = bundle[`${target}/${BUNDLE_FILE}`] as string
-  if (!text.startsWith(`Third-party licenses for bake-rs, ${target} (${triple})\n`)) fail(`has a ${target}/${BUNDLE_FILE} whose heading names another platform`)
+  if (!text.startsWith(`Third-party licenses for bake, ${target} (${triple})\n`)) fail(`has a ${target}/${BUNDLE_FILE} whose heading names another platform`)
 
   const workspace = Array.isArray(inventory.workspace) ? inventory.workspace.map(asTable) : fail('lists no Bake crates')
   const cli = workspace.find(entry => entry?.name === 'bake-cli')
@@ -410,7 +411,7 @@ export function targetLicenses(
     listed[entry.name] = notice.sha256
   }
   for (const crate of new Set([...Object.keys(listed), ...Object.keys(notices)])) {
-    if (!(crate in listed)) fail(`does not reproduce the NOTICE of ${crate}, which bake-rs links`)
+    if (!(crate in listed)) fail(`does not reproduce the NOTICE of ${crate}, which bake links`)
     if (!(crate in notices)) fail(`reproduces a NOTICE of ${crate}, which the archive does not carry`)
   }
   return { text, inventory: inventoryText, notices: listed }
@@ -419,7 +420,7 @@ export function targetLicenses(
 /** The archive's files for `options`, in a fixed order. */
 export function payload(options: Pick<PackOptions, 'binary' | 'root' | 'notices'>, target: RustTarget, licenses: TargetLicenses): PayloadFile[] {
   const files: PayloadFile[] = [
-    { source: options.binary, path: target === 'win32-x64' ? 'bin/bake-rs.exe' : 'bin/bake-rs', mode: BINARY_MODE },
+    { source: options.binary, path: target === 'win32-x64' ? 'bin/bake.exe' : 'bin/bake', mode: BINARY_MODE },
     { source: join(options.root, 'LICENSE'), path: 'LICENSE', mode: FILE_MODE },
     { source: join(options.root, 'THIRD_PARTY_NOTICES.md'), path: 'THIRD_PARTY_NOTICES.md', mode: FILE_MODE },
   ]
@@ -540,7 +541,7 @@ export async function packRust(options: PackOptions): Promise<PackResult> {
   const outputDir = checkOutputDir(options.root, options.outputDir)
   const destination = join(outputDir, name)
   // Windows's TEMP can be an 8.3 short path; resolve it as pack.ts does.
-  const scratch = realpathSync.native(mkdtempSync(join(tmpdir(), 'bake-rs-pack-')))
+  const scratch = realpathSync.native(mkdtempSync(join(tmpdir(), 'bake-pack-')))
   // Beside the destination, so the final rename stays on one file system.
   const partial = join(outputDir, `.${name}.${process.pid}-${randomUUID()}.partial`)
   try {
@@ -668,7 +669,7 @@ export const PROTECTED_OUTPUTS = ['.artifacts/bake-release', 'distribution/host/
 /**
  * The canonical directory a native archive may be written into for
  * `outputDir`: outside the repository, or under its
- * `.artifacts/bake-rs-release/`, and never inside a
+ * `.artifacts/bake-native-release/`, and never inside a
  * {@link PROTECTED_OUTPUTS} directory, through whatever links lead there.
  * @throws naming the refused directory.
  */
@@ -677,8 +678,8 @@ export function checkOutputDir(root: string, outputDir: string): string {
   for (const name of PROTECTED_OUTPUTS) {
     if (inside(canonicalPath(join(root, name)), out)) throw new Error(`--out ${outputDir} resolves to ${out}, inside the TypeScript release's ${name}/`)
   }
-  if (inside(canonicalPath(root), out) && !inside(canonicalPath(join(root, '.artifacts/bake-rs-release')), out)) {
-    throw new Error(`--out ${outputDir} resolves to ${out}, in the repository but not under .artifacts/bake-rs-release/`)
+  if (inside(canonicalPath(root), out) && !inside(canonicalPath(join(root, '.artifacts/bake-native-release')), out)) {
+    throw new Error(`--out ${outputDir} resolves to ${out}, in the repository but not under .artifacts/bake-native-release/`)
   }
   return out
 }
@@ -701,7 +702,7 @@ async function main(): Promise<void> {
   const metadata = Bun.spawnSync(['cargo', 'metadata', '--locked', '--no-deps', '--format-version', '1'], { cwd: rust, stdout: 'pipe', stderr: 'inherit' })
   if (metadata.exitCode !== 0) throw new Error(`cargo metadata exited ${metadata.exitCode}`)
   const inputs = workspaceInputs(JSON.parse(metadata.stdout.toString()))
-  const outputDir = resolve(values.out ?? join(root, '.artifacts/bake-rs-release', inputs.version))
+  const outputDir = resolve(values.out ?? join(root, '.artifacts/bake-native-release', inputs.version))
   // Before building: packRust checks again, but a refused directory should cost no build.
   checkOutputDir(root, outputDir)
   // Generated for this run, never read from an earlier --write, and before
@@ -711,8 +712,8 @@ async function main(): Promise<void> {
   await run(['cargo', 'fetch', '--locked'], rust)
   const licenses = buildBundle(collect(root)).files
   // From rust/, so rust-toolchain.toml selects the pinned toolchain.
-  await run(['cargo', 'build', '--locked', '-p', 'bake-cli', '--bin', 'bake-rs', ...profile === 'release' ? ['--release'] : []], rust)
-  const binary = join(inputs.targetDir, profile === 'release' ? 'release' : 'debug', process.platform === 'win32' ? 'bake-rs.exe' : 'bake-rs')
+  await run(['cargo', 'build', '--locked', '-p', 'bake-cli', '--bin', 'bake', ...profile === 'release' ? ['--release'] : []], rust)
+  const binary = join(inputs.targetDir, profile === 'release' ? 'release' : 'debug', process.platform === 'win32' ? 'bake.exe' : 'bake')
   const { docs, notices, version } = inputs
   const result = await packRust({ binary, root, docs, notices, licenses, version, target: hostTarget(), outputDir })
   console.log(result.listing.join('\n'))

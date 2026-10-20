@@ -111,7 +111,7 @@ pub fn check_record(line: &str, version: &str, target: &str) -> Result<(), Strin
         Some(Value::String(value)) => Some(value.as_str()),
         _ => None,
     };
-    if member("kind") != Some("bake-rs-self-check") {
+    if member("kind") != Some("bake-self-check") {
         return Err("it printed no self-check record".to_owned());
     }
     if record.get("schema").and_then(Value::as_u64) != Some(1) {
@@ -255,7 +255,7 @@ fn first_line(text: &str) -> Option<String> {
 mod tests {
     use super::*;
 
-    const RECORD: &str = r#"{"kind":"bake-rs-self-check","schema":1,"version":"0.4.1","runtime":"rust","target":"linux-x64","docs":{}}"#;
+    const RECORD: &str = r#"{"kind":"bake-self-check","schema":1,"version":"0.4.1","runtime":"rust","target":"linux-x64","docs":{}}"#;
 
     #[test]
     fn a_record_must_name_the_published_version_and_this_host() {
@@ -278,7 +278,7 @@ mod tests {
         );
         assert_eq!(
             check_record(
-                &RECORD.replace("bake-rs-self-check", "other"),
+                &RECORD.replace("bake-self-check", "other"),
                 "0.4.1",
                 "linux-x64"
             ),

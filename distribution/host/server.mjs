@@ -13,7 +13,7 @@ const archiveRedirect = process.env.BAKE_ARCHIVE_REDIRECT?.trim().replace(/\/+$/
 const archivePath = /^\/releases\/([0-9A-Za-z.-]+)\/(bake-v[0-9A-Za-z.-]+-(?:darwin-(?:arm64|x64)|linux-(?:arm64|x64)|win32-x64)\.tar\.gz)$/
 // The native route: its own manifest, signature, and archives, which no 0.3
 // updater reads. Its archives redirect to the same GitHub release tag.
-const nativeArchivePath = /^\/native\/releases\/([0-9A-Za-z.-]+)\/(bake-rs-v[0-9A-Za-z.-]+-(?:darwin-(?:arm64|x64)|linux-(?:arm64|x64)|win32-x64)\.tar\.gz)$/
+const nativeArchivePath = /^\/native\/releases\/([0-9A-Za-z.-]+)\/(bake-v[0-9A-Za-z.-]+-(?:darwin-(?:arm64|x64)|linux-(?:arm64|x64)|win32-x64)\.tar\.gz)$/
 // Active installs, reported to gissx.org when all three are set. An installed
 // Bake fetches its channel's manifest at most hourly to check for updates,
 // unless BAKE_NO_UPDATE_CHECK is set. The TypeScript agent uses Node's own

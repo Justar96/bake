@@ -58,7 +58,7 @@ function scenario(): Scenario {
   roots.push(directory)
   const key = ephemeralKey()
   const home = join(directory, 'home')
-  const root = join(home, '.local/share/bake-rs')
+  const root = join(home, '.local/share/bake-native')
   const binDir = join(home, '.local/bin')
   mkdirSync(binDir, { recursive: true })
   let files: HostFiles = { manifest: Buffer.from('{}'), signature: '', releases: new Map() }
@@ -140,6 +140,7 @@ posix('installs from an empty home and links bake to the current release', async
   expect(readlinkSync(join(world.root, 'current'))).toBe('releases/0.4.0')
   expect(existsSync(join(world.root, 'previous'))).toBe(false)
   expect(readlinkSync(join(world.binDir, 'bake'))).toBe(join(world.root, 'current/bin/bake'))
+  // `bake` is the only command the native install makes (D45).
   expect(existsSync(join(world.binDir, 'bake-rs'))).toBe(false)
   expect(runCommand(join(world.binDir, 'bake'), ['--version'])).toBe('bake 0.4.0\n')
   expect(JSON.parse(readFileSync(join(world.root, 'links.json'), 'utf8'))).toEqual({
@@ -297,8 +298,8 @@ posix('refuses a manifest with an unknown member, another schema, or a renamed a
   }))
   expect((await world.run()).stderr).toContain('not a bake-native-release/1 manifest')
 
-  // The TypeScript route's archive name, and a name from another version.
-  for (const file of [`bake-v0.4.0-${release.target}.tar.gz`, `bake-rs-v0.4.1-${release.target}.tar.gz`]) {
+  // A name from another version, and one of another shape.
+  for (const file of [`bake-v0.4.1-${release.target}.tar.gz`, `bake-0.4.0-${release.target}.tar.gz`]) {
     world.serve(release, manifestBytes({ version: '0.4.0', artifacts: { [release.target]: { ...release.artifact, file } } }))
     expect((await world.run()).stderr).toContain('names the archive')
   }

@@ -4,9 +4,11 @@
  *
  * The native route is separate from the TypeScript `latest.json` route
  * ([D45](../../docs/roadmap/rust-0.4/scope-00/support.md#decision-register)),
- * and a 0.3 updater cannot read a manifest in this shape. `bake-rs` parses
- * these members; `distribution/host/verify-native-manifest.mjs` applies the
- * same rules in the download service's image build.
+ * and the native key, which no 0.3 updater trusts, signs it. Both routes name
+ * an archive the same way, so a 0.3 updater is kept off this manifest by its
+ * route and its signature, not by the shape of its artifact names. `bake`
+ * parses these members; `distribution/host/verify-native-manifest.mjs`
+ * applies the same rules in the download service's image build.
  */
 
 import { archiveName, isNativeVersion, isRustTarget, RUST_TARGETS, type RustTarget } from './pack-rust.ts'
@@ -28,7 +30,7 @@ export const NATIVE_RELEASES_DIR = 'native/releases'
 
 /** One platform's archive, as the manifest describes it. */
 export interface NativeArtifact {
-  /** `bake-rs-v<version>-<target>.tar.gz`, relative to `native/releases/<version>/`. */
+  /** `bake-v<version>-<target>.tar.gz`, relative to `native/releases/<version>/`. */
   readonly file: string
   /** Lowercase hex SHA-256 of the archive bytes. */
   readonly sha256: string
@@ -102,7 +104,7 @@ function object(value: unknown, what: string): Record<string, unknown> {
 }
 
 /**
- * Validate native manifest text, with the rules `bake-rs` and the host's
+ * Validate native manifest text, with the rules `bake` and the host's
  * verifier apply.
  * @param text - the exact bytes of `native/stable.json`, decoded.
  * @returns the manifest.
