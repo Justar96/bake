@@ -49,6 +49,10 @@ vendor/**/src/**/*.d.ts
 !packages/**/src/**/ripgrep.d.ts
 !packages/**/src/**/turndown-plugin-gfm.d.ts
 
+# Profiles that instrumented Rust test children write beside their package
+# when started without LLVM_PROFILE_FILE; `bun run coverage:rust` merges them.
+rust/**/*.profraw
+
 # A failing PTY run keeps its transcript here.
 apps/tui/.smoke/
 
