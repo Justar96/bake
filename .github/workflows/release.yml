@@ -98,7 +98,8 @@ jobs:
           host="$(node -p 'process.platform + "-" + process.arch')"
           [ "$host" = "${{ matrix.target }}" ] || { echo "Runner is $host, not ${{ matrix.target }}" >&2; exit 1; }
       - run: bun run release:pack
-      # Install this archive with the real installer and update through it,
+      # Install this archive with the frozen 0.3 installer, which
+      # scripts/release/fixtures/legacy-0.3/ keeps, and update through it,
       # signed with a throwaway key; the release key never reaches a build.
       - run: bun run release:assemble --ephemeral-key
       - run: bun run release:verify-local
