@@ -1,10 +1,10 @@
 # Skills
 
-A skill is a Markdown file of instructions for one kind of task, in the Agent Skills format. bake-rs lists each skill's name, description, and file in the system prompt, and the model reads a skill's file when a task matches its description.
+A skill is a Markdown file of instructions for one kind of task, in the Agent Skills format. bake lists each skill's name, description, and file in the system prompt, and the model reads a skill's file when a task matches its description.
 
 ## Where they are found
 
-bake-rs reads skills from these places, in this order, and keeps the first skill of each name:
+bake reads skills from these places, in this order, and keeps the first skill of each name:
 
 1. `.agents/skills` in the session's working directory and in each parent up to the root of its git repository, or up to the filesystem root outside a repository, nearest first;
 2. `~/.agents/skills` in your home directory;
@@ -31,14 +31,14 @@ Read the changelog first, then …
 - `name` defaults to the name of the directory holding the file. The format allows lowercase letters, digits, and single hyphens, up to 64 characters.
 - `disable-model-invocation: true` leaves the skill out of the system prompt, so it runs only when a prompt asks for it by name.
 
-A relative path in a skill file is taken from the skill's directory. A skill file larger than 1 MiB is skipped. bake-rs does not report skills it skips in print mode, so check a skill's frontmatter when it does not appear.
+A relative path in a skill file is taken from the skill's directory. A skill file larger than 1 MiB is skipped. bake does not report skills it skips in print mode, so check a skill's frontmatter when it does not appear.
 
 ## Running a skill by name
 
 A prompt that starts with `/skill:<name>` sends that skill's instructions, without the frontmatter, followed by the rest of the prompt:
 
 ```sh
-bake-rs -p "/skill:release-notes for v0.4.0"
+bake -p "/skill:release-notes for v0.4.0"
 ```
 
 A name that matches no loaded skill sends the prompt as written.

@@ -3,7 +3,7 @@
 Bake is a keyboard-driven coding agent for the terminal. It streams the model's answer as it arrives, runs shell and file tools inside a sandbox, and saves every session as an append-only log you can resume.
 
 > [!NOTE]
-> Bake is moving to a native Rust agent, `bake-rs` ([roadmap](docs/roadmap/rust-0.4/README.md)). This TypeScript agent is what the installer below installs. It is deprecated and receives bug and security fixes only, as 0.3.x releases, until Bake 0.4.0 replaces it. The installer still requires Node.js until then.
+> Bake is moving to a native Rust agent, `bake` ([roadmap](docs/roadmap/rust-0.4/README.md)). This TypeScript agent is what the installer below installs. It is deprecated and receives bug and security fixes only, as 0.3.x releases, until Bake 0.4.0 replaces it. The installer still requires Node.js until then.
 
 - **Slash commands** for models and reasoning effort, sign-in, sessions, goals, compaction, permissions, and settings, with argument completion.
 - **Long-running work**: goals that continue across rounds, subagents you can watch from the input row, and shell commands left running in the background.
@@ -78,7 +78,7 @@ Delete the install directory and its `bake` link: `~/.local/share/bake` and `~/.
 - [Terminal application](apps/tui/packages/app/README.md): commands, keys, and session navigation.
 - [TUI design](apps/tui/DESIGN.md), including its [known limits](apps/tui/DESIGN.md#10-limits).
 - [Development guide](docs/development.md): building from source, test loops, and repository layout.
-- [Rust agent](rust/README.md): run `bun run dev:rust` from a checkout to try the interactive Rust agent, `bake-rs`, with the models in your Bake home, or `bun run dev:rust:preview` for the sample views with no model connection. It is a development build, not the shipped `bake`.
+- [Rust agent](rust/README.md): run `bun run dev:rust` from a checkout to try the interactive Rust agent, `bake`, with the models in your Bake home, or `bun run dev:rust:preview` for the sample views with no model connection. It is a development build, not an installed release.
 - [0.4 Rust migration roadmap](docs/roadmap/rust-0.4/README.md): proposed development scopes, 0.3.x maintenance policy, and required test evidence.
 - [Contributing](CONTRIBUTING.md) and the [changelog](CHANGELOG.md).
 

@@ -14,7 +14,7 @@ Never commit credentials or `.env`, never overwrite recorded session generations
 
 ## The Rust agent and the frozen TypeScript agent
 
-Bake's Rust agent, `bake-rs` under [`rust/`](rust/README.md), is the product line on `develop`, built to the [Rust 0.4 roadmap](docs/roadmap/rust-0.4/README.md). The TypeScript agent is deprecated and frozen: it still builds and is what `bake` installs until the Rust release, and the Rust release removes it from `develop`.
+Bake's Rust agent, `bake` under [`rust/`](rust/README.md), is the product line on `develop`, built to the [Rust 0.4 roadmap](docs/roadmap/rust-0.4/README.md). The TypeScript agent is deprecated and frozen: it still builds and is what `bake` installs until the Rust release, and the Rust release removes it from `develop`.
 
 - Do not add TypeScript features. On `develop`, change TypeScript only to keep its gates passing, or for tooling the Rust port uses, such as the evaluator under `evals/` and the scripts under `scripts/`.
 - Fix a 0.3 bug on `release/0.3`, the TypeScript agent's maintenance line: branch from an up-to-date `origin/release/0.3` and open the pull request against it. That branch's own CONTRIBUTING and AGENTS.md describe its fixes-only rules and its releases. Nothing from `release/0.3` merges into `develop` or `main`.

@@ -79,7 +79,7 @@ Preserve the [linear scope sequence](README.md#linear-development-sequence). Sco
 
 A crate or renderer prototype may run earlier in an isolated development path. It neither changes the shipped launcher nor closes a later scope. Keep the current UI runnable until the native frontend satisfies the accepted behavior and intentional differences have their own reviewed tests.
 
-The [Rust preview](../../../rust/README.md) is this early path: `bun run dev:rust:preview` launches a fullscreen draft editor, fixed sample-agent list, and read-only inspector, and `bake-rs preview --inline` runs the same components with terminal scrollback, both with scripted fixture turns and no model connection or session persistence. `bun run dev:rust` runs the same components against a real Pi-format agent session (`bake-rs`, or `bake-rs --inline`). Their unit and PTY checks qualify only that supported subset; the full acceptance scenarios above remain open.
+The [Rust preview](../../../rust/README.md) is this early path: `bun run dev:rust:preview` launches a fullscreen draft editor, fixed sample-agent list, and read-only inspector, and `bake preview --inline` runs the same components with terminal scrollback, both with scripted fixture turns and no model connection or session persistence. `bun run dev:rust` runs the same components against a real Pi-format agent session (`bake`, or `bake --inline`). Their unit and PTY checks qualify only that supported subset; the full acceptance scenarios above remain open.
 
 ## Dev Note
 
