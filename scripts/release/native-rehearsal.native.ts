@@ -26,7 +26,7 @@ import { afterEach, expect, test } from 'bun:test'
 import { spawnSync } from 'node:child_process'
 import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import { archiveName, hostTarget, isRustTarget, payload, workspaceInputs, type RustTarget } from './pack-rust.ts'
 import {
   ephemeralKey, installerTrusting, manifestBytes, runInstaller, signManifest, startReleaseHost, stubRelease,
@@ -55,10 +55,30 @@ function workspace(): { version: string; target: RustTarget; binary: string; not
   return { version: inputs.version, target, binary, notices: inputs.notices }
 }
 
+/**
+ * A copy of the built binary without its debug information.
+ *
+ * This checkout's debug `bake-rs` unpacks to about 760 MB, past the 512 MiB
+ * an install accepts; a release binary is a fraction of that. The rehearsal
+ * needs the binary to run its own `--self-check`, not to be debuggable, and
+ * `strip -S` removes debug symbols with both GNU binutils and Apple's strip.
+ */
+function strippedBinary(directory: string, binary: string): string {
+  const copy = join(directory, basename(binary))
+  copyFileSync(binary, copy)
+  chmodSync(copy, 0o755)
+  const stripped = spawnSync('strip', ['-S', copy], { encoding: 'utf8' })
+  if (stripped.status !== 0) {
+    throw new Error(`strip -S exited ${String(stripped.status)}: ${stripped.stderr ?? ''}`)
+  }
+  return copy
+}
+
 /** Archive the built binary in the release layout, as `pack-rust.ts` lays it out. */
 function packRehearsal(directory: string, build: ReturnType<typeof workspace>): { file: string; artifact: NativeArtifact } {
   const stage = join(directory, 'stage')
-  const files = payload({ binary: build.binary, root: ROOT, notices: build.notices }, build.target, {
+  const binary = strippedBinary(directory, build.binary)
+  const files = payload({ binary, root: ROOT, notices: build.notices }, build.target, {
     text: `Rehearsal placeholder for ${build.target}; the release bundle comes from gen-native-licenses.\n`,
     inventory: '{"schema":"bake-native-licenses/1","note":"rehearsal placeholder"}\n',
     notices: {},

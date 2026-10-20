@@ -30,6 +30,12 @@ afterEach(() => {
 
 const TARGET = `${process.platform === 'darwin' ? 'darwin' : 'linux'}-${process.arch === 'arm64' ? 'arm64' : 'x64'}`
 
+/**
+ * install.sh is POSIX sh and refuses Windows before anything else: Windows
+ * installs with install.ps1, which `native-install-windows.test.ts` runs.
+ */
+const posix = test.skipIf(process.platform === 'win32')
+
 /** One scenario's private world: a home, a command directory, a host, and the installer that trusts its key. */
 interface Scenario {
   readonly directory: string
@@ -123,7 +129,7 @@ function runCommand(path: string, args: readonly string[]): string {
   return result.stdout ?? ''
 }
 
-test('installs from an empty home and links bake to the current release', async () => {
+posix('installs from an empty home and links bake to the current release', async () => {
   const world = scenario()
   setup(world.directory)
   world.publish('0.4.0')
@@ -143,7 +149,7 @@ test('installs from an empty home and links bake to the current release', async 
   expect(existsSync(join(world.root, 'install.lock'))).toBe(false)
 })
 
-test('a second release becomes current, records the one it replaced, and keeps only those two', async () => {
+posix('a second release becomes current, records the one it replaced, and keeps only those two', async () => {
   const world = scenario()
   setup(world.directory)
   world.publish('0.4.0')
@@ -160,7 +166,7 @@ test('a second release becomes current, records the one it replaced, and keeps o
   expect(runCommand(join(world.binDir, 'bake'), ['--version'])).toBe('bake 0.4.2\n')
 })
 
-test('refuses a manifest older than the installed release', async () => {
+posix('refuses a manifest older than the installed release', async () => {
   const world = scenario()
   setup(world.directory)
   world.publish('0.4.1')
@@ -172,7 +178,7 @@ test('refuses a manifest older than the installed release', async () => {
   expect(installedVersion(world.root)).toBe('0.4.1')
 })
 
-test('takes over a Bake-managed 0.3 bake, leaves dsh and the 0.3 install alone, and restores them', async () => {
+posix('takes over a Bake-managed 0.3 bake, leaves dsh and the 0.3 install alone, and restores them', async () => {
   const world = scenario()
   setup(world.directory)
   const legacy = legacyInstall(world.home)
@@ -201,7 +207,7 @@ test('takes over a Bake-managed 0.3 bake, leaves dsh and the 0.3 install alone, 
   expect(existsSync(join(world.root, 'links.json'))).toBe(false)
 })
 
-test('keeps a user-owned bake, installs the release, and replaces it only when asked', async () => {
+posix('keeps a user-owned bake, installs the release, and replaces it only when asked', async () => {
   const world = scenario()
   setup(world.directory)
   const command = join(world.binDir, 'bake')
@@ -233,7 +239,7 @@ test('keeps a user-owned bake, installs the release, and replaces it only when a
   expect(readFileSync(command, 'utf8')).toContain('someone else')
 })
 
-test('a tampered signature, hash, or truncated archive leaves the working install as it was', async () => {
+posix('a tampered signature, hash, or truncated archive leaves the working install as it was', async () => {
   const world = scenario()
   setup(world.directory)
   world.publish('0.4.0')
@@ -270,7 +276,7 @@ test('a tampered signature, hash, or truncated archive leaves the working instal
   expect(existsSync(join(world.root, 'releases/0.4.1'))).toBe(false)
 })
 
-test('refuses a manifest with an unknown member, another schema, or a renamed archive', async () => {
+posix('refuses a manifest with an unknown member, another schema, or a renamed archive', async () => {
   const world = scenario()
   setup(world.directory)
   const release = stubRelease(world.directory, '0.4.0', TARGET)
@@ -299,7 +305,7 @@ test('refuses a manifest with an unknown member, another schema, or a renamed ar
   expect(existsSync(join(world.root, 'current'))).toBe(false)
 })
 
-test('refuses an archive holding a link', async () => {
+posix('refuses an archive holding a link', async () => {
   const world = scenario()
   setup(world.directory)
   world.publish('0.4.0', { extraMember: { kind: 'symlink', name: 'escape' } })
@@ -309,7 +315,7 @@ test('refuses an archive holding a link', async () => {
   expect(existsSync(join(world.root, 'current'))).toBe(false)
 })
 
-test('a failed self-check leaves the pointer where it was', async () => {
+posix('a failed self-check leaves the pointer where it was', async () => {
   const world = scenario()
   setup(world.directory)
   world.publish('0.4.0')
@@ -329,7 +335,7 @@ test('a failed self-check leaves the pointer where it was', async () => {
   expect(runCommand(join(world.binDir, 'bake'), ['--version'])).toBe('bake 0.4.0\n')
 })
 
-test('the install lock refuses a second install, is taken over when its owner is gone, and waits out a lock with no owner', async () => {
+posix('the install lock refuses a second install, is taken over when its owner is gone, and waits out a lock with no owner', async () => {
   const world = scenario()
   setup(world.directory)
   world.publish('0.4.0')
@@ -358,7 +364,7 @@ test('the install lock refuses a second install, is taken over when its owner is
   expect(installedVersion(world.root)).toBe('0.4.1')
 }, 60_000)
 
-test('two installs at once: one takes the lock and the other is refused', async () => {
+posix('two installs at once: one takes the lock and the other is refused', async () => {
   const world = scenario()
   setup(world.directory)
   // The self-check holds the lock long enough for the second install to meet it.
@@ -380,4 +386,159 @@ test('both installers embed the same native release key, and the committed key w
   // discarded. A committed key must equal every embedded copy.
   const file = join(import.meta.dir, '../../distribution/host/native-release-key.pub')
   if (existsSync(file)) expect(readFileSync(file, 'utf8').trim()).toBe(shell)
+})
+
+posix('a rerun keeps the record of the 0.3 command it took over, and restores it', async () => {
+  const world = scenario()
+  setup(world.directory)
+  const legacy = legacyInstall(world.home)
+  world.publish('0.4.0')
+  expect((await world.run()).status).toBe(0)
+  const record = readFileSync(join(world.root, 'links.json'), 'utf8')
+  expect(record).toContain(legacy.target)
+
+  // Running the installer again is how an install is updated: the command
+  // it already made is kept, and the record of the 0.3 link it replaced is
+  // left as the first run wrote it.
+  expect((await world.run()).status).toBe(0)
+  world.publish('0.4.1')
+  const updated = await world.run()
+  expect(updated.status).toBe(0)
+  expect(updated.stdout).toContain(`Kept ${join(world.binDir, 'bake')}`)
+  expect(installedVersion(world.root)).toBe('0.4.1')
+  expect(readFileSync(join(world.root, 'links.json'), 'utf8')).toBe(record)
+  expect(existsSync(join(world.root, 'backups'))).toBe(false)
+  expect(runCommand(join(world.binDir, 'bake'), ['--version'])).toBe('bake 0.4.1\n')
+
+  const restored = await world.run(['--uninstall-links'])
+  expect(restored.status).toBe(0)
+  expect(readlinkSync(join(world.binDir, 'bake'))).toBe(legacy.target)
+  expect(runCommand(join(world.binDir, 'bake'), [])).toBe('bake 0.3.8\n')
+  expect(existsSync(join(world.root, 'links.json'))).toBe(false)
+})
+
+posix('leaves a command the user replaced after the install alone', async () => {
+  const world = scenario()
+  setup(world.directory)
+  legacyInstall(world.home)
+  world.publish('0.4.0')
+  expect((await world.run()).status).toBe(0)
+  const command = join(world.binDir, 'bake')
+  rmSync(command)
+  writeFileSync(command, '#!/bin/sh\nprintf \'someone else\\n\'\n')
+  chmodSync(command, 0o755)
+  const restored = await world.run(['--uninstall-links'])
+  expect(restored.status).toBe(0)
+  expect(restored.stdout).toContain('no longer the command this installer made')
+  expect(readFileSync(command, 'utf8')).toContain('someone else')
+})
+
+posix('refuses an archive that unpacks past the bound every reader applies', async () => {
+  const world = scenario()
+  setup(world.directory)
+  world.publish('0.4.0', { fillerBytes: 600 * 1024 * 1024 })
+  const result = await world.run()
+  expect(result.status).not.toBe(0)
+  expect(result.stderr).toContain('more than the 536870912 an install accepts')
+  expect(existsSync(join(world.root, 'current'))).toBe(false)
+}, 120_000)
+
+/** Linux has no embedded-verifier fallback, so a refused openssl stops the install there. */
+const linux = test.skipIf(process.platform !== 'linux')
+
+linux('refuses an openssl that cannot verify the RFC 8032 vector it is probed with', async () => {
+  const world = scenario()
+  setup(world.directory)
+  world.publish('0.4.0')
+  // An openssl that answers every question with success, which the probe
+  // catches by requiring it to refuse the vector over another message.
+  const yesMan = join(world.directory, 'openssl-yes')
+  writeFileSync(yesMan, '#!/bin/sh\nexit 0\n')
+  chmodSync(yesMan, 0o755)
+  const result = await world.run([], { BAKE_OPENSSL: yesMan })
+  expect(result.status).not.toBe(0)
+  expect(result.stderr).toContain('nothing here verifies the release signature')
+  expect(result.stderr).toContain('brew install openssl@3')
+  expect(result.stderr).toContain(yesMan)
+  expect(existsSync(join(world.root, 'current'))).toBe(false)
+})
+
+/**
+ * A stand-in for macOS's `osascript -l JavaScript`: it runs the script's
+ * exact text with Node and prints what `run(argv)` returns, as osascript
+ * does. Only the host's JavaScript engine differs; macOS CI runs the same
+ * scenario through the real one.
+ */
+function osascriptStub(directory: string): string {
+  const shims = join(directory, 'osascript')
+  mkdirSync(shims, { recursive: true })
+  const driver = 'const source = require("node:fs").readFileSync(process.argv[1], "utf8");'
+    + 'const run = new Function(source + "\\nreturn run")();'
+    + 'console.log(run(process.argv.slice(2)))'
+  writeFileSync(join(shims, 'osascript'), `#!/bin/sh
+# osascript -l JavaScript <script> <arguments...>
+shift 2
+script=$1
+shift
+exec node -e '${driver}' "$script" "$@"
+`)
+  chmodSync(join(shims, 'osascript'), 0o755)
+  return shims
+}
+
+posix('verifies with the embedded JavaScript verifier when no openssl can', async () => {
+  const world = scenario()
+  setup(world.directory)
+  world.publish('0.4.0')
+  // No openssl is tried once BAKE_OPENSSL names one, and this one does not
+  // exist, so the install falls back to the embedded verifier.
+  const forced = {
+    BAKE_OPENSSL: join(world.directory, 'no-openssl-here'),
+    PATH: `${osascriptStub(world.directory)}:${process.env['PATH'] ?? '/usr/bin:/bin'}`,
+  }
+  const installed = await world.run([], forced)
+  expect(installed.stderr).toBe('')
+  expect(installed.status).toBe(0)
+  expect(installed.stdout).toContain('embedded JavaScript verifier (osascript)')
+  expect(installedVersion(world.root)).toBe('0.4.0')
+
+  const next = stubRelease(world.directory, '0.4.1', TARGET)
+  const manifest = manifestBytes({ version: next.version, artifacts: { [next.target]: next.artifact } })
+  world.serve(next, manifest, Buffer.alloc(64, 7).toString('base64'))
+  const refused = await world.run([], forced)
+  expect(refused.stderr).toContain('signature did not verify')
+  expect(installedVersion(world.root)).toBe('0.4.0')
+}, 120_000)
+
+/** The macOS fallback as a stock Mac runs it: real osascript, no openssl. */
+const darwin = test.skipIf(process.platform !== 'darwin')
+
+darwin('verifies with real osascript when no openssl can', async () => {
+  const world = scenario()
+  setup(world.directory)
+  world.publish('0.4.0')
+  // No openssl is tried once BAKE_OPENSSL names one, and this one does not
+  // exist, so the install falls back to osascript as a stock Mac does.
+  const forced = { BAKE_OPENSSL: join(world.directory, 'no-openssl-here') }
+  const installed = await world.run([], forced)
+  expect(installed.stderr).toBe('')
+  expect(installed.status).toBe(0)
+  expect(installed.stdout).toContain('embedded JavaScript verifier (osascript)')
+  expect(installedVersion(world.root)).toBe('0.4.0')
+  expect(runCommand(join(world.binDir, 'bake'), ['--version'])).toBe('bake 0.4.0\n')
+
+  // The same verifier refuses a manifest the key did not sign.
+  const next = stubRelease(world.directory, '0.4.1', TARGET)
+  const manifest = manifestBytes({ version: next.version, artifacts: { [next.target]: next.artifact } })
+  world.serve(next, manifest, Buffer.alloc(64, 7).toString('base64'))
+  const refused = await world.run([], forced)
+  expect(refused.stderr).toContain('signature did not verify')
+  expect(installedVersion(world.root)).toBe('0.4.0')
+}, 180_000)
+
+test('reports whether the POSIX installer checks ran', () => {
+  if (process.platform === 'win32') {
+    console.info('install.sh checks skipped on Windows: it is POSIX sh, and install.ps1 installs there')
+  }
+  expect(true).toBe(true)
 })

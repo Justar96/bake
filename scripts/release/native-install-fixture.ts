@@ -11,8 +11,10 @@
  */
 import { spawnSync } from 'node:child_process'
 import { createHash, generateKeyPairSync, sign, type KeyObject } from 'node:crypto'
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, truncateSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { nativeManifestBytes, parseNativeManifest } from './native-manifest.ts'
 
 const HOST = resolve(import.meta.dir, '../../distribution/host')
 
@@ -55,14 +57,49 @@ export interface StubOptions {
   readonly selfCheckDelay?: number
   /** An extra archive member, to check that unsafe members are refused. */
   readonly extraMember?: { readonly kind: 'symlink' | 'parent'; readonly name: string }
+  /** Bytes of filler the archive unpacks to, for the decompression bound. */
+  readonly fillerBytes?: number
   /** The executable's name inside `bin/`; `bake` by default, `bake.exe` for a Windows archive. */
   readonly executableName?: string
 }
 
 /**
+ * The compiled stub Windows needs, built once for this test file.
+ *
+ * Windows starts no script as an executable, so a release's `bin/bake.exe`
+ * has to be a real program there: this one prints the `self-check.json`
+ * written beside it, which keeps every release's record in its own archive
+ * while all of them share one build.
+ * @returns the built executable's path.
+ */
+let compiledStub: string | undefined
+
+function compiledStubExecutable(): string {
+  if (compiledStub !== undefined) return compiledStub
+  const directory = mkdtempSync(join(tmpdir(), 'bake-native-stub-'))
+  process.on('exit', () => { rmSync(directory, { recursive: true, force: true }) })
+  const source = join(directory, 'stub.ts')
+  writeFileSync(source, `import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+const spec = JSON.parse(readFileSync(join(dirname(process.execPath), 'self-check.json'), 'utf8'))
+if (process.argv.at(-1) === '--self-check') {
+  if (spec.delaySeconds > 0) Bun.sleepSync(spec.delaySeconds * 1000)
+  console.log(spec.record)
+  process.exit(spec.status)
+}
+console.log('bake ' + spec.version)
+`)
+  const built = join(directory, 'bake.exe')
+  const compiled = spawnSync('bun', ['build', '--compile', source, '--outfile', built], { encoding: 'utf8' })
+  if (compiled.status !== 0) throw new Error(`bun build --compile exited ${String(compiled.status)}: ${compiled.stderr}`)
+  compiledStub = built
+  return built
+}
+
+/**
  * Build a native release archive holding `pack-rust.ts`'s layout, whose
- * `bin/bake` is a small script that answers `--version` and `--self-check` as
- * the real binary does.
+ * `bin/bake` answers `--version` and `--self-check` as the real binary does:
+ * a small script, or on Windows the compiled executable above.
  * @param directory - a private directory the archive is staged and written in.
  */
 export function stubRelease(directory: string, version: string, target: string, options: StubOptions = {}): NativeRelease {
@@ -79,7 +116,13 @@ export function stubRelease(directory: string, version: string, target: string, 
     docs: { cli: 'f'.repeat(64) },
   })
   const executable = options.executableName ?? 'bake'
-  writeFileSync(join(stage, 'bin', executable), `#!/bin/sh
+  if (process.platform === 'win32') {
+    copyFileSync(compiledStubExecutable(), join(stage, 'bin', executable))
+    writeFileSync(join(stage, 'bin/self-check.json'), JSON.stringify({
+      record, version, status: options.selfCheckStatus ?? 0, delaySeconds: options.selfCheckDelay ?? 0,
+    }))
+  } else {
+    writeFileSync(join(stage, 'bin', executable), `#!/bin/sh
 case \${1:-} in
   --self-check)
     sleep ${options.selfCheckDelay ?? 0}
@@ -90,12 +133,20 @@ case \${1:-} in
   *) printf 'bake %s: %s\\n' '${version}' "\${*:-no arguments}" ;;
 esac
 `)
+  }
   chmodSync(join(stage, 'bin', executable), 0o755)
   writeFileSync(join(stage, 'LICENSE'), 'MIT\n')
   writeFileSync(join(stage, 'THIRD_PARTY_NOTICES.md'), '# Notices\n')
   writeFileSync(join(stage, 'notices/bake-cli/NOTICE'), 'bake-cli\n')
   writeFileSync(join(stage, 'licenses/inventory.json'), '{"schema":"bake-native-licenses/1"}\n')
   writeFileSync(join(stage, 'licenses', target, 'THIRD-PARTY-LICENSES.txt'), 'licenses\n')
+  if (options.fillerBytes !== undefined) {
+    // A hole, not bytes: the archive stays small and its listing states the
+    // size the installers add up.
+    const filler = join(stage, 'licenses', target, 'filler')
+    writeFileSync(filler, '')
+    truncateSync(filler, options.fillerBytes)
+  }
   const members = ['bin', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'notices', 'licenses']
   if (options.extraMember?.kind === 'symlink') {
     spawnSync('ln', ['-s', '/etc/passwd', join(stage, options.extraMember.name)], { stdio: 'ignore' })
@@ -124,7 +175,14 @@ export interface NativeManifest {
   readonly extra?: unknown
 }
 
-/** Serialize a manifest as the release host serves it. */
+/**
+ * Serialize a manifest as the release host serves it.
+ *
+ * A manifest the release's own writer accepts is written by it, so the
+ * installers read the exact bytes `release:assemble:rust` publishes,
+ * trailing newline and all. The hand-built form below serves the malformed
+ * cases, which that writer cannot express.
+ */
 export function manifestBytes(manifest: NativeManifest): Buffer {
   const body: Record<string, unknown> = {
     schema: manifest.schema ?? 'bake-native-release/1',
@@ -134,7 +192,12 @@ export function manifestBytes(manifest: NativeManifest): Buffer {
     artifacts: manifest.artifacts,
   }
   if (manifest.extra !== undefined) body['extra'] = manifest.extra
-  return Buffer.from(JSON.stringify(body))
+  const text = JSON.stringify(body)
+  try {
+    return nativeManifestBytes(parseNativeManifest(text))
+  } catch {
+    return Buffer.from(text)
+  }
 }
 
 /** What the loopback host serves. */
@@ -233,6 +296,17 @@ export function embeddedKey(installer: keyof typeof KEY_LINES): string {
   const line = KEY_LINES[installer].exec(source)?.[0]
   if (line === undefined) throw new Error(`${installer} has no embedded native release key line`)
   return line.slice(line.indexOf('\'') + 1, -1)
+}
+
+/**
+ * The JavaScript Ed25519 verifier `install.sh` embeds, as its heredoc holds
+ * it: the exact text a stock macOS runs through `osascript -l JavaScript`.
+ */
+export function ed25519JavaScriptVerifier(): string {
+  const source = readFileSync(join(HOST, 'install.sh'), 'utf8')
+  const region = /\n  cat <<'BAKE_ED25519_JAVASCRIPT'\n([\s\S]*?)\nBAKE_ED25519_JAVASCRIPT\n/u.exec(source)?.[1]
+  if (region === undefined) throw new Error('install.sh has no Ed25519 JavaScript verifier heredoc')
+  return region
 }
 
 /** The region of `install.ps1` holding its Ed25519 verifier, which the tests dot-source. */

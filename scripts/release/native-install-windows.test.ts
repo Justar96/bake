@@ -13,7 +13,7 @@
  */
 import { afterEach, describe, expect, test } from 'bun:test'
 import { createPrivateKey, generateKeyPairSync, randomBytes, sign } from 'node:crypto'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import {
@@ -258,6 +258,92 @@ describe.skipIf(PWSH === undefined)('the Windows installer', () => {
     expect(readFileSync(join(binDir, 'bake.cmd'), 'utf8')).toContain('BAKE_NATIVE_ROOT')
     expect((await runPowerShell(installer, ['--uninstall-links'], env)).status).toBe(0)
     expect(readFileSync(join(binDir, 'bake.cmd'), 'utf8')).toBe(mine)
+  }, 300_000)
+
+  test('a rerun keeps the record of the 0.3 launcher it took over, and restores it', async () => {
+    const directory = scratch('install-ps1-rerun')
+    const key = ephemeralKey()
+    const root = join(directory, 'root')
+    const binDir = join(directory, 'bin')
+    mkdirSync(binDir, { recursive: true })
+    let files: HostFiles = { manifest: Buffer.from('{}'), signature: '', releases: new Map() }
+    const host = startReleaseHost(() => files)
+    hosts.push(host)
+    const publish = (version: string): void => {
+      const release = stubRelease(directory, version, 'win32-x64', { executableName: 'bake.exe' })
+      const manifest = manifestBytes({ version, artifacts: { 'win32-x64': release.artifact } })
+      files = { manifest, signature: signManifest(manifest, key), releases: new Map([[releasePath(release), release.bytes]]) }
+    }
+    const installer = installerTrusting('install.ps1', key.publicKey, directory)
+    const shims = process.platform === 'win32' ? '' : `${tarShim(directory)}:`
+    const env = {
+      PATH: `${shims}${process.env['PATH'] ?? ''}`,
+      BAKE_DOWNLOAD_URL: host.origin,
+      BAKE_NATIVE_ROOT: root,
+      BAKE_BIN_DIR: binDir,
+      BAKE_SKIP_PATH_UPDATE: '1',
+    }
+    const legacyLauncher = '@echo off\r\nsetlocal\r\nset "BAKE_RELEASE_ROOT=C:\\Users\\x\\AppData\\Local\\Bake"\r\n'
+      + 'node "%BAKE_RELEASE_ROOT%\\versions\\0.3.8-abcdef012345\\apps\\cli\\lib\\bin.js" %*\r\n'
+    writeFileSync(join(binDir, 'bake.cmd'), legacyLauncher)
+
+    publish('0.4.0')
+    expect((await runPowerShell(installer, [], env)).status).toBe(0)
+    const record = readFileSync(join(root, 'links.json'), 'utf8')
+    const backups = () => readdirSync(join(root, 'backups'))
+    expect(backups()).toHaveLength(1)
+
+    // Running the installer again is how an install is updated: the shim it
+    // already wrote is kept, no second backup is taken, and the record of
+    // the 0.3 launcher stays as the first run wrote it.
+    expect((await runPowerShell(installer, [], env)).status).toBe(0)
+    publish('0.4.1')
+    const updated = await runPowerShell(installer, [], env)
+    expect(updated.status).toBe(0)
+    expect(updated.stdout).toContain(`Kept ${join(binDir, 'bake.cmd')}`)
+    expect(readFileSync(join(root, 'current.txt'), 'utf8').trim()).toBe('0.4.1')
+    expect(readFileSync(join(root, 'links.json'), 'utf8')).toBe(record)
+    expect(backups()).toHaveLength(1)
+
+    const restored = await runPowerShell(installer, ['--uninstall-links'], env)
+    expect(restored.status).toBe(0)
+    expect(readFileSync(join(binDir, 'bake.cmd'), 'utf8')).toBe(legacyLauncher)
+    expect(existsSync(join(root, 'links.json'))).toBe(false)
+  }, 300_000)
+
+  test('installs through the documented irm | iex entry point', async () => {
+    const directory = scratch('install-ps1-iex')
+    const key = ephemeralKey()
+    const root = join(directory, 'root')
+    const binDir = join(directory, 'bin')
+    mkdirSync(binDir, { recursive: true })
+    const release = stubRelease(directory, '0.4.0', 'win32-x64', { executableName: 'bake.exe' })
+    const manifest = manifestBytes({ version: release.version, artifacts: { 'win32-x64': release.artifact } })
+    const files: HostFiles = {
+      manifest, signature: signManifest(manifest, key), releases: new Map([[releasePath(release), release.bytes]]),
+    }
+    const host = startReleaseHost(() => files)
+    hosts.push(host)
+    const installer = installerTrusting('install.ps1', key.publicKey, directory)
+    // `irm <url> | iex` runs the script's text, not a file: the same shape as
+    // `iex (Get-Content -Raw)`, which needs no network.
+    const piped = join(directory, 'piped.ps1')
+    writeFileSync(piped, `$ErrorActionPreference = 'Stop'
+Invoke-Expression (Get-Content -Raw -LiteralPath $env:BAKE_TEST_INSTALLER)
+`)
+    const shims = process.platform === 'win32' ? '' : `${tarShim(directory)}:`
+    const result = await runPowerShell(piped, [], {
+      PATH: `${shims}${process.env['PATH'] ?? ''}`,
+      BAKE_TEST_INSTALLER: installer,
+      BAKE_DOWNLOAD_URL: host.origin,
+      BAKE_NATIVE_ROOT: root,
+      BAKE_BIN_DIR: binDir,
+      BAKE_SKIP_PATH_UPDATE: '1',
+    })
+    expect(result.stderr).toBe('')
+    expect(result.status).toBe(0)
+    expect(readFileSync(join(root, 'current.txt'), 'utf8').trim()).toBe('0.4.0')
+    expect(readFileSync(join(binDir, 'bake.cmd'), 'utf8')).toContain('BAKE_NATIVE_ROOT')
   }, 300_000)
 
   test('refuses a manifest the native key did not sign and leaves nothing installed', async () => {

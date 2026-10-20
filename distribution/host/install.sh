@@ -1,8 +1,10 @@
 #!/bin/sh
 # The Bake native installer: it installs the Rust agent, `bake`, from the
 # signed native release channel. POSIX sh only, and the host needs no Node or
-# Bun: it needs curl or wget, tar, sha256sum or shasum, and an OpenSSL with
-# Ed25519 (OpenSSL 1.1.1 or newer).
+# Bun: it needs curl or wget, tar, and sha256sum or shasum. The manifest
+# signature is verified by an OpenSSL with Ed25519 (1.1.1 or newer) where the
+# host has one, and otherwise, on macOS, by the Ed25519 verifier this script
+# embeds, run by `osascript -l JavaScript`.
 #
 #   curl -fsSL https://bake.justar.dev/install.sh | sh
 #
@@ -43,6 +45,8 @@ Environment:
   BAKE_NATIVE_ROOT    install root (default ~/.local/share/bake-rs)
   BAKE_BIN_DIR        command directory (default ~/.local/bin)
   BAKE_REPLACE_COMMAND=1  as --replace-command, for a piped install
+  BAKE_OPENSSL        the openssl that verifies the release signature; when
+                      it is set, no other openssl is tried
 USAGE
       exit 0 ;;
     *) printf 'Bake install: unknown option %s\n' "$1" >&2; exit 2 ;;
@@ -114,7 +118,9 @@ lock_stale() {
     [ "$waited" -lt 10 ] || return 0
     sleep 1
     waited=$((waited + 1))
-    [ -d "$lock_dir" ] || return 1
+    # The holder released the lock while we waited: the caller's next mkdir
+    # takes it, as the Rust updater's own retry does.
+    [ -d "$lock_dir" ] || return 0
   done
   owner_pid=$(awk 'NR == 1 { print $1 }' "$lock_dir/owner" 2>/dev/null || :)
   case $owner_pid in
@@ -140,6 +146,31 @@ sha256_of() {
   else
     shasum -a 256 "$1" | cut -d ' ' -f 1
   fi
+}
+
+sha512_of() {
+  if need shasum; then
+    shasum -a 512 "$1" | cut -d ' ' -f 1
+  elif need sha512sum; then
+    sha512sum "$1" | cut -d ' ' -f 1
+  else
+    return 1
+  fi
+}
+
+# A file's bytes as lowercase hex, which `od` prints on every POSIX host.
+hex_of() {
+  od -An -v -tx1 < "$1" | tr -d ' \n'
+}
+
+# Decode base64 into a file. `-d` is GNU and current macOS; `-D` is the older
+# BSD spelling the Macs that need the embedded verifier may still have.
+base64_decode() {
+  base64 -d < "$1" > "$2" 2>/dev/null || base64 -D < "$1" > "$2" 2>/dev/null
+}
+
+byte_count() {
+  wc -c < "$1" | tr -d ' '
 }
 
 # A path as a JSON string's content for links.json. Every backslash and quote
@@ -173,6 +204,250 @@ version_newer() {
       print (x > y) ? "yes" : "no"
     }
   ' | grep -q '^yes$'
+}
+
+# RFC 8032 section 7.1 TEST 2: the public key as the installers carry one,
+# base64 DER SubjectPublicKeyInfo, and its signature over the one-byte
+# message `r` (0x72). A verifier must accept this pair over that message and
+# refuse it over another, which is how this script learns that a candidate
+# really verifies Ed25519 rather than reporting support it does not have.
+# The message is not empty: OpenSSL 3.5's pkeyutl refuses a zero-byte input.
+ed25519_test_key='MCowBQYDK2VwAyEAPUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw='
+ed25519_test_signature='kqAJqfDUyrhyDoILX2QlQKKye1QWUD+Ps3YiI+vbadoIWsHkPhWZbkWPNhPQ8R2MOHsurrQwKu6wDSkWErsMAA=='
+
+# How the manifest signature is verified: `openssl`, with the proven command
+# in openssl_command, or `javascript`, the verifier this script embeds.
+verifier=
+openssl_command=
+
+# Whether `$2`, base64, is a valid Ed25519 signature by the key `$1`, base64
+# DER SubjectPublicKeyInfo, over the exact bytes of the file `$3`.
+verify_signature() {
+  if [ "$verifier" = javascript ]; then
+    javascript_verify "$1" "$2" "$3"
+  else
+    openssl_verify "$1" "$2" "$3"
+  fi
+}
+
+openssl_verify() {
+  work="$temporary/verify"
+  rm -rf "$work"
+  mkdir -p "$work"
+  {
+    printf '%s\n' '-----BEGIN PUBLIC KEY-----'
+    printf '%s\n' "$1" | fold -w 64
+    printf '%s\n' '-----END PUBLIC KEY-----'
+  } > "$work/key.pem"
+  printf '%s' "$2" > "$work/signature.base64"
+  "$openssl_command" base64 -d -A -in "$work/signature.base64" -out "$work/signature.bin" 2>/dev/null || return 1
+  "$openssl_command" pkeyutl -verify -pubin -inkey "$work/key.pem" -rawin \
+    -in "$3" -sigfile "$work/signature.bin" >/dev/null 2>&1
+}
+
+# The embedded verifier: this script assembles R || A || M and its SHA-512,
+# and the JavaScript does the point decompression and the group check.
+javascript_verify() {
+  work="$temporary/verify"
+  rm -rf "$work"
+  mkdir -p "$work"
+  printf '%s' "$1" > "$work/key.base64"
+  base64_decode "$work/key.base64" "$work/key.der" || return 1
+  [ "$(byte_count "$work/key.der")" = 44 ] || return 1
+  # The fixed Ed25519 SubjectPublicKeyInfo header, then the 32 key bytes.
+  case $(hex_of "$work/key.der") in
+    302a300506032b6570032100*) ;;
+    *) return 1 ;;
+  esac
+  tail -c 32 "$work/key.der" > "$work/key.bin"
+  printf '%s' "$2" > "$work/signature.base64"
+  base64_decode "$work/signature.base64" "$work/signature.bin" || return 1
+  [ "$(byte_count "$work/signature.bin")" = 64 ] || return 1
+  head -c 32 "$work/signature.bin" > "$work/commitment.bin"
+  cat "$work/commitment.bin" "$work/key.bin" "$3" > "$work/signed.bin"
+  digest=$(sha512_of "$work/signed.bin") || return 1
+  ed25519_javascript > "$work/ed25519.js"
+  answer=$(osascript -l JavaScript "$work/ed25519.js" \
+    "$(hex_of "$work/key.bin")" "$(hex_of "$work/signature.bin")" "$digest" 2>/dev/null || :)
+  [ "$answer" = true ]
+}
+
+# BEGIN ED25519 JAVASCRIPT VERIFIER
+# macOS ships LibreSSL, whose openssl(1) has neither `pkeyutl -rawin` nor
+# Ed25519, so a stock Mac has no OpenSSL this script can verify with and runs
+# no Node. `osascript -l JavaScript` is JavaScriptCore, which has BigInt on
+# every supported macOS, so the verifier below is the installer's own code.
+# The tests extract this heredoc and run its exact text under Bun and Node.
+ed25519_javascript() {
+  cat <<'BAKE_ED25519_JAVASCRIPT'
+'use strict'
+// Ed25519 verification, RFC 8032 section 5.1.7, over hex arguments: the
+// 32-byte public key, the 64-byte signature, and the SHA-512 of R || A || M,
+// which the caller computes with `shasum -a 512`. Only public keys,
+// signatures, and release bytes pass through here, so no secret is handled
+// and no timing side channel matters.
+var BAKE_P = (1n << 255n) - 19n
+var BAKE_L = (1n << 252n) + 27742317777372353535851937790883648493n
+
+function bakeFieldMod(value) {
+  var residue = value % BAKE_P
+  return residue < 0n ? residue + BAKE_P : residue
+}
+
+function bakePower(base, exponent) {
+  var result = 1n
+  var factor = bakeFieldMod(base)
+  var remaining = exponent
+  while (remaining > 0n) {
+    if (remaining & 1n) result = bakeFieldMod(result * factor)
+    factor = bakeFieldMod(factor * factor)
+    remaining >>= 1n
+  }
+  return result
+}
+
+// The curve constant d = -121665/121666 and the square root of -1.
+var BAKE_D = bakeFieldMod(-121665n * bakePower(121666n, BAKE_P - 2n))
+var BAKE_SQRT_MINUS_ONE = bakePower(2n, (BAKE_P - 1n) / 4n)
+
+// Hex as bytes, or null when it is not an even run of hex digits.
+function bakeHexBytes(hex) {
+  if (typeof hex !== 'string' || hex.length % 2 !== 0 || !/^[0-9a-fA-F]*$/.test(hex)) return null
+  var bytes = []
+  for (var index = 0; index < hex.length; index += 2) bytes.push(parseInt(hex.substr(index, 2), 16))
+  return bytes
+}
+
+// A little-endian byte string as a non-negative integer.
+function bakeLittleEndian(bytes) {
+  var value = 0n
+  for (var index = bytes.length - 1; index >= 0; index--) value = (value << 8n) | BigInt(bytes[index])
+  return value
+}
+
+// Points are extended twisted Edwards coordinates (X, Y, Z, T), where this
+// addition is complete for the curve, so it doubles as well.
+function bakePointAdd(left, right) {
+  var a = bakeFieldMod((left[1] - left[0]) * (right[1] - right[0]))
+  var b = bakeFieldMod((left[1] + left[0]) * (right[1] + right[0]))
+  var c = bakeFieldMod(left[3] * 2n * BAKE_D * right[3])
+  var d = bakeFieldMod(left[2] * 2n * right[2])
+  var e = b - a
+  var f = d - c
+  var g = d + c
+  var h = b + a
+  return [bakeFieldMod(e * f), bakeFieldMod(g * h), bakeFieldMod(f * g), bakeFieldMod(e * h)]
+}
+
+function bakeScalarMultiply(point, scalar) {
+  var result = [0n, 1n, 1n, 0n]
+  var addend = point
+  var remaining = scalar
+  while (remaining > 0n) {
+    if (remaining & 1n) result = bakePointAdd(result, addend)
+    addend = bakePointAdd(addend, addend)
+    remaining >>= 1n
+  }
+  return result
+}
+
+function bakePointEquals(left, right) {
+  if (bakeFieldMod(left[0] * right[2]) !== bakeFieldMod(right[0] * left[2])) return false
+  return bakeFieldMod(left[1] * right[2]) === bakeFieldMod(right[1] * left[2])
+}
+
+// RFC 8032 section 5.1.3: 32 little-endian bytes as a point, or null for a
+// non-canonical encoding (y at or above p), a y with no x, or x = 0 with the
+// sign bit set.
+function bakePointDecode(bytes) {
+  if (bytes === null || bytes.length !== 32) return null
+  var sign = (bytes[31] >> 7) & 1
+  var copy = bytes.slice(0, 32)
+  copy[31] = copy[31] & 0x7f
+  var y = bakeLittleEndian(copy)
+  if (y >= BAKE_P) return null
+  var square = bakeFieldMod(y * y)
+  var u = bakeFieldMod(square - 1n)
+  var v = bakeFieldMod(BAKE_D * square + 1n)
+  var candidate = bakeFieldMod(u * bakePower(v, 3n) * bakePower(bakeFieldMod(u * bakePower(v, 7n)), (BAKE_P - 5n) / 8n))
+  var check = bakeFieldMod(v * candidate * candidate)
+  if (check !== u) {
+    if (check !== bakeFieldMod(-u)) return null
+    candidate = bakeFieldMod(candidate * BAKE_SQRT_MINUS_ONE)
+  }
+  if (candidate === 0n && sign === 1) return null
+  if (Number(candidate % 2n) !== sign) candidate = BAKE_P - candidate
+  return [candidate, y, 1n, bakeFieldMod(candidate * y)]
+}
+
+var BAKE_BASE = bakePointDecode(bakeHexBytes('5866666666666666666666666666666666666666666666666666666666666666'))
+
+// The cofactorless check [S]B = R + [k]A. A signature whose S is at or above
+// the group order, whose R or A is non-canonical or undecodable, or whose
+// lengths differ from 32, 64, and 64 bytes is refused before any curve
+// arithmetic.
+function bakeEd25519Verify(keyHex, signatureHex, digestHex) {
+  var key = bakeHexBytes(keyHex)
+  var signature = bakeHexBytes(signatureHex)
+  var digest = bakeHexBytes(digestHex)
+  if (key === null || key.length !== 32) return false
+  if (signature === null || signature.length !== 64) return false
+  if (digest === null || digest.length !== 64) return false
+  var s = bakeLittleEndian(signature.slice(32, 64))
+  if (s >= BAKE_L) return false
+  var publicPoint = bakePointDecode(key)
+  if (publicPoint === null) return false
+  var commitment = bakePointDecode(signature.slice(0, 32))
+  if (commitment === null) return false
+  var k = bakeLittleEndian(digest) % BAKE_L
+  var left = bakeScalarMultiply(BAKE_BASE, s)
+  var right = bakePointAdd(commitment, bakeScalarMultiply(publicPoint, k))
+  return bakePointEquals(left, right)
+}
+
+// osascript passes the script's arguments to `run` and prints what it returns.
+function run(argv) {
+  return bakeEd25519Verify(argv[0], argv[1], argv[2]) ? 'true' : 'false'
+}
+BAKE_ED25519_JAVASCRIPT
+}
+# END ED25519 JAVASCRIPT VERIFIER
+
+# Choose how this host verifies the release signature, and prove the choice
+# before anything is downloaded: the candidate must accept RFC 8032's TEST 1
+# signature over its own message and refuse it over another one.
+set_verifier() {
+  probe="$temporary/probe"
+  rm -rf "$probe"
+  mkdir -p "$probe"
+  printf 'r' > "$probe/message"
+  printf 'x' > "$probe/other"
+  tried=
+  for candidate in ${BAKE_OPENSSL:-openssl /opt/homebrew/opt/openssl@3/bin/openssl /usr/local/opt/openssl@3/bin/openssl}; do
+    need "$candidate" || continue
+    verifier=openssl
+    openssl_command=$candidate
+    if verify_signature "$ed25519_test_key" "$ed25519_test_signature" "$probe/message" \
+      && ! verify_signature "$ed25519_test_key" "$ed25519_test_signature" "$probe/other"; then
+      return 0
+    fi
+    tried="$tried $candidate"
+  done
+  verifier=
+  openssl_command=
+  # Only macOS has osascript, so this is the Mac's fallback; the probe above
+  # proves it before the manifest is read, as it proves an openssl.
+  if need osascript && need base64 && need od && { need shasum || need sha512sum; }; then
+    verifier=javascript
+    if verify_signature "$ed25519_test_key" "$ed25519_test_signature" "$probe/message" \
+      && ! verify_signature "$ed25519_test_key" "$ed25519_test_signature" "$probe/other"; then
+      return 0
+    fi
+    verifier=
+    tried="$tried osascript"
+  fi
+  [ -n "$tried" ] || tried=' nothing: no openssl is installed'
+  fail "nothing here verifies the release signature, which is Ed25519 (tried:$tried); install OpenSSL 3 (brew install openssl@3) or name one with BAKE_OPENSSL"
 }
 
 # Set `target` to this host's release platform.
@@ -274,9 +549,14 @@ self_check() {
   esac
 }
 
+# The most a release archive may unpack to, as `bake-update`'s archive reader
+# bounds it: a native release is tens of megabytes, and this stops a
+# decompression bomb long before the disk fills.
+max_unpacked_bytes=536870912
+
 # Every member of the archive, refused before anything is unpacked when it is
-# absolute, holds a `..` component, or is anything but a regular file or a
-# directory.
+# absolute, holds a `..` component, is anything but a regular file or a
+# directory, or together with the rest unpacks past max_unpacked_bytes.
 check_members() {
   archive=$1
   tar -tzf "$archive" > "$temporary/members" 2>/dev/null || fail "could not read $archive"
@@ -297,6 +577,21 @@ check_members() {
       *' -> '* | *' link to '*) fail "the archive holds a link: $line" ;;
     esac
   done < "$temporary/members-long"
+  # Each listed member's size is the field before its date, which GNU tar
+  # writes as `2026-10-20` and BSD tar as `Oct 20`.
+  unpacked=$(awk '
+    {
+      for (i = 2; i < NF; i++) {
+        if ($i ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/ || $i ~ /^[A-Z][a-z][a-z]$/) {
+          if ($(i - 1) ~ /^[0-9]+$/) total += $(i - 1)
+          break
+        }
+      }
+    }
+    END { printf "%.0f", total }
+  ' "$temporary/members-long")
+  [ "$unpacked" -le "$max_unpacked_bytes" ] \
+    || fail "the archive unpacks to $unpacked bytes, more than the $max_unpacked_bytes an install accepts"
 }
 
 # Where `<bin>/bake` points, as far as the takeover is concerned:
@@ -344,18 +639,28 @@ uninstall_links() {
         ;;
       *'"kind":"symlink"'*)
         target=$(json_path "$(printf '%s' "$line" | cut -d '"' -f 14)")
-        rm -f "$path"
-        ln -s "$target" "$path"
-        step "Restored $path -> $target"
-        restored=$((restored + 1))
+        # Only this install's own command is put back, as for a command it
+        # created: a `bake` the user has replaced since is left alone.
+        if [ "$(command_owner "$path")" = native ]; then
+          rm -f "$path"
+          ln -s "$target" "$path"
+          step "Restored $path -> $target"
+          restored=$((restored + 1))
+        else
+          step "Left $path alone; it is no longer the command this installer made"
+        fi
         ;;
       *'"kind":"file"'*)
         backup=$(json_path "$(printf '%s' "$line" | cut -d '"' -f 14)")
         [ -e "$backup" ] || fail "the backup $backup recorded for $path is gone"
-        rm -f "$path"
-        mv -f "$backup" "$path"
-        step "Restored $path from $backup"
-        restored=$((restored + 1))
+        if [ "$(command_owner "$path")" = native ]; then
+          rm -f "$path"
+          mv -f "$backup" "$path"
+          step "Restored $path from $backup"
+          restored=$((restored + 1))
+        else
+          step "Left $path alone; it is no longer the command this installer made"
+        fi
         ;;
       *) fail "$links records a command this installer cannot restore: $line" ;;
     esac
@@ -369,24 +674,21 @@ install_release() {
   set_platform
   temporary=$(mktemp -d "${TMPDIR:-/tmp}/bake-install.XXXXXX")
   set_pointer_mv
+  set_verifier
 
-  step 'Verifying the native release manifest'
+  if [ "$verifier" = javascript ]; then
+    step 'Verifying the native release manifest with the embedded JavaScript verifier (osascript)'
+  else
+    step "Verifying the native release manifest with $openssl_command"
+  fi
   fetch_to "$download_url/native/stable.json" "$temporary/stable.json" 60
   fetch_to "$download_url/native/stable.json.sig" "$temporary/stable.json.sig" 60
-  {
-    printf '%s\n' '-----BEGIN PUBLIC KEY-----'
-    printf '%s\n' "$native_release_key" | fold -w 64
-    printf '%s\n' '-----END PUBLIC KEY-----'
-  } > "$temporary/native-release-key.pem"
   tr -d '[:space:]' < "$temporary/stable.json.sig" > "$temporary/signature.base64"
-  # `openssl base64 -d` rejects nothing outside base64, so the text is checked
-  # first and the decoded signature must be Ed25519's 64 bytes.
+  # A base64 decoder rejects nothing outside base64, so the text is checked
+  # first and the signature must be Ed25519's 64 bytes.
   grep -q '^[A-Za-z0-9+/]\{86\}==$' "$temporary/signature.base64" \
     || fail 'the native release manifest signature is not a base64 Ed25519 signature'
-  openssl base64 -d -A -in "$temporary/signature.base64" -out "$temporary/signature.bin" 2>/dev/null \
-    || fail 'the native release manifest signature is not base64'
-  openssl pkeyutl -verify -pubin -inkey "$temporary/native-release-key.pem" -rawin \
-    -in "$temporary/stable.json" -sigfile "$temporary/signature.bin" >/dev/null 2>&1 \
+  verify_signature "$native_release_key" "$(cat "$temporary/signature.base64")" "$temporary/stable.json" \
     || fail 'the native release manifest signature did not verify'
 
   # The manifest, as `bake-native-release/1` fixes it. Whitespace between
@@ -436,6 +738,7 @@ install_release() {
 
   acquire_lock install
   mkdir -p "$native_root/releases" "$bin_dir"
+  sweep_leftovers
   staging="$native_root/releases/.staging-$$"
   rm -rf "$staging"
   mkdir "$staging"
@@ -481,6 +784,26 @@ install_release() {
   release_lock
 }
 
+# What an interrupted run left behind: a temporary pointer that was never
+# renamed, and a staging or replaced release directory. Called under the
+# lock, as the Rust updater's own sweep of the same names is.
+sweep_leftovers() {
+  for leftover in "$native_root"/.current.* "$native_root"/.previous.* \
+    "$native_root/releases"/.staging-* "$native_root/releases"/.replaced-*; do
+    [ -e "$leftover" ] || continue
+    rm -rf "$leftover" 2>/dev/null || :
+  done
+}
+
+# Link `<bin>/bake` to this release's executable, through a temporary link
+# and a rename, so a reader sees one command or the other.
+write_command_link() {
+  command_temp="$bin_dir/.bake.$$"
+  rm -f "$command_temp"
+  ln -s "$native_root/current/bin/$executable_name" "$command_temp"
+  mv $pointer_mv "$command_temp" "$1"
+}
+
 # Create `<bin>/bake`, taking over a Bake-managed 0.3 command and recording
 # every command this installer created or replaced in links.json. `dsh` and
 # the 0.3 install are never touched.
@@ -490,12 +813,21 @@ link_command() {
     *[[:cntrl:]]*) fail "cannot record the command $command_path, which holds a control character" ;;
   esac
   owner=$(command_owner "$command_path")
+  if [ "$owner" = native ]; then
+    # A rerun of this installer, which is how an install is updated. The
+    # command already leads to `current`, and links.json still records what
+    # the first run replaced; recording this install's own link instead
+    # would lose the 0.3 command `--uninstall-links` has to restore. The
+    # link is rewritten only when the release renamed its executable.
+    if [ "$(readlink "$command_path")" != "$native_root/current/bin/$executable_name" ]; then
+      write_command_link "$command_path"
+    fi
+    step "Kept $command_path"
+    return 0
+  fi
   replaced='null'
   case $owner in
     none) ;;
-    native)
-      replaced="{\"kind\":\"symlink\",\"target\":\"$(json_value "$(readlink "$command_path")")\"}"
-      ;;
     legacy)
       step "Taking over $command_path from the Bake 0.3 install"
       replaced="{\"kind\":\"symlink\",\"target\":\"$(json_value "$(readlink "$command_path")")\"}"
@@ -513,10 +845,7 @@ link_command() {
       replaced="{\"kind\":\"file\",\"backup\":\"$(json_value "$backup")\"}"
       ;;
   esac
-  command_temp="$bin_dir/.bake.$$"
-  rm -f "$command_temp"
-  ln -s "$native_root/current/bin/$executable_name" "$command_temp"
-  mv $pointer_mv "$command_temp" "$command_path"
+  write_command_link "$command_path"
   links_temp="$native_root/.links.json.$$"
   {
     printf '%s\n' '{"schema":"bake-native-links/1","links":['
@@ -530,9 +859,6 @@ link_command() {
 need tar || fail 'this install needs tar'
 need curl || need wget || fail 'this install needs curl or wget'
 need sha256sum || need shasum || fail 'this install needs sha256sum or shasum'
-need openssl || fail 'this install needs openssl 1.1.1 or newer, which verifies the release signature'
-openssl list -public-key-algorithms 2>/dev/null | grep -qi ed25519 \
-  || fail 'this openssl has no Ed25519, which the release signature needs; install openssl 1.1.1 or newer'
 
 if [ "$mode" = uninstall-links ]; then
   uninstall_links

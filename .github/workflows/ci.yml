@@ -170,12 +170,16 @@ jobs:
         env:
           BAKE_TEST_PWSH: pwsh
         run: bun test --timeout=120000 ./scripts/release/native-install-windows.test.ts
-      # install.sh verifies with the host's openssl; record which one macOS has.
-      - name: Check the POSIX installer with the host's openssl
+      # install.sh verifies with the host's openssl where one passes its probe,
+      # and otherwise with the verifier it embeds; record which openssl the
+      # runner has and which path the install took. On macOS the suite also
+      # installs with BAKE_OPENSSL naming no openssl, which forces the
+      # embedded verifier through real osascript, as a stock Mac does.
+      - name: Check the POSIX installer and its Ed25519 verifier
         if: runner.os != 'Windows'
         run: |
-          openssl version
-          bun test --timeout=120000 ./scripts/release/native-install.test.ts
+          openssl version || true
+          bun test --timeout=180000 ./scripts/release/native-install.test.ts ./scripts/release/native-install-ed25519.test.ts
       # Per-binary test durations, kept on success to watch the job's budget.
       - uses: actions/upload-artifact@v4
         if: success()
@@ -220,5 +224,8 @@ jobs:
       - run: bun run release:pack
       # A throwaway key: CI never holds the release signing key. verify-local
       # checks the manifest against it, then installs and updates through it.
+      # It installs with the frozen 0.3 installers under
+      # scripts/release/fixtures/legacy-0.3/, because distribution/host's are
+      # now the native ones; 0.3 itself is released from release/0.3.
       - run: bun run release:assemble --ephemeral-key
       - run: bun run release:verify-local

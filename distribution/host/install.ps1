@@ -167,8 +167,6 @@ function BakeSpkiPublicKey([string]$base64) {
 }
 # END ED25519 VERIFIER
 
-if ($MyInvocation.InvocationName -eq '.') { return }
-
 $downloadUrl = if ($env:BAKE_DOWNLOAD_URL) { $env:BAKE_DOWNLOAD_URL.TrimEnd('/') } else { 'https://bake.justar.dev' }
 $localAppData = $env:LOCALAPPDATA
 if (-not $localAppData) { $localAppData = [Environment]::GetFolderPath('LocalApplicationData') }
@@ -296,7 +294,9 @@ function BakeCurrentVersion() {
 # so a reader sees one release name or the other.
 function BakeWritePointer([string]$name, [string]$version) {
   $pointer = Join-Path $nativeRoot $name
-  $temp = "$pointer.$PID.tmp"
+  # Named so that the sweep the Rust updater runs under the same lock, which
+  # matches `.current*` and `.previous*`, clears an interrupted run's temp.
+  $temp = Join-Path $nativeRoot ".$name.$PID.tmp"
   [IO.File]::WriteAllText($temp, "$version`r`n", (New-Object Text.UTF8Encoding $false))
   # `Move-Item -Force` renames over an existing file, which Windows does in
   # one step, so a reader sees one name or the other. `File.Replace` is not
@@ -343,6 +343,11 @@ function BakeIsLegacyShim([string]$text) {
 # A stalled host fails the install rather than holding it open forever; the
 # manifest and its signature are small, so they get a short deadline.
 function BakeFetch([string]$url, [string]$path, [int]$timeoutSeconds) {
+  # Windows PowerShell 5.1 on .NET before 4.7 defaults to TLS 1.0, which the
+  # release host refuses; adding TLS 1.2 leaves whatever else is enabled.
+  try {
+    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+  } catch { }
   try {
     Invoke-WebRequest $url -UseBasicParsing -TimeoutSec $timeoutSeconds -OutFile $path
   } catch {
@@ -376,6 +381,12 @@ function BakeUninstallLinks() {
         if (-not (Test-Path -LiteralPath $backup -PathType Leaf)) {
           throw "Bake install: the backup $backup recorded for $path is gone"
         }
+        # Only this install's own command is put back: a `bake.cmd` the user
+        # has replaced since is left alone, as a created command is.
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf) -or ([IO.File]::ReadAllText($path)) -ne (BakeShimText $nativeRoot)) {
+          Write-Output "Left $path alone; it is no longer the command this installer made"
+          continue
+        }
         Remove-Item -Force -LiteralPath $path -ErrorAction SilentlyContinue
         Move-Item -Force -LiteralPath $backup -Destination $path
         Write-Output "Restored $path from $backup"
@@ -401,12 +412,22 @@ function BakeLinkCommand([string]$version, [string]$release) {
       throw "Bake install: $command is not a file"
     }
     $existing = [IO.File]::ReadAllText($command)
-    $managed = ($existing -eq $shim) -or (BakeIsLegacyShim $existing)
+    if ($existing -eq $shim) {
+      # A rerun of this installer, which is how an install is updated. The
+      # command already reads `current.txt`, and links.json still records
+      # what the first run replaced; backing this shim up and recording it
+      # instead would lose the 0.3 command `--uninstall-links` has to
+      # restore, and grow <root>\backups on every run.
+      Write-Output "Kept $command"
+      BakeEnsureOnPath
+      return
+    }
+    $managed = BakeIsLegacyShim $existing
     if (-not $managed -and -not $replaceCommand) {
       Write-Error "Bake install: $command exists and no Bake installer made it, so it was left alone. Bake $version is installed at $release. Run it there, or install again with -ReplaceCommand (BAKE_REPLACE_COMMAND=1) to replace that file and keep a backup." -ErrorAction Continue
       exit 1
     }
-    if (BakeIsLegacyShim $existing) { Write-Output "Taking over $command from the Bake 0.3 install" }
+    if ($managed) { Write-Output "Taking over $command from the Bake 0.3 install" }
     $backups = Join-Path $nativeRoot 'backups'
     New-Item -ItemType Directory -Force -Path $backups | Out-Null
     $backup = Join-Path $backups ("bake.cmd." + ([DateTimeOffset]::UtcNow).ToUnixTimeSeconds() + ".$PID")
@@ -424,17 +445,18 @@ function BakeLinkCommand([string]$version, [string]$release) {
   ) -join "`n"), (New-Object Text.UTF8Encoding $false))
   Move-Item -Force -LiteralPath $linksTemp -Destination $links
   Write-Output "Linked $command"
-  if ($env:BAKE_SKIP_PATH_UPDATE -ne '1') {
-    $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-    $parts = if ($null -eq $userPath) { @() } else { $userPath -split ';' }
-    $present = $false
-    foreach ($part in $parts) { if ($part.TrimEnd('\') -eq $binDir.TrimEnd('\')) { $present = $true } }
-    if (-not $present) {
-      $next = (("$userPath".TrimEnd(';') + ';' + $binDir)).TrimStart(';')
-      [Environment]::SetEnvironmentVariable('Path', $next, 'User')
-      Write-Output "Added $binDir to your PATH; open a new terminal to use it"
-    }
-  }
+  BakeEnsureOnPath
+}
+
+# Add the command directory to the user PATH, unless it is already there.
+function BakeEnsureOnPath() {
+  if ($env:BAKE_SKIP_PATH_UPDATE -eq '1') { return }
+  $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+  $parts = if ($null -eq $userPath) { @() } else { $userPath -split ';' }
+  foreach ($part in $parts) { if ($part.TrimEnd('\') -eq $binDir.TrimEnd('\')) { return } }
+  $next = (("$userPath".TrimEnd(';') + ';' + $binDir)).TrimStart(';')
+  [Environment]::SetEnvironmentVariable('Path', $next, 'User')
+  Write-Output "Added $binDir to your PATH; open a new terminal to use it"
 }
 
 function BakeInstall() {
@@ -500,12 +522,22 @@ function BakeInstall() {
   Write-Output ("Checked SHA-256 " + $expected.Substring(0, 12))
 
   # Every member, refused before anything is unpacked when it is absolute,
-  # holds a `..` component, or is anything but a regular file or a directory.
+  # holds a `..` component, is anything but a regular file or a directory, or
+  # together with the rest unpacks past the bound `bake-update` also applies.
+  $maxUnpackedBytes = 536870912
   $listing = & tar.exe -tvzf $archive
   if ($LASTEXITCODE -ne 0) { throw "Bake install: could not read $file" }
+  $unpacked = [long]0
   foreach ($line in $listing) {
     if ($line -notmatch '^[-d]') { throw "Bake install: the archive holds a link or special file: $line" }
     if ($line -match ' -> ' -or $line -match ' link to ') { throw "Bake install: the archive holds a link: $line" }
+    # The member's size is the field before its date, which BSD tar writes as
+    # `Oct 20` and GNU tar as `2026-10-20`.
+    $sized = [regex]::Match($line, '\s(\d+)\s+(?:\d{4}-\d{2}-\d{2}|[A-Za-z]{3})\s')
+    if ($sized.Success) { $unpacked += [long]$sized.Groups[1].Value }
+  }
+  if ($unpacked -gt $maxUnpackedBytes) {
+    throw "Bake install: the archive unpacks to $unpacked bytes, more than the $maxUnpackedBytes an install accepts"
   }
   foreach ($name in (& tar.exe -tzf $archive)) {
     if ($name -match '^[/\\]' -or $name -match '^[A-Za-z]:' -or $name -match '(^|[/\\])\.\.([/\\]|$)') {

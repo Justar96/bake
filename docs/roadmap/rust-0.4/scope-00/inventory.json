@@ -1313,6 +1313,7 @@
     {"path":"scripts/release/manifest.test.ts","lane":"bun-scripts","owner":"scripts:release","scopes":["16"],"disposition":"replace-tooling","basis":"scripts:release"},
     {"path":"scripts/release/native-archive.test.ts","lane":"bun-scripts","owner":"scripts:release","scopes":["16"],"disposition":"replace-tooling","basis":"scripts:release"},
     {"path":"scripts/release/native-channel.test.ts","lane":"bun-scripts","owner":"scripts:release","scopes":["16"],"disposition":"replace-tooling","basis":"scripts:release"},
+    {"path":"scripts/release/native-install-ed25519.test.ts","lane":"bun-scripts","owner":"scripts:release","scopes":["16"],"disposition":"replace-tooling","basis":"scripts:release"},
     {"path":"scripts/release/native-install-windows.test.ts","lane":"bun-scripts","owner":"scripts:release","scopes":["16"],"disposition":"replace-tooling","basis":"scripts:release"},
     {"path":"scripts/release/native-install.test.ts","lane":"bun-scripts","owner":"scripts:release","scopes":["16"],"disposition":"replace-tooling","basis":"scripts:release"},
     {"path":"scripts/release/native-licenses.test.ts","lane":"bun-scripts","owner":"scripts:release","scopes":["16"],"disposition":"replace-tooling","basis":"scripts:release"},
