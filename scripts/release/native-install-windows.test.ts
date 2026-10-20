@@ -30,8 +30,14 @@ afterEach(() => {
 
 /** The PowerShell these checks run under, or why they cannot run. */
 function powershell(): string | undefined {
+  // A named PowerShell must be found, by path or on PATH: falling back to
+  // another would check the installer under a PowerShell CI did not ask for.
   const named = process.env['BAKE_TEST_PWSH']
-  if (named !== undefined && named !== '' && existsSync(named)) return named
+  if (named !== undefined && named !== '') {
+    const found = existsSync(named) ? named : Bun.which(named)
+    if (found === null) throw new Error(`BAKE_TEST_PWSH names ${named}, which is not a file or on PATH`)
+    return found
+  }
   const local = resolve(import.meta.dir, '../../.preflight/tools/pwsh/pwsh')
   if (existsSync(local)) return local
   return Bun.which('pwsh') ?? Bun.which('powershell.exe') ?? undefined
@@ -69,7 +75,7 @@ function runPowerShell(script: string, args: readonly string[], env: Record<stri
     ? Object.fromEntries(Object.entries(process.env).filter(([name]) => name.toUpperCase() !== 'PSMODULEPATH'))
     : { PATH: process.env['PATH'] ?? '', HOME: process.env['HOME'] ?? '' }
   return runInstaller(
-    [PWSH, '-NoProfile', '-NonInteractive', '-File', script, ...args],
+    [PWSH, '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script, ...args],
     { ...inherited, ...env } as Record<string, string>,
     RUN_TIMEOUT_MS,
   )

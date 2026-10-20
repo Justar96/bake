@@ -165,12 +165,16 @@ jobs:
         if: runner.os == 'Windows'
         env:
           BAKE_TEST_PWSH: powershell.exe
-        run: bun test --timeout=120000 ./scripts/release/native-install-windows.test.ts
+        run: |
+          powershell.exe -NoProfile -Command '$PSVersionTable.PSVersion.ToString()'
+          bun test --timeout=120000 ./scripts/release/native-install-windows.test.ts
       - name: Check the Windows installer under PowerShell 7
         if: runner.os == 'Windows'
         env:
           BAKE_TEST_PWSH: pwsh
-        run: bun test --timeout=120000 ./scripts/release/native-install-windows.test.ts
+        run: |
+          pwsh -NoProfile -Command '$PSVersionTable.PSVersion.ToString()'
+          bun test --timeout=120000 ./scripts/release/native-install-windows.test.ts
       # install.sh verifies with the host's openssl where one passes its probe,
       # and otherwise with the verifier it embeds; record which openssl the
       # runner has and which path the install took. On macOS the suite also
