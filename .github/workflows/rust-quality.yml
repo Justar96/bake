@@ -1,0 +1,126 @@
+name: Rust quality
+
+# On-demand evidence that the Rust tests check the code's logic: line and
+# region coverage, mutation testing of a branch's changes, and a short fuzz
+# run. Nothing here gates a push or a release; ci.yml does. Run it on a
+# pushed branch with `gh workflow run rust-quality.yml --ref <branch>`.
+on:
+  workflow_dispatch:
+    inputs:
+      base:
+        description: Ref whose merge-base bounds the mutated diff (empty means origin/develop); a run on develop itself needs an older base such as origin/main
+        type: string
+        default: ''
+      fuzz-seconds:
+        description: Seconds to fuzz each target
+        type: number
+        default: 60
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bake-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      # The mutated diff starts at a merge-base, which needs the history.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile
+      # As in ci.yml: the process-owner tests need unprivileged namespaces,
+      # and the native eval smoke's grep tool runs ripgrep.
+      - name: Enable Linux process namespaces
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Install ripgrep
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ripgrep
+      - name: Install the pinned Rust toolchain and its llvm-tools
+        working-directory: rust
+        run: |
+          rustup toolchain install --no-self-update
+          rustup component add llvm-tools
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust -> target
+      - name: Install the Rust quality tools
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest@0.9.148,cargo-llvm-cov@0.9.1,cargo-mutants@27.1.0,cargo-fuzz@0.13.2
+
+      - name: Coverage
+        timeout-minutes: 60
+        run: bun run coverage:rust --lcov --html
+      - name: Coverage summary
+        if: always()
+        run: |
+          if [ -f rust/target/llvm-cov/summary.md ]; then
+            { echo '## Rust coverage'; echo; cat rust/target/llvm-cov/summary.md; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rust-coverage
+          path: |
+            rust/target/llvm-cov/coverage.json
+            rust/target/llvm-cov/lcov.info
+            rust/target/llvm-cov/summary.md
+            rust/target/llvm-cov/html/
+          if-no-files-found: ignore
+
+      # A missed mutant is a finding to read, not a failure of the run. In
+      # place, mutants reuse rust/target; a scratch copy would build cold.
+      - name: Mutants on the diff
+        if: ${{ !cancelled() }}
+        timeout-minutes: 60
+        continue-on-error: true
+        env:
+          BASE: ${{ inputs.base }}
+        run: |
+          set -o pipefail
+          bun run mutants:rust --in-place ${BASE:+--base "$BASE"} 2>&1 | tee "$RUNNER_TEMP/mutants.log"
+      - name: Mutants summary
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/mutants.log" ]; then
+            { echo '## Rust mutants'; echo; echo '```'
+              grep -E '^(mutants:rust: |MISSED   rust/|TIMEOUT  rust/)' "$RUNNER_TEMP/mutants.log" || true
+              echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rust-mutants
+          path: |
+            rust/target/mutants/diff.patch
+            rust/target/mutants/*/mutants.out/
+          if-no-files-found: ignore
+
+      # rust/fuzz pins its own nightly toolchain.
+      - name: Fuzz
+        if: ${{ !cancelled() }}
+        timeout-minutes: 60
+        continue-on-error: true
+        env:
+          FUZZ_SECONDS: ${{ inputs.fuzz-seconds }}
+        run: |
+          (cd rust/fuzz && rustup toolchain install --no-self-update)
+          bun run fuzz:rust --all --seconds "$FUZZ_SECONDS"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rust-fuzz-artifacts
+          path: rust/fuzz/artifacts/
+          if-no-files-found: ignore
