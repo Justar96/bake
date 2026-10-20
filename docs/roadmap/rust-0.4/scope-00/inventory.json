@@ -292,6 +292,9 @@
     "scripts:rust-pty": {
       "reason": "The Rust PTY driver's Windows ConPTY client; native terminal qualification tooling for bake-rs, not a TypeScript contract."
     },
+    "scripts:rust-tests": {
+      "reason": "Native test execution, Cargo filters, and failure reporting for development and qualification."
+    },
     "scripts:workspace": {
       "reason": "Bun/TypeScript workspace gates; scope 01 adds native checks beside them while TypeScript remains."
     },
@@ -1327,6 +1330,7 @@
     {"path":"scripts/rust-migration-inventory.test.ts","lane":"bun-scripts","owner":"scripts:migration","scopes":["00"],"disposition":"replace-tooling","basis":"scripts:migration"},
     {"path":"scripts/rust-migration-ledger.test.ts","lane":"bun-scripts","owner":"scripts:qualification-ledger","scopes":["01","17"],"disposition":"reuse-oracle","basis":"scripts:qualification-ledger"},
     {"path":"scripts/rust-pty-conpty.test.ts","lane":"bun-scripts","owner":"scripts:rust-pty","scopes":["14","15"],"disposition":"replace-tooling","basis":"scripts:rust-pty"},
+    {"path":"scripts/rust-test.test.ts","lane":"bun-scripts","owner":"scripts:rust-tests","scopes":["01"],"disposition":"replace-tooling","basis":"scripts:rust-tests"},
     {"path":"scripts/session-fixture-layout.spec.ts","lane":"vitest-runtime","owner":"scripts:persistence","scopes":["02","03"],"disposition":"reuse-oracle","basis":"scripts:persistence"},
     {"path":"scripts/session-query-spill-command.spec.ts","lane":"vitest-runtime","owner":"scripts:persistence","scopes":["02","03"],"disposition":"reuse-oracle","basis":"scripts:persistence"},
     {"path":"scripts/session-snapshot-corpus-policy.spec.ts","lane":"vitest-runtime","owner":"scripts:persistence","scopes":["02","03"],"disposition":"reuse-oracle","basis":"scripts:persistence"},

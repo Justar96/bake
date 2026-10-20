@@ -1,0 +1,19 @@
+nextest-version = "0.9.143"
+
+[profile.default]
+fail-fast = false
+retries = 0
+flaky-result = "fail"
+leak-timeout = { period = "100ms", result = "fail" }
+slow-timeout = { period = "60s", terminate-after = 4 }
+
+# This custom harness keeps its whole observation and settlement sequence
+# in one process. Preserve its successful evidence as well as failures.
+[[profile.default.overrides]]
+filter = "binary_id(bake-process::windows_job_rundown)"
+slow-timeout = { period = "60s", terminate-after = 10 }
+success-output = "final"
+
+[profile.ci.junit]
+path = "junit.xml"
+report-skipped = "all"

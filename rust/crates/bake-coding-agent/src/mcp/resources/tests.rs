@@ -476,6 +476,69 @@ async fn a_withdrawn_registry_leaves_no_server_to_reach() {
     assert_eq!(listed.structured_content, Some(json!({ "resources": [] })));
 }
 
+#[tokio::test]
+async fn the_first_connected_generation_includes_resources_and_instructions() {
+    use crate::mcp::config::parse_mcp_config;
+    use crate::mcp::{McpServerState, McpServers, McpTimings, McpToolFilter};
+
+    let text = json!({ "mcpServers": { "docs": { "command": "x" } } });
+    let entries = parse_mcp_config(&text.to_string(), std::path::Path::new("mcp.json")).servers;
+    let registry = McpServers::new(
+        &entries,
+        Vec::new(),
+        McpTimings::default(),
+        McpToolFilter::default(),
+        WorkGate::default(),
+    );
+    let (caller, _fake, server) = client(docs_server).await;
+    let changes = registry.subscribe();
+    let (observed, published) = std::thread::scope(|scope| {
+        // Hold the first notification at its write lock. Readers can then
+        // inspect Connected before a publisher can make a second update.
+        let notification = changes.borrow();
+        let publisher = scope.spawn(|| {
+            registry.publish_connection(
+                0,
+                Vec::new(),
+                |count| McpServerState::Connected {
+                    tools: count,
+                    generation: 1,
+                    refresh_error: None,
+                },
+                Some("Docs search."),
+                Some(Arc::clone(&caller)),
+            )
+        });
+        let observed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+            while !matches!(
+                registry.statuses()[0].state,
+                McpServerState::Connected { .. }
+            ) {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "publication did not start"
+                );
+                std::thread::yield_now();
+            }
+            assert_eq!(registry.declared_tool_names(), RESOURCE_TOOL_NAMES);
+            assert!(
+                registry
+                    .servers_prompt_section()
+                    .is_some_and(|section| section.contains("Docs search."))
+            );
+        }));
+        drop(notification);
+        (observed, publisher.join())
+    });
+    caller.client.shutdown().await;
+    server.abort();
+    let _ = server.await;
+    published.expect("publisher thread").expect("publication");
+    observed.expect("the first connected state is complete");
+    assert_eq!(*changes.borrow(), 1);
+}
+
 // Pi's `syncResourceTools`: the three tools are published exactly while a
 // connected server offers resources, and withdrawn with it; a server
 // without the capability adds none, and a hidden one does not reach them.
@@ -509,13 +572,15 @@ async fn the_resource_tools_are_published_with_the_servers_that_offer_resources(
     let (caller, _fake, server) = client(docs_server).await;
 
     // A server that declared no resources publishes none of the tools.
-    registry.publish(0, Vec::new(), connected).unwrap();
-    registry.set_connection(0, None, None);
+    registry
+        .publish_connection(0, Vec::new(), connected, None, None)
+        .unwrap();
     assert!(registry.tool_names().is_empty());
 
     // A hidden server does not reach them either.
-    registry.publish(2, Vec::new(), connected).unwrap();
-    registry.set_connection(2, None, Some(Arc::clone(&caller)));
+    registry
+        .publish_connection(2, Vec::new(), connected, None, Some(Arc::clone(&caller)))
+        .unwrap();
     assert!(registry.tool_names().is_empty());
 
     let server_tool = {
@@ -530,9 +595,14 @@ async fn the_resource_tools_are_published_with_the_servers_that_offer_resources(
         Arc::new(tool)
     };
     registry
-        .publish(1, vec![Arc::clone(&server_tool)], connected)
+        .publish_connection(
+            1,
+            vec![Arc::clone(&server_tool)],
+            connected,
+            Some("  Docs search.  "),
+            Some(Arc::clone(&caller)),
+        )
         .unwrap();
-    registry.set_connection(1, Some("  Docs search.  "), Some(Arc::clone(&caller)));
     // Pi's `registerTools`: the server's namespace carries its instructions,
     // which `describeNamespace()` returns to scripts.
     let namespace = registry
@@ -595,13 +665,18 @@ async fn tool_restrictions_cover_the_resource_tools() {
     );
     let (caller, _fake, server) = client(docs_server).await;
     registry
-        .publish(0, Vec::new(), |count| McpServerState::Connected {
-            tools: count,
-            generation: 1,
-            refresh_error: None,
-        })
+        .publish_connection(
+            0,
+            Vec::new(),
+            |count| McpServerState::Connected {
+                tools: count,
+                generation: 1,
+                refresh_error: None,
+            },
+            None,
+            Some(Arc::clone(&caller)),
+        )
         .unwrap();
-    registry.set_connection(0, None, Some(Arc::clone(&caller)));
     assert_eq!(registry.tool_names(), RESOURCE_TOOL_NAMES);
     assert_eq!(
         registry.declared_tool_names(),

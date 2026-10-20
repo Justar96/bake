@@ -1077,6 +1077,9 @@ enum Outcome {
     Panicked,
 }
 
+#[path = "../../../test-support/harness.rs"]
+mod harness;
+
 fn main() {
     if let Ok(mode) = std::env::var(FIXTURE) {
         fixture_main(&mode);
@@ -1116,15 +1119,13 @@ fn main() {
     tests.extend(tests![
         a_killed_member_left_in_the_group_holds_the_shutdown_and_the_server
     ]);
-    let filters: Vec<String> = std::env::args()
-        .skip(1)
-        .filter(|arg| !arg.starts_with('-'))
-        .collect();
+    let args = harness::HarnessArgs::parse(std::env::args().skip(1));
+    if args.list(tests.iter().map(|(name, _)| *name)) {
+        return;
+    }
     let selected: Vec<_> = tests
         .into_iter()
-        .filter(|(name, _)| {
-            filters.is_empty() || filters.iter().any(|filter| name.contains(filter.as_str()))
-        })
+        .filter(|(name, _)| args.matches(name))
         .collect();
     println!("\nrunning {} tests", selected.len());
     let mut failed = Vec::new();

@@ -471,3 +471,70 @@ impl Drop for Run {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
+
+    use super::*;
+    use crate::{OutputItem, ToolDeclaration};
+
+    #[tokio::test]
+    async fn timeout_settlement_preserves_output_and_the_thread_exits() {
+        let bound = Duration::from_secs(5);
+        let exits = Arc::new(AtomicUsize::new(0));
+        let mut request = ExecuteRequest::new("text(\"partial\"); await tools.hang()");
+        request.tools = vec![ToolDeclaration::named("hang")];
+        request.source.options.timeout_ms = Some(30_000);
+        let observed_exits = Arc::clone(&exits);
+        request.on_exit = Some(ExitHook::new(move || {
+            observed_exits.fetch_add(1, Ordering::SeqCst);
+        }));
+        let engine = CodemodeEngine::get().expect("the test engine compiles");
+        let mut run = engine.start(request).expect("the fixture starts");
+        let output = tokio::time::timeout(bound, run.next()).await;
+        assert_eq!(
+            output.ok(),
+            Some(Event::Output(OutputItem::Text {
+                text: "partial".to_owned(),
+                console: false,
+            }))
+        );
+        let call = tokio::time::timeout(bound, run.next()).await;
+        assert!(matches!(call, Ok(Event::Call(ref call)) if call.name() == "hang"));
+
+        // Deliver the stop after the pending call is observable. Integration
+        // tests cover real deadlines; settlement must not depend on the VM
+        // starting before a short wall-clock deadline under suite load.
+        run.handle.stop(StopReason::TimedOut, None);
+        let event = tokio::time::timeout(bound, run.next()).await;
+        let Ok(Event::Done(outcome)) = event else {
+            panic!("{event:?}");
+        };
+        assert_eq!(
+            outcome.result,
+            Err(Failure::Timeout {
+                message: "Execution timed out after 30000 ms".to_owned(),
+            })
+        );
+        assert_eq!(
+            tokio::time::timeout(bound, run.next()).await.ok(),
+            Some(Event::Done(outcome))
+        );
+
+        let exited = tokio::time::timeout(bound, async {
+            while !run.thread.as_ref().is_some_and(JoinHandle::is_finished) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await;
+        assert!(exited.is_ok(), "the script thread did not exit");
+        run.thread
+            .take()
+            .expect("the run owns its thread")
+            .join()
+            .expect("the script thread exits without panicking");
+        assert_eq!(exits.load(Ordering::SeqCst), 1);
+    }
+}

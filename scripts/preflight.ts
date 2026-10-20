@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Local pre-PR verification: every gate CI runs, in one command, reporting
+ * Local verification: every gate CI runs, in one command, reporting
  * all of them rather than stopping at the first failure.
  *
  * Steps run in phases. Static checks that neither build nor share output run
@@ -62,6 +62,8 @@ export interface Step {
   /** Selectable group; `--only` and `--skip` accept a group or a step name. */
   readonly group: 'hygiene' | 'generated' | 'types' | 'lint' | 'unit' | 'build' | 'tui' | 'runtime' | 'e2e' | 'native'
   readonly summary: string
+  /** Working directory relative to the repository root. */
+  readonly cwd?: string
   /** Whether the step reads build output, and is skipped under `--fast`. */
   readonly needsBuild?: boolean
   /** The build that owns this step's artifacts; defaults to the TypeScript `build` step. */
@@ -70,48 +72,12 @@ export interface Step {
   readonly command?: (options: Options, scope: Scope) => readonly string[] | { readonly skip: string }
   /** A check done in-process instead of a command. */
   readonly inline?: (options: Options, scope: Scope) => Promise<Omit<Result, 'seconds'>>
-  /**
-   * For a Vitest step, the command that reruns some of its test files alone.
-   * A file that failed in the loaded run and passes alone is reported, not
-   * failed: a real-process test can miss a deadline on a busy machine.
-   */
-  readonly rerun?: (files: readonly string[]) => readonly string[]
 }
 
 /** A step that produces artifacts other steps read. */
 export type BuildStep = 'build' | 'rust'
 
 const bun = (...args: string[]): readonly string[] => ['bun', ...args]
-
-/** Past this many failed files a rerun is not a load check; something is broken. */
-const RERUN_LIMIT = 12
-
-/** What a failed Vitest run blames. */
-export interface VitestFailures {
-  /** Test files that failed, could not start, or were blamed for an unhandled error. */
-  readonly files: readonly string[]
-  /** Unhandled errors Vitest could not tie to a test file, which no rerun can clear. */
-  readonly unattributed: number
-}
-
-const TEST_FILE = String.raw`\S+?\.(?:spec|test|e2e)\.[cm]?tsx?`
-
-/**
- * What a Vitest run failed on, read from its uncoloured output.
- * @param log - the run's output.
- */
-export function vitestFailures(log: string): VitestFailures {
-  const files = new Set<string>()
-  const add = (pattern: RegExp) => { for (const match of log.matchAll(pattern)) if (match[1] !== undefined) files.add(match[1]) }
-  add(new RegExp(String.raw`^ FAIL {2}(${TEST_FILE})\b`, 'gmu'))
-  add(new RegExp(String.raw`originated in "(${TEST_FILE})" test file`, 'gu'))
-  add(new RegExp(String.raw`Failed to start \w+ worker for test files (${TEST_FILE})`, 'gu'))
-  // Each unhandled error is a block under its own rule; a block naming no test file is unattributed.
-  const blocks = log.split(/^⎯+ (?:Unhandled Errors?|Uncaught Exception|Unhandled Rejection) ⎯+$/mu).slice(1)
-  const unattributed = blocks.filter(block => !/originated in "|Failed to start \w+ worker for test files/u.test(block)
-    && /\S/u.test(block.replace(/^\s*Vitest caught \d+ unhandled errors?[^\n]*\n(?:[^\n]*\n)?/u, ''))).length
-  return { files: [...files].sort(), unattributed }
-}
 
 /** The Bun-run tests under a directory, as `./`-prefixed paths `bun test` reads as files. */
 export function bunTests(directory: string): string[] {
@@ -248,32 +214,48 @@ export const STEPS: readonly Step[] = [
     command: () => bun('run', 'build'),
   },
   {
+    name: 'rust-fmt', phase: 'static', group: 'native', cwd: 'rust',
+    summary: 'Rust workspace formatting',
+    command: () => ['cargo', 'fmt', '--all', '--', '--check'],
+  },
+  {
+    name: 'rust-clippy', phase: 'build', group: 'native', needsBuild: true, cwd: 'rust',
+    summary: 'locked Rust workspace lint, including test targets',
+    command: () => ['cargo', 'clippy', '--workspace', '--all-targets', '--locked', '--', '-D', 'warnings'],
+  },
+  {
+    name: 'rust-test', phase: 'build', group: 'native', needsBuild: true,
+    summary: 'Rust tests, with parallel execution when cargo-nextest is installed',
+    command: () => bun('run', 'test:rust'),
+  },
+  {
+    name: 'rust-doc', phase: 'build', group: 'native', needsBuild: true, cwd: 'rust',
+    summary: 'locked Rust workspace documentation tests',
+    command: () => ['cargo', 'test', '--workspace', '--locked', '--doc', '--no-fail-fast'],
+  },
+  {
     name: 'rust', phase: 'build', group: 'native', needsBuild: true,
-    summary: 'locked Rust workspace format, lint, tests, and build',
-    command: () => bun('run', 'check:rust'),
+    summary: 'locked Rust workspace build for PTY, package, and eval scenarios',
+    cwd: 'rust',
+    command: () => ['cargo', 'build', '--workspace', '--locked'],
   },
   ...(['peers', 'unit', 'layout', 'docs', 'spec'] as const).map((target): Step => ({
     name: `tui-${target}`, phase: 'tui', group: 'tui',
     summary: `TUI check target \`${target}\``,
     // Component specs mount the built runtime; the rest read sources.
-    ...target === 'spec' ? {
-      needsBuild: true,
-      rerun: (files: readonly string[]) => node(VITEST, 'run', '--config', 'apps/tui/vitest.config.ts', '--maxWorkers=1', ...files),
-    } : {},
+    ...target === 'spec' ? { needsBuild: true } : {},
     command: () => bun('apps/tui/scripts/tui.ts', 'check', target),
   })),
   {
     name: 'runtime', phase: 'runtime', group: 'runtime', needsBuild: true,
     summary: 'shared runtime, CLI, and tooling specs under Node',
     command: runtimeArgs,
-    rerun: files => node(VITEST, 'run', '--maxWorkers=1', ...files),
   },
   {
     name: 'integration', phase: 'runtime', group: 'runtime', needsBuild: true,
     summary: 'assembled profiles, sandbox backends, and built artifacts (`*.e2e.ts`), keyless',
     // Always whole: these suites boot built output, which no import graph from a changed source reaches.
     command: () => node(VITEST, 'run', '--config', INTEGRATION_CONFIG),
-    rerun: files => node(VITEST, 'run', '--config', INTEGRATION_CONFIG, '--maxWorkers=1', ...files),
   },
   {
     name: 'e2e', phase: 'e2e', group: 'e2e', needsBuild: true,
@@ -344,7 +326,7 @@ export function selectSteps(options: Options): readonly { readonly step: Step; r
     const named = (names: readonly string[]) => names.includes(step.name) || names.includes(step.group)
     if (options.only.length > 0 && !named(options.only)) return { step, skip: 'not selected' }
     if (named(options.skip)) return { step, skip: '--skip' }
-    if (options.fast && step.needsBuild === true) return { step, skip: '--fast' }
+    if (options.fast && (step.needsBuild === true || step.group === 'native')) return { step, skip: '--fast' }
     return { step }
   })
 }
@@ -370,13 +352,13 @@ async function capture(argv: readonly string[]): Promise<string> {
 }
 
 /** Run a command with its output written to a log file; resolve with its exit code. */
-async function logged(argv: readonly string[], log: string): Promise<number> {
+async function logged(argv: readonly string[], log: string, cwd: string): Promise<number> {
   writeFileSync(log, `$ ${argv.join(' ')}\n`)
   // One append descriptor for both streams keeps them interleaved as the command wrote them.
   const file = openSync(log, 'a')
   try {
     const env = { ...process.env, FORCE_COLOR: '0' }
-    const child = Bun.spawn([...argv], { cwd: ROOT, stdin: 'ignore', stdout: file, stderr: file, env })
+    const child = Bun.spawn([...argv], { cwd, stdin: 'ignore', stdout: file, stderr: file, env })
     await child.exited
     return child.exitCode ?? 1
   } catch (error) {
@@ -400,7 +382,8 @@ async function resolveScope(options: Options): Promise<Scope> {
   return { base: candidates.join(' or '), mergeBase: undefined, files: [] }
 }
 
-async function runStep(step: Step, options: Options, scope: Scope): Promise<Result> {
+/** Execute one gate once; a nonzero child exit always fails the gate. */
+export async function runStep(step: Step, options: Options, scope: Scope, logDirectory = LOG_DIR): Promise<Result> {
   const started = performance.now()
   const seconds = () => (performance.now() - started) / 1000
   if (step.inline !== undefined) {
@@ -412,18 +395,10 @@ async function runStep(step: Step, options: Options, scope: Scope): Promise<Resu
   }
   const command = step.command?.(options, scope) ?? { skip: 'nothing to run' }
   if ('skip' in command) return { outcome: 'skip', seconds: 0, note: command.skip }
-  const log = join(LOG_DIR, `${step.name}.log`)
-  const code = await logged(command, log)
+  const log = join(logDirectory, `${step.name}.log`)
+  const code = await logged(command, log, resolve(ROOT, step.cwd ?? '.'))
   const note = `.preflight/${step.name}.log`
-  if (code === 0) return { outcome: 'pass', seconds: seconds(), note }
-  if (step.rerun === undefined) return { outcome: 'fail', seconds: seconds(), note }
-  const { files: failed, unattributed } = vitestFailures(readFileSync(log, 'utf8'))
-  // A rerun of the named files cannot clear an error no file was blamed for.
-  if (unattributed > 0 || failed.length === 0 || failed.length > RERUN_LIMIT) return { outcome: 'fail', seconds: seconds(), note }
-  const again = `.preflight/${step.name}.rerun.log`
-  if (await logged(step.rerun(failed), join(ROOT, again)) !== 0) return { outcome: 'fail', seconds: seconds(), note: again }
-  return { outcome: 'warn', seconds: seconds(),
-    note: `${failed.length} file(s) failed only under load, passing alone: ${failed.join(', ')} (${note})` }
+  return { outcome: code === 0 ? 'pass' : 'fail', seconds: seconds(), note }
 }
 
 /** Run up to `limit` tasks at once. */

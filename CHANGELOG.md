@@ -4,6 +4,9 @@ Notable changes to Bake. `/changelog` in the terminal prints the section for the
 
 ## [Unreleased]
 
+- Rust MCP startup publishes a server's tools, resource tools, and instructions together, so the first prompt sees the complete connected server.
+- Development: Rust tests accept focused Cargo filters and use parallel execution on Linux and Windows when nextest is installed. Preflight reports Rust checks separately, retains CI test reports, and fails tests without automatic retries.
+
 - Rust background jobs commit their start before executing and their terminal state before publication. Resumed sessions preserve recorded outcomes and observations, report uncertain effects honestly, and never restart a lost process automatically. Job waits also stop at their original deadline across notice-triggered turns.
 - Rust print mode drains its final background summary before closing event output, preserving terminal attempt accounting. A failed required debit write exits with status 1; unreported provider usage remains unknown.
 

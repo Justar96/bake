@@ -76,13 +76,16 @@ type CaseFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
 /// A case body.
 type CaseBody = fn(Arc<Case>) -> CaseFuture;
 
+#[path = "../../../test-support/harness.rs"]
+mod harness;
+
 fn main() {
     if fixture::run_if_fixture() {
         return;
     }
     // SAFETY: set before any thread or runtime starts.
     unsafe { std::env::set_var(SECRET, "leaked") };
-    let filter: Option<String> = std::env::args().skip(1).find(|arg| !arg.starts_with('-'));
+    let args = harness::HarnessArgs::parse(std::env::args().skip(1));
     let cases: Vec<(&str, CaseBody)> = vec![
         ("tools_are_admitted_declared_called_and_logged", |case| {
             Box::pin(tools_are_admitted_declared_called_and_logged(case))
@@ -173,13 +176,13 @@ fn main() {
             },
         ),
     ];
+    if args.list(cases.iter().map(|(name, _)| *name)) {
+        return;
+    }
     let mut failed = Vec::new();
     let mut ran = 0;
     for (name, body) in cases {
-        if filter
-            .as_deref()
-            .is_some_and(|filter| !name.contains(filter))
-        {
+        if !args.matches(name) {
             continue;
         }
         ran += 1;

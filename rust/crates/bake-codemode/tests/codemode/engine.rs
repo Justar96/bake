@@ -415,7 +415,9 @@ fn pending_bytes_message() -> String {
 /// deadline or without one.
 #[tokio::test]
 async fn calls_in_a_loop_without_awaiting_stop_at_the_pending_call_limit() {
-    for timeout_ms in [Some(300), None] {
+    // Filling the queue must hit its limit before a deadline competes with
+    // it under suite load. The completion bound below remains five seconds.
+    for timeout_ms in [Some(30_000), None] {
         let started = Instant::now();
         let execution = execute(
             "for (;;) tools.echo({ a: 'y'.repeat(1000) })",

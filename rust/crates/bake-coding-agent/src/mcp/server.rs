@@ -258,23 +258,22 @@ pub(super) async fn serve(
         }
         Some(Ok(tools)) => {
             let first = *generation + 1;
-            if let Err(error) = servers.publish(index, tools, |count| McpServerState::Connected {
-                tools: count,
-                generation: first,
-                refresh_error: None,
-            }) {
+            if let Err(error) = servers.publish_connection(
+                index,
+                tools,
+                |count| McpServerState::Connected {
+                    tools: count,
+                    generation: first,
+                    refresh_error: None,
+                },
+                client.server().instructions.as_deref(),
+                readable_resources.then(|| Arc::clone(&caller)),
+            ) {
                 return End::Failed(format!(
                     "MCP server \"{name}\" offered tools that were refused: {error}"
                 ));
             }
             *generation = first;
-            // After the first generation, so the resource tools and the
-            // server's tools are published together.
-            servers.set_connection(
-                index,
-                client.server().instructions.as_deref(),
-                readable_resources.then(|| Arc::clone(&caller)),
-            );
         }
     }
     let mut events_open = true;

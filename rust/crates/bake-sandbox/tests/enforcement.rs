@@ -154,7 +154,47 @@ fn tests() -> Vec<harness::Test> {
         "chain::default_provider_confines_or_refuses".into(),
         default_provider_confines_or_refuses,
     ));
+    tests.push(harness::Test::new(
+        "harness::ignored_discovery_is_empty".into(),
+        ignored_discovery_is_empty,
+    ));
     tests
+}
+
+fn ignored_discovery_is_empty() {
+    use std::process::Stdio;
+    use std::time::Duration;
+
+    use tokio::io::AsyncReadExt;
+
+    let (status, output) = runtime().block_on(async {
+        let mut child = tokio::process::Command::new(std::env::current_exe().expect("test binary"))
+            .args(["--list", "--format", "terse", "--ignored"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .expect("discover ignored tests");
+        let status = tokio::time::timeout(Duration::from_secs(5), child.wait()).await;
+        if status.is_err() {
+            child
+                .kill()
+                .await
+                .expect("kill and await stalled discovery");
+        }
+        let status = status
+            .expect("discovery finishes")
+            .expect("wait for discovery");
+        let mut output = Vec::new();
+        let mut stdout = child.stdout.take().expect("discovery stdout");
+        tokio::time::timeout(Duration::from_secs(5), stdout.read_to_end(&mut output))
+            .await
+            .expect("discovery output closes")
+            .expect("read discovery output");
+        (status, output)
+    });
+    assert!(status.success(), "{status:?}");
+    assert!(output.is_empty(), "{output:?}");
 }
 
 fn platform_runners() -> Vec<Runner> {
@@ -1236,14 +1276,14 @@ mod harness {
                     })
             })
             .collect();
+        // No test here is ignored, including during discovery.
+        let selected = if only_ignored { Vec::new() } else { selected };
         if list {
             for test in &selected {
                 println!("{}: test", test.name);
             }
             return ExitCode::SUCCESS;
         }
-        // No test here is ignored.
-        let selected = if only_ignored { Vec::new() } else { selected };
         println!("\nrunning {} tests", selected.len());
         let next = AtomicUsize::new(0);
         let failures = Mutex::new(Vec::new());

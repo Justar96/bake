@@ -53,8 +53,15 @@
 
 #[cfg(not(windows))]
 fn main() {
+    if std::env::args().any(|arg| arg == "--list") {
+        return;
+    }
     println!("SKIP: the Windows job settlement probe and case run on Windows only");
 }
+
+#[cfg(windows)]
+#[path = "../../../test-support/harness.rs"]
+mod harness;
 
 #[cfg(windows)]
 fn main() {
@@ -110,6 +117,10 @@ mod windows {
                 std::thread::sleep(Duration::from_secs(3600));
             },
             _ => {}
+        }
+        let args = super::harness::HarnessArgs::parse(std::env::args().skip(1));
+        if args.list(["windows_job_rundown"]) || !args.matches("windows_job_rundown") {
+            return;
         }
         let probe_runs = runs("BAKE_PROCESS_JOB_PROBE_RUNS", 50, 500);
         let settle_runs = runs("BAKE_PROCESS_SETTLEMENT_RUNS", 20, 200);
