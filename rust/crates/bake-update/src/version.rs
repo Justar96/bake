@@ -62,12 +62,17 @@ fn compare_prerelease(left: &str, right: &str) -> Ordering {
             (Some(_), None) => return Ordering::Greater,
             (Some(left), Some(right)) if left == right => continue,
             (Some(left), Some(right)) => {
-                return match (numeric(left), numeric(right)) {
+                let order = match (numeric(left), numeric(right)) {
                     (Some(left), Some(right)) => left.cmp(&right),
                     (Some(_), None) => Ordering::Less,
                     (None, Some(_)) => Ordering::Greater,
                     (None, None) => left.cmp(right),
                 };
+                // Identifiers that differ only in leading zeros (`01`, `1`)
+                // tie; the identifiers after them decide.
+                if order != Ordering::Equal {
+                    return order;
+                }
             }
         }
     }
@@ -156,5 +161,20 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn numeric_identifiers_that_tie_leave_the_order_to_the_rest() {
+        // Leading zeros are accepted, so `01` and `1` tie as numbers; the
+        // order then comes from the identifiers after them, keeping it
+        // transitive: `-01` and `-1` both sort before `-1.0`.
+        assert_eq!(compare_versions("1.0.0-01", "1.0.0-1"), Ordering::Equal);
+        assert_eq!(compare_versions("1.0.0-01", "1.0.0-1.0"), Ordering::Less);
+        assert_eq!(compare_versions("1.0.0-1.0", "1.0.0-01"), Ordering::Greater);
+        assert_eq!(
+            compare_versions("1.0.0-01.b", "1.0.0-1.a"),
+            Ordering::Greater
+        );
+        assert_eq!(compare_versions("1.0.0-00.0", "1.0.0-0"), Ordering::Greater);
     }
 }
