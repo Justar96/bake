@@ -10,13 +10,16 @@
 //! `bake-rs plugin check` starts one Wasm plugin package in its helper
 //! ([`plugin_check`]). These commands need no Bake home; `bake-rs plugin
 //! install`, `enable`, `disable`, and `list` manage the Wasm plugins the
-//! Bake home enables for sessions ([`plugin_manage`]).
+//! Bake home enables for sessions ([`plugin_manage`]). `bake update`
+//! installs a published release over the native install this executable
+//! runs from, or rolls it back ([`update`]).
 
 mod docs;
 mod plugin_check;
 mod plugin_manage;
 mod print_output;
 mod self_check;
+mod update;
 
 use std::ffi::OsString;
 use std::io::{self, IsTerminal, Write};
@@ -55,6 +58,15 @@ Usage:
                               Enable an installed package for new sessions
   bake-rs plugin disable <id> Disable a plugin, clearing a recorded failure
   bake-rs plugin list         List the enabled plugins and their state
+  bake update                 Install the published release over this native
+                              install and make it current
+  bake update --check         Report a published release, installing nothing,
+                              and exit 10 when one is available
+  bake update --force <version>
+                              Install the published version even when it is
+                              not newer than the installed one
+  bake update --rollback      Make the release the last update replaced
+                              current again
   bake-rs auth check --provider <name> [--model <id>] [--json]
                               [--credentials] [--no-refresh]
                               Report whether a provider is ready to send
@@ -169,9 +181,16 @@ takes commands on standard input and writes responses, the json mode's events,
 and approval questions on standard output, until that input ends. Message and
 @file arguments are not prompts there; see 'bake-rs docs rpc'.
 
+'bake update' installs the release published for this platform beside the
+running one and makes it current only after the new binary passes its own
+--self-check; the release it replaces stays installed, and 'bake update
+--rollback' returns to it. '--check' installs nothing and exits 10 when an
+update is available. Every run takes the install lock, and needs the install
+the Bake installer made (BAKE_NATIVE_ROOT names another one).
+
 Run 'bake-rs docs' for the documentation: the Bake home, settings, models,
 permissions, sessions, plugins, context files, skills, MCP servers, the RPC
-protocol, and the command line.
+protocol, updates, and the command line.
 ";
 
 #[derive(Debug, PartialEq, Eq)]
@@ -186,6 +205,8 @@ enum Command {
     PluginCheck(PathBuf, Option<plugin_check::Call>),
     /// `bake-rs plugin install | enable | disable | list`.
     PluginManage(plugin_manage::Manage),
+    /// `bake update [--check] [--force <version>] [--rollback]`.
+    Update(update::Request),
     /// `bake-rs auth <command>`: the arguments from `auth` on.
     Auth(Vec<String>),
     Agent(Vec<String>),
@@ -250,6 +271,11 @@ fn parse(args: &[OsString]) -> Result<Command, String> {
         ["plugin", "list", extra, ..] => {
             Err(format!("unexpected argument '{extra}' for 'plugin list'"))
         }
+        // A word after `update` is a prompt, as it is after `plugin`;
+        // an option belongs to the update command, typo and all.
+        ["update", rest @ ..] if rest.first().is_none_or(|first| first.starts_with('-')) => {
+            update::parse(rest).map(Command::Update)
+        }
         ["auth", ..] => Ok(Command::Auth(args)),
         _ => Ok(Command::Agent(args)),
     }
@@ -295,6 +321,7 @@ fn main() -> ExitCode {
         Ok(Command::SelfCheck) => run_self_check(),
         Ok(Command::PluginCheck(dir, call)) => plugin_check::run(&dir, call.as_ref()),
         Ok(Command::PluginManage(command)) => plugin_manage::run(&command),
+        Ok(Command::Update(request)) => update::run(&request),
         Ok(Command::Auth(args)) => run_auth(&args),
         // Without arguments, a terminal opens a session; a pipe gets help.
         Ok(Command::Agent(args))
@@ -833,6 +860,38 @@ mod tests {
         assert_eq!(
             parse_strs(&["-p", "--self-check"]),
             Ok(Command::Agent(vec!["-p".into(), "--self-check".into()]))
+        );
+    }
+
+    #[test]
+    fn update_options_are_a_command_and_a_word_after_update_is_a_prompt() {
+        assert_eq!(
+            parse_strs(&["update"]),
+            Ok(Command::Update(update::Request::Install(None)))
+        );
+        assert_eq!(
+            parse_strs(&["update", "--check"]),
+            Ok(Command::Update(update::Request::Check))
+        );
+        assert_eq!(
+            parse_strs(&["update", "--rollback"]),
+            Ok(Command::Update(update::Request::Rollback))
+        );
+        assert_eq!(
+            parse_strs(&["update", "--force", "0.4.1"]),
+            Ok(Command::Update(update::Request::Install(Some(
+                "0.4.1".to_owned()
+            ))))
+        );
+        // A mistyped option is a mistake, not a prompt.
+        assert!(parse_strs(&["update", "--checks"]).is_err());
+        assert_eq!(
+            parse_strs(&["update", "the", "docs"]),
+            Ok(Command::Agent(vec![
+                "update".to_owned(),
+                "the".to_owned(),
+                "docs".to_owned()
+            ]))
         );
     }
 

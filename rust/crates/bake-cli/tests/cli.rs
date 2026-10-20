@@ -136,6 +136,38 @@ fn an_unknown_docs_topic_fails_with_the_list() {
     assert!(text(&out.stderr).contains("unexpected argument 'extra' for 'docs'"));
 }
 
+/// `bake update` runs against the install the Bake installer made. The
+/// test binary is not one, so every run says so instead of reaching the
+/// network, and a mistyped option is a usage error.
+#[test]
+fn update_needs_a_native_install_and_names_a_mistyped_option() {
+    let run_update = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_bake-rs"))
+            .args(args)
+            .env_remove("BAKE_NATIVE_ROOT")
+            .stdin(Stdio::null())
+            .output()
+            .expect("bake-rs runs")
+    };
+    for args in [
+        &["update"][..],
+        &["update", "--check"],
+        &["update", "--rollback"],
+    ] {
+        let out = run_update(args);
+        assert_eq!(out.status.code(), Some(1), "{args:?}");
+        assert!(out.stdout.is_empty(), "{args:?}");
+        assert!(
+            text(&out.stderr).contains("needs a native install"),
+            "{args:?}: {}",
+            text(&out.stderr)
+        );
+    }
+    let out = run_update(&["update", "--checks"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(text(&out.stderr).contains("unexpected argument '--checks' for 'update'"));
+}
+
 #[test]
 fn help_mentions_docs() {
     let out = run(&["--help"]);
@@ -192,6 +224,10 @@ fn external_command_examples_do_not_hide_agent_flags() {
 /// the agent's parser does not accept them. `--help` still names them.
 const AUTH_OPTIONS: &[&str] = &["--json", "--credentials", "--no-refresh", "--min-expiry"];
 
+/// The options of `bake update`, which parses its own command line
+/// (`src/update.rs`) rather than the agent's. `--help` names them.
+const UPDATE_OPTIONS: &[&str] = &["--check", "--force", "--rollback"];
+
 /// Pi's options `bake-rs` excludes. The documentation names them to say
 /// they are refused, so the parser must not accept them and `--help` must
 /// not offer them.
@@ -244,7 +280,10 @@ fn flags_named_in_the_docs_are_accepted() {
                 "{topic} names {flag}, which --help omits"
             );
             // Commands of the binary, not options of the agent command line.
-            if flag == "--inline" || flag == "--self-check" {
+            if flag == "--inline"
+                || flag == "--self-check"
+                || UPDATE_OPTIONS.contains(&flag.as_str())
+            {
                 continue;
             }
             let args = bake_coding_agent::cli::parse_args(&[flag.clone(), "x".into()]);

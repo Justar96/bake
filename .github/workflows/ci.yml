@@ -16,9 +16,10 @@ concurrency:
 # demand. Work reaches develop as direct pushes checked locally: Linux and
 # macOS over SSH before every push, Windows when a Windows host is available.
 # This run is the one CI check of everything a release carries, so it runs
-# every job: TypeScript checks on Linux, the native job on Linux and Windows,
-# and the Windows release check. No job runs on macOS. The release tag after
-# it builds and checks every platform again.
+# every job: TypeScript checks on Linux, the native job on Linux, Windows, and
+# Apple Silicon macOS, and the Windows release check. Developers check an
+# Intel Mac over SSH before pushing; this run is the Apple Silicon check. The
+# release tag after it builds and checks every platform again.
 jobs:
   # TypeScript gates share the local preflight table; Rust has its own matrix.
   preflight:
@@ -81,12 +82,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
     name: rust (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     # Cold Windows Wasmtime checks took 21.5 minutes; setup and the archive
     # check's existing nine-minute bound also need time within this job.
-    timeout-minutes: ${{ matrix.os == 'windows-latest' && 45 || 30 }}
+    timeout-minutes: ${{ matrix.os == 'ubuntu-latest' && 30 || 60 }}
     steps:
       - uses: actions/checkout@v4
       # Defender scans every file Cargo creates, which makes small-file I/O
@@ -116,6 +117,9 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq ripgrep
+      - name: Install ripgrep and fd
+        if: runner.os == 'macOS'
+        run: brew install ripgrep fd
       - name: Install the pinned Rust toolchain
         working-directory: rust
         run: rustup toolchain install --no-self-update
@@ -147,6 +151,34 @@ jobs:
         run: |
           exe=$([[ $RUNNER_OS == Windows ]] && echo .exe || true)
           echo "BAKE_CARGO_ABOUT=$RUNNER_TEMP/cargo-about-0.9.2/bin/cargo-about$exe" >> "$GITHUB_ENV"
+      # The installer checks run before the native gate, so a failure there
+      # cannot hide their evidence.
+      # install.ps1 carries its own Ed25519 verifier: run its suite under the
+      # Windows PowerShell 5.1 that a plain `irm | iex` install uses, and pwsh.
+      - name: Check the Windows installer under Windows PowerShell 5.1
+        if: runner.os == 'Windows'
+        env:
+          BAKE_TEST_PWSH: powershell.exe
+        run: |
+          powershell.exe -NoProfile -Command '$PSVersionTable.PSVersion.ToString()'
+          bun test --timeout=120000 ./scripts/release/native-install-windows.test.ts
+      - name: Check the Windows installer under PowerShell 7
+        if: runner.os == 'Windows'
+        env:
+          BAKE_TEST_PWSH: pwsh
+        run: |
+          pwsh -NoProfile -Command '$PSVersionTable.PSVersion.ToString()'
+          bun test --timeout=120000 ./scripts/release/native-install-windows.test.ts
+      # install.sh verifies with the host's openssl where one passes its probe,
+      # and otherwise with the verifier it embeds; record which openssl the
+      # runner has and which path the install took. On macOS the suite also
+      # installs with BAKE_OPENSSL naming no openssl, which forces the
+      # embedded verifier through real osascript, as a stock Mac does.
+      - name: Check the POSIX installer and its Ed25519 verifier
+        if: runner.os != 'Windows'
+        run: |
+          openssl version || true
+          bun test --timeout=180000 ./scripts/release/native-install.test.ts ./scripts/release/native-install-ed25519.test.ts
       - run: bun run preflight --only native
       # Keep per-test durations and failures, including when a later gate fails.
       - uses: actions/upload-artifact@v4
@@ -194,5 +226,8 @@ jobs:
       - run: bun run release:pack
       # A throwaway key: CI never holds the release signing key. verify-local
       # checks the manifest against it, then installs and updates through it.
+      # It installs with the frozen 0.3 installers under
+      # scripts/release/fixtures/legacy-0.3/, because distribution/host's are
+      # now the native ones; 0.3 itself is released from release/0.3.
       - run: bun run release:assemble --ephemeral-key
       - run: bun run release:verify-local

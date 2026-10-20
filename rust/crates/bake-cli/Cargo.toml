@@ -15,6 +15,9 @@ bake-ai.workspace = true
 bake-coding-agent.workspace = true
 bake-sandbox.workspace = true
 bake-tui.workspace = true
+# `bake update`: the signed native release route, the install layout, and
+# the atomic pointer switch.
+bake-update.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "signal", "macros"] }
 # `--self-check`: its JSON record, and the SHA-256 of each embedded

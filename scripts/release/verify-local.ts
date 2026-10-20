@@ -4,6 +4,14 @@
  * temporary home: install the staged release, then publish a newer one built
  * from it and update to that with `bake update`, then return to the staged
  * release with `bake update --rollback`.
+ *
+ * This is the frozen TypeScript release's check, so it installs with the
+ * frozen 0.3 installers kept in `fixtures/legacy-0.3/`, not with
+ * `distribution/host/install.{sh,ps1}`, which now install the Rust agent from
+ * the native release route. Every host and home it touches is this run's own:
+ * both installers take their release host from `BAKE_RELEASE_BASE_URL`, which
+ * names a loopback server here, and `BAKE_DOWNLOAD_URL` is pointed at it too
+ * so no step can reach the production host.
  */
 
 import { generateKeyPairSync, sign } from 'node:crypto'
@@ -15,6 +23,8 @@ import { windowsPowerShellEnvironment } from './powershell.ts'
 import { VERSIONED_MANIFESTS } from './version.ts'
 
 const ROOT = resolve(import.meta.dir, '../..')
+/** The frozen 0.3 installers this check installs with; see their README. */
+const LEGACY_INSTALLERS = resolve(import.meta.dir, 'fixtures/legacy-0.3')
 const temporary = mkdtempSync(join(tmpdir(), 'bake-release-verify-'))
 const stagedVersion = (JSON.parse(readFileSync(join(ROOT, 'apps/cli/package.json'), 'utf8')) as { version: string }).version
 // A release assembled with --ephemeral-key leaves the key a client must be told to trust.
@@ -94,7 +104,8 @@ async function publishNewer(archive: string, target: string): Promise<{ base: st
   }
   const host = join(temporary, 'newer-host')
   mkdirSync(join(host, 'public/releases', version), { recursive: true })
-  for (const file of ['server.mjs', 'index.html', 'install.sh', 'install.ps1']) cpSync(join(ROOT, 'distribution/host', file), join(host, file))
+  for (const file of ['server.mjs', 'index.html']) cpSync(join(ROOT, 'distribution/host', file), join(host, file))
+  for (const file of ['install.sh', 'install.ps1']) cpSync(join(LEGACY_INSTALLERS, file), join(host, file))
   const file = `bake-v${version}-${target}.tar.gz`
   const newer = join(host, 'public/releases', version, file)
   // Bun.Archive cannot write symlinks or file modes, which the release needs.
@@ -126,12 +137,12 @@ try {
   const installRoot = join(temporary, 'install')
   const binDir = join(temporary, 'bin')
   const env: NodeJS.ProcessEnv = {
-    ...process.env, ...trust, BAKE_RELEASE_BASE_URL: base, BAKE_INSTALL_ROOT: installRoot,
+    ...process.env, ...trust, BAKE_RELEASE_BASE_URL: base, BAKE_DOWNLOAD_URL: base, BAKE_INSTALL_ROOT: installRoot,
     BAKE_BIN_DIR: binDir, BAKE_SKIP_PATH_UPDATE: '1', BAKE_HOME: join(temporary, 'home'), BAKE_NO_UPDATE_CHECK: '1',
   }
   if (process.platform === 'win32') {
     const install = ['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command',
-      'Invoke-RestMethod "$env:BAKE_RELEASE_BASE_URL/install.ps1" | Invoke-Expression']
+      `Invoke-Expression (Get-Content -Raw -LiteralPath "${join(LEGACY_INSTALLERS, 'install.ps1')}")`]
     const installEnv = windowsPowerShellEnvironment(env)
     await run(install, installEnv)
     await run(install, installEnv)
@@ -152,7 +163,7 @@ try {
     delete defaultHome.DSH_HOME
     await runHelp(['cmd.exe', '/c', join(binDir, 'bake.cmd'), '--help'], defaultHome)
   } else {
-    const install = ['sh', '-c', 'curl -fsSL "$BAKE_RELEASE_BASE_URL/install.sh" | sh']
+    const install = ['sh', join(LEGACY_INSTALLERS, 'install.sh')]
     await run(install, env)
     await run(install, env)
     const version = await run([join(binDir, 'bake'), '--version'], env)

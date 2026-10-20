@@ -1,0 +1,32 @@
+[package]
+name = "bake-update"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+# Ed25519 manifest signatures, the archive's SHA-256, and the random staging
+# directory names, from the `ring` the workspace already links.
+ring.workspace = true
+# The manifest signature is base64, as `distribution/host/*.pub` is.
+base64.workspace = true
+serde_json.workspace = true
+# The manifest, its signature, and the archive are fetched over the same
+# rustls reqwest the provider route uses; `tokio` bounds each request.
+reqwest.workspace = true
+tokio = { workspace = true, features = ["time"] }
+flate2.workspace = true
+tar.workspace = true
+
+# Whether the process that holds `install.lock` is still alive.
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_Threading"] }
+
+[dev-dependencies]
+# The release fixtures the tests serve are built with the crate's own reader.
+tokio = { workspace = true, features = ["rt", "macros", "time"] }

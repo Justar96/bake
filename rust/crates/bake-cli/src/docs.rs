@@ -82,6 +82,11 @@ pub const TOPICS: &[Topic] = &[
         summary: "Claude Code and Codex hooks.json command hooks",
         text: include_str!("../docs/hooks.md"),
     },
+    Topic {
+        name: "update",
+        summary: "bake update: installing a published release, and rolling back",
+        text: include_str!("../docs/update.md"),
+    },
 ];
 
 /// The topic named `name`.

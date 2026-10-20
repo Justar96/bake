@@ -14,6 +14,7 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { RELEASE_PUBLIC_KEYS } from '../../packages/boot/updater/src/keys.ts'
 import { parseManifest, type ReleaseManifest, verifySignature } from '../../packages/boot/updater/src/manifest.ts'
+import { nativeKeyProblem } from './native-channel.ts'
 import { CHANGELOG_PLACEHOLDER, changelogSection, compareVersions, isPublishableVersion, workspaceVersion } from './version.ts'
 
 /** The deployed 0.1.0 manifest predates signing; only this baseline may lack a signature. */
@@ -56,6 +57,10 @@ function sameArtifacts(left: ReleaseManifest, right: ReleaseManifest): boolean {
  */
 export async function preflight(options: PreflightOptions): Promise<{ readonly version: string; readonly notes: string }> {
   const problems: string[] = []
+  // The next release from `develop` is native, so its signing key must be the
+  // owner's before any release is prepared.
+  const nativeKey = nativeKeyProblem(options.root)
+  if (nativeKey !== undefined) problems.push(nativeKey)
   const version = workspaceVersion(options.root)
   if (!isPublishableVersion(version)) problems.push(`Automated releases require a stable, canonical version: ${version}`)
   if (options.tag !== undefined && options.tag !== `v${version}`) problems.push(`Tag ${options.tag} does not name the workspace version ${version}; expected v${version}`)
