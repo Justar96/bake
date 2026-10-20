@@ -287,6 +287,7 @@ dependencies = [
 name = "bake-tui-view"
 version = "0.4.0-dev"
 dependencies = [
+ "proptest",
  "ratatui-core",
  "unicode-segmentation",
  "unicode-width",
@@ -299,6 +300,7 @@ dependencies = [
  "base64 0.22.1",
  "flate2",
  "libc",
+ "proptest",
  "reqwest",
  "ring",
  "serde_json",

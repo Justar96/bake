@@ -1794,4 +1794,131 @@ mod tests {
         // A tab that reaches the row's end hangs like a space.
         assert_eq!(rows_of("abc\tdef", 5), ["abc\t", "def"]);
     }
+
+    mod properties {
+        use proptest::prelude::*;
+
+        use super::*;
+
+        /// Draft text: words, spaces, tabs, and line breaks, with wide CJK
+        /// and emoji graphemes, combining and zero-width marks, ZWJ
+        /// sequences, a no-break space that belongs to its word, and C0 and
+        /// C1 controls that unsanitized model text may hold.
+        fn draft() -> impl Strategy<Value = String> {
+            "[a-z \t\n\r\u{1b}\u{9b}\u{4e2d}\u{1F600}\u{301}\u{200D}\u{a0}\u{200B}]{0,40}"
+        }
+
+        fn row_width(row: &str, limit: usize) -> usize {
+            let mut col = 0;
+            let mut text_end = 0;
+            for grapheme in row.graphemes(true) {
+                col += advance(grapheme, col, limit);
+                if !is_blank(grapheme) {
+                    text_end = col;
+                }
+            }
+            text_end
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(512))]
+
+            #[test]
+            fn layout_rows_cover_the_text_in_order_and_split_only_at_wraps_and_breaks(
+                text in draft(),
+                width in 0..20usize,
+            ) {
+                let rows = layout(&text, 0, width).rows;
+                prop_assert_eq!(rows.first().map(|row| row.start), Some(0));
+                prop_assert_eq!(rows.last().map(|row| row.end), Some(text.len()));
+                for row in &rows {
+                    prop_assert!(row.start <= row.end);
+                    prop_assert!(text.is_char_boundary(row.start) && text.is_char_boundary(row.end));
+                    prop_assert!(!text[row.start..row.end].contains('\n'));
+                }
+                for pair in rows.windows(2) {
+                    let (left, right) = (pair[0], pair[1]);
+                    let wrapped = right.start == left.end;
+                    let broke = right.start == left.end + 1 && text.as_bytes()[left.end] == b'\n';
+                    prop_assert!(wrapped || broke, "{:?} then {:?}", left, right);
+                    if wrapped {
+                        // A wrap falls between graphemes and opens on a word.
+                        let first = text[right.start..right.end].graphemes(true).next();
+                        prop_assert!(first.is_some_and(|grapheme| !is_blank(grapheme)));
+                        let joined = &text[left.start..right.end];
+                        let at = left.end - left.start;
+                        prop_assert!(joined.grapheme_indices(true).any(|(index, _)| index == at));
+                    }
+                }
+            }
+
+            #[test]
+            fn layout_rows_fit_the_width_unless_one_grapheme_is_wider(
+                text in draft(),
+                width in 0..20usize,
+            ) {
+                let limit = width.saturating_sub(1).max(1);
+                for row in layout(&text, 0, width).rows {
+                    let row = &text[row.start..row.end];
+                    let drawn = row_width(row, limit);
+                    // Zero-cell graphemes, such as a control character, may
+                    // share the row of a grapheme wider than the width.
+                    let single = row
+                        .graphemes(true)
+                        .filter(|grapheme| !is_blank(grapheme) && cell_width(grapheme) > 0)
+                        .count()
+                        == 1;
+                    prop_assert!(drawn <= limit || single, "{row:?} takes {drawn} of {limit}");
+                }
+            }
+
+            #[test]
+            fn a_word_splits_only_after_filling_a_whole_row(
+                text in draft(),
+                width in 0..20usize,
+            ) {
+                let limit = width.saturating_sub(1).max(1);
+                let rows = layout(&text, 0, width).rows;
+                for pair in rows.windows(2) {
+                    let (left, right) = (&text[pair[0].start..pair[0].end], &text[pair[1].start..pair[1].end]);
+                    if pair[1].start != pair[0].end {
+                        continue;
+                    }
+                    let last = left.graphemes(true).next_back();
+                    let next = right.graphemes(true).next();
+                    let (Some(last), Some(next)) = (last, next) else {
+                        continue;
+                    };
+                    let narrow = |grapheme: &str| !is_blank(grapheme) && cell_width(grapheme) <= 1;
+                    if narrow(last) && narrow(next) {
+                        // The cut word fills its row from the row's start.
+                        prop_assert!(left.graphemes(true).all(narrow), "{left:?} | {right:?}");
+                        prop_assert!(row_width(left, limit) + cell_width(next) > limit);
+                    }
+                }
+            }
+
+            #[test]
+            fn the_caret_stays_on_its_row_and_inside_the_width(
+                text in draft(),
+                width in 0..20usize,
+                at in any::<prop::sample::Index>(),
+            ) {
+                let limit = width.saturating_sub(1).max(1);
+                let stops: Vec<usize> = text
+                    .grapheme_indices(true)
+                    .map(|(index, _)| index)
+                    .chain([text.len()])
+                    .collect();
+                let caret = stops[at.index(stops.len())];
+                let DraftLayout { rows, caret: (row, column) } = layout(&text, caret, width);
+                let held = rows[row];
+                prop_assert!(held.start <= caret && caret <= held.end);
+                let wide = text[held.start..held.end]
+                    .graphemes(true)
+                    .any(|grapheme| cell_width(grapheme) > limit);
+                prop_assert!(column <= limit || wide, "column {column} past {limit}");
+            }
+        }
+    }
 }
