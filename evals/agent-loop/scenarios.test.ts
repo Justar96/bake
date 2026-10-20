@@ -3,13 +3,13 @@
  * apply a reference fix by hand, and judge it again. No model runs.
  */
 import { afterAll, describe, expect, test } from 'bun:test'
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
-  checkCommandFor, checkpointCodes, compactionBudget, CONTEXT_WINDOWS, EXPLORE_ANSWER, EXTENDED_CASES, FAN_OUT_LEDGERS, fanOutBalances, fixture, LONG_SESSION_BUDGET,
-  INDEPENDENT_FACTS, INDEPENDENT_NOTES, MASKING_FACTS, maskingProbe, maxRequestsFor, noteNames, PI_COMPACTION, PI_CONTEXT_WINDOWS, PI_RESERVE_TOKENS, piCompactionFor, piContextWindowFor, prompts, REQUEST_FLOORS, requestFloorFor, SKILL_SCENARIOS, slowCheckLine, STANDARD_CASES, SUMMARY_TOOL_RESULT_CHARS, usesSkills, validate,
+  capMsFor, checkCommandFor, checkpointCodes, compactionBudget, CONTEXT_WINDOWS, EXPLORE_ANSWER, EXTENDED_CASES, FAN_OUT_LEDGERS, fanOutBalances, fixture, LONG_SESSION_BUDGET,
+  INDEPENDENT_FACTS, INDEPENDENT_NOTES, MASKING_FACTS, maskingProbe, maxRequestsFor, MCP_CHECKLIST_ITEMS, MCP_DOCS_INSTRUCTIONS, MCP_DOCS_SERVER, MCP_DOCS_TOOL, MCP_DOCUMENTS, noteNames, PI_COMPACTION, PI_CONTEXT_WINDOWS, PI_RESERVE_TOKENS, piCompactionFor, piContextWindowFor, prompts, REQUEST_FLOORS, requestFloorFor, SKILL_SCENARIOS, slowCheckLine, STANDARD_CASES, SUMMARY_TOOL_RESULT_CHARS, usesSkills, validate,
   type Fixture, type Outcome,
 } from './scenarios.ts'
 
@@ -395,6 +395,145 @@ describe('fan_out', () => {
     expect(prompts.fan_out).not.toMatch(/\b(read|bash|grep|script|codemode|parallel)\b/i)
     expect(requestFloorFor('fan_out')).toBe(2)
     expect(maxRequestsFor('fan_out')).toBeGreaterThanOrEqual(FAN_OUT_LEDGERS.length + 3)
+  })
+})
+
+describe('mcp_docs', () => {
+  /** One JSON-RPC exchange at a time with the built fixture server, over its standard input and output. */
+  function driver(script: string) {
+    const child = spawn('node', [script], { stdio: ['pipe', 'pipe', 'pipe'] })
+    let pending = ''
+    let stderr = ''
+    const waiting = new Map<number, (message: any) => void>()
+    child.stdout.setEncoding('utf8').on('data', chunk => {
+      pending += chunk
+      const lines = pending.split('\n')
+      pending = lines.pop()!
+      for (const line of lines.filter(Boolean)) {
+        const message = JSON.parse(line)
+        waiting.get(message.id)?.(message)
+        waiting.delete(message.id)
+      }
+    })
+    child.stderr.setEncoding('utf8').on('data', chunk => { stderr += chunk })
+    let id = 0
+    return {
+      get stderr() { return stderr },
+      /** Send one request and resolve with the whole response message. */
+      request(method: string, params?: unknown): Promise<any> {
+        id++
+        const sent = id
+        const answered = new Promise<any>((resolveMessage, reject) => {
+          const timer = setTimeout(() => { waiting.delete(sent); reject(new Error(`${method} went unanswered`)) }, 10_000)
+          waiting.set(sent, message => { clearTimeout(timer); resolveMessage(message) })
+        })
+        child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: sent, method, ...params === undefined ? {} : { params } }) + '\n')
+        return answered
+      },
+      notify(method: string) { child.stdin.write(JSON.stringify({ jsonrpc: '2.0', method }) + '\n') },
+      /** Close standard input, as the stdio shutdown does, and wait for the server to exit. */
+      async close(): Promise<number | null> {
+        child.stdin.end()
+        const exit = await new Promise<number | null>(resolveExit => child.once('close', resolveExit))
+        child.kill('SIGKILL')
+        return exit
+      },
+    }
+  }
+
+  test('is native-only, names no tool, and keeps the default caps', () => {
+    expect(STANDARD_CASES).not.toContain('mcp_docs')
+    expect(EXTENDED_CASES).not.toContain('mcp_docs')
+    expect(prompts.mcp_docs).not.toMatch(/\b(read|bash|grep|resource|get_document)\b/i)
+    expect(prompts.mcp_docs).toContain('docs MCP server')
+    expect(requestFloorFor('mcp_docs')).toBe(3)
+    expect(maxRequestsFor('mcp_docs')).toBe(14)
+    expect(capMsFor('mcp_docs')).toBe(180_000)
+  })
+
+  test('builds a server beside an empty workspace, with the checklist in two places', () => {
+    const built = build('mcp_docs')
+    expect(readdirSync(built.workspace)).toEqual([])
+    expect(built.file).toBe('checklist.txt')
+    expect(built.mcpServer).toEqual({ name: MCP_DOCS_SERVER, command: 'node', args: [expect.stringContaining('docs-server.cjs')], tools: [MCP_DOCS_TOOL] })
+    // The server is outside the workspace, so the checklist is reachable only through it.
+    for (const path of Object.keys(built.protected!)) expect(path.startsWith(built.workspace)).toBe(false)
+    const checklist = MCP_DOCUMENTS[0]!
+    expect(checklist.uri).toBe('docs://release/checklist')
+    expect(checklist.text.split('\n').slice(2, -1)).toEqual(MCP_CHECKLIST_ITEMS.map((item, index) => `${index + 1}. ${item}`))
+    for (const document of MCP_DOCUMENTS.slice(1)) {
+      expect(document.text).not.toContain(MCP_CHECKLIST_ITEMS[0]!)
+    }
+  })
+
+  test('succeeds only on the checklist items in order with the server unchanged', () => {
+    const built = build('mcp_docs')
+    const write = (text: string) => writeFileSync(join(built.workspace, 'checklist.txt'), text)
+    expect(validate('mcp_docs', built, outcome())).toMatchObject({ validated: false, testExit: null })
+    write(MCP_DOCUMENTS[1]!.text)
+    expect(validate('mcp_docs', built, outcome()).validated).toBe(false)
+    write([...MCP_CHECKLIST_ITEMS].reverse().join('\n') + '\n')
+    expect(validate('mcp_docs', built, outcome()).validated).toBe(false)
+    write(MCP_CHECKLIST_ITEMS.map((item, index) => `${index + 1}. ${item}`).join('\n') + '\n')
+    expect(validate('mcp_docs', built, outcome()).validated).toBe(false)
+    write(MCP_CHECKLIST_ITEMS.join('\r\n') + '\r\n')
+    expect(validate('mcp_docs', built, outcome())).toMatchObject({ validated: true, fixturesUnchanged: true })
+    expect(validate('mcp_docs', built, outcome({ code: 1 })).validated).toBe(false)
+    // A changed fixture server fails the sample even with the right answer.
+    const script = built.mcpServer!.args[0]!
+    writeFileSync(script, readFileSync(script, 'utf8') + '// touched\n')
+    expect(validate('mcp_docs', built, outcome())).toMatchObject({ validated: false, fixturesUnchanged: false })
+  })
+
+  test('answers initialize, tools/list, resources/list, resources/read, and tools/call over stdio', async () => {
+    const built = build('mcp_docs')
+    const server = driver(built.mcpServer!.args[0]!)
+    try {
+      const initialize = await server.request('initialize', { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'eval-test', version: '1' } })
+      expect(initialize.result).toMatchObject({
+        protocolVersion: '2025-11-25',
+        capabilities: { tools: { listChanged: false }, resources: { listChanged: false } },
+        serverInfo: { name: MCP_DOCS_SERVER },
+        instructions: MCP_DOCS_INSTRUCTIONS,
+      })
+      server.notify('notifications/initialized')
+      // A revision the client does not offer gets the server's own.
+      const older = driver(built.mcpServer!.args[0]!)
+      expect((await older.request('initialize', { protocolVersion: '1999-01-01' })).result.protocolVersion).toBe('2025-06-18')
+      expect(await older.close()).toBe(0)
+
+      const tools = (await server.request('tools/list')).result.tools
+      expect(tools.map((tool: any) => tool.name)).toEqual([MCP_DOCS_TOOL])
+      expect(tools[0].inputSchema).toMatchObject({ type: 'object', required: ['name'] })
+      expect(tools[0].description).toContain('release-checklist')
+
+      const resources = (await server.request('resources/list')).result.resources
+      expect(resources.map((resource: any) => resource.uri)).toEqual(MCP_DOCUMENTS.map(document => document.uri))
+      expect(resources).toHaveLength(3)
+      expect((await server.request('resources/templates/list')).result).toEqual({ resourceTemplates: [] })
+
+      const read = await server.request('resources/read', { uri: 'docs://release/checklist' })
+      expect(read.result.contents).toEqual([{ uri: 'docs://release/checklist', mimeType: 'text/plain', text: MCP_DOCUMENTS[0]!.text }])
+      for (const item of MCP_CHECKLIST_ITEMS) expect(read.result.contents[0].text).toContain(item)
+      expect((await server.request('resources/read', { uri: 'docs://nothing' })).error.code).toBe(-32602)
+
+      const call = await server.request('tools/call', { name: MCP_DOCS_TOOL, arguments: { name: 'release-checklist' } })
+      expect(call.result).toEqual({ content: [{ type: 'text', text: MCP_DOCUMENTS[0]!.text }] })
+      const missing = await server.request('tools/call', { name: MCP_DOCS_TOOL, arguments: { name: 'nothing' } })
+      expect(missing.result.isError).toBe(true)
+      expect(missing.result.content[0].text).toContain('release-checklist')
+      expect((await server.request('tools/call', { name: 'other' })).error.code).toBe(-32602)
+      expect((await server.request('does/not/exist')).error.code).toBe(-32601)
+      expect((await server.request('ping')).result).toEqual({})
+
+      // The task's own path: the checklist through the tool, then through the resource, agree.
+      expect(call.result.content[0].text).toBe(read.result.contents[0].text)
+      expect(server.stderr).toBe('')
+      // The server writes no file: the fixture is still intact.
+      expect(validate('mcp_docs', built, outcome()).fixturesUnchanged).toBe(true)
+    } finally {
+      expect(await server.close()).toBe(0)
+    }
   })
 })
 

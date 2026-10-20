@@ -75,8 +75,8 @@ const models = [...new Set((process.env.EVAL_MODELS ?? 'standard,extended').spli
 const cases = [...new Set((process.env.EVAL_CASES ?? STANDARD_CASES.join(',')).split(',').filter(Boolean)
   .flatMap(entry => CASE_SETS[entry] ?? [entry]))]
 for (const scenario of cases) if (prompts[scenario] === undefined) throw new Error(`EVAL_CASES names unknown scenario ${scenario}`)
-if (cases.some(scenario => ['background_compaction', 'context_masking', 'independent_reads'].includes(scenario)) && Object.values(ARMS).some(arm => arm.kind !== 'native')) {
-  throw new Error('background_compaction, context_masking, and independent_reads require native arms')
+if (cases.some(scenario => ['background_compaction', 'context_masking', 'independent_reads', 'mcp_docs'].includes(scenario)) && Object.values(ARMS).some(arm => arm.kind !== 'native')) {
+  throw new Error('background_compaction, context_masking, independent_reads, and mcp_docs require native arms')
 }
 const trials = Number(process.env.EVAL_TRIALS ?? 3)
 const nativePermission = (process.env.EVAL_NATIVE_PERMISSION ?? 'danger-full-access') as NativePermission
@@ -476,6 +476,13 @@ async function run(route: Route, scenario: string, trial: number, variant: strin
       }
       // As for pi: agent-level retry off, and a forced window becomes pi's window and compaction settings for it.
       writeFileSync(join(home, 'settings.json'), JSON.stringify(nativeConfig), { mode: 0o600 })
+      // A scenario's MCP server, in the one file bake-rs reads: the private
+      // home, which it owns at mode 0700 with this file at 0600, outside the
+      // workspace and every repository, as bake-rs's ownership rules require.
+      if (built.mcpServer !== undefined) {
+        const { name, command, args } = built.mcpServer
+        writeFileSync(join(home, 'mcp.json'), JSON.stringify({ mcpServers: { [name]: { command, args } } }), { mode: 0o600 })
+      }
       if (nativeRoute.keyName !== undefined) env.EVAL_API_KEY = credential(nativeRoute.keyName)
       // bake-rs reads instructions and skills from ~/.agents, so each sample gets an empty user home of its own.
       const userHome = join(root, 'user'); mkdirSync(userHome, { mode: 0o700 })
@@ -616,7 +623,9 @@ async function run(route: Route, scenario: string, trial: number, variant: strin
       nestedCalls: jsonMode ? nestedCalls(events) : null,
       missingTools: (() => {
         const requested = nativeConfig === null ? undefined : requestedTools(nativeConfig)
-        return requested === undefined || wire[0] === undefined ? null : requested.filter(name => !wire[0].toolNames.includes(name))
+        // A scenario's own MCP server must have reached the model too, or the sample measures a run without it.
+        const expected = [...requested ?? [], ...(built.mcpServer?.tools ?? []).map(tool => `mcp__${built.mcpServer!.name}__${tool}`)]
+        return (requested === undefined && built.mcpServer === undefined) || wire[0] === undefined ? null : expected.filter(name => !wire[0].toolNames.includes(name))
       })(),
       runawayAbort: runawayAbort([
         stderr, final,
@@ -688,7 +697,7 @@ writeFileSync(join(out, 'design.json'), JSON.stringify({
   composition: 'Built headless CLI with each revision\'s own headless system-prompt config (harness opener off, working-directory suffix) and its standard-preset persona prefix; host tools retained.'
     + (roster === 'tui' ? ' Roster tui: the standard preset\'s tool-fs, tool-fs-search, and tool-result-pruner configs and the terminal spill-policy inline cap; ask_user_question stays out, having no one to answer it headless.' : ' Roster headless: the headless bundle\'s own tool configs.')
     + ' Session title and ambient AGENTS disabled equally; instructions_file keeps agent-instructions for its own AGENTS.md.'
-    + (armNames.some(name => ARMS[name]!.kind === 'native') ? ' A native arm runs bake-rs -p --mode json with the built binary\'s own system prompt and default tools unless recorded defaultTools overrides them, the recorded session mode (memory uses --no-session), the ' + nativePermission + ' preset, and agent-level retry off; a cliproxyapi model comes through the 0.3 settings.yaml and .credentials.yaml it imports read-only, and a DeepSeek model through models.json over Chat Completions. Its stale writer acts on its event stream. Its recorded EVAL_SETTINGS object configures settings.json except evaluator-controlled route, retry, permission, and scenario policy. Forced windows and compaction settings are recorded in piContextWindows and piCompaction.' : '')
+    + (armNames.some(name => ARMS[name]!.kind === 'native') ? ' A native arm runs bake-rs -p --mode json with the built binary\'s own system prompt and default tools unless recorded defaultTools overrides them, the recorded session mode (memory uses --no-session), the ' + nativePermission + ' preset, and agent-level retry off; a cliproxyapi model comes through the 0.3 settings.yaml and .credentials.yaml it imports read-only, and a DeepSeek model through models.json over Chat Completions. Its stale writer acts on its event stream. Its recorded EVAL_SETTINGS object configures settings.json except evaluator-controlled route, retry, permission, and scenario policy. Forced windows and compaction settings are recorded in piContextWindows and piCompaction. A scenario that provides an MCP server gets it as the only mcp.json bake-rs reads, in that private home at mode 0600, outside the workspace and every repository.' : '')
     + (armNames.some(name => ARMS[name]!.kind === 'pi') ? ' A pi arm runs pi --mode json with its own system prompt and default tools, no session, extensions, prompt templates, or context files, no skills but a skill scenario\'s own, agent-level retry off, and pi\'s own wire for each model; it skips scenarios that need a Bake-only tool. Where a scenario forces a context window, pi gets its window for it (piContextWindows), Bake\'s threshold plus pi\'s default reserve, and compaction settings that keep Bake\'s retained tail (piCompaction).' : ''),
   cache: 'Fresh process/home/workspace/session per sample; provider cache is observed, not assumed cold. Pair order alternates by trial and scenario.',
   endpoint: 'Agent exits; external Node test passes without test modification; injected external comment is preserved.',
@@ -711,7 +720,7 @@ for (const route of routes) {
         // A Bake prompt that is not the shipped composition invalidates every sample after it; stop before spending more.
         if (sample.composition?.ok === false) throw new Error(`${sample.label}: the rendered system prompt is not the shipped composition (${JSON.stringify(sample.composition)}); partial results retained`)
         // A binary built before a tool existed drops its name silently, which would measure every later sample without it.
-        if (sample.missingTools?.length > 0) throw new Error(`${sample.label}: the agent did not offer the model ${sample.missingTools.join(', ')}, which the arm's defaultTools names; is the binary older than the tool? Partial results retained`)
+        if (sample.missingTools?.length > 0) throw new Error(`${sample.label}: the agent did not offer the model ${sample.missingTools.join(', ')}, which the arm's defaultTools or the scenario's MCP server names; is the binary older than the tool, or did the server not start? Partial results retained`)
       }
       if (scenario === 'no_tools' && pair.every(sample => !sample.success && (sample.requests === 0 || sample.rawProviderUsage.some((request: any) => request.status !== 200)))) {
         const error = pair.flatMap(sample => sample.requestMetrics).find((request: any) => request.error !== undefined)?.error

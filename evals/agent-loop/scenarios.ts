@@ -7,8 +7,8 @@
  */
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
-import { join, relative } from 'node:path'
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { join, relative, resolve } from 'node:path'
 import { COMPACTION_DEFAULTS } from '../../packages/compaction/compaction-basic/src/config.ts'
 
 /** The standard suite every recorded version runs; `duplicate_recovery`, `reminder`, and the delegation cases are opt-in. */
@@ -42,6 +42,43 @@ export const maskingProbe = (index: number) => `diagnostic-${String(index + 1).p
 /** The `fan_out` ledgers, one `ledgers/<name>.log` each, in the alphabetical order `balances.txt` lists them. */
 export const FAN_OUT_LEDGERS = ['amber', 'birch', 'cedar', 'dune', 'ember', 'fjord', 'grove', 'heath', 'iris', 'juniper', 'kestrel', 'lumen', 'maple', 'nimbus', 'orchid', 'prairie']
 
+/** The `mcp_docs` server's name in `mcp.json`, so its tools reach the model as `mcp__docs__<tool>`. */
+export const MCP_DOCS_SERVER = 'docs'
+/** Its one tool, which returns a document by name. */
+export const MCP_DOCS_TOOL = 'get_document'
+/** The `instructions` it returns from `initialize`; the model reads the first line in the prompt's `mcp_servers` section. */
+export const MCP_DOCS_INSTRUCTIONS = 'Project documentation server: release checklists and runbooks.'
+/** The release checklist's items, in order, as `checklist.txt` must hold them. */
+export const MCP_CHECKLIST_ITEMS = [
+  'Freeze the release branch',
+  'Update CHANGELOG.md with the release section',
+  'Run the full test suite on the release branch',
+  'Tag the release commit',
+  'Publish the release notes',
+]
+/** A document the `mcp_docs` server serves, reachable both as the resource `uri` and by `name` through its tool. */
+export interface McpDocument { name: string; uri: string; title: string; description: string; text: string }
+/** A document's numbered steps, so its items are told apart from its title. */
+const numbered = (title: string, items: readonly string[]) => `# ${title}\n\n${items.map((item, index) => `${index + 1}. ${item}`).join('\n')}\n`
+/** The checklist and two distractors; a run that reads the wrong document writes the wrong lines. */
+export const MCP_DOCUMENTS: McpDocument[] = [
+  {
+    name: 'release-checklist', uri: 'docs://release/checklist', title: 'Release checklist',
+    description: 'The steps of a release, in the order they are done.',
+    text: numbered('Release checklist', MCP_CHECKLIST_ITEMS),
+  },
+  {
+    name: 'deploy-runbook', uri: 'docs://runbook/deploy', title: 'Deployment runbook',
+    description: 'How a built image reaches staging and production.',
+    text: numbered('Deployment runbook', ['Build the service image', 'Push it to the internal registry', 'Deploy it to staging', 'Watch the error rate for ten minutes', 'Promote it to production']),
+  },
+  {
+    name: 'oncall-rotation', uri: 'docs://oncall/rotation', title: 'On-call rotation',
+    description: 'Who carries the pager, and how a handover is done.',
+    text: numbered('On-call rotation', ['Hand over at 10:00 on Monday', 'Read the open incidents with the outgoing engineer', 'Check that the pager reaches your phone', 'Record the handover in the rotation log']),
+  },
+]
+
 export const prompts: Record<string, string> = {
   no_tools: 'Reply exactly TOKEN_CONTROL_OK. Do not call any tools.',
   ordinary_edit: 'Fix roundMoney in src/money.js: it should round to the nearest cent, matching Math.round(value * 100) / 100. The tests in test.cjs describe the required behavior.' + common,
@@ -72,6 +109,9 @@ export const prompts: Record<string, string> = {
   background_compaction: chainedTask(20),
   independent_reads: `Read these four independent files using four read calls in the same assistant response: ${INDEPENDENT_NOTES.join(', ')}. Each holds one fact. Write facts.txt with those four fact lines in that order, then ${roundMoneyTask.replace('Fix', 'fix')} Do not change the notes.` + natural,
   fan_out: 'Each file under ledgers/ is an independent daily ledger. A ledger\'s balance is its opening amount plus every credit entry minus every debit entry; memo lines are not entries. Write balances.txt with one line per ledger, <name>=<balance>, where name is the file name without .log, in alphabetical order, then a final line total=<the sum of all the balances>. Do not change the ledgers.' + scopeOnly,
+  // The MCP server is named, no tool is: the checklist is reachable through
+  // the server's own tool and as one of its resources.
+  mcp_docs: 'The project\'s docs MCP server has the release checklist. Write checklist.txt in this directory with its items in order, one per line, each line the item\'s own text without its number.' + scopeOnly,
   context_masking: `First read notes/requirements.txt and retain its three fact lines for the final artifact. Then inspect twenty diagnostic batches: start by calling grep with pattern "${maskingProbe(0)}" and path "diagnostics.log". Each batch's final matching line names the next pattern; call grep once per response and follow that chain until the final batch says DONE. Do not combine batches or read diagnostics.log with another tool. Finally write facts.txt with the three original fact lines in their original order and ${roundMoneyTask.replace('Fix', 'fix')} Do not change the requirements or diagnostics.` + natural,
 }
 
@@ -131,6 +171,10 @@ export const REQUEST_FLOORS: Record<string, number> = {
   // requests; the lower bound does not assume either arm compacts.
   background_compaction: 22,
   independent_reads: 3,
+  // The checklist in one call, through the server's tool or as its resource;
+  // the write, which needs that result; the final reply. A run that reaches
+  // the resource by its uri lists the resources first and pays one more.
+  mcp_docs: 3,
   context_masking: 22,
   // One script or shell command that lists, reads, sums, and writes; final.
   fan_out: 2,
@@ -403,23 +447,35 @@ export function treeDigest(dir: string): string {
   return hash(entries.join('\n'))
 }
 
+/** An MCP server a fixture provides; the runner writes it into the sample's private Bake home as `mcp.json`. */
+export interface FixtureMcpServer {
+  /** The server's name, which prefixes its model-visible tools. */
+  name: string
+  /** The program `mcp.json` names, and its arguments. */
+  command: string
+  args: string[]
+  /** The tools it offers, so the runner can check that the model was given `mcp__<name>__<tool>`. */
+  tools: string[]
+}
+
 /**
  * A built fixture: its workspace, the file the scenario judges, for a
- * read-only scenario the digest it must keep, and the hash of each fixture
- * file the agent must not change, such as a check script the predicate trusts.
+ * read-only scenario the digest it must keep, the hash of each fixture file
+ * the agent must not change, such as a check script the predicate trusts, and
+ * the MCP server the scenario provides.
  */
-export interface Fixture { workspace: string; file: string; digest?: string; protected?: Record<string, string> }
+export interface Fixture { workspace: string; file: string; digest?: string; protected?: Record<string, string>; mcpServer?: FixtureMcpServer }
 /** Options a test passes to shorten a fixture; a live run uses the defaults. */
 export interface FixtureOptions { slowCheckMs?: number }
 
-/** The hash of each named workspace file, as it stands now. */
+/** The hash of each named file, as it stands now; a path is relative to the workspace, or absolute for a fixture file outside it. */
 function protect(workspace: string, paths: readonly string[]): Record<string, string> {
-  return Object.fromEntries(paths.map(path => [path, hash(readFileSync(join(workspace, path), 'utf8'))]))
+  return Object.fromEntries(paths.map(path => [path, hash(readFileSync(resolve(workspace, path), 'utf8'))]))
 }
 /** Whether every protected file still exists with the hash it had when the fixture was built; null when none is protected. */
 export function fixturesUnchanged(built: Fixture): boolean | null {
   if (built.protected === undefined) return null
-  return Object.entries(built.protected).every(([path, digest]) => existsSync(join(built.workspace, path)) && hash(readFileSync(join(built.workspace, path), 'utf8')) === digest)
+  return Object.entries(built.protected).every(([path, digest]) => existsSync(resolve(built.workspace, path)) && hash(readFileSync(resolve(built.workspace, path), 'utf8')) === digest)
 }
 
 /** Build a scenario's workspace under `root`. */
@@ -474,6 +530,20 @@ export function fixture(root: string, scenario: string, options: FixtureOptions 
       }).join('\n') + '\n'
       write('diagnostics.log', diagnostics)
       return { workspace, file: 'src/money.js', protected: protect(workspace, ['notes/requirements.txt', 'diagnostics.log']) }
+    }
+    case 'mcp_docs': {
+      // The server sits beside the workspace, not in it: the agent reads the
+      // checklist from the server, not from the file that holds it.
+      const serverDir = join(root, 'mcp')
+      mkdirSync(serverDir)
+      const script = join(serverDir, 'docs-server.cjs')
+      copyFileSync(join(import.meta.dir, 'fixtures/mcp-docs-server.cjs'), script)
+      const documents = join(serverDir, 'documents.json')
+      writeFileSync(documents, JSON.stringify({ server: MCP_DOCS_SERVER, tool: MCP_DOCS_TOOL, instructions: MCP_DOCS_INSTRUCTIONS, documents: MCP_DOCUMENTS }, null, 2) + '\n')
+      return {
+        workspace, file: 'checklist.txt', protected: protect(workspace, [script, documents]),
+        mcpServer: { name: MCP_DOCS_SERVER, command: 'node', args: [script], tools: [MCP_DOCS_TOOL] },
+      }
     }
     case 'fan_out': {
       const ledgers = FAN_OUT_LEDGERS.map(name => `ledgers/${name}.log`)
@@ -571,6 +641,12 @@ export function validate(scenario: string, built: Fixture, outcome: Outcome, env
     const unchanged = fixturesUnchanged(built)
     const lines = source.split(/\r?\n/).map(line => line.trim()).filter(Boolean)
     const validated = outcome.code === 0 && unchanged !== false && lines.join('\n') === fanOutBalances().join('\n')
+    return { validated, source, testsUnchanged: null, testExit: null, fixturesUnchanged: unchanged }
+  }
+  if (scenario === 'mcp_docs') {
+    const unchanged = fixturesUnchanged(built)
+    const lines = source.split(/\r?\n/).map(line => line.trim()).filter(Boolean)
+    const validated = outcome.code === 0 && unchanged !== false && lines.join('\n') === MCP_CHECKLIST_ITEMS.join('\n')
     return { validated, source, testsUnchanged: null, testExit: null, fixturesUnchanged: unchanged }
   }
   if (scenario === 'explore_answer') {

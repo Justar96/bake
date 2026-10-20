@@ -12,7 +12,11 @@
  * reads and edits in one response, which the evaluator must mark as a raced
  * injection rather than score. The evaluator's own home holds a
  * `~/.agents/AGENTS.md` and a skill throughout, and no request may carry
- * either, since each sample must get an empty user home. A last control puts
+ * either, since each sample must get an empty user home. One more case runs
+ * `mcp_docs`, whose fixture provides a stdio MCP server: the binary must read
+ * the `mcp.json` the evaluator wrote into the sample's private home, start
+ * that server, offer the model its tool and the three resource tools, and
+ * carry its instructions into the system prompt. A last control puts
  * an `AGENTS.md` above the workspace, which the evaluator must refuse before
  * any request. It measures nothing about a real model.
  *
@@ -25,10 +29,12 @@
  */
 import { deepStrictEqual } from 'node:assert'
 import { spawn, spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
-import { checkpointCodes, INDEPENDENT_FACTS, INDEPENDENT_NOTES, MASKING_FACTS, maskingProbe, noteNames, prompts } from './scenarios.ts'
+import { isAbsolute, join, resolve } from 'node:path'
+import {
+  checkpointCodes, INDEPENDENT_FACTS, INDEPENDENT_NOTES, MASKING_FACTS, maskingProbe, MCP_CHECKLIST_ITEMS, MCP_DOCS_INSTRUCTIONS, MCP_DOCS_SERVER, MCP_DOCS_TOOL, noteNames, prompts,
+} from './scenarios.ts'
 
 const root = resolve(import.meta.dir, '../..')
 const binary = join(root, 'rust/target/debug', `bake-rs${process.platform === 'win32' ? '.exe' : ''}`)
@@ -50,7 +56,7 @@ type Json = any
  * the check; `never` reads `test.cjs` instead, so no injection happens;
  * `raced` sends the read, edit, and check in one response.
  */
-type Mode = 'normal' | 'never' | 'raced' | 'background' | 'independent' | 'masking' | 'recovery'
+type Mode = 'normal' | 'never' | 'raced' | 'background' | 'independent' | 'masking' | 'recovery' | 'mcp'
 
 /** One Responses SSE stream: `response.created`, the items, and `response.completed` with usage. */
 function stream(id: string, n: number, items: Json[], reported?: { input: number; cached: number; output: number }): string {
@@ -79,10 +85,20 @@ const EDIT = call('edit', 'edit', { path: 'src/money.js', edits: [{ oldText: 'Ma
 const CHECK = call('check', 'bash', { command: 'node test.cjs' })
 const FINAL_TEXT = 'Fixed roundMoney; node test.cjs passes.'
 const FINAL = { type: 'message', id: 'msg_final', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: FINAL_TEXT, annotations: [] }] }
+/** The `mcp_docs` turn: the fixture server's own tool, then the checklist it returned. */
+const MCP_TOOL = `mcp__${MCP_DOCS_SERVER}__${MCP_DOCS_TOOL}`
+const DOCUMENT = call('document', MCP_TOOL, { name: 'release-checklist' })
+const CHECKLIST = call('checklist', 'write', { path: 'checklist.txt', content: MCP_CHECKLIST_ITEMS.join('\n') + '\n' })
+/** The tools bake-rs publishes for a server that offers resources; every `mcp_docs` request must carry them. */
+const RESOURCE_TOOLS = ['list_mcp_resources', 'list_mcp_resource_templates', 'read_mcp_resource']
 
 /** The scripted turn, chosen from the request alone by how many tool outputs it carries. */
 function reply(body: Json, mode: Mode): { text: string; sendsEdit: boolean } {
   const outputs = (body.input as Json[]).filter(item => item.type === 'function_call_output').length
+  if (mode === 'mcp') {
+    const items = outputs === 0 ? [DOCUMENT] : outputs === 1 ? [CHECKLIST] : [FINAL]
+    return { text: stream(`resp_mcp_${outputs}`, outputs + 1, items), sendsEdit: false }
+  }
   if (mode === 'raced') return outputs === 0 ? { text: stream('resp_all', 1, [READ, EDIT, CHECK]), sendsEdit: true } : { text: stream('resp_final', 2, [FINAL]), sendsEdit: false }
   if (outputs === 0) return { text: stream('resp_read', 1, [mode === 'never' ? call('read', 'read', { path: 'test.cjs' }) : READ]), sendsEdit: false }
   if (outputs === 1) return { text: stream('resp_edit', 2, [EDIT, CHECK]), sendsEdit: true }
@@ -125,6 +141,8 @@ async function smokeNativeArm(): Promise<void> {
   const received: { path: string; authorization: string | null; model: unknown; leaked: boolean }[] = []
   const foregroundTurns = new Map<string, number>()
   const configuration: { settings: Json; tools: string[] }[] = []
+  /** Each `mcp.json` the evaluator wrote into a sample's private home, as it stood while that sample ran. */
+  const mcpConfigs: { config: Json; mode: number; scriptPresent: boolean }[] = []
   /** Whether each `stale_edit` edit the server sent found the injected comment already in place. */
   const injectedBeforeEdit: boolean[] = []
   const server = Bun.serve({ port: 0, hostname: '127.0.0.1',
@@ -141,6 +159,12 @@ async function smokeNativeArm(): Promise<void> {
       const sampleRoot = join(samplesDir, samples[0]!)
       configuration.push({ settings: JSON.parse(readFileSync(join(sampleRoot, 'home/settings.json'), 'utf8')),
         tools: (body.tools ?? []).map((tool: Json) => tool.name) })
+      if (mode === 'mcp') {
+        const path = join(sampleRoot, 'home/mcp.json')
+        const config = JSON.parse(readFileSync(path, 'utf8'))
+        mcpConfigs.push({ config, mode: statSync(path).mode & 0o777,
+          scriptPresent: (config.mcpServers?.[MCP_DOCS_SERVER]?.args ?? []).every((argument: string) => existsSync(argument)) })
+      }
       if (mode === 'independent' || mode === 'masking') {
         const summary = !Array.isArray(body.tools) || body.tools.length === 0
         const n = foregroundTurns.get(sampleRoot) ?? 0
@@ -205,7 +229,7 @@ async function smokeNativeArm(): Promise<void> {
     const launch = async (next: Mode, cases: string[], out: string) => {
       mode = next
       const armSettings = (candidate: boolean) => next === 'background' ? { backgroundCompaction: candidate }
-        : next === 'recovery' ? {}
+        : next === 'recovery' || next === 'mcp' ? {}
           : next === 'masking' ? { backgroundCompaction: false, contextMasking: candidate, defaultTools: ['read', 'write', 'edit', 'bash', 'grep'] }
           : next === 'independent' ? { maxConcurrentReadTools: candidate ? 4 : 1 }
             : candidate ? { defaultTools: ['read', 'edit', 'bash'] } : { images: { autoResize: false } }
@@ -371,6 +395,37 @@ async function smokeNativeArm(): Promise<void> {
       }
     }
 
+    // The mcp.json wiring, end to end: the real binary reads the private home's file, starts the
+    // fixture server, offers the model its tool and the three resource tools, and carries the
+    // server's own instructions into the system prompt.
+    const beforeMcp = configuration.length
+    const mcpOutputs = await evaluate('mcp', ['mcp_docs'])
+    for (const { tools } of configuration.slice(beforeMcp)) {
+      const absent = [MCP_TOOL, ...RESOURCE_TOOLS].filter(name => !tools.includes(name))
+      if (absent.length > 0) throw new Error(`an mcp_docs request did not offer ${absent.join(', ')}; it offered ${tools.join(', ')}`)
+    }
+    if (mcpConfigs.length !== 6) throw new Error(`expected one mcp.json reading per mcp_docs request, found ${mcpConfigs.length}`)
+    for (const { config, mode: fileMode, scriptPresent } of mcpConfigs) {
+      const entry = config.mcpServers?.[MCP_DOCS_SERVER]
+      // The evaluator owns the file: mode 0600 in the sample's own home, naming the fixture script by absolute path.
+      if (Object.keys(config.mcpServers ?? {}).length !== 1 || entry?.command !== 'node' || entry.args?.length !== 1
+        || !isAbsolute(entry.args[0]) || !scriptPresent || fileMode !== 0o600) {
+        throw new Error(`mcp.json was not the evaluator's owner-only file: ${JSON.stringify({ config, fileMode, scriptPresent })}`)
+      }
+    }
+    for (const arm of ['base', 'candidate']) {
+      const { label, sample } = sampleOf(mcpOutputs, 'mcp_docs', arm)
+      check(label, sample, {
+        success: sample.success, code: sample.code, requests: sample.requests, byTool: sample.byTool, toolErrors: sample.toolErrors,
+        excessRequests: sample.excessRequests, fixturesUnchanged: sample.fixturesUnchanged, missingTools: sample.missingTools,
+        instructions: typeof sample.systemPrompt === 'string' && sample.systemPrompt.includes(MCP_DOCS_INSTRUCTIONS),
+      }, {
+        success: true, code: 0, requests: 3, byTool: { [MCP_TOOL]: 1, write: 1 }, toolErrors: 0,
+        excessRequests: 0, fixturesUnchanged: true, missingTools: [],
+        instructions: true,
+      })
+    }
+
     // Control: with no injection the edit finds no comment, and the evaluator must fail the sample as the agent's.
     injectedBeforeEdit.length = 0
     const never = await evaluate('never', ['stale_edit'])
@@ -403,7 +458,7 @@ async function smokeNativeArm(): Promise<void> {
     }
     console.log('pass native arm stray context file refused')
     console.log(JSON.stringify({ schema: 'bake/native-arm-smoke', version: 2, platform: process.platform, arch: process.arch,
-      samples: 16, requests: received.length, passed: true }))
+      samples: 18, requests: received.length, passed: true }))
   } finally {
     await server.stop(true)
     rmSync(temp, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
