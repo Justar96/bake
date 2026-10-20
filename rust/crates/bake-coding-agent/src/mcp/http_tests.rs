@@ -430,10 +430,39 @@ async fn a_stalled_startup_times_out_within_the_reconnect_budget() {
     let error = error_text(&started.state());
     assert!(error.contains("failed to connect"), "{error}");
     assert!(
-        error.contains("giving up after 1 failed attempts"),
+        error.contains("gave up after 1 reconnect attempts"),
         "{error}"
     );
     assert_eq!(server.rpc("initialize").len(), 2, "one retry, then no more");
+    started.shutdown().await;
+    server.stop().await;
+}
+
+// Bake 0.3's reconnect policy over Pi's transport: a connection that fails
+// is retried within the budget, and the connection that succeeds publishes
+// its listing as the next whole generation.
+#[tokio::test]
+async fn a_failed_connection_is_retried_until_it_serves() {
+    let state = Shared::default();
+    state.set(|state| state.initialize = Initialize::Status(500, None));
+    let server = Server::start(protocol(&state)).await;
+    let started = start(entry(&server.url), quick(), None);
+    // Let it fail at least once, then let the server answer.
+    let deadline = tokio::time::Instant::now() + BOUND;
+    while server.rpc("initialize").is_empty() {
+        assert!(tokio::time::Instant::now() < deadline, "no attempt");
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    state.set(|state| state.initialize = Initialize::Answer);
+    started.wait_for("the connection", connected).await;
+    assert!(
+        server.rpc("initialize").len() >= 2,
+        "{:?}",
+        server.requests()
+    );
+    assert_eq!(generation(&started.state()), 1);
+    assert_eq!(started.servers.tool_names(), ["mcp__remote__echo"]);
+    assert_eq!(started.call("mcp__remote__echo").await, Ok("hello".into()));
     started.shutdown().await;
     server.stop().await;
 }

@@ -58,7 +58,7 @@ A `url` server starts no process: bake-rs itself connects to it. Like `web_searc
 `mcp.json` authorizes exactly the origin it names — the scheme, host, and port — and bake-rs holds the connection to it:
 
 - The host is resolved once per connection and that address is used for every request of it, so a name that later answers with another address cannot move the connection.
-- A loopback or private address is allowed, so a local server works; `http` is refused when the host resolves to a public address, because the `headers` would cross the network in clear text. Use `https` there.
+- A loopback or private address is allowed, so a local server works; `http` is refused when the host resolves to an address that leaves this machine's networks, because the `headers` would cross a public network in clear text. Use `https` there.
 - A redirect to another origin is refused; a redirect within the same origin is followed up to three times.
 - `headers` are the only credentials sent. Their values are never printed in a warning, an error, or a log, and a server that answers with them in its own message has them removed from what bake-rs shows.
 - Connections are made directly. `HTTPS_PROXY`, `HTTP_PROXY`, and `NO_PROXY` are not read: a proxy would resolve the host itself, so the address could not be pinned.

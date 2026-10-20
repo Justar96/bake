@@ -115,14 +115,15 @@ pub(super) async fn run(
             // once, as Pi's transport documents.
             Attempt::Expired(error) => (error, served),
         };
-        // 0.3's stability window: a connection that stayed up past the
-        // backoff ceiling closes the outage and starts a fresh budget.
+        // 0.3's stability window: an attempt that served tools and lasted
+        // longer than the backoff ceiling closes the outage and starts a
+        // fresh budget.
         if served && started.elapsed() > settings.reconnect_max_delay {
             attempts = 0;
         }
         if attempts >= settings.max_reconnect_attempts {
             let error = format!(
-                "{error}; giving up after {attempts} failed attempts to reconnect to MCP server \"{}\"",
+                "{error}; bake-rs gave up after {attempts} reconnect attempts for MCP server \"{}\"",
                 entry.name
             );
             return servers.set_state(index, ended(ever_served, error));

@@ -21,11 +21,12 @@
 //!   reach an origin the owner did not authorize, and at most
 //!   `MAX_REDIRECTS` (three) same-origin hops are followed.
 //! - **`https` for a public destination.** Plain `http` is allowed to a
-//!   loopback or otherwise non-public address, which is what Pi and Bake 0.3
+//!   loopback or otherwise local address, which is what Pi and Bake 0.3
 //!   allow and what a local server needs, and refused when the host resolves
-//!   to a globally reachable address, where the configured `Authorization`
-//!   header would cross the network in clear text. The classification is the
-//!   web tools' ([`crate::web::policy::is_public_ip`]).
+//!   to an address that reaches a public network, where the configured
+//!   `Authorization` header would cross it in clear text
+//!   ([`reaches_a_public_network`], over the web tools'
+//!   [`is_public_ip`](crate::web::policy::is_public_ip)).
 //! - **No proxy.** The client connects directly and reads neither
 //!   `HTTPS_PROXY` nor `NO_PROXY`. Bake 0.3 sent MCP HTTP through undici's
 //!   global dispatcher, which `installProxyFromEnvironment` built from those
@@ -155,7 +156,7 @@ pub(crate) async fn admit(
             "MCP server \"{name}\" could not resolve its host: {detail}"
         ))
     })?;
-    if url.scheme() == "http" && addresses.iter().copied().any(is_public_ip) {
+    if url.scheme() == "http" && addresses.iter().copied().any(reaches_a_public_network) {
         return Err(refused(format!(
             "MCP server \"{name}\" uses http to a public address, which would send its headers in clear text; use https, or a loopback or private address"
         )));
@@ -191,6 +192,29 @@ pub(crate) async fn admit(
     // connection's budget is `super::http`'s.
     options.reconnect = Reconnect::default();
     Ok(Admitted { options, client })
+}
+
+/// Whether a connection to `address` may leave this machine's networks, so
+/// that clear text would be on a public network.
+///
+/// An IPv4 address, and the IPv4 an IPv4-mapped address carries, follow the
+/// web tools' classification. Any other IPv6 address counts as public
+/// unless it is the loopback, link-local (`fe80::/10`), or unique-local
+/// (`fc00::/7`): a transition or translation address (6to4, Teredo, NAT64)
+/// is non-public to [`is_public_ip`], which cannot pin the IPv4 it reaches,
+/// but it does carry traffic off this machine, so plain `http` to one is
+/// refused here.
+fn reaches_a_public_network(address: IpAddr) -> bool {
+    let IpAddr::V6(v6) = address else {
+        return is_public_ip(address);
+    };
+    if v6.to_ipv4_mapped().is_some() {
+        return is_public_ip(address);
+    }
+    let first = v6.segments()[0];
+    let link_local = first & 0xffc0 == 0xfe80;
+    let unique_local = first & 0xfe00 == 0xfc00;
+    !(v6.is_loopback() || link_local || unique_local)
 }
 
 /// The entry's headers with their values resolved. A value that runs a
@@ -326,6 +350,34 @@ mod tests {
                 .await
                 .is_err()
         );
+    }
+
+    // Bake's own: an address that carries traffic off this machine needs
+    // https, even where the web tools' classification calls it non-public
+    // because it cannot pin the IPv4 it translates to.
+    #[test]
+    fn a_transition_address_counts_as_a_public_network() {
+        let public = |address: &str| reaches_a_public_network(address.parse().expect("address"));
+        for local in [
+            "127.0.0.1",
+            "10.1.2.3",
+            "192.168.0.9",
+            "::1",
+            "fe80::1",
+            "fd00::1",
+        ] {
+            assert!(!public(local), "{local}");
+        }
+        for away in [
+            "93.184.216.34",
+            "2001:4860:4860::8888",
+            // NAT64, 6to4, and Teredo, each non-public to `is_public_ip`.
+            "64:ff9b::808:808",
+            "2002:5db8:d822::1",
+            "2001:0:4136:e378::1",
+        ] {
+            assert!(public(away), "{away}");
+        }
     }
 
     #[tokio::test]
