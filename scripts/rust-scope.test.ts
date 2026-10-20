@@ -47,7 +47,8 @@ describe('Rust change scope', () => {
 
   it('widens to the full suite for workspace-wide inputs and its own runners', () => {
     for (const wide of ['rust/Cargo.toml', 'rust/Cargo.lock', 'rust/rust-toolchain.toml', 'rust/.config/nextest.toml',
-      'rust/test-support/harness.rs', 'rust/about.toml', 'rust/README.md', 'rust/plugins/build-fixtures.sh', ...RUST_SCOPE_RUNNERS]) {
+      'rust/test-support/harness.rs', 'rust/about.toml', 'rust/README.md', 'rust/plugins/build-fixtures.sh',
+      'rust/crates/bake-update/Cargo.toml', 'rust/plugins/fixtures/hostile/Cargo.toml', ...RUST_SCOPE_RUNNERS]) {
       const scope = rustScope(['rust/crates/bake-tui-view/src/lib.rs', wide], graph)
       expect(scope.kind).toBe('full')
       expect(scope.kind === 'full' ? scope.reason : '').toContain(wide)

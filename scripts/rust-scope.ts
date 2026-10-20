@@ -5,7 +5,8 @@
  * A changed path inside a workspace member selects that member. A path under
  * `rust/` outside every member (the workspace manifest, lockfile, toolchain
  * pin, nextest config, shared test support) can move any test, so it widens
- * to the full suite, as do the scripts that make this decision. Rust sources
+ * to the full suite, as do a member's `Cargo.toml` (features unify across the
+ * workspace) and the scripts that make this decision. Rust sources
  * also read files outside their own package; `RUST_EXTERNAL_INPUTS` names
  * each one and its consumers, and `rust-scope.test.ts` scans the sources so
  * the table cannot fall behind. Any other path outside `rust/` selects nothing.
@@ -98,6 +99,8 @@ export function rustScope(files: readonly string[], packages: readonly RustPacka
     if (!file.startsWith('rust/')) continue
     const owner = members.find(member => file.startsWith(`${member.dir}/`))
     if (owner === undefined) return { kind: 'full', reason: `${file} is a workspace-wide Rust input` }
+    // Features unify across the workspace build, so one member's manifest can change how any member compiles.
+    if (file === `${owner.dir}/Cargo.toml`) return { kind: 'full', reason: `${file} can change workspace feature resolution` }
     select(owner.name, file)
   }
   return changed.size === 0 ? { kind: 'none' } : withReverseDependents(changed, packages)
