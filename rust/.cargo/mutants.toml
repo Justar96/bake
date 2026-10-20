@@ -1,0 +1,34 @@
+# cargo-mutants settings for the workspace. `bun run mutants:rust`
+# (scripts/rust-mutants.ts) drives it and chooses the diff, the output
+# directory, and how the codemode package is tested.
+
+# The workspace test runner. bake-codemode's `codemode` test binary shares one
+# compiled Wasm engine per process, so under nextest every one of its tests
+# compiles the engine again (8 CPU-minutes instead of 27 CPU-seconds); the
+# script tests that package's mutants with `--test-tool cargo` instead.
+test_tool = "nextest"
+additional_cargo_args = ["--locked"]
+
+# Test code, test servers, and fixtures are not product logic; cargo-mutants
+# already skips `#[cfg(test)]` items, and these globs also cover the files
+# such modules live in. The hostile plugin fixture is committed as Wasm, so
+# no test can observe a mutation of its source. Probes are not workspace
+# members.
+exclude_globs = [
+    "**/tests/**",
+    "**/tests.rs",
+    "**/*_tests.rs",
+    "**/test_server.rs",
+    "**/http_test_server.rs",
+    "**/test_support.rs",
+    "test-support/**",
+    "probes/**",
+    "plugins/fixtures/**",
+]
+
+# A mutant that hangs a loop or a wait is reported as a timeout instead of
+# blocking the run. Most packages test in under a second and the slowest
+# unmutated package run, bake-coding-agent's, takes about 9 s, so 20 s keeps
+# infinite-loop mutants from dominating a run without timing out a slow one.
+timeout_multiplier = 2.0
+minimum_test_timeout = 20
