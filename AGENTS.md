@@ -1,6 +1,6 @@
 # Bake
 
-Bake is an independent terminal coding agent. Its product line is the Rust agent, `bake-rs` under `rust/`, built to the [Rust 0.4 roadmap](docs/roadmap/rust-0.4/README.md). The TypeScript agent is deprecated and frozen: it is what `bake` installs until the Rust release, which removes it (see [Branches and releases](#branches-and-releases)). `origin` is Bake's own repository. `upstream` is a read-only reference: review its DeepSeek Harness releases there, then port changes selectively. Never merge from or push to `upstream` automatically.
+Bake is an independent terminal coding agent. Its product line is the Rust agent, `bake` under `rust/`, built to the [Rust 0.4 roadmap](docs/roadmap/rust-0.4/README.md). The TypeScript agent is deprecated and frozen: it is what `bake` installs until the Rust release, which removes it (see [Branches and releases](#branches-and-releases)). `origin` is Bake's own repository. `upstream` is a read-only reference: review its DeepSeek Harness releases there, then port changes selectively. Never merge from or push to `upstream` automatically.
 
 ## Porting from upstream
 
@@ -32,7 +32,7 @@ bun run build             # Node runtime and TUI artifacts
 bun run start             # built terminal agent
 bun run dev               # hot component preview, no agent or model key
 bun run dev:tui           # build and run the real Node agent
-bun run dev:rust          # build and run the interactive Rust agent (bake-rs) against the Bake home
+bun run dev:rust          # build and run the interactive Rust agent (bake) against the Bake home
 bun run dev:rust:preview  # build and run the Rust TUI preview (fixture runtime, no model connection)
 bun run check:rust        # locked Rust format, lint, test, and build checks
 bun run check             # TUI types, tests, layout, peer identity, and docs

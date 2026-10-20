@@ -29,4 +29,4 @@ Every install, update, and rollback holds the install's lock, so two of them nev
 
 ## Where it installs
 
-The install root is `~/.local/share/bake-rs`, or `%LOCALAPPDATA%\bake-rs` on Windows; `BAKE_NATIVE_ROOT` names another one. It is separate from a Bake 0.3 install, which keeps working with its own data and its own `dsh` command. The commands the installer links live in `~/.local/bin`, or wherever `BAKE_BIN_DIR` names, and point at the current release, so an update does not touch them.
+The install root is `~/.local/share/bake-native`, or `%LOCALAPPDATA%\bake-native` on Windows; `BAKE_NATIVE_ROOT` names another one. It is separate from a Bake 0.3 install, which keeps working with its own data and its own `dsh` command. The commands the installer links live in `~/.local/bin`, or wherever `BAKE_BIN_DIR` names, and point at the current release, so an update does not touch them.

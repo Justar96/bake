@@ -1,8 +1,8 @@
 # Code mode
 
-The `codemode` tool lets the model write a JavaScript script that calls bake-rs's other tools. Only the script's output reaches the model, so a script can run calls in parallel and filter large results before the model sees them.
+The `codemode` tool lets the model write a JavaScript script that calls bake's other tools. Only the script's output reaches the model, so a script can run calls in parallel and filter large results before the model sees them.
 
-The tool is on by default, a subagent's session included. Turn it off for a run with `bake-rs -xt codemode`, with a `--tools` list that leaves it out such as `bake-rs -t read,bash` or a `-name` entry that removes it, or for every session with a `defaultTools` setting that leaves it out (`bake-rs docs settings`). While it is off, requests are exactly what they are without it.
+The tool is on by default, a subagent's session included. Turn it off for a run with `bake -xt codemode`, with a `--tools` list that leaves it out such as `bake -t read,bash` or a `-name` entry that removes it, or for every session with a `defaultTools` setting that leaves it out (`bake docs settings`). While it is off, requests are exactly what they are without it.
 
 ## Scripts
 
@@ -37,7 +37,7 @@ The result starts with `Script completed` or `Script failed`, the wall time, and
 
 ## Call tools
 
-Every tool the session gives the model, other than `codemode` itself, is a method of `tools`, named by its identifier: characters that are not valid in a JavaScript identifier become `_`. Each method takes one object with the tool's arguments. A script's calls go through the same permissions, approvals, sandbox, plugins, and hooks as the model's own calls (`bake-rs docs permissions`), each under its own id, and they are recorded in the `codemode` result's details rather than as results of their own. At most 16 of a script's calls run at once; the others wait, in the order the script made them, and Esc cancels the waiting ones too.
+Every tool the session gives the model, other than `codemode` itself, is a method of `tools`, named by its identifier: characters that are not valid in a JavaScript identifier become `_`. Each method takes one object with the tool's arguments. A script's calls go through the same permissions, approvals, sandbox, plugins, and hooks as the model's own calls (`bake docs permissions`), each under its own id, and they are recorded in the `codemode` result's details rather than as results of their own. At most 16 of a script's calls run at once; the others wait, in the order the script made them, and Esc cancels the waiting ones too.
 
 What a call resolves to depends on the tool:
 
@@ -48,7 +48,7 @@ What a call resolves to depends on the tool:
 
 A call that fails, is blocked, is refused, or gets invalid arguments rejects with an `Error` that carries the tool's error text. Use `Promise.allSettled()` to keep the results of the calls that succeed.
 
-Each MCP server is a namespace named `mcp__<server>`, with the server's name as an alias and its `description` from `mcp.json` (`bake-rs docs mcp`). Tools a server keeps hidden are not callable from scripts either.
+Each MCP server is a namespace named `mcp__<server>`, with the server's name as an alias and its `description` from `mcp.json` (`bake docs mcp`). Tools a server keeps hidden are not callable from scripts either.
 
 While `codemode` is active, `codemode.mode` in [settings](#settings) decides how the other tools are presented. With `on` (default) declared tools stay declared, and their descriptions say what a script's call resolves to. With `only` they are left out of the model's requests and listed in the `codemode` description instead, so the model calls them through scripts. The session file still records them as declared. Tool declarations in the `codemode` description, `describeTool()`, and `ALL_TOOLS` carry the tools' guidelines, since the system prompt's rules only cover declared tools.
 
@@ -70,7 +70,7 @@ The store is for small state such as IDs, cursors, or summaries. One value may h
 ## Limits
 
 - A script's VM has 256 MB of memory. Running out throws `InternalError: out of memory`; filter or aggregate large data instead of accumulating it.
-- At most two scripts run at once in one bake-rs process. A cancelled script occupies its slot until its engine stops. At capacity, new scripts fail immediately; retry after an earlier one ends.
+- At most two scripts run at once in one bake process. A cancelled script occupies its slot until its engine stops. At capacity, new scripts fail immediately; retry after an earlier one ends.
 - A script may have at most 1024 calls waiting for an answer, whose arguments together take at most 64 MiB. Passing either fails the script; await calls before making more, or batch them.
 - A script that waits on a promise that can never settle (no tool call pending) fails immediately, since there are no timers.
 - Scripts cannot start other `codemode` scripts.
