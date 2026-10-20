@@ -1,0 +1,2 @@
+{"type":"object","properties":{"v":{"allOf":[{"type":"number"},{"minimum":3},{"multipleOf":2}]}}}
+{"v":1}

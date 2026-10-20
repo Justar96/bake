@@ -1,0 +1,2 @@
+{"type": "object", "patternProperties": {"^x-": {"type": "string", "pattern": "^[a-z]{2,8}$", "minLength": 2}}, "additionalProperties": false, "if": {"required": ["mode"]}, "then": {"properties": {"mode": {"enum": ["a", "b"]}}}, "else": {"not": {"required": ["other"]}}}
+{"x-name": "abc"}

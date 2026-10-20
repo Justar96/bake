@@ -1,0 +1,9 @@
+{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-06-18","capabilities":{"tools":{"listChanged":true},"resources":{"subscribe":false}},"serverInfo":{"name":"fuzz","version":"1.0.0"},"instructions":"Be careful."}}
+
+{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"echo","description":"Echo text","inputSchema":{"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}}]}}
+{"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"hi"}],"structuredContent":{"text":"hi"},"isError":false}}
+{"jsonrpc":"2.0","id":4,"result":{"resources":[{"uri":"file:///fuzz","name":"fuzz","mimeType":"text/plain"}],"nextCursor":"page-2"}}
+{"jsonrpc":"2.0","id":5,"result":{"resources":[]}}
+{"jsonrpc":"2.0","id":6,"error":{"code":-32601,"message":"Method not found"}}
+{"jsonrpc":"2.0","id":7,"result":{"contents":[{"uri":"file:///fuzz","mimeType":"text/plain","text":"hello"}]}}
+{"jsonrpc":"2.0","id":8,"result":{}}

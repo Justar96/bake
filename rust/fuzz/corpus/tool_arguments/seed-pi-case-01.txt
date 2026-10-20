@@ -1,0 +1,2 @@
+{"type":"object","properties":{"a":{"type":"number"}},"additionalProperties":false}
+{"a":1,"b":1,"c":2}

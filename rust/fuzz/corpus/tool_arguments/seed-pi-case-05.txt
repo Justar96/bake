@@ -1,0 +1,2 @@
+{"type":"object","properties":{"v":{"oneOf":[{"type":"number"},{"minimum":0}]}}}
+{"v":3}

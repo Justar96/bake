@@ -1,0 +1,4 @@
+ M src/a.rs
+A  src/b.rs
+?? new file.txt
+ D gone
