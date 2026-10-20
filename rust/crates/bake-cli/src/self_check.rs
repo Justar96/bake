@@ -187,6 +187,15 @@ mod tests {
     }
 
     #[test]
+    fn the_updater_names_this_host_the_same_way() {
+        // `bake update` matches a manifest's artifacts against this
+        // platform's name, and the packager matches the archive against
+        // the record's; one disagreement would install another platform's
+        // archive or refuse this one.
+        assert_eq!(host_platform(), bake_update::host_target());
+    }
+
+    #[test]
     fn the_shipped_documentation_passes() {
         let line = record(
             "0.0.0",
