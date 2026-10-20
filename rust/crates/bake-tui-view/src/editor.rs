@@ -863,8 +863,13 @@ pub fn sanitize(input: &str) -> String {
     out
 }
 
-/// Terminal cells one grapheme other than a tab occupies.
+/// Terminal cells one grapheme other than a tab occupies. An ASCII control
+/// character occupies none: Ratatui's buffer drops it when drawing, and its
+/// measure asserts it is never given one.
 pub fn cell_width(grapheme: &str) -> usize {
+    if grapheme.len() == 1 && grapheme.as_bytes()[0].is_ascii_control() {
+        return 0;
+    }
     usize::from(grapheme.cell_width())
 }
 
@@ -1583,6 +1588,24 @@ mod tests {
         assert_eq!(draft.text(), "\u{0E01}\u{0E33}");
         draft.left();
         assert_eq!(draft.caret(), 0);
+    }
+
+    #[test]
+    fn a_control_character_takes_no_cell_in_the_layout() {
+        // Ratatui's buffer drops control characters when it draws, and its
+        // measure asserts it is never given one; unsanitized text reaches
+        // the layout through `transcript::wrap`.
+        assert_eq!(cell_width("\r"), 0);
+        assert_eq!(cell_width("\x1b"), 0);
+        assert_eq!(cell_width("\x7f"), 0);
+        let text = "ab\rcd\x07";
+        assert_eq!(
+            layout(text, text.len(), 4).rows,
+            [
+                VisualRow { start: 0, end: 4 },
+                VisualRow { start: 4, end: 6 }
+            ]
+        );
     }
 
     #[test]

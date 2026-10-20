@@ -344,6 +344,16 @@ mod tests {
     }
 
     #[test]
+    fn a_command_with_control_characters_lays_out_without_panicking() {
+        // The model writes the command, so it may hold any character.
+        let mut job = job("bash-1", JobState::Running);
+        job.command = "printf 'a\rb'\r\x07 && echo\x1b".into();
+        let at = Duration::ZERO;
+        let (lines, _) = shell(&job, at, at, 12, 8, 0, look());
+        assert!(text(&lines[0]).contains("printf"));
+    }
+
+    #[test]
     fn words_name_the_exit_code_and_the_stop() {
         assert_eq!(word(&JobState::Running), "running");
         assert_eq!(
