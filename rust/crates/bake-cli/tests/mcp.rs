@@ -86,6 +86,11 @@ fn main() {
             "a_url_servers_tool_is_declared_called_and_closed",
             a_url_servers_tool_is_declared_called_and_closed,
         ),
+        #[cfg(unix)]
+        (
+            "a_configured_server_resource_is_listed_and_read",
+            a_configured_server_resource_is_listed_and_read,
+        ),
         ("no_mcp_starts_nothing", no_mcp_starts_nothing),
         (
             "a_missing_configuration_is_an_ordinary_startup",
@@ -741,6 +746,10 @@ const BUILTIN: [&str; 10] = [
     "codemode",
 ];
 
+/// Pi's resource tools, which a server with the `resources` capability
+/// publishes.
+const RESOURCE_TOOLS: [&str; 3] = bake_coding_agent::mcp::RESOURCE_TOOL_NAMES;
+
 const FIXTURE_TOOLS: [&str; 9] = [
     "mcp__fx__echo",
     "mcp__fx__env",
@@ -988,6 +997,81 @@ fn a_configured_tool_is_declared_called_and_logged(case: &Arc<Case>) {
 // Bake's `transport.ts` `buildChildEnv` over `scrubbedParentEnv`: a
 // credential-shaped variable of `bake-rs` never reaches a server unless the
 // entry names it, and an entry's template passes it.
+/// `bake-rs -p` reads a resource of a configured server: the three resource
+/// tools are declared beside the server's own, `read_mcp_resource` returns
+/// the resource's text to the model, and the server's instructions reach the
+/// system prompt attributed to it.
+#[cfg(unix)]
+fn a_configured_server_resource_is_listed_and_read(case: &Arc<Case>) {
+    let model = ModelServer::with_hook(
+        vec![
+            Reply::calls(&[(
+                "read_mcp_resource",
+                json!({ "server": "fx", "uri": "docs://intro" }),
+            )]),
+            Reply::text(),
+        ],
+        Box::new(move |index, body| {
+            if index != 0 {
+                return;
+            }
+            let mut expected: Vec<&str> = BUILTIN.to_vec();
+            expected.extend(FIXTURE_TOOLS);
+            expected.push("mcp__fx__change_resources");
+            expected.extend(RESOURCE_TOOLS);
+            assert_eq!(declared(body), expected);
+            let prompt = match &body["input"][0]["content"] {
+                Value::String(text) => text.clone(),
+                Value::Array(parts) => parts
+                    .iter()
+                    .filter_map(|part| part["text"].as_str())
+                    .collect(),
+                other => panic!("unexpected system content {other}"),
+            };
+            assert!(
+                prompt.contains("servers' own text, not the user's"),
+                "{prompt}"
+            );
+            assert!(
+                prompt.contains(&format!(
+                    "- mcp__fx: {}",
+                    fixture::FIXTURE_INSTRUCTIONS_FIRST_LINE
+                )),
+                "{prompt}"
+            );
+        }),
+    );
+    case.write_models(model.port);
+    case.write_config(
+        &case.home(),
+        &json!({
+            "mcpServers": {
+                "fx": case.server("fx", "resources instructions", json!({})),
+            }
+        }),
+    );
+    let run = case.run(&["--sandbox", "danger-full-access"]);
+    model.assert_hook_passed();
+    assert_eq!(run.stderr, "");
+    assert_eq!(run.status.code(), Some(0));
+    assert_eq!(run.stdout, format!("{ANSWER}\n"));
+    let requests = model.requests();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(tool_outputs(&requests[1]), ["# docs://intro"]);
+    let events = case.events("fx");
+    assert!(
+        events.iter().any(|event| event == "read docs://intro"),
+        "{events:?}"
+    );
+    let lines = session_lines(case);
+    let result = lines
+        .iter()
+        .find(|line| line["message"]["role"] == "toolResult")
+        .expect("a logged tool result");
+    assert_eq!(result["message"]["toolName"], "read_mcp_resource");
+    assert_eq!(result["message"]["details"]["server"], "fx");
+}
+
 #[cfg(unix)]
 fn the_scrub_drops_credentials_an_entry_does_not_name(case: &Arc<Case>) {
     let model = ModelServer::start(vec![

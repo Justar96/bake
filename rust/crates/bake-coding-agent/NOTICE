@@ -126,8 +126,17 @@ MCP integration: the configuration of src/extensions/mcp/config.ts (the
 mcpServers shape, server names, transports, exposures, timeouts, and its
 messages), the connection and tool lifecycle of src/extensions/mcp/runtime.ts
 and src/extensions/mcp/index.ts, the tool wrapping and result conversion of
-src/extensions/mcp/tools.ts (convertMcpResult, binary resources saved to
-files, and middle truncation), and the startup wait and tool declaration of
+src/extensions/mcp/tools.ts (convertMcpResult, toModelContent,
+readableResources, binary resources saved to
+files, and middle truncation), the resource tools of
+src/extensions/mcp/resources.ts (list_mcp_resources,
+list_mcp_resource_templates, and read_mcp_resource with their parameter and
+output schemas, descriptions, payloads, and messages, isMcpAppResource,
+listed, stringArgument, findServer, and jsonResult) with their registration
+and the server instructions and mcp_servers section of
+src/extensions/mcp/index.ts (serversWithResources, syncResourceTools,
+registerTools, serverSummary, and renderServersSection) over the names of
+src/core/mcp-servers.ts, and the startup wait and tool declaration of
 src/core/mcp-servers.ts and src/core/agent-session.ts, adapted in src/mcp/,
 with the cases of test/mcp-extension.test.ts and
 test/suite/agent-session-mcp.test.ts that src/mcp/ and tests/mcp_session.rs

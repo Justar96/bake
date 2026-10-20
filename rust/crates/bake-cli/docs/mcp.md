@@ -1,6 +1,6 @@
 # MCP servers
 
-bake-rs starts the Model Context Protocol servers listed in `mcp.json` in the Bake home for every session, and gives the model their tools as `mcp__<server>__<tool>`. A server is either a program bake-rs starts and talks to over its standard input and output (`command`), or a Streamable HTTP endpoint it connects to (`url`).
+bake-rs starts the Model Context Protocol servers listed in `mcp.json` in the Bake home for every session, and gives the model their tools as `mcp__<server>__<tool>`. A server is either a program bake-rs starts and talks to over its standard input and output (`command`), or a Streamable HTTP endpoint it connects to (`url`). A server that offers resources also adds three tools that list and read them, and a server's own instructions reach the system prompt.
 
 ## mcp.json
 
@@ -30,8 +30,8 @@ The file uses the `mcpServers` shape other MCP clients share:
 - `url` is a Streamable HTTP endpoint instead of a program; `headers` are sent with every request to it, and their values may reference variables the same way. The legacy HTTP+SSE transport (`"type": "sse"`) is not supported.
 - `timeout` is each request's limit in seconds (default 60). It also bounds a server that never answers `initialize`.
 - `enabled: false` keeps an entry without starting it.
-- `exposure` is `direct` (the default: its tools are given to the model) or `hidden` (they are not); `toolExposure` sets it for single tools by name or `*` pattern.
-- `description` is a note for you.
+- `exposure` is `direct` (the default: its tools are given to the model) or `hidden` (they are not); `toolExposure` sets it for single tools by name or `*` pattern. A `hidden` server's resources are not reachable either.
+- `description` is a one-sentence note about what the server offers. The model reads its first line in the `mcp_servers` section of the system prompt, in place of the server's own instructions.
 
 A server name may use letters, digits, `_`, and `-`, up to 32 characters. bake-rs reads only this file: there is no project `mcp.json`, so a repository cannot add or change a server.
 
@@ -74,6 +74,22 @@ The server's tools are published once it has answered `initialize` and `tools/li
 - A server that answers 401, or 403 asking for a wider scope, needs OAuth sign-in, which bake-rs does not support yet: it reports that and stops. Put a token in `headers` instead.
 - Closing a session ends each HTTP session (`DELETE`) before bake-rs exits.
 
+## Resources
+
+A server that declares the `resources` capability makes its resources reachable through the three tools Codex and opencode use, so a model trained on them uses them unchanged:
+
+- `list_mcp_resources` lists resources. Without arguments it lists every server with resources; with `server` it lists one page of one server, which `cursor` continues.
+- `list_mcp_resource_templates` lists parameterized resources the same way. A server that does not implement the method has none.
+- `read_mcp_resource` takes a `server` and a `uri` and returns the resource.
+
+The three are one shared set: they appear as soon as a server with resources connects and disappear when the last one goes, and the session file logs that change like any other tool change, so a resumed session gives the model the same tools. A session whose servers offer no resources has none of them, and `--tools`, `--exclude-tools`, and `--no-tools` restrict them by name as they restrict every other tool.
+
+Listings are JSON. Resources meant for a host's user interface (`ui://` URIs and `profile=mcp-app` media types) and icons are left out. A read becomes text and images for the model: an image is passed through, another binary resource is saved to a private file the result names, and text over 20 KB keeps its start and end, with the whole text in a file the result names so `read` can reach it. Resource reads do not ask for approval, as MCP tool calls do not, and a plugin that lists one of the three in its manifest vetoes its calls.
+
+## Server instructions
+
+A server may return `instructions` from its handshake, describing what it offers. bake-rs keeps at most 4 KB of them and gives the model the first line, up to 250 characters, in an `mcp_servers` section of the system prompt, under a line that says the text is the server's own and not an instruction to follow. A `description` in `mcp.json` replaces it, so you can say what a server is for in your own words. A session with no connected server that reports either sends no such section, and its requests are unchanged.
+
 ## Startup and problems
 
 Servers start in the background as the session opens. The first prompt waits up to 10 seconds for servers still starting, so their tools are in its first request; a server that is slower, or a `url` server still reconnecting, adds its tools to a later prompt. Esc stops a running MCP call without stopping its server. When the session ends, bake-rs stops every server and the processes it started before it exits; in print mode Ctrl+C, `SIGTERM`, and `SIGHUP` do the same at any point, while startup waits for piped input or for servers, or while a prompt runs. `/new`, `/resume`, `/fork`, and `/clone` stop the current session's servers before the next session starts its own.
@@ -92,4 +108,4 @@ A problem with `mcp.json` or one of its entries is a warning when bake-rs starts
 
 ## Not supported yet
 
-OAuth sign-in, reconnecting a `command` server that stopped (its tools are removed instead), resources, prompts, server instructions, code mode and tool search exposures, and a `/mcp` command are not available.
+OAuth sign-in, reconnecting a `command` server that stopped (its tools are removed instead), resource subscriptions, prompts, code mode and tool search exposures, and a `/mcp` command are not available.
