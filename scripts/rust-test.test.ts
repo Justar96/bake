@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { parseChangedArgs, type RustTestPlan, runRustTestCommands, rustTestCommands } from './rust-test.ts'
+import { codemodeBinaryPath, needsCodemodeSuite, parseChangedArgs, type RustTestPlan, runRustTestCommands, rustTestCommands } from './rust-test.ts'
 import type { RustScope } from './rust-scope.ts'
 
 const plan = (overrides: Partial<RustTestPlan>): RustTestPlan => ({
@@ -59,6 +59,29 @@ describe('Rust test runner', () => {
     expect(rustTestCommands(plan({ cores: 4 }))[1]).toContain('--test-threads=2')
     // CI runs the suite after nextest, so it takes every core.
     expect(rustTestCommands(plan({ ci: true }))[1]).toEqual(CODEMODE_SUITE.slice(0, CODEMODE_SUITE.indexOf('--')))
+  })
+
+  it('runs the codemode binary nextest built instead of building it again through cargo test', () => {
+    const binary = '/rust/target/debug/deps/codemode-0123'
+    expect(rustTestCommands(plan({ codemodeBinary: binary }))[1]).toEqual([binary, '--test-threads=8'])
+    expect(rustTestCommands(plan({ codemodeBinary: binary, ci: true }))[1]).toEqual([binary])
+    expect(rustTestCommands(plan({ codemodeBinary: binary, scope: scoped(['bake-tui-view'], ['bake-tui-view']) }))).toHaveLength(1)
+    expect(needsCodemodeSuite(plan({}))).toBe(true)
+    expect(needsCodemodeSuite(plan({ scope: scoped(['bake-ai'], ['bake-ai', 'bake-codemode']) }))).toBe(true)
+    for (const overrides of [{ platform: 'darwin' }, { nextest: false }, { args: ['-p', 'bake-ai'] }, { scope: scoped(['bake-ai'], ['bake-ai']) }]) {
+      expect(needsCodemodeSuite(plan(overrides))).toBe(false)
+    }
+  })
+
+  it('reads the codemode binary from nextest\'s binary list, and nothing from other output', () => {
+    const listed = JSON.stringify({ 'rust-build-meta': {}, 'rust-binaries': {
+      'bake-ai': { 'binary-path': '/t/bake_ai-1' },
+      'bake-codemode::codemode': { 'binary-id': 'bake-codemode::codemode', 'binary-path': 'D:\\t\\codemode-2.exe' },
+    } })
+    expect(codemodeBinaryPath(listed)).toBe('D:\\t\\codemode-2.exe')
+    expect(codemodeBinaryPath(JSON.stringify({ 'rust-binaries': {} }))).toBeUndefined()
+    expect(codemodeBinaryPath(JSON.stringify({ 'rust-binaries': { 'bake-codemode::codemode': { 'binary-path': 3 } } }))).toBeUndefined()
+    expect(codemodeBinaryPath('error: could not compile')).toBeUndefined()
   })
 
   it('filters a scoped run by package over the whole workspace, with the engine suite only when it is reached', () => {

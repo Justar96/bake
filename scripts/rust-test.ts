@@ -28,6 +28,31 @@ export interface RustTestPlan {
   readonly cores: number
   /** The packages a change reaches; absent for every test. */
   readonly scope?: Extract<RustScope, { kind: 'packages' }> | undefined
+  /** The codemode test binary nextest's workspace build produced; see `codemodeBinaryPath`. */
+  readonly codemodeBinary?: string | undefined
+}
+
+/** Whether the plan runs nextest and the separate codemode suite. */
+export function needsCodemodeSuite(plan: Omit<RustTestPlan, 'codemodeBinary'>): boolean {
+  const { args, nextest, platform, scope } = plan
+  return nextest && platform !== 'darwin' && args.length === 0 && (scope === undefined || scope.packages.includes('bake-codemode'))
+}
+
+/**
+ * Lists nextest's workspace test binaries, building them as `cargo nextest run`
+ * would, with the same Cargo arguments, so the run that follows builds nothing.
+ */
+export const CODEMODE_LIST = ['cargo', 'nextest', 'list', '--workspace', '--locked', '--message-format', 'json', '--list-type', 'binaries-only'] as const
+
+/** The codemode test binary's path in `CODEMODE_LIST` output, or undefined when it is not listed. */
+export function codemodeBinaryPath(listJson: string): string | undefined {
+  try {
+    const listed = JSON.parse(listJson) as { 'rust-binaries'?: Record<string, { 'binary-path'?: unknown }> }
+    const path = listed['rust-binaries']?.['bake-codemode::codemode']?.['binary-path']
+    return typeof path === 'string' && path.length > 0 ? path : undefined
+  } catch {
+    return undefined
+  }
 }
 
 /**
@@ -35,8 +60,7 @@ export interface RustTestPlan {
  *
  * The codemode suite shares one compiled Wasm engine per process, so it runs as
  * one `cargo test` process instead of nextest's process per test, started beside
- * nextest. Its build is already part of nextest's workspace build; while that build
- * holds Cargo's lock it waits. Warm runs on a 32-core Linux host (three each):
+ * nextest. Warm runs on a 32-core Linux host (three each):
  * nextest then the codemode suite in sequence took 16.1-20.6 s; codemode under
  * nextest in a test group took 17.1-19.9 s at 8 threads and 16.3-37.7 s at 16-32,
  * paying an engine compile per test; the suite beside nextest with a quarter of
@@ -44,13 +68,20 @@ export interface RustTestPlan {
  * a few cores and no such measurement, so CI keeps the suites in sequence, the
  * codemode suite on every core; see `runRustTestCommands`.
  *
+ * The suite runs the binary nextest built. `cargo test --workspace --test codemode`
+ * selects only bake-codemode's test target, so Cargo resolves features without
+ * the other members' dev-dependencies and compiles bake-codemode and Wasmtime a
+ * second time: CI run 39496362634 spent 2m 20s on Linux and 2m 37s on Windows
+ * there after nextest finished. `cargo test` remains the fallback when the
+ * binary is not listed.
+ *
  * A scoped run keeps `--workspace`, so features and artifacts match the full run,
  * and filters which tests run. Plain Cargo has no such filter: `-p` selection
  * resolves features for the selected packages only and rebuilds shared
  * dependencies, so macOS and runs without nextest test everything instead.
  */
 export function rustTestCommands(plan: RustTestPlan): readonly (readonly string[])[] {
-  const { args, nextest, ci, platform, cores, scope } = plan
+  const { args, nextest, ci, platform, cores, scope, codemodeBinary } = plan
   if (!nextest || platform === 'darwin' || args.length > 0) {
     return [['cargo', 'test', ...args.length === 0 ? ['--workspace', '--tests'] : [], '--locked', '--no-fail-fast', ...args]]
   }
@@ -60,11 +91,11 @@ export function rustTestCommands(plan: RustTestPlan): readonly (readonly string[
     // A package can have no tests on this platform; the filter still chose it correctly.
     ...scope === undefined ? [] : ['--no-tests', 'warn'],
     '-E', filter]
-  if (scope !== undefined && !scope.packages.includes('bake-codemode')) return [nextestRun]
-  // Workspace feature resolution again, so Cargo reuses nextest's artifacts.
+  if (!needsCodemodeSuite(plan)) return [nextestRun]
+  const threads = ci ? [] : [`--test-threads=${Math.max(2, Math.floor(cores / 4))}`]
+  if (codemodeBinary !== undefined) return [nextestRun, [codemodeBinary, ...threads]]
   const codemode = ['cargo', 'test', '--workspace', '--locked', '--test', 'codemode', '--no-fail-fast']
-  if (ci) return [nextestRun, codemode]
-  return [nextestRun, [...codemode, '--', `--test-threads=${Math.max(2, Math.floor(cores / 4))}`]]
+  return [nextestRun, threads.length === 0 ? codemode : [...codemode, '--', ...threads]]
 }
 
 /** A started command: its exit code, and a way to write output it held back. */
@@ -184,7 +215,17 @@ async function main(args: readonly string[]): Promise<number> {
     if (scope !== undefined && (process.platform === 'darwin' || !nextest)) console.log('test:rust: plain Cargo cannot filter a workspace run; running every test.')
   }
   const ci = process.env['CI'] === 'true'
-  const commands = rustTestCommands({ args: cargoArgs, nextest, ci, platform: process.platform, cores: availableParallelism(), scope })
+  const base = { args: cargoArgs, nextest, ci, platform: process.platform, cores: availableParallelism(), scope }
+  let codemodeBinary: string | undefined
+  if (needsCodemodeSuite(base)) {
+    // This builds the workspace's test binaries; a build failure ends the run here.
+    console.log(`$ ${CODEMODE_LIST.join(' ')}`)
+    const listed = Bun.spawnSync([...CODEMODE_LIST], { cwd: RUST_DIR, stdin: 'ignore', stdout: 'pipe', stderr: 'inherit' })
+    if (listed.exitCode !== 0) return listed.exitCode ?? 1
+    codemodeBinary = codemodeBinaryPath(listed.stdout.toString())
+    if (codemodeBinary === undefined) console.log('test:rust: nextest did not list the codemode binary; running it through cargo test.')
+  }
+  const commands = rustTestCommands({ ...base, codemodeBinary })
   return runRustTestCommands(commands, startRustTestProcess, !ci)
 }
 
