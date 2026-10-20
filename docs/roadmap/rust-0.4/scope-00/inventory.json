@@ -292,6 +292,9 @@
     "scripts:rust-pty": {
       "reason": "The Rust PTY driver's Windows ConPTY client; native terminal qualification tooling for bake, not a TypeScript contract."
     },
+    "scripts:rust-quality": {
+      "reason": "Mutation testing and coverage reports for the native workspace; on-demand evidence that its tests check its logic."
+    },
     "scripts:rust-tests": {
       "reason": "Native test execution, Cargo filters, and failure reporting for development and qualification."
     },
@@ -1285,6 +1288,7 @@
     {"path":"packages/web/web/tests/web.spec.ts","lane":"vitest-runtime","owner":"packages/web/web","scopes":["12"],"disposition":"reuse-oracle","basis":"packages/web"},
     {"path":"scripts/bun-invocation.test.ts","lane":"bun-scripts","owner":"scripts:workspace","scopes":["01"],"disposition":"replace-tooling","basis":"scripts:workspace"},
     {"path":"scripts/change-scope.test.ts","lane":"bun-scripts","owner":"scripts:workspace","scopes":["01"],"disposition":"replace-tooling","basis":"scripts:workspace"},
+    {"path":"scripts/ci-step-summary.test.ts","lane":"bun-scripts","owner":"scripts:workspace","scopes":["01"],"disposition":"replace-tooling","basis":"scripts:workspace"},
     {"path":"scripts/clean.test.ts","lane":"bun-scripts","owner":"scripts:workspace","scopes":["01"],"disposition":"replace-tooling","basis":"scripts:workspace"},
     {"path":"scripts/cordis-config-files.test.ts","lane":"bun-scripts","owner":"scripts:cordis","scopes":["05","12"],"disposition":"replace-tooling","basis":"scripts:cordis"},
     {"path":"scripts/cordis-core-api.test.ts","lane":"bun-scripts","owner":"scripts:cordis","scopes":["05","12"],"disposition":"replace-tooling","basis":"scripts:cordis"},
@@ -1330,10 +1334,15 @@
     {"path":"scripts/repo-files.spec.ts","lane":"vitest-runtime","owner":"scripts:workspace","scopes":["01"],"disposition":"replace-tooling","basis":"scripts:workspace"},
     {"path":"scripts/rescope-vendor.test.ts","lane":"bun-scripts","owner":"scripts:workspace","scopes":["01"],"disposition":"replace-tooling","basis":"scripts:workspace"},
     {"path":"scripts/run-oxlint.test.ts","lane":"bun-scripts","owner":"scripts:workspace","scopes":["01"],"disposition":"replace-tooling","basis":"scripts:workspace"},
+    {"path":"scripts/rust-coverage.test.ts","lane":"bun-scripts","owner":"scripts:rust-quality","scopes":["01"],"disposition":"replace-tooling","basis":"scripts:rust-quality"},
+    {"path":"scripts/rust-fuzz.test.ts","lane":"bun-scripts","owner":"scripts:rust-tests","scopes":["01"],"disposition":"replace-tooling","basis":"scripts:rust-tests"},
+    {"path":"scripts/rust-iterate.test.ts","lane":"bun-scripts","owner":"scripts:rust-tests","scopes":["01"],"disposition":"replace-tooling","basis":"scripts:rust-tests"},
     {"path":"scripts/rust-migration-baseline.test.ts","lane":"bun-scripts","owner":"scripts:migration","scopes":["00"],"disposition":"replace-tooling","basis":"scripts:migration"},
     {"path":"scripts/rust-migration-inventory.test.ts","lane":"bun-scripts","owner":"scripts:migration","scopes":["00"],"disposition":"replace-tooling","basis":"scripts:migration"},
     {"path":"scripts/rust-migration-ledger.test.ts","lane":"bun-scripts","owner":"scripts:qualification-ledger","scopes":["01","17"],"disposition":"reuse-oracle","basis":"scripts:qualification-ledger"},
+    {"path":"scripts/rust-mutants.test.ts","lane":"bun-scripts","owner":"scripts:rust-quality","scopes":["01"],"disposition":"replace-tooling","basis":"scripts:rust-quality"},
     {"path":"scripts/rust-pty-conpty.test.ts","lane":"bun-scripts","owner":"scripts:rust-pty","scopes":["14","15"],"disposition":"replace-tooling","basis":"scripts:rust-pty"},
+    {"path":"scripts/rust-scope.test.ts","lane":"bun-scripts","owner":"scripts:rust-tests","scopes":["01"],"disposition":"replace-tooling","basis":"scripts:rust-tests"},
     {"path":"scripts/rust-test.test.ts","lane":"bun-scripts","owner":"scripts:rust-tests","scopes":["01"],"disposition":"replace-tooling","basis":"scripts:rust-tests"},
     {"path":"scripts/session-fixture-layout.spec.ts","lane":"vitest-runtime","owner":"scripts:persistence","scopes":["02","03"],"disposition":"reuse-oracle","basis":"scripts:persistence"},
     {"path":"scripts/session-query-spill-command.spec.ts","lane":"vitest-runtime","owner":"scripts:persistence","scopes":["02","03"],"disposition":"reuse-oracle","basis":"scripts:persistence"},

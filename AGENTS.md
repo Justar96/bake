@@ -35,6 +35,10 @@ bun run dev:tui           # build and run the real Node agent
 bun run dev:rust          # build and run the interactive Rust agent (bake) against the Bake home
 bun run dev:rust:preview  # build and run the Rust TUI preview (fixture runtime, no model connection)
 bun run check:rust        # locked Rust format, lint, test, and build checks
+bun run iterate:rust      # Rust edit loop: fmt, clippy, and the tests the uncommitted change reaches
+bun run mutants:rust      # mutation testing of the changed Rust lines; prints missed mutants
+bun run coverage:rust     # Rust line and region coverage report
+bun run fuzz:rust         # cargo-fuzz targets in rust/fuzz on its nightly (--list, <target>, --all)
 bun run check             # TUI types, tests, layout, peer identity, and docs
 bun run test              # pure and Node integration tests
 bun run test:runtime <file>  # focused shared-runtime tests
@@ -51,7 +55,7 @@ bun run eval              # live paired agent-loop eval; needs a model route
 bun run eval:record       # commit an eval's metrics and flag regressions
 ```
 
-Run the checks relevant to your change while you work, and `bun run preflight` before pushing to `develop`; it reports every gate instead of stopping at the first failure. Full preflight requires the pinned Rust toolchain; `--fast` excludes native builds and PTY scenarios. Any terminal behavior change also requires the built-profile PTY scenarios. Tests that use Cordis or Ink run on Node; pure modules and tooling tests run on Bun; native workspace tests run under Cargo. Report only what you actually ran, including failures and skipped checks. Never bypass hooks without explicit approval.
+Run the checks relevant to your change while you work, and `bun run preflight` before pushing to `develop`. Outside CI, preflight runs only the Rust tests a change reaches; `--full` runs them all. Preflight reports every gate instead of stopping at the first failure. Full preflight requires the pinned Rust toolchain; `--fast` excludes native builds and PTY scenarios. Any terminal behavior change also requires the built-profile PTY scenarios. Tests that use Cordis or Ink run on Node; pure modules and tooling tests run on Bun; native workspace tests run under Cargo. Report only what you actually ran, including failures and skipped checks. Never bypass hooks without explicit approval.
 
 ## Branches and releases
 

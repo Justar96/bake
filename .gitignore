@@ -68,3 +68,14 @@ rust/fuzz/coverage/
 rust/fuzz/generated/
 rust/fuzz/corpus/*/*
 !rust/fuzz/corpus/*/seed-*
+
+# Symposium (rust/SYMPOSIUM.toml): `cargo agents sync` installs skill copies
+# and project hooks for each configured agent beside the Cargo workspace.
+rust/.agents/
+rust/.claude/
+rust/.codex/
+rust/.gemini/
+rust/.github/
+rust/.goose/
+rust/.kiro/
+rust/.opencode/
