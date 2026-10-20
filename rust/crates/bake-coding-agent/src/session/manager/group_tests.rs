@@ -277,8 +277,10 @@ fn every_prefix_of_a_group_loads_and_rebuilds_a_valid_request() {
         let all: Vec<SessionEntry> = manager.entries().into_iter().cloned().collect();
         drop(manager);
         let bytes = std::fs::read(&file).expect("read");
-        let copy = dir.join("prefix.jsonl");
         for cut in before..=bytes.len() {
+            // Each prefix owns its lock path: another test's child may
+            // inherit a just-closed descriptor until it reaches exec.
+            let copy = dir.join(&format!("prefix-{cut}.jsonl"));
             let prefix = &bytes[..cut];
             std::fs::write(&copy, prefix).expect("write prefix");
             // Complete lines, and a last line whose whole JSON is there.

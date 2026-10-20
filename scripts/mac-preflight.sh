@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Remote commands are built here on purpose, from values this script controls.
 # shellcheck disable=SC2029
-# Run a check on a Mac over SSH against this checkout's working tree, since no
-# CI job runs on macOS. Tracked changes go too, staged or not; untracked
+# Run a check on a Mac over SSH against this checkout's working tree.
+# Intel macOS is checked here. Tracked changes go too, staged or not; untracked
 # files do not.
 #
 #   bun run preflight:mac [command...]   default: bun run preflight --only native
@@ -71,6 +71,13 @@ git checkout -q --force --detach "$ref"
 git clean -qfdx -e rust/target -e node_modules -e .preflight
 rm -f ../last.log ../last.status
 status_file=$HOME/$dir/last.status
+# Cargo shares one process among concurrent cases. A macOS SSH shell's
+# default 256 descriptors cannot hold their files, pipes, and sockets.
+mac_nofile=$(ulimit -Sn)
+if [[ $mac_nofile != unlimited ]] && (( mac_nofile < 4096 )); then
+  ulimit -Sn 4096
+fi
+echo "preflight:mac: open-file limit $(ulimit -Sn)"
 # The command runs in a subshell, so an `exit` in it still leaves a status.
 nohup bash -c "bun install --frozen-lockfile >/dev/null 2>&1; ($cmd); echo \$? > '$status_file'" \
   > ../last.log 2>&1 < /dev/null &

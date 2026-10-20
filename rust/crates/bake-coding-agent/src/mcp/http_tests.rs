@@ -413,6 +413,15 @@ async fn an_expired_session_re_initializes_and_republishes_its_tools() {
     let started = start(entry(&server.url), quick(), None);
     started.wait_for("the first generation", connected).await;
     assert_eq!(started.servers.tool_names(), ["mcp__remote__echo"]);
+    // The GET starts only after `notifications/initialized` is accepted.
+    // Expiring earlier can reject that notification before the tool is posted.
+    tokio::time::timeout(BOUND, async {
+        while server.with_method("GET").is_empty() {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+    })
+    .await
+    .expect("the server accepted the initialization notification");
     state.set(|state| {
         state.expired.insert("session-1".to_owned());
         state.session = "session-2".to_owned();
