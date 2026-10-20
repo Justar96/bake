@@ -4,6 +4,8 @@ Notable changes to Bake. `/changelog` in the terminal prints the section for the
 
 ## [Unreleased]
 
+- Development: native releases have their own publication route, `native/stable.json` and `native/releases/<version>/` on the download host, signed by a separate Ed25519 key that is still a placeholder nobody holds. `bun run release:assemble:rust` stages and signs checked native archives, the host's image build verifies the native manifest, and the channel safeguards refuse a native archive on the 0.3 route, 0.3 publication after a native 0.4.0, and either channel moving backward. Nothing is published yet, and no installer, update, or rollback reads the route.
+
 - Rust background jobs commit their start before executing and their terminal state before publication. Resumed sessions preserve recorded outcomes and observations, report uncertain effects honestly, and never restart a lost process automatically. Job waits also stop at their original deadline across notice-triggered turns.
 - Rust print mode drains its final background summary before closing event output, preserving terminal attempt accounting. A failed required debit write exits with status 1; unreported provider usage remains unknown.
 
