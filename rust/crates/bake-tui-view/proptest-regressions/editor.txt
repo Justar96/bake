@@ -4,7 +4,7 @@
 #
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
-cc a71e63b3f00e5fe1cca5283a3bb5e6b6a239226aafc0e7c6f71300de7f621688 # shrinks to text = "\r", width = 0
-cc 02b1b829e99d897a121c3c355e6c97cf1518344799fb3045da6df82ab2827694 # shrinks to text = "\r", width = 0
-cc 2d6c3d31ceff24de7ddb9a71d3208610b0e1de79ffe51e5b1d65629c47db6f85 # shrinks to text = "\r", width = 0
-cc 75eab307fb6e1a531b23c79b34f6a5f33a6d1d19f482f7514f020a1862592b67 # shrinks to text = "\r", width = 0, at = Index(0)
+cc b3d589172253993393248665e61d2f96c5efd8eecde6210557b0c05c589a3940 # shrinks to text = "\r", width = 0
+cc 0e5847cc64c217b66b70f082c1eeb1714d3019610557648ff7a68f114ef17707 # shrinks to text = "\r", width = 0
+cc 9c10d6b87273e25041f98be1ced2e02c32ec0c5e886568582e3cd35bd3ed6006 # shrinks to text = "\u{1b}", width = 0
+cc c17f0eb5b9033024713a98d8e83d7fca9262ab4720260dc0911d232569273a59 # shrinks to text = "\r", width = 0, at = Index(0)

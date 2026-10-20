@@ -864,9 +864,10 @@ pub fn sanitize(input: &str) -> String {
 }
 
 /// Terminal cells one grapheme other than a tab occupies. A grapheme that
-/// holds a control character takes none: Ratatui's buffer never draws one,
-/// and its own `cell_width` asserts in debug builds that none reaches it,
-/// while model text reaches the transcript's wrapping unsanitized.
+/// holds a control character (C0, DEL, or C1) takes none: Ratatui's buffer
+/// drops every such grapheme, and its own `cell_width` asserts in debug
+/// builds that none reaches it, while model text reaches the transcript's
+/// wrapping unsanitized.
 pub fn cell_width(grapheme: &str) -> usize {
     if grapheme.contains(char::is_control) {
         return 0;
