@@ -56,7 +56,7 @@ describe('Rust change scope', () => {
   })
 
   it('selects nothing for paths no Rust package reads', () => {
-    for (const files of [[], ['docs/architecture.md'], ['packages/core/agent/src/index.ts', 'scripts/preflight.ts', 'package.json']]) {
+    for (const files of [[], ['docs/architecture.md'], ['packages/core/agent/src/index.ts', 'scripts/doc-sync.ts', 'package.json']]) {
       expect(rustScope(files, graph)).toEqual({ kind: 'none' })
       expect(files.some(isRustInput)).toBe(false)
     }
@@ -162,6 +162,14 @@ function stringLiterals(code: string): { value: string; index: number }[] {
 
 const ANCHORED = /(?:include_str!|include_bytes!)\s*\(\s*$|#\[path\s*=\s*$/u
 
+/** The absolute paths a literal can name, given the code before it, its source file, and its package directory. */
+function literalTargets(before: string, literal: string, source: string, own: string): string[] {
+  if (ANCHORED.test(before)) return [resolve(dirname(source), literal)]
+  // `concat!(env!("CARGO_MANIFEST_DIR"), "/../x")` joins onto the package directory, not the root.
+  if (literal.includes('../')) return [resolve(own, literal.replace(/^\/+/u, ''))]
+  return /^[\w.-]+\/[\w./-]+$/u.test(literal) ? [resolve(RUST, literal)] : []
+}
+
 /**
  * String literals in a member's sources that name an existing path outside that member:
  * `include_str!`, `include_bytes!`, and `#[path]` resolve from the source file; other `../`
@@ -178,10 +186,7 @@ function externalReferences(): Reference[] {
       const code = readFileSync(source, 'utf8')
       for (const { value: literal, index } of stringLiterals(code)) {
         const before = code.slice(Math.max(0, index - 40), index)
-        const candidates = ANCHORED.test(before) ? [resolve(dirname(source), literal)]
-          : literal.includes('../') ? [resolve(own, literal)]
-            : /^[\w.-]+\/[\w./-]+$/u.test(literal) ? [resolve(RUST, literal)] : []
-        for (const absolute of candidates) {
+        for (const absolute of literalTargets(before, literal, source, own)) {
           const target = relative(ROOT, absolute).replaceAll('\\', '/')
           // The member's own files, and its ancestors (`..`, `../..`) as join bases, are not inputs.
           if (target === '' || target.startsWith('../') || !existsSync(absolute)) continue
@@ -232,6 +237,17 @@ describe('Rust external input table', () => {
 })
 
 describe('Rust string literal scan', () => {
+  it('resolves each literal form from the base Rust resolves it from', () => {
+    const own = join(RUST, 'crates/bake-x')
+    const source = join(own, 'tests/a.rs')
+    expect(literalTargets('include_str!(', '../../../../CHANGELOG.md', source, own)).toEqual([join(ROOT, 'CHANGELOG.md')])
+    expect(literalTargets('#[path = ', '../src/b.rs', source, own)).toEqual([join(own, 'src/b.rs')])
+    expect(literalTargets('Path::new(', '../bake-y/f', source, own)).toEqual([join(RUST, 'crates/bake-y/f')])
+    expect(literalTargets('concat!(env!("CARGO_MANIFEST_DIR"), ', '/../bake-y/f', source, own)).toEqual([join(RUST, 'crates/bake-y/f')])
+    expect(literalTargets('rust_dir().join(', 'plugins/guard', source, own)).toEqual([join(RUST, 'plugins/guard')])
+    expect(literalTargets('println!(', 'no path', source, own)).toEqual([])
+  })
+
   it('skips comments and character literals and reads raw strings', () => {
     const code = [
       'let q = \'"\'; let e = \'\\\'\'; fn f<\'a>(x: &\'a str) {}',

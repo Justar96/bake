@@ -57,6 +57,8 @@ describe('Rust test runner', () => {
     expect(commands[0]).toContain('not binary_id(bake-codemode::codemode)')
     expect(commands[1]).toEqual(CODEMODE_SUITE)
     expect(rustTestCommands(plan({ cores: 4 }))[1]).toContain('--test-threads=2')
+    // CI runs the suite after nextest, so it takes every core.
+    expect(rustTestCommands(plan({ ci: true }))[1]).toEqual(CODEMODE_SUITE.slice(0, CODEMODE_SUITE.indexOf('--')))
   })
 
   it('filters a scoped run by package over the whole workspace, with the engine suite only when it is reached', () => {
@@ -73,15 +75,32 @@ describe('Rust test runner', () => {
 
   it('retains an earlier failure and finishes the other suite without retrying', async () => {
     const commands = rustTestCommands(plan({}))
-    for (const failed of [0, 1]) {
-      const ran: (readonly string[])[] = []
-      const code = await runRustTestCommands(commands, (command) => {
-        ran.push(command)
-        return { exited: Promise.resolve(ran.length - 1 === failed ? 17 : 0), release: () => {} }
-      })
-      expect(code).toBe(17)
-      expect(ran).toEqual([...commands])
+    for (const concurrent of [true, false]) {
+      for (const failed of [0, 1]) {
+        const ran: (readonly string[])[] = []
+        const code = await runRustTestCommands(commands, (command) => {
+          ran.push(command)
+          return { exited: Promise.resolve(ran.length - 1 === failed ? 17 : 0), release: () => {} }
+        }, concurrent)
+        expect(code).toBe(17)
+        expect(ran).toEqual([...commands])
+      }
     }
+  })
+
+  it('starts each suite after the one before exits when not concurrent, with output live', async () => {
+    const events: string[] = []
+    let finishFirst = (_code: number): void => {}
+    const first = new Promise<number>((done) => { finishFirst = done })
+    const running = runRustTestCommands([['first'], ['second']], (command, held) => {
+      events.push(`start ${command[0]} held=${held}`)
+      return { exited: command[0] === 'first' ? first : Promise.resolve(0), release: () => { events.push(`release ${command[0]}`) } }
+    }, false)
+    await Promise.resolve()
+    expect(events).toEqual(['start first held=false'])
+    finishFirst(5)
+    expect(await running).toBe(5)
+    expect(events).toEqual(['start first held=false', 'release first', 'start second held=false', 'release second'])
   })
 
   it('starts the suites together and writes held output only after the earlier suites finish', async () => {
@@ -92,7 +111,7 @@ describe('Rust test runner', () => {
       events.push(`start ${command[0]} held=${held}`)
       const exited = command[0] === 'first' ? first : Promise.resolve(3)
       return { exited, release: () => { events.push(`release ${command[0]}`) } }
-    })
+    }, true)
     await Promise.resolve()
     expect(events).toEqual(['start first held=false', 'start second held=true'])
     finishFirst(0)

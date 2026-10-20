@@ -408,9 +408,10 @@ async function resolveScope(options: Options): Promise<Scope> {
     const mergeBase = await capture(['git', 'merge-base', base, 'HEAD']).then(out => out.trim(), () => undefined)
     if (mergeBase === undefined) continue
     // Both sides of a rename, so moving a file out of a tree still changes that tree.
-    const changed = await capture(['git', 'diff', '--name-only', '--no-renames', mergeBase])
-    const untracked = await capture(['git', 'ls-files', '--others', '--exclude-standard'])
-    const files = [...new Set([...changed.split('\n'), ...untracked.split('\n')].filter(Boolean))].sort()
+    // Raw NUL-separated paths: git quotes unusual names in its line output.
+    const changed = await capture(['git', '-c', 'core.quotepath=off', 'diff', '--name-only', '--no-renames', '-z', mergeBase])
+    const untracked = await capture(['git', '-c', 'core.quotepath=off', 'ls-files', '--others', '--exclude-standard', '-z'])
+    const files = [...new Set([...changed.split('\0'), ...untracked.split('\0')].filter(Boolean))].sort()
     return { base, mergeBase, files }
   }
   return { base: candidates.join(' or '), mergeBase: undefined, files: [] }

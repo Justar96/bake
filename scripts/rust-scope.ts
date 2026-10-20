@@ -51,7 +51,7 @@ export const RUST_EXTERNAL_INPUTS: readonly RustExternalInput[] = [
 ]
 
 /** Scripts that decide which Rust tests run; a change to them checks itself against the whole suite. */
-export const RUST_SCOPE_RUNNERS: readonly string[] = ['scripts/rust-scope.ts', 'scripts/rust-test.ts']
+export const RUST_SCOPE_RUNNERS: readonly string[] = ['scripts/preflight.ts', 'scripts/rust-scope.ts', 'scripts/rust-test.ts']
 
 /** A workspace member and the members it depends on through any dependency kind. */
 export interface RustPackage {
@@ -214,11 +214,18 @@ export function changesSinceMergeBase(base: string, root: string = ROOT): { merg
   return { mergeBase, files: [...new Set([...paths(diff), ...paths(git(UNTRACKED, root))])].sort() }
 }
 
-/** Uncommitted and untracked paths, or HEAD's own commit when the tree is clean. */
-export function worktreeChanges(root: string = ROOT): { from: string; files: string[] } {
-  const files = [...new Set([...paths(git([...DIFF, 'HEAD', '--'], root)), ...paths(git(UNTRACKED, root))])].sort()
+/**
+ * Uncommitted and untracked paths, or HEAD's own commit when the tree is clean;
+ * undefined when git cannot list them, as with no HEAD~1 in a one-commit or shallow clone.
+ */
+export function worktreeChanges(root: string = ROOT): { from: string; files: string[] } | undefined {
+  const uncommitted = git([...DIFF, 'HEAD', '--'], root)
+  const untracked = git(UNTRACKED, root)
+  if (uncommitted === undefined || untracked === undefined) return undefined
+  const files = [...new Set([...paths(uncommitted), ...paths(untracked)])].sort()
   if (files.length > 0) return { from: 'uncommitted changes', files }
-  return { from: 'HEAD~1..HEAD', files: paths(git([...DIFF, 'HEAD~1', 'HEAD', '--'], root)).sort() }
+  const head = git([...DIFF, 'HEAD~1', 'HEAD', '--'], root)
+  return head === undefined ? undefined : { from: 'HEAD~1..HEAD', files: paths(head).sort() }
 }
 
 /** The base a scoped run measures from when none is given; the first that resolves wins. */

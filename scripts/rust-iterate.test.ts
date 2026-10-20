@@ -50,6 +50,12 @@ describe('Rust iterate loop', () => {
     expect(() => iterateScope({ packages: [], base: 'nowhere', all: false, clippy: true }, workspace, changes)).toThrow(/no merge base/u)
   })
 
+  it('tests everything when git cannot list the change', () => {
+    const unreadable = { worktree: () => undefined, since: unused.since }
+    expect(iterateScope({ packages: [], base: undefined, all: false, clippy: true }, workspace, unreadable).scope)
+      .toEqual({ kind: 'full', reason: 'git cannot list the change' })
+  })
+
   it('stops at the first failing stage and times every stage it ran', async () => {
     let clock = 0
     const ran: string[] = []

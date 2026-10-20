@@ -6,9 +6,10 @@
  *   bun run iterate:rust [-p <crate> ...] [--base <ref>] [--all] [--no-clippy]
  *
  * By default the change is the uncommitted and untracked paths against HEAD, or
- * HEAD's own commit when the tree is clean. `--base <ref>` measures from the merge
- * base with `<ref>` instead; `-p` names the packages directly; `--all` tests
- * everything. Each selection adds the selected packages' reverse dependents.
+ * HEAD's own commit when the tree is clean; when git cannot list it, every test
+ * runs. `--base <ref>` measures from the merge base with `<ref>` instead; `-p`
+ * names the packages directly; `--all` tests everything. Each selection adds the
+ * selected packages' reverse dependents.
  */
 import { availableParallelism } from 'node:os'
 import { resolve } from 'node:path'
@@ -55,7 +56,8 @@ export function parseIterateOptions(argv: readonly string[]): IterateOptions | '
 
 /** Where a run reads its changed paths. */
 export interface IterateChanges {
-  readonly worktree: () => { from: string; files: readonly string[] }
+  /** Undefined when git cannot list the change. */
+  readonly worktree: () => { from: string; files: readonly string[] } | undefined
   readonly since: (base: string) => { mergeBase: string; files: readonly string[] } | undefined
 }
 
@@ -77,6 +79,7 @@ export function iterateScope(
     return { from: `the merge base with ${options.base} (${since.mergeBase.slice(0, 10)})`, scope: rustScope(since.files, workspace) }
   }
   const worktree = changes.worktree()
+  if (worktree === undefined) return { from: 'every package', scope: { kind: 'full', reason: 'git cannot list the change' } }
   return { from: worktree.from, scope: rustScope(worktree.files, workspace) }
 }
 
@@ -142,7 +145,7 @@ async function main(argv: readonly string[]): Promise<number> {
         scope: resolved.scope.kind === 'packages' ? resolved.scope : undefined,
       })
       for (const command of commands) console.log(`$ ${command.join(' ')}`)
-      return runRustTestCommands(commands, startRustTestProcess)
+      return runRustTestCommands(commands, startRustTestProcess, true)
     },
   })
   const { code, times } = await runStages(stages)

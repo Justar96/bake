@@ -21,6 +21,7 @@ export interface RustTestPlan {
   /** Cargo arguments after `test`; when given, the run is one plain `cargo test`. */
   readonly args: readonly string[]
   readonly nextest: boolean
+  /** CI selects nextest's JUnit profile and runs the suites in sequence. */
   readonly ci: boolean
   readonly platform: string
   /** Logical cores, which bound the engine suite's threads beside nextest. */
@@ -39,7 +40,9 @@ export interface RustTestPlan {
  * nextest then the codemode suite in sequence took 16.1-20.6 s; codemode under
  * nextest in a test group took 17.1-19.9 s at 8 threads and 16.3-37.7 s at 16-32,
  * paying an engine compile per test; the suite beside nextest with a quarter of
- * the cores took 12.0-12.3 s, and with every core 13.5-14.0 s.
+ * the cores took 12.0-12.3 s, and with every core 13.5-14.0 s. CI runners have
+ * a few cores and no such measurement, so CI keeps the suites in sequence, the
+ * codemode suite on every core; see `runRustTestCommands`.
  *
  * A scoped run keeps `--workspace`, so features and artifacts match the full run,
  * and filters which tests run. Plain Cargo has no such filter: `-p` selection
@@ -58,9 +61,10 @@ export function rustTestCommands(plan: RustTestPlan): readonly (readonly string[
     ...scope === undefined ? [] : ['--no-tests', 'warn'],
     '-E', filter]
   if (scope !== undefined && !scope.packages.includes('bake-codemode')) return [nextestRun]
-  const threads = Math.max(2, Math.floor(cores / 4))
   // Workspace feature resolution again, so Cargo reuses nextest's artifacts.
-  return [nextestRun, ['cargo', 'test', '--workspace', '--locked', '--test', 'codemode', '--no-fail-fast', '--', `--test-threads=${threads}`]]
+  const codemode = ['cargo', 'test', '--workspace', '--locked', '--test', 'codemode', '--no-fail-fast']
+  if (ci) return [nextestRun, codemode]
+  return [nextestRun, [...codemode, '--', `--test-threads=${Math.max(2, Math.floor(cores / 4))}`]]
 }
 
 /** A started command: its exit code, and a way to write output it held back. */
@@ -70,16 +74,19 @@ export interface RustTestProcess {
 }
 
 /**
- * Start every command at once and finish all of them, retaining the first failure.
- * Each command after the first holds its output, which is written once every earlier
- * command has finished, so suites never interleave in a gate log. Nothing is retried.
+ * Finish every command, retaining the first failure; nothing is retried.
+ * Concurrent commands start at once, and each after the first holds its output,
+ * which is written once every earlier command has finished, so suites never
+ * interleave in a gate log. Otherwise each starts when the one before exits.
  */
 export async function runRustTestCommands(
   commands: readonly (readonly string[])[], start: (command: readonly string[], held: boolean) => RustTestProcess,
+  concurrent: boolean,
 ): Promise<number> {
-  const processes = commands.map((command, index) => start(command, index > 0))
+  const started = concurrent ? commands.map((command, index) => start(command, index > 0)) : undefined
   let code = 0
-  for (const child of processes) {
+  for (const [index, command] of commands.entries()) {
+    const child = started?.[index] ?? start(command, false)
     const result = await child.exited
     child.release()
     if (result !== 0 && code === 0) code = result
@@ -176,10 +183,9 @@ async function main(args: readonly string[]): Promise<number> {
     else if (!nextest) console.log('test:rust: cargo-nextest is unavailable; using cargo test (see rust/README.md).')
     if (scope !== undefined && (process.platform === 'darwin' || !nextest)) console.log('test:rust: plain Cargo cannot filter a workspace run; running every test.')
   }
-  const commands = rustTestCommands({
-    args: cargoArgs, nextest, ci: process.env['CI'] === 'true', platform: process.platform, cores: availableParallelism(), scope,
-  })
-  return runRustTestCommands(commands, startRustTestProcess)
+  const ci = process.env['CI'] === 'true'
+  const commands = rustTestCommands({ args: cargoArgs, nextest, ci, platform: process.platform, cores: availableParallelism(), scope })
+  return runRustTestCommands(commands, startRustTestProcess, !ci)
 }
 
 if (import.meta.main) process.exit(await main(process.argv.slice(2)))
