@@ -21,7 +21,9 @@
 //! continues; without one, every page of every server with its listing
 //! errors. MCP App resources (`ui://` URIs and `profile=mcp-app` media
 //! types) and icons are left out: they are user interfaces for hosts that
-//! render them. A read becomes model-facing text and images through
+//! render them, and so is a `server` key an entry of the server's own
+//! carries, which is Bake's attribution, not the server's data. A read becomes
+//! model-facing text and images through
 //! [`super::tools`]'s conversion, so a binary resource is saved to a private
 //! file the note names and text over [`super::MCP_OUTPUT_MAX_BYTES`] keeps
 //! its start and end beside the file holding all of it. Scripts receive the
