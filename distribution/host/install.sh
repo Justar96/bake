@@ -423,31 +423,54 @@ set_verifier() {
   printf 'r' > "$probe/message"
   printf 'x' > "$probe/other"
   tried=
-  for candidate in ${BAKE_OPENSSL:-openssl /opt/homebrew/opt/openssl@3/bin/openssl /usr/local/opt/openssl@3/bin/openssl}; do
-    need "$candidate" || continue
-    verifier=openssl
-    openssl_command=$candidate
-    if verify_signature "$ed25519_test_key" "$ed25519_test_signature" "$probe/message" \
-      && ! verify_signature "$ed25519_test_key" "$ed25519_test_signature" "$probe/other"; then
-      return 0
-    fi
-    tried="$tried $candidate"
-  done
-  verifier=
-  openssl_command=
-  # Only macOS has osascript, so this is the Mac's fallback; the probe above
-  # proves it before the manifest is read, as it proves an openssl.
+  if [ -n "${BAKE_OPENSSL:-}" ]; then
+    # The one this host was told to use, and no other.
+    probe_openssl "$BAKE_OPENSSL" && return 0
+  else
+    probe_openssl openssl && return 0
+    probe_openssl /opt/homebrew/opt/openssl@3/bin/openssl && return 0
+    probe_openssl /usr/local/opt/openssl@3/bin/openssl && return 0
+  fi
+  # Only macOS has osascript, so this is the Mac's fallback; it is proven on
+  # the same vector, before the manifest is read.
   if need osascript && need base64 && need od && { need shasum || need sha512sum; }; then
     verifier=javascript
-    if verify_signature "$ed25519_test_key" "$ed25519_test_signature" "$probe/message" \
-      && ! verify_signature "$ed25519_test_key" "$ed25519_test_signature" "$probe/other"; then
+    if probe_verifier; then
       return 0
     fi
     verifier=
-    tried="$tried osascript"
+    tried="$tried
+  the verifier this script embeds, run by osascript"
   fi
-  [ -n "$tried" ] || tried=' nothing: no openssl is installed'
-  fail "nothing here verifies the release signature, which is Ed25519 (tried:$tried); install OpenSSL 3 (brew install openssl@3) or name one with BAKE_OPENSSL"
+  fail "nothing here verifies the release signature, which is Ed25519. Tried:$tried
+Install OpenSSL 3 (brew install openssl@3) or name one with BAKE_OPENSSL."
+}
+
+# Whether the openssl at `$1` exists and verifies Ed25519, which makes it
+# this install's verifier.
+probe_openssl() {
+  if ! need "$1"; then
+    tried="$tried
+  $1, which is not installed"
+    return 1
+  fi
+  verifier=openssl
+  openssl_command=$1
+  if probe_verifier; then
+    return 0
+  fi
+  verifier=
+  openssl_command=
+  tried="$tried
+  $1"
+  return 1
+}
+
+# Whether the chosen verifier accepts the embedded vector over its own
+# message and refuses it over another one.
+probe_verifier() {
+  verify_signature "$ed25519_test_key" "$ed25519_test_signature" "$probe/message" \
+    && ! verify_signature "$ed25519_test_key" "$ed25519_test_signature" "$probe/other"
 }
 
 # Set `target` to this host's release platform.
