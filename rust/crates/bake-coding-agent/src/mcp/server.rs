@@ -8,6 +8,11 @@
 //! end the process; here the same task that started the server stops it,
 //! and its permit holds the session's shutdown until the server's process
 //! and tree are gone.
+//!
+//! This module owns a stdio server and the part both transports share:
+//! [`serve`], which initializes, lists, publishes, and watches one
+//! connection. [`super::http`] owns a Streamable HTTP server's admitted
+//! egress, connections, and reconnection over the same [`serve`].
 
 use std::ffi::OsString;
 use std::future::Future;
@@ -46,10 +51,14 @@ pub(crate) struct ServerContext {
     pub(crate) sandbox: Arc<dyn SandboxProvider>,
     pub(crate) cwd: PathBuf,
     pub(crate) work: WorkGate,
+    /// What a Streamable HTTP server connects with ([`super::http`]).
+    pub(crate) http: super::McpHttpOptions,
+    /// The resolver its egress admission pins addresses from.
+    pub(crate) resolver: super::egress::HostResolver,
 }
 
 /// How serving ended.
-enum End {
+pub(super) enum End {
     /// The session is shutting down.
     Cancelled,
     /// Setup failed; nothing was published.
@@ -60,13 +69,16 @@ enum End {
 
 /// The connection's owner at each stage, so whichever stage is interrupted
 /// is the one shut down.
-enum Connection {
+pub(super) enum Connection {
     Connecting(Box<Connecting>),
     Client(Arc<McpClient>),
 }
 
 /// `future`, unless `signal` aborts first; `None` drops the future.
-async fn unless_aborted<T>(signal: &AbortSignal, future: impl Future<Output = T>) -> Option<T> {
+pub(super) async fn unless_aborted<T>(
+    signal: &AbortSignal,
+    future: impl Future<Output = T>,
+) -> Option<T> {
     tokio::select! {
         biased;
         () = signal.cancelled() => None,
@@ -78,20 +90,30 @@ async fn unless_aborted<T>(signal: &AbortSignal, future: impl Future<Output = T>
 /// it and waits until its process and tree are gone.
 pub(crate) async fn run(context: ServerContext, scope: TaskScope) {
     let signal = scope.signal().clone();
-    let servers = &context.servers;
-    let index = context.index;
-    let Some(entry) = servers.entry(index) else {
+    let Some(entry) = context.servers.entry(context.index) else {
         return;
     };
-    let command = match unless_aborted(&signal, admit(&context, &entry)).await {
+    match &entry.transport {
+        McpTransportConfig::Http(config) => {
+            super::http::run(&context, &entry, config, &signal).await;
+        }
+        McpTransportConfig::Stdio(_) => run_stdio(context, &entry, &signal).await,
+    }
+}
+
+/// Runs one stdio server: admission, spawn, serving, and an awaited stop.
+async fn run_stdio(context: ServerContext, entry: &McpServerEntry, signal: &AbortSignal) {
+    let servers = &context.servers;
+    let index = context.index;
+    let command = match unless_aborted(signal, admit(&context, entry)).await {
         None => return servers.set_state(index, McpServerState::Closed),
         Some(Err(refusal)) => return servers.set_state(index, refusal),
         Some(Ok(command)) => command,
     };
-    let options = stdio_options(&entry, servers.timings());
+    let options = stdio_options(entry, servers.timings());
     // The spawn may suspend only before the process exists, so dropping it
     // leaves nothing running.
-    let (process, connecting) = match unless_aborted(&signal, spawn_stdio(command, options)).await {
+    let (process, connecting) = match unless_aborted(signal, spawn_stdio(command, options)).await {
         None => return servers.set_state(index, McpServerState::Closed),
         Some(Ok(started)) => started,
         Some(Err(SpawnError::Started { process, error })) => {
@@ -111,7 +133,7 @@ pub(crate) async fn run(context: ServerContext, scope: TaskScope) {
                     entry.name
                 ),
             };
-            stop(&context, None, &process).await;
+            stop_process(&context, &process).await;
             return servers.set_state(
                 index,
                 McpServerState::Failed {
@@ -130,10 +152,12 @@ pub(crate) async fn run(context: ServerContext, scope: TaskScope) {
     };
     // Owned together from here, before the first suspending `initialize`.
     let mut connection = Connection::Connecting(Box::new(connecting));
-    let end = serve(&context, &entry, &signal, &mut connection).await;
+    let mut generation = 0_u64;
+    let end = serve(&context, entry, signal, &mut connection, &mut generation).await;
     // No later prompt declares the tools of a server being stopped.
     servers.withdraw(index, McpServerState::Stopping { retrying: false });
-    stop(&context, Some(&connection), &process).await;
+    stop_client(&connection).await;
+    stop_process(&context, &process).await;
     let state = match end {
         End::Cancelled => McpServerState::Closed,
         End::Failed(error) => McpServerState::Failed {
@@ -146,13 +170,20 @@ pub(crate) async fn run(context: ServerContext, scope: TaskScope) {
     servers.set_state(index, state);
 }
 
-/// The client and process options a server runs with; checked by
+/// The client options every transport's server runs with: Bake as the
+/// client, and the entry's `timeout` as each request's deadline, which is
+/// also what bounds a stalled `initialize`.
+pub(super) fn client_options(entry: &McpServerEntry) -> ClientOptions {
+    let mut client = ClientOptions::new(Implementation::new("bake", env!("CARGO_PKG_VERSION")));
+    client.request_timeout = Some(entry.settings.timeout);
+    client
+}
+
+/// The client and process options a stdio server runs with; checked by
 /// [`super::validate`] before any server starts, and again by
 /// `spawn_stdio`.
 pub(crate) fn stdio_options(entry: &McpServerEntry, timings: super::McpTimings) -> StdioOptions {
-    let mut client = ClientOptions::new(Implementation::new("bake", env!("CARGO_PKG_VERSION")));
-    client.request_timeout = Some(entry.settings.timeout);
-    let mut options = StdioOptions::new(client);
+    let mut options = StdioOptions::new(client_options(entry));
     options.stdin_close_grace = timings.stdin_close_grace;
     options.terminate_grace = timings.terminate_grace;
     options.kill_wait = timings.kill_wait;
@@ -176,12 +207,15 @@ fn with_stderr(error: String, process: &StdioProcess) -> String {
 }
 
 /// Initializes, lists, publishes, and serves until the session's shutdown,
-/// a failure, or the connection's end.
-async fn serve(
+/// a failure, or the connection's end. `generation` counts the listings
+/// this server has published, so a reconnected HTTP server's generations go
+/// on from where the last connection left them.
+pub(super) async fn serve(
     context: &ServerContext,
     entry: &McpServerEntry,
     signal: &AbortSignal,
     connection: &mut Connection,
+    generation: &mut u64,
 ) -> End {
     let servers = &context.servers;
     let index = context.index;
@@ -205,7 +239,6 @@ async fn serve(
         client: Arc::clone(&client),
         work: context.work.clone(),
     });
-    let mut generation = 0_u64;
     // Servers without the tools capability need not answer `tools/list`.
     let lists = client.server().capabilities.tools().is_some();
     match list(&caller, entry, signal, lists).await {
@@ -216,16 +249,17 @@ async fn serve(
             ));
         }
         Some(Ok(tools)) => {
-            generation += 1;
+            let first = *generation + 1;
             if let Err(error) = servers.publish(index, tools, |count| McpServerState::Connected {
                 tools: count,
-                generation,
+                generation: first,
                 refresh_error: None,
             }) {
                 return End::Failed(format!(
                     "MCP server \"{name}\" offered tools that were refused: {error}"
                 ));
             }
+            *generation = first;
         }
     }
     let mut events_open = true;
@@ -245,14 +279,14 @@ async fn serve(
                     None => return End::Cancelled,
                     Some(listed) => {
                         let published = listed.and_then(|tools| {
-                            let next = generation + 1;
+                            let next = *generation + 1;
                             servers
                                 .publish(index, tools, |count| McpServerState::Connected {
                                     tools: count,
                                     generation: next,
                                     refresh_error: None,
                                 })
-                                .map(|()| generation = next)
+                                .map(|()| *generation = next)
                         });
                         if let Err(error) = published {
                             keep_generation(servers, index, format!("failed to refresh tools: {error}"));
@@ -314,19 +348,23 @@ async fn list(
     )
 }
 
-/// Shuts the client down, then the process, until the server and its tree
-/// are gone. An incomplete shutdown keeps everything owned and is retried:
-/// each attempt waits within [`McpTimings::kill_wait`](super::McpTimings).
-async fn stop(context: &ServerContext, connection: Option<&Connection>, process: &StdioProcess) {
+/// Shuts the connection down at whichever stage it reached, and returns
+/// once its driver task has ended and dropped both transport halves.
+pub(super) async fn stop_client(connection: &Connection) {
     match connection {
-        Some(Connection::Connecting(connecting)) => {
+        Connection::Connecting(connecting) => {
             connecting.shutdown().await;
         }
-        Some(Connection::Client(client)) => {
+        Connection::Client(client) => {
             client.shutdown().await;
         }
-        None => {}
     }
+}
+
+/// Shuts the process down, until the server and its tree are gone. An
+/// incomplete shutdown keeps everything owned and is retried: each attempt
+/// waits within [`McpTimings::kill_wait`](super::McpTimings).
+async fn stop_process(context: &ServerContext, process: &StdioProcess) {
     let mut retrying = false;
     while process.shutdown().await.is_err() {
         if !retrying {
@@ -352,11 +390,10 @@ async fn admit(
     let name = &entry.name;
     let config = match &entry.transport {
         McpTransportConfig::Stdio(config) => config,
-        McpTransportConfig::Http { .. } => {
+        // `run` sends an HTTP server to `super::http` instead.
+        McpTransportConfig::Http(_) => {
             return Err(McpServerState::Refused {
-                reason: format!(
-                    "MCP server \"{name}\" uses Streamable HTTP, which Bake does not start yet: no network admission exists for it"
-                ),
+                reason: format!("MCP server \"{name}\" is not a stdio server"),
             });
         }
     };

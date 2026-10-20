@@ -13,11 +13,10 @@
 //!
 //! [`AgentSession::start_mcp`](crate::agent_session::AgentSession::start_mcp)
 //! starts each enabled server of an [`McpOptions`] as a task the session's
-//! gate owns. The task, in order:
+//! gate owns. For a stdio server ([`server`]) the task, in order:
 //!
-//! 1. admits the server under D24 before anything runs: a `url` server is
-//!    refused (Streamable HTTP has no egress admission yet), and a stdio
-//!    server's command is wrapped by the session's sandbox provider for the
+//! 1. admits the server under D24 before anything runs: its command is
+//!    wrapped by the session's sandbox provider for the
 //!    standing sandbox mode, or refused when no backend can enforce it. Its
 //!    environment is Bake's scrubbed environment with the entry's `env` set
 //!    over it;
@@ -35,6 +34,18 @@
 //!    shuts the process down, retrying an incomplete shutdown until the
 //!    server and its tree are gone. The task's gate permit is released only
 //!    then, so session shutdown returns after every server is gone.
+//!
+//! A `url` server ([`http`]) runs the same steps 3 to 5 over `bake-mcp`'s
+//! Streamable HTTP transport, with [`egress`]' D24 network admission in
+//! place of the sandbox and spawn: the owner's `mcp.json` authorizes the
+//! configured origin, whose host is resolved once per connection and
+//! pinned, redirects stay same-origin, and the entry's `headers` are its
+//! only credentials. Unlike a stdio server it reconnects: an expired HTTP
+//! session re-initializes, and a lost connection is retried within Bake
+//! 0.3's reconnect budget, each connection publishing its tools as one new
+//! generation and the retired client drained before the next one serves.
+//! The connection is the `bake-rs` process's own, not a sandboxed child's,
+//! so, like the web tools (D40), it is allowed in every sandbox mode.
 //!
 //! # Lifetime and permission boundaries
 //!
@@ -71,18 +82,23 @@
 //! server sent it, and its server is its namespace
 //! (`McpServers::tool_namespace`).
 //!
-//! Not implemented: Streamable HTTP servers, OAuth, reconnecting a closed
+//! Not implemented: OAuth, reconnecting a closed stdio
 //! server (its tools are withdrawn instead), resources and their tools,
 //! prompts, server instructions and Pi's `mcp_servers` prompt section, the
 //! `codemode`, `codemode-deferred`, and `deferred` exposures and tool search,
 //! progress updates, the `/mcp` command, and the server log file.
 
 pub mod config;
+pub mod egress;
 pub mod home;
+mod http;
+#[cfg(test)]
+mod http_test_server;
 pub mod names;
 mod server;
 pub(crate) mod tools;
 
+use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
@@ -92,9 +108,10 @@ use bake_sandbox::SandboxProvider;
 use tokio::sync::{Notify, watch};
 
 pub use config::{
-    MCP_CONFIG_FILE, McpConfig, McpExposure, McpServerEntry, McpServerSettings, McpStdioConfig,
-    McpTransportConfig, load_mcp_config, parse_mcp_config,
+    MCP_CONFIG_FILE, McpConfig, McpExposure, McpHttpConfig, McpServerEntry, McpServerSettings,
+    McpStdioConfig, McpTransportConfig, load_mcp_config, parse_mcp_config,
 };
+pub use egress::HostResolver;
 pub use home::load_home_mcp_config;
 pub use names::{MCP_TOOL_PREFIX, mcp_namespace, public_tool_name};
 pub use tools::{MAX_DECLARATION_BYTES, MAX_TOOLS_PER_SERVER, MCP_OUTPUT_MAX_BYTES};
@@ -125,6 +142,44 @@ impl Default for McpTimings {
             stdin_close_grace: Duration::from_millis(500),
             terminate_grace: Duration::from_secs(2),
             kill_wait: Duration::from_secs(2),
+        }
+    }
+}
+
+/// What a Streamable HTTP server connects with: the bounds of one
+/// connection and the reconnect budget of one outage.
+///
+/// The defaults are Bake 0.3's reconnect policy
+/// (`RECONNECT_DEFAULTS` in `packages/mcp/mcp-client/src/connection.ts`:
+/// 500 ms doubling to 30 s, 10 attempts per outage) over Pi v1.3.0's
+/// message limit and connect deadline (`packages/mcp/src/transports/streamable-http.ts`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct McpHttpOptions {
+    /// The largest JSON body and the largest server-sent event a server may
+    /// send. Default: 16 MiB, as Pi.
+    pub max_message_bytes: NonZeroUsize,
+    /// Each connection's TCP and TLS deadline. Default: 10 s, as Pi.
+    pub connect_timeout: Duration,
+    /// The delay before the first reconnect of an outage, doubled per
+    /// consecutive failed attempt. Default: 500 ms, as 0.3.
+    pub reconnect_initial_delay: Duration,
+    /// The backoff ceiling, and the time a connection must serve to end the
+    /// outage and restore the budget. Default: 30 s, as 0.3.
+    pub reconnect_max_delay: Duration,
+    /// Consecutive failed attempts before the server gives up. Default: 10,
+    /// as 0.3.
+    pub max_reconnect_attempts: u32,
+}
+
+impl Default for McpHttpOptions {
+    fn default() -> Self {
+        Self {
+            max_message_bytes: NonZeroUsize::new(bake_mcp::DEFAULT_MAX_MESSAGE_BYTES)
+                .unwrap_or(NonZeroUsize::MIN),
+            connect_timeout: Duration::from_secs(10),
+            reconnect_initial_delay: Duration::from_millis(500),
+            reconnect_max_delay: Duration::from_secs(30),
+            max_reconnect_attempts: 10,
         }
     }
 }
@@ -180,6 +235,11 @@ pub struct McpOptions {
     pub timings: McpTimings,
     /// Which published tools each prompt may declare.
     pub tool_filter: McpToolFilter,
+    /// What a `url` server connects with.
+    pub http: McpHttpOptions,
+    /// How a `url` server's host is resolved before its address is pinned;
+    /// the system resolver when `None`.
+    pub resolver: Option<HostResolver>,
 }
 
 impl std::fmt::Debug for McpOptions {
@@ -190,7 +250,8 @@ impl std::fmt::Debug for McpOptions {
             .field("sandbox", &self.sandbox.name())
             .field("timings", &self.timings)
             .field("tool_filter", &self.tool_filter)
-            .finish()
+            .field("http", &self.http)
+            .finish_non_exhaustive()
     }
 }
 
@@ -506,29 +567,42 @@ impl McpServers {
     }
 }
 
-/// Checks `options` before anything starts: the startup wait, and each
-/// enabled stdio server's client and process options, with `bake-mcp`'s
-/// own checks (`StdioOptions::validate`), so every wait gives a deadline
-/// the clock can represent. `McpOptions` and `McpServerEntry` are public,
-/// so their values need not have come through the configuration parser.
+/// Checks `options` before anything starts: the startup wait, each enabled
+/// server's client options, and a stdio server's process options, with
+/// `bake-mcp`'s own checks (`ClientOptions::validate`,
+/// `StdioOptions::validate`), so every wait gives a deadline the clock can
+/// represent. `McpOptions` and `McpServerEntry` are public, so their values
+/// need not have come through the configuration parser.
 pub(crate) fn validate(options: &McpOptions) -> Result<(), String> {
-    let wait = options.timings.startup_wait;
-    if std::time::Instant::now().checked_add(wait).is_none() {
-        let error = bake_mcp::OptionsError::DurationTooLong {
-            field: "timings.startup_wait",
-            value: wait,
-        };
-        return Err(format!("invalid MCP options: {error}"));
-    }
+    let representable = |field: &'static str, value: Duration| {
+        if std::time::Instant::now().checked_add(value).is_some() {
+            return Ok(());
+        }
+        let error = bake_mcp::OptionsError::DurationTooLong { field, value };
+        Err(format!("invalid MCP options: {error}"))
+    };
+    representable("timings.startup_wait", options.timings.startup_wait)?;
+    representable("http.connect_timeout", options.http.connect_timeout)?;
+    representable(
+        "http.reconnect_initial_delay",
+        options.http.reconnect_initial_delay,
+    )?;
+    representable("http.reconnect_max_delay", options.http.reconnect_max_delay)?;
     for entry in &options.servers {
-        if !entry.settings.enabled || !matches!(entry.transport, McpTransportConfig::Stdio(_)) {
+        if !entry.settings.enabled {
             continue;
         }
-        server::stdio_options(entry, options.timings)
-            .validate()
-            .map_err(|error| {
-                format!("invalid MCP options for server \"{}\": {error}", entry.name)
-            })?;
+        let named = |error: bake_mcp::OptionsError| {
+            format!("invalid MCP options for server \"{}\": {error}", entry.name)
+        };
+        match entry.transport {
+            McpTransportConfig::Stdio(_) => server::stdio_options(entry, options.timings)
+                .validate()
+                .map_err(named)?,
+            McpTransportConfig::Http(_) => {
+                server::client_options(entry).validate().map_err(named)?
+            }
+        }
     }
     Ok(())
 }
@@ -543,12 +617,15 @@ pub(crate) fn start(
     reserved: Vec<String>,
     work: &WorkGate,
 ) -> (McpServers, Option<String>) {
+    let resolver = http::resolver(&options);
     let McpOptions {
         servers: entries,
         standing,
         sandbox,
         timings,
         tool_filter,
+        http: http_options,
+        resolver: _,
     } = options;
     let servers = McpServers::new(&entries, reserved, timings, tool_filter);
     let mut refused = None;
@@ -563,6 +640,8 @@ pub(crate) fn start(
             sandbox: Arc::clone(&sandbox),
             cwd: cwd.clone(),
             work: work.clone(),
+            http: http_options,
+            resolver: Arc::clone(&resolver),
         };
         // The gate owns the task; its handle is not needed.
         match work.spawn(move |scope| server::run(context, scope)) {
@@ -660,6 +739,8 @@ mod tests {
             sandbox: Arc::new(bake_sandbox::provider::UnavailableProvider::new(None)),
             timings,
             tool_filter: McpToolFilter::default(),
+            http: McpHttpOptions::default(),
+            resolver: None,
         }
     }
 

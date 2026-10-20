@@ -22,6 +22,13 @@
 //! counts as no active prefix instead of failing the fetch; and the
 //! character cap counts UTF-16 code units, as the TypeScript did, cutting
 //! only between characters.
+//!
+//! [`resolve_addresses`] and [`pinned_client_builder`] are the resolution
+//! and pinning halves without the public-address rule, which
+//! [`resolve_public_addresses`] adds. Bake's MCP egress admission
+//! ([`crate::mcp::egress`]) reuses them for a configured Streamable HTTP
+//! server, whose origin its owner authorized in `mcp.json`, so a private
+//! or loopback address is allowed there.
 
 use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 use std::sync::Arc;
@@ -127,27 +134,50 @@ pub fn system_lookup(host: &str) -> Result<Vec<IpAddr>, String> {
         .map_err(|error| error.to_string())
 }
 
-/// `resolvePublicAddresses`: resolve `host` once with `lookup`, a literal
-/// without asking it, and refuse the whole answer set when any address is
-/// not public. The addresses returned are the only ones a connection may
-/// use.
+/// Why [`resolve_addresses`] has no address to pin.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ResolveFailure {
+    /// The lookup failed, with its message.
+    Lookup(String),
+    /// The lookup succeeded with no address.
+    NoAddresses,
+}
+
+/// Resolve `host` once with `lookup`, a literal without asking it. The
+/// addresses returned are the only ones a connection may use; no policy is
+/// applied to them, so a caller that needs the public-address rule uses
+/// [`resolve_public_addresses`] instead.
+pub fn resolve_addresses(
+    host: &str,
+    lookup: &dyn Fn(&str) -> Result<Vec<IpAddr>, String>,
+) -> Result<Vec<IpAddr>, ResolveFailure> {
+    let unbracketed = strip_ipv6_brackets(host);
+    let resolved = match unbracketed.parse::<IpAddr>() {
+        Ok(literal) => vec![literal],
+        Err(_) => lookup(unbracketed).map_err(ResolveFailure::Lookup)?,
+    };
+    if resolved.is_empty() {
+        return Err(ResolveFailure::NoAddresses);
+    }
+    Ok(resolved)
+}
+
+/// `resolvePublicAddresses`: [`resolve_addresses`], then refuse the whole
+/// answer set when any address is not public. The addresses returned are
+/// the only ones a connection may use.
 pub fn resolve_public_addresses(
     host: &str,
     lookup: &dyn Fn(&str) -> Result<Vec<IpAddr>, String>,
 ) -> Result<Vec<IpAddr>, WebError> {
-    let unbracketed = strip_ipv6_brackets(host);
-    let resolved = match unbracketed.parse::<IpAddr>() {
-        Ok(literal) => vec![literal],
-        Err(_) => lookup(unbracketed).map_err(|error| {
+    let resolved = resolve_addresses(host, lookup).map_err(|failure| match failure {
+        ResolveFailure::Lookup(error) => {
             WebError::new(WEB_PROVIDER_ERROR, format!("web fetch failed: {error}"))
-        })?,
-    };
-    if resolved.is_empty() {
-        return Err(WebError::new(
+        }
+        ResolveFailure::NoAddresses => WebError::new(
             WEB_PROVIDER_ERROR,
             format!("hostname \"{host}\" resolved to no addresses"),
-        ));
-    }
+        ),
+    })?;
     let prefixes = if resolved.iter().any(IpAddr::is_ipv6) {
         nat64_prefixes(&lookup(IPV4ONLY_DISCOVERY_HOST).unwrap_or_default())
     } else {
@@ -180,6 +210,20 @@ impl reqwest::dns::Resolve for PinnedResolver {
         let addresses: reqwest::dns::Addrs = Box::new(self.0.clone().into_iter());
         Box::pin(std::future::ready(Ok(addresses)))
     }
+}
+
+/// A client builder that connects directly (no proxy) and resolves every
+/// name to `addresses`, so the hostname is never resolved again and DNS
+/// rebinding cannot move a connection. The caller adds its own redirect
+/// policy and timeouts.
+pub fn pinned_client_builder(addresses: &[IpAddr]) -> reqwest::ClientBuilder {
+    let pinned: Vec<SocketAddr> = addresses
+        .iter()
+        .map(|address| SocketAddr::new(*address, 0))
+        .collect();
+    reqwest::Client::builder()
+        .no_proxy()
+        .dns_resolver(Arc::new(PinnedResolver(pinned)))
 }
 
 /// The anonymous public HTTP(S) fetcher (`HttpFetchProvider`).
@@ -342,14 +386,8 @@ impl HttpFetcher {
     async fn request_once(&self, url: &Url) -> Result<reqwest::Response, WebError> {
         let host = url.host_str().unwrap_or_default();
         let addresses = self.resolve(host).await?;
-        let pinned = addresses
-            .into_iter()
-            .map(|address| SocketAddr::new(address, 0))
-            .collect();
-        let client = reqwest::Client::builder()
-            .no_proxy()
+        let client = pinned_client_builder(&addresses)
             .redirect(reqwest::redirect::Policy::none())
-            .dns_resolver(Arc::new(PinnedResolver(pinned)))
             .build()
             .map_err(|error| failed(&error))?;
         client

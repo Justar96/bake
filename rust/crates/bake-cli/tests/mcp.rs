@@ -1048,7 +1048,7 @@ fn refused_entries_are_reported_and_valid_servers_start(case: &Arc<Case>) {
         "fx": case.server("fx", "", json!({})),
         "bad": { "args": ["no command"] },
         "legacy": { "type": "sse", "url": "https://example.com/sse" },
-        "remote": { "url": "http://127.0.0.1:9/mcp" },
+        "remote": { "url": "http://93.184.216.34/mcp" },
         "code": { "command": "x", "exposure": "codemode" },
         "cmd": { "command": "x", "env": { "TOKEN": "!print-the-secret-value" } },
         "esc\u{1b}[31mname": { "command": "x" },
@@ -1066,8 +1066,7 @@ fn refused_entries_are_reported_and_valid_servers_start(case: &Arc<Case>) {
         ),
         format!("Warning: MCP: {shown}: server \"cmd\": env \"TOKEN\" runs a command"),
         format!("Warning: MCP: {shown}: invalid server name \"esc\\u{{1b}}[31mname\""),
-        "Warning: MCP server \"remote\" uses Streamable HTTP, which bake-rs does not start yet"
-            .to_owned(),
+        "Warning: MCP server \"remote\" uses http to a public address".to_owned(),
         format!("Warning: MCP server \"unset\" env \"TOKEN\" references unset variables: {UNSET}"),
     ];
     for line in &expected {

@@ -99,6 +99,8 @@ impl McpHarness {
                     sandbox: Arc::new(UnavailableProvider::new(None)),
                     timings: McpTimings::default(),
                     tool_filter: McpToolFilter::default(),
+                    http: bake_coding_agent::mcp::McpHttpOptions::default(),
+                    resolver: None,
                 })
             })
             .expect("start servers");

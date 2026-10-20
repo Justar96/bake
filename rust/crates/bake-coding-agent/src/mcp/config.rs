@@ -21,7 +21,8 @@
 //! - The only exposures are `direct` (the default here; Pi's is
 //!   `codemode`) and `hidden`: Pi's `codemode`, `codemode-deferred`, and
 //!   `deferred` are not supported yet.
-//! - An environment value may reference variables (`$NAME`, `${NAME}`), as
+//! - An environment or header value may reference variables (`$NAME`,
+//!   `${NAME}`), as
 //!   Pi's config values do, but never run a command (`!cmd`). A server's
 //!   environment is Bake's scrubbed environment, which drops credential-like
 //!   and Bake-managed names, with the entry's `env` over it, so naming a
@@ -32,8 +33,8 @@
 //!   Only an owner-controlled file may therefore be loaded. A sandbox
 //!   runner's own variables still go over the entry's, so `env` cannot
 //!   forge them.
-//! - `url` servers are read and validated, and refused when the session
-//!   starts them: Streamable HTTP has no D24 egress admission yet.
+//! - A `url` server's headers are values of the same kind, resolved when the
+//!   server connects ([`super::egress`]); `!cmd` is refused there too.
 
 use std::fs;
 use std::io::Read;
@@ -135,16 +136,37 @@ impl std::fmt::Debug for McpStdioConfig {
     }
 }
 
+/// A server reached over Streamable HTTP. `Debug` shows the URL's origin
+/// and the names of `headers`, never a path, a query, or a header value.
+#[derive(Clone, PartialEq)]
+pub struct McpHttpConfig {
+    /// `url`: the endpoint, `http` or `https`.
+    pub url: String,
+    /// `headers`, in file order, sent with every request. Values may
+    /// reference variables, resolved when the server connects.
+    pub headers: Vec<(String, String)>,
+}
+
+impl std::fmt::Debug for McpHttpConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let origin = reqwest::Url::parse(&self.url)
+            .map(|url| url.origin().ascii_serialization())
+            .unwrap_or_else(|_| "<invalid>".to_owned());
+        let headers: Vec<&str> = self.headers.iter().map(|(name, _)| name.as_str()).collect();
+        f.debug_struct("McpHttpConfig")
+            .field("origin", &origin)
+            .field("headers", &headers)
+            .finish()
+    }
+}
+
 /// A server's transport.
 #[derive(Debug, Clone, PartialEq)]
 pub enum McpTransportConfig {
     /// `command`: a stdio server.
     Stdio(McpStdioConfig),
-    /// `url`: a Streamable HTTP server. Validated, but refused when started.
-    Http {
-        /// The endpoint.
-        url: String,
-    },
+    /// `url`: a Streamable HTTP server.
+    Http(McpHttpConfig),
 }
 
 /// One validated `mcpServers` entry.
@@ -344,16 +366,25 @@ fn validate_server(name: &str, value: &Value) -> Result<McpServerEntry, String> 
                 "server \"{name}\": url must be an http or https URL"
             ));
         }
-        if let Some(headers) = object.get("headers")
-            && string_map(headers).is_none()
+        let headers = match object.get("headers") {
+            None => Vec::new(),
+            Some(headers) => string_map(headers)
+                .ok_or_else(|| format!("server \"{name}\": headers must map names to strings"))?,
+        };
+        if let Some((key, _)) = headers
+            .iter()
+            .find(|(_, value)| is_command_config_value(value))
         {
             return Err(format!(
-                "server \"{name}\": headers must map names to strings"
+                "server \"{name}\": headers \"{key}\" runs a command, which Bake does not run; set the value or reference a variable with ${{NAME}}"
             ));
         }
         return Ok(McpServerEntry {
             name: name.to_owned(),
-            transport: McpTransportConfig::Http { url: url.clone() },
+            transport: McpTransportConfig::Http(McpHttpConfig {
+                url: url.clone(),
+                headers,
+            }),
             settings,
         });
     }
@@ -483,9 +514,10 @@ mod tests {
         assert!(!config.servers[2].settings.enabled);
         assert_eq!(
             config.servers[1].transport,
-            McpTransportConfig::Http {
-                url: "https://example.com/mcp".into()
-            }
+            McpTransportConfig::Http(McpHttpConfig {
+                url: "https://example.com/mcp".into(),
+                headers: vec![("Authorization".into(), "Bearer ${TOKEN}".into())],
+            })
         );
         assert_eq!(config.errors.len(), 4);
         assert!(config.errors[0].contains("server \"bad\" needs either \"command\""));
@@ -530,13 +562,23 @@ mod tests {
     }
 
     #[test]
-    fn debug_output_names_env_values_never() {
+    fn debug_output_names_env_and_header_values_never() {
         let config = parse(json!({
-            "mcpServers": { "s": { "command": "x", "env": { "TOKEN": "sk-secret-value" } } }
+            "mcpServers": {
+                "s": { "command": "x", "env": { "TOKEN": "sk-secret-value" } },
+                "r": {
+                    "url": "https://example.com/mcp?token=query-secret",
+                    "headers": { "Authorization": "Bearer header-secret" },
+                },
+            }
         }));
         let shown = format!("{config:?}");
-        assert!(shown.contains("TOKEN"), "{shown}");
-        assert!(!shown.contains("sk-secret-value"), "{shown}");
+        assert!(
+            shown.contains("TOKEN") && shown.contains("Authorization"),
+            "{shown}"
+        );
+        assert!(shown.contains("https://example.com"), "{shown}");
+        assert!(!shown.contains("secret"), "{shown}");
     }
 
     #[test]
@@ -544,6 +586,7 @@ mod tests {
         let config = parse(json!({
             "mcpServers": {
                 "cmd": { "command": "x", "env": { "TOKEN": "!op read secret" } },
+                "header-cmd": { "url": "https://example.com/mcp", "headers": { "Authorization": "!op read secret" } },
                 "code": { "command": "x", "exposure": "codemode" },
                 "deferred": { "command": "x", "toolExposure": { "a": "deferred" } },
                 "long-name-that-is-over-thirty-two-chars": { "command": "x" },
@@ -553,15 +596,20 @@ mod tests {
         }));
         assert!(config.servers.is_empty());
         assert!(config.errors[0].contains("env \"TOKEN\" runs a command"));
-        assert!(config.errors[1].ends_with(
+        assert!(
+            config.errors[1].contains("headers \"Authorization\" runs a command"),
+            "{:?}",
+            config.errors
+        );
+        assert!(config.errors[2].ends_with(
             "server \"code\": exposure \"codemode\" is not supported yet; use \"direct\" or \"hidden\""
         ));
-        assert!(config.errors[2].contains(
+        assert!(config.errors[3].contains(
             "toolExposure \"a\" \"deferred\" is not supported yet; use \"direct\" or \"hidden\""
         ));
-        assert!(config.errors[3].contains("at most 32"));
-        assert!(config.errors[4].contains("timeout must be a positive number"));
+        assert!(config.errors[4].contains("at most 32"));
         assert!(config.errors[5].contains("timeout must be a positive number"));
+        assert!(config.errors[6].contains("timeout must be a positive number"));
     }
 
     // `timeout` is untrusted JSON: a negative, zero, oversized, or

@@ -15,7 +15,10 @@
 //!
 //! [`HttpTransport::start`] validates the options, builds the HTTP client,
 //! and starts one supervisor task without any I/O. It returns the owner
-//! handle and the two halves for [`McpClient::start`](crate::McpClient::start):
+//! handle and the two halves for [`McpClient::start`](crate::McpClient::start).
+//! [`HttpTransport::start_with_client`] takes the HTTP client from the
+//! caller instead, which then owns resolution, pinning, redirects, proxies,
+//! and TLS, as Bake's MCP egress admission does:
 //!
 //! ```no_run
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
@@ -159,10 +162,12 @@
 //!
 //! # Security
 //!
-//! Redirects are never followed: a 3xx response fails its request without
-//! contacting the target, so caller headers cannot reach another origin.
-//! The proxy environment is not read. A URL with a user name or password is
-//! refused. `Debug` output of the options, the transport, and its halves
+//! The client [`HttpTransport::start`] builds follows no redirect: a 3xx
+//! response fails its request without contacting the target, so caller
+//! headers cannot reach another origin. It reads no proxy environment. With
+//! [`HttpTransport::start_with_client`] those two are the supplied client's
+//! to decide, and a 3xx it does not follow still fails its request. A URL
+//! with a user name or password is refused either way. `Debug` output of the options, the transport, and its halves
 //! shows the URL's origin only, and no header value or session ID; caller
 //! header values are also marked sensitive for `reqwest`.
 //!
@@ -180,9 +185,10 @@
 //! # Not implemented
 //!
 //! OAuth and any credential source other than the static headers given at
-//! start; re-initialization after an expired session; the deprecated
+//! start; re-initialization after an expired session, which the owner of the
+//! transport does by starting a new one (Bake's `mcp::http`); the deprecated
 //! 2024-11-05 HTTP+SSE transport fallback; the stateless 2026-07-28 binding;
-//! HTTP/2; and proxies.
+//! and HTTP/2. The client built here uses no proxy; a supplied one may.
 
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
@@ -666,13 +672,15 @@ impl HttpTransport {
     /// Validate `options`, build the HTTP client, and start the supervisor
     /// task. Sends nothing; the first POST is the client's `initialize`.
     ///
+    /// The client connects directly: it reads no proxy environment, follows
+    /// no redirect, resolves each request's host itself, and applies
+    /// [`HttpOptions::connect_timeout`].
+    ///
     /// Must be called inside a Tokio runtime.
     pub fn start(
         options: HttpOptions,
     ) -> Result<(Self, HttpReceiver, HttpSender), HttpOptionsError> {
         let config = Config::new(&options)?;
-        let runtime =
-            tokio::runtime::Handle::try_current().map_err(|_| HttpOptionsError::NoRuntime)?;
         let client = reqwest::Client::builder()
             .no_proxy()
             .redirect(reqwest::redirect::Policy::none())
@@ -683,6 +691,40 @@ impl HttpTransport {
             .map_err(|error| HttpOptionsError::Client {
                 message: HttpError::network(error).to_string(),
             })?;
+        Self::spawn(options, config, client)
+    }
+
+    /// [`start`](Self::start) over an HTTP client the caller built, which
+    /// then owns every transport-level network decision this transport does
+    /// not make itself: address resolution and pinning, the redirect policy,
+    /// proxies, TLS, and [`HttpOptions::connect_timeout`], which this call
+    /// does not apply. The options are validated as `start` validates them,
+    /// and the URL, headers, limits, and timeouts still hold.
+    ///
+    /// A caller that admits network egress (Bake's
+    /// `mcp::egress`) supplies a client whose resolver answers with the
+    /// addresses its policy pinned and whose redirect policy refuses a
+    /// cross-origin hop, so the transport reaches only the admitted origin.
+    /// A 3xx response the client does not follow is still
+    /// [`HttpError::Redirect`].
+    ///
+    /// Must be called inside a Tokio runtime.
+    pub fn start_with_client(
+        options: HttpOptions,
+        client: reqwest::Client,
+    ) -> Result<(Self, HttpReceiver, HttpSender), HttpOptionsError> {
+        let config = Config::new(&options)?;
+        Self::spawn(options, config, client)
+    }
+
+    /// Start the supervisor task for validated `options` and `config`.
+    fn spawn(
+        options: HttpOptions,
+        config: Config,
+        client: reqwest::Client,
+    ) -> Result<(Self, HttpReceiver, HttpSender), HttpOptionsError> {
+        let runtime =
+            tokio::runtime::Handle::try_current().map_err(|_| HttpOptionsError::NoRuntime)?;
         let limits = options.limits;
         let (requests, requests_in) = mpsc::channel(1);
         let (notices, notices_in) = mpsc::channel(1);

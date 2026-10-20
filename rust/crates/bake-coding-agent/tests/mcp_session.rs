@@ -48,8 +48,8 @@ use bake_coding_agent::agent_session::{AgentSession, AgentSessionOptions};
 use bake_coding_agent::auth_storage::AuthStorage;
 use bake_coding_agent::cli::{CliEnvironment, no_interrupt, parse_args, start_interactive};
 use bake_coding_agent::mcp::{
-    McpOptions, McpServerEntry, McpServerState, McpServers, McpTimings, McpToolFilter,
-    load_mcp_config,
+    McpHttpOptions, McpOptions, McpServerEntry, McpServerState, McpServers, McpTimings,
+    McpToolFilter, load_mcp_config,
 };
 use bake_coding_agent::model_registry::ModelRegistry;
 use bake_coding_agent::model_registry::config::ModelConfig;
@@ -590,6 +590,8 @@ fn options(
             kill_wait: Duration::from_secs(2),
         },
         tool_filter: McpToolFilter::default(),
+        http: McpHttpOptions::default(),
+        resolver: None,
     }
 }
 
@@ -782,7 +784,7 @@ async fn tools_are_admitted_declared_called_and_logged(case: Arc<Case>) {
 }
 
 // D24: nothing runs before admission, and a mode no backend enforces, a
-// transport without admission, or an unresolvable value is refused.
+// `url` the egress policy refuses, or an unresolvable value is refused.
 async fn denied_admission_starts_nothing(case: Arc<Case>) {
     let model = Model::new();
     let session = session(&case, &model, None).await;
@@ -792,7 +794,7 @@ async fn denied_admission_starts_nothing(case: Arc<Case>) {
         &case,
         json!({
             "confined": server_json(&case, "confined", ""),
-            "remote": { "url": "http://127.0.0.1:9/mcp" },
+            "remote": { "url": "http://93.184.216.34/mcp" },
             "unset": denied,
             "off": { "command": "x", "enabled": false },
         }),
@@ -823,7 +825,7 @@ async fn denied_admission_starts_nothing(case: Arc<Case>) {
             .contains("sandbox mode \"read-only\" is requested but no sandbox backend is usable")
     );
     assert!(reason(0).contains("no backend in this test"));
-    assert!(reason(1).contains("Streamable HTTP"));
+    assert!(reason(1).contains("would send its headers in clear text"));
     assert!(reason(2).contains("references unset variables: BAKE_MCP_SESSION_TEST_UNSET"));
     assert_eq!(statuses[3].state, McpServerState::Disabled);
     // No process was started.

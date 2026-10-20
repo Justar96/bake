@@ -1153,8 +1153,7 @@ fn load_resources(
 
 /// Reads the Bake home's `mcp.json` for a session in `cwd`
 /// ([`crate::mcp::load_home_mcp_config`]), adding a warning for the file's
-/// refusal or each refused entry. A `url` server is dropped with a warning:
-/// Streamable HTTP has no D24 egress admission yet. Blocking.
+/// refusal or each refused entry. Blocking.
 fn load_mcp_servers(
     home: &Path,
     cwd: &Path,
@@ -1168,20 +1167,7 @@ fn load_mcp_servers(
             .iter()
             .map(|error| terminal_safe(&format!("MCP: {error}"))),
     );
-    config
-        .servers
-        .into_iter()
-        .filter(|entry| match entry.transport {
-            crate::mcp::McpTransportConfig::Http { .. } => {
-                warnings.push(terminal_safe(&format!(
-                    "MCP server \"{}\" uses Streamable HTTP, which bake-rs does not start yet: no network admission exists for it",
-                    entry.name
-                )));
-                false
-            }
-            crate::mcp::McpTransportConfig::Stdio(_) => true,
-        })
-        .collect()
+    config.servers
 }
 
 /// `text` as one line, with every control character, line breaks
@@ -1710,6 +1696,8 @@ async fn build_session(args: &Args, build: Build) -> Result<Built, String> {
             sandbox: sandbox_provider,
             timings: crate::mcp::McpTimings::default(),
             tool_filter,
+            http: crate::mcp::McpHttpOptions::default(),
+            resolver: None,
         });
     // Checked now, so starting them later can fail only if the session has
     // been shut down.
@@ -2972,7 +2960,9 @@ mod tests {
         let config = serde_json::json!({ "mcpServers": {
             "absent": { "command": missing.to_string_lossy() },
             "off": { "command": "x", "enabled": false },
-            "remote": { "url": "https://example.com/mcp" },
+            // Refused by the egress policy without any lookup or
+            // connection: a public literal over plain http.
+            "remote": { "url": "http://93.184.216.34/mcp" },
             "bad\u{1b}name": { "command": "x" },
         } });
         write_owned(&dir.join("home").join("mcp.json"), &config.to_string());
@@ -2993,10 +2983,6 @@ mod tests {
             "{warnings}"
         );
         assert!(!warnings.contains('\u{1b}'), "{warnings}");
-        assert!(
-            warnings.contains("Warning: MCP server \"remote\" uses Streamable HTTP"),
-            "{warnings}"
-        );
         let wait = |servers: crate::mcp::McpServers| async move {
             servers.wait_for_startup(|| false).await;
             servers.statuses()
@@ -3008,12 +2994,16 @@ mod tests {
             .clone();
         let statuses = wait(servers).await;
         let names: Vec<_> = statuses.iter().map(|status| status.name.as_str()).collect();
-        assert_eq!(names, ["absent", "off"]);
+        assert_eq!(names, ["absent", "off", "remote"]);
         assert!(
             matches!(&statuses[0].state, McpServerState::Failed { error } if error.contains("failed to start")),
             "{statuses:?}"
         );
         assert_eq!(statuses[1].state, McpServerState::Disabled);
+        assert!(
+            matches!(&statuses[2].state, McpServerState::Refused { reason } if reason.contains("clear text")),
+            "{statuses:?}"
+        );
 
         // A replacement starts no server while the session it replaces
         // runs; the caller starts them once that session is shut down.
@@ -3024,14 +3014,6 @@ mod tests {
             .expect("replacement");
         assert!(replacement.session.mcp_servers().is_none());
         assert!(replacement.has_pending_servers());
-        assert!(
-            replacement
-                .warnings
-                .iter()
-                .any(|warning| warning.contains("Streamable HTTP")),
-            "{:?}",
-            replacement.warnings
-        );
         started.session.shutdown().await;
         let old = started
             .session
@@ -3041,7 +3023,10 @@ mod tests {
         assert!(
             old.iter().all(|status| matches!(
                 status.state,
-                McpServerState::Failed { .. } | McpServerState::Disabled | McpServerState::Closed
+                McpServerState::Failed { .. }
+                    | McpServerState::Disabled
+                    | McpServerState::Refused { .. }
+                    | McpServerState::Closed
             )),
             "{old:?}"
         );
@@ -3052,7 +3037,7 @@ mod tests {
             .mcp_servers()
             .expect("replacement servers")
             .clone();
-        assert_eq!(wait(servers).await.len(), 2);
+        assert_eq!(wait(servers).await.len(), 3);
         // Once only.
         replacement.start_servers().expect("nothing left to start");
         replacement.session.shutdown().await;
