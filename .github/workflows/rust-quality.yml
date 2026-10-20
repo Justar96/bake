@@ -83,7 +83,8 @@ jobs:
       # A missed mutant is a finding to read, not a failure of the run. In
       # place, mutants reuse rust/target; a scratch copy would build cold.
       - name: Mutants on the diff
-        timeout-minutes: 90
+        if: ${{ !cancelled() }}
+        timeout-minutes: 60
         continue-on-error: true
         env:
           BASE: ${{ inputs.base }}
@@ -109,6 +110,7 @@ jobs:
 
       # rust/fuzz pins its own nightly toolchain.
       - name: Fuzz
+        if: ${{ !cancelled() }}
         timeout-minutes: 60
         continue-on-error: true
         env:
