@@ -558,10 +558,19 @@ function BakeInstall() {
     if ($candidate -eq '') { throw 'Bake install: the archive holds no bin\bake executable' }
 
     Write-Output 'Running the release self-check'
-    $checkOut = Join-Path $script:temporary 'self-check.out'
-    $checkErr = Join-Path $script:temporary 'self-check.err'
-    $check = Start-Process -FilePath $candidate -ArgumentList '--self-check' -NoNewWindow -PassThru `
-      -RedirectStandardOutput $checkOut -RedirectStandardError $checkErr
+    # System.Diagnostics.Process, not Start-Process: Windows PowerShell 5.1's
+    # Start-Process copies the environment into a case-insensitive dictionary
+    # and throws when it holds both Path and PATH, as it does when PowerShell
+    # starts from Git Bash or MSYS. A ProcessStartInfo whose
+    # EnvironmentVariables is never read passes this process's block as is.
+    $startInfo = New-Object Diagnostics.ProcessStartInfo
+    $startInfo.FileName = $candidate
+    $startInfo.Arguments = '--self-check'
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $check = [Diagnostics.Process]::Start($startInfo)
+    $reading = $check.StandardOutput.ReadToEndAsync()
     if (-not $check.WaitForExit(60000)) {
       try { $check.Kill() } catch { }
       throw "Bake install: the downloaded Bake $version did not finish its self-check; this install is unchanged"
@@ -569,7 +578,10 @@ function BakeInstall() {
     if ($check.ExitCode -ne 0) {
       throw "Bake install: the downloaded Bake $version failed its self-check; this install is unchanged"
     }
-    $record = ([IO.File]::ReadAllText($checkOut)) -replace '\s', ''
+    if (-not $reading.Wait(10000)) {
+      throw "Bake install: the downloaded Bake $version did not finish its self-check; this install is unchanged"
+    }
+    $record = $reading.Result -replace '\s', ''
     if ($record -notmatch '"kind":"bake-rs-self-check"') {
       throw "Bake install: the downloaded Bake $version printed no self-check record; this install is unchanged"
     }

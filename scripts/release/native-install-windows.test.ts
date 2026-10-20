@@ -71,6 +71,9 @@ function said(run: InstallerRun): string {
 function runPowerShell(script: string, args: readonly string[], env: Record<string, string> = {}): Promise<InstallerRun> {
   if (PWSH === undefined) throw new Error('No PowerShell available')
   // Windows PowerShell needs its own module path, not PowerShell Core's.
+  // On Windows the inherited block keeps its `Path` while a scenario sets
+  // `PATH`, so the installer runs with both, as it does when started from
+  // Git Bash; Windows PowerShell 5.1's Start-Process throws on that block.
   const inherited = process.platform === 'win32'
     ? Object.fromEntries(Object.entries(process.env).filter(([name]) => name.toUpperCase() !== 'PSMODULEPATH'))
     : { PATH: process.env['PATH'] ?? '', HOME: process.env['HOME'] ?? '' }
