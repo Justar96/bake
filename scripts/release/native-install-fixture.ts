@@ -152,7 +152,6 @@ export function signManifest(bytes: Buffer, key: EphemeralKey): string {
 /** The host the installer downloads from, which the test owns and closes. */
 export interface ReleaseHost {
   readonly origin: string
-  readonly requests: readonly string[]
   stop(): void
 }
 
@@ -161,13 +160,11 @@ export interface ReleaseHost {
  * loopback, from files the caller may replace between installs.
  */
 export function startReleaseHost(files: () => HostFiles): ReleaseHost {
-  const requests: string[] = []
   const server = Bun.serve({
     port: 0,
     hostname: '127.0.0.1',
     fetch(request) {
       const { pathname } = new URL(request.url)
-      requests.push(pathname)
       const served = files()
       if (pathname === '/native/stable.json') return new Response(new Uint8Array(served.manifest))
       if (pathname === '/native/stable.json.sig') return new Response(`${served.signature}\n`)
@@ -177,7 +174,6 @@ export function startReleaseHost(files: () => HostFiles): ReleaseHost {
   })
   return {
     origin: `http://127.0.0.1:${String(server.port)}`,
-    requests,
     stop(): void { server.stop(true) },
   }
 }

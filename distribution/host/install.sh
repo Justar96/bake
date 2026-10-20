@@ -259,7 +259,7 @@ self_check() {
     waited=$((waited + 1))
   done
   wait "$check_pid" || fail "the downloaded Bake $want_version failed its self-check; this install is unchanged"
-  record=$(tr -d ' \t\r\n' < "$temporary/self-check.out")
+  record=$(tr -d '[:space:]' < "$temporary/self-check.out")
   case $record in
     *'"kind":"bake-rs-self-check"'*) ;;
     *) fail "the downloaded Bake $want_version printed no self-check record; this install is unchanged" ;;
@@ -378,7 +378,7 @@ install_release() {
     printf '%s\n' "$native_release_key" | fold -w 64
     printf '%s\n' '-----END PUBLIC KEY-----'
   } > "$temporary/native-release-key.pem"
-  tr -d '\r\n' < "$temporary/stable.json.sig" > "$temporary/signature.base64"
+  tr -d '[:space:]' < "$temporary/stable.json.sig" > "$temporary/signature.base64"
   # `openssl base64 -d` rejects nothing outside base64, so the text is checked
   # first and the decoded signature must be Ed25519's 64 bytes.
   grep -q '^[A-Za-z0-9+/]\{86\}==$' "$temporary/signature.base64" \
