@@ -14,6 +14,8 @@
 import { createPrivateKey, createPublicKey, generateKeyPairSync, sign, type KeyObject } from 'node:crypto'
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
+import { assertTypeScriptArchive, readArchiveLayout } from './native-archive.ts'
+import { assertTypeScriptPublicationAllowed } from './native-channel.ts'
 
 const ROOT = resolve(import.meta.dir, '../..')
 const version = (JSON.parse(readFileSync(join(ROOT, 'apps/cli/package.json'), 'utf8')) as { version: string }).version
@@ -23,6 +25,9 @@ const source = join(ROOT, '.artifacts/bake-release', version)
 const publicRoot = join(ROOT, 'distribution/host/public')
 const destination = join(publicRoot, 'releases', version)
 if (!existsSync(source)) throw new Error(`No archives at ${source}; run bun run release:pack first`)
+// 0.3 publication ends when 0.4.0 ships (D13), and this route serves only the
+// TypeScript updater (D14), so the native channel's state is checked first.
+assertTypeScriptPublicationAllowed(publicRoot)
 
 /** Where `--ephemeral-key` leaves the throwaway public key, beside the archives. */
 const EPHEMERAL_PUBLIC_KEY = 'ephemeral-release-key.pub'
@@ -55,6 +60,7 @@ for (const file of readdirSync(source).sort()) {
   const target = pattern.exec(file)?.[1]
   if (target === undefined) throw new Error(`Unexpected release file: ${file}`)
   const path = join(source, file)
+  assertTypeScriptArchive(file, await readArchiveLayout(path))
   const archive = Bun.file(path)
   const size = archive.size
   if (size === 0) throw new Error(`Empty release archive: ${file}`)

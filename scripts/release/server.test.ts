@@ -22,8 +22,12 @@ async function serve(redirect?: string, extra: Record<string, string> = {}): Pro
   roots.push(root)
   copyFileSync(resolve(import.meta.dir, '../../distribution/host/server.mjs'), join(root, 'server.mjs'))
   mkdirSync(join(root, 'public/releases/0.1.1'), { recursive: true })
+  mkdirSync(join(root, 'public/native/releases/0.4.0'), { recursive: true })
   writeFileSync(join(root, 'public/latest.json'), '{}')
   writeFileSync(join(root, 'public/releases/0.1.1/bake-v0.1.1-linux-x64.tar.gz'), 'held here')
+  writeFileSync(join(root, 'public/native/stable.json'), '{"channel":"stable"}')
+  writeFileSync(join(root, 'public/native/stable.json.sig'), 'signature\n')
+  writeFileSync(join(root, 'public/native/releases/0.4.0/bake-rs-v0.4.0-linux-x64.tar.gz'), 'native bytes')
   const env: Record<string, string | undefined> = { ...process.env, PORT: '0', BAKE_ARCHIVE_REDIRECT: redirect, ...extra }
   const server = Bun.spawn(['node', join(root, 'server.mjs')], { env, stdout: 'pipe', stderr: 'inherit' })
   servers.push(server)
@@ -59,11 +63,27 @@ test('serves an archive it holds, and redirects nothing but archives', async () 
 test('answers 404 for a missing archive without a redirect host', async () => {
   const { base } = await serve()
   expect((await fetch(`${base}/releases/0.1.1/bake-v0.1.1-win32-x64.tar.gz`, { redirect: 'manual' })).status).toBe(404)
+  expect((await fetch(`${base}/native/releases/0.4.0/bake-rs-v0.4.0-win32-x64.tar.gz`, { redirect: 'manual' })).status).toBe(404)
+})
+
+test('serves the native route, and redirects a native archive it does not hold', async () => {
+  const { base } = await serve('https://github.com/Justar96/bake/releases/download')
+  expect(await (await fetch(`${base}/native/stable.json`)).text()).toBe('{"channel":"stable"}')
+  expect(await (await fetch(`${base}/native/stable.json.sig`)).text()).toBe('signature\n')
+  const held = await fetch(`${base}/native/releases/0.4.0/bake-rs-v0.4.0-linux-x64.tar.gz`, { redirect: 'manual' })
+  expect(held.status).toBe(200)
+  expect(await held.text()).toBe('native bytes')
+  const redirected = await fetch(`${base}/native/releases/0.4.0/bake-rs-v0.4.0-win32-x64.tar.gz`, { redirect: 'manual' })
+  expect(redirected.status).toBe(302)
+  expect(redirected.headers.get('location')).toBe('https://github.com/Justar96/bake/releases/download/v0.4.0/bake-rs-v0.4.0-win32-x64.tar.gz')
+  // The native manifest is not on the 0.3 route, and nothing else under native/ is served.
+  expect((await fetch(`${base}/native/stable.json.bak`, { redirect: 'manual' })).status).toBe(404)
+  expect((await fetch(`${base}/releases/0.4.0/bake-rs-v0.4.0-linux-x64.tar.gz`, { redirect: 'manual' })).status).toBe(404)
 })
 
 /** A stand-in for gissx.org's activity endpoint that keeps what it is sent. */
 function collector(status = 204) {
-  const reports: { authorization: string | null; body: { product: string; visitor: string; day: string } }[] = []
+  const reports: { authorization: string | null; body: { product: string; channel?: string; visitor: string; day: string } }[] = []
   const server = Bun.serve({ port: 0, hostname: '127.0.0.1', async fetch(request) {
     reports.push({ authorization: request.headers.get('authorization'), body: await request.json() as never })
     return new Response(null, { status })
@@ -97,6 +117,31 @@ test('reports an installed Bake checking for updates once a day, as a hash, and 
     await settle()
     expect(sink.reports).toHaveLength(2)
     expect(sink.reports[1]!.body.visitor).not.toBe(report!.body.visitor)
+  } finally { sink.stop() }
+})
+
+test('counts a native install by its route, as the native channel, whatever client reads it', async () => {
+  const sink = collector()
+  try {
+    const { base } = await serve(undefined, { GISSX_ACTIVITY_URL: sink.url, GISSX_ACTIVITY_TOKEN: 'token', BAKE_ACTIVITY_SALT: 'salt' })
+    // Any client checking the native manifest twice is one install.
+    expect((await fetch(`${base}/native/stable.json`, { headers: { 'user-agent': 'bake/0.4.0' } })).status).toBe(200)
+    expect((await fetch(`${base}/native/stable.json`, { headers: { 'user-agent': 'curl/8.9.1' } })).status).toBe(200)
+    // Nothing else on the route is a check.
+    await fetch(`${base}/native/stable.json`, { method: 'HEAD' })
+    await fetch(`${base}/native/stable.json.sig`)
+    await settle()
+    expect(sink.reports).toHaveLength(1)
+    expect(sink.reports[0]!.body).toMatchObject({ product: 'bake', channel: 'native' })
+    expect(sink.reports[0]!.body.visitor).toMatch(/^[0-9a-f]{16}$/)
+    expect(JSON.stringify(sink.reports[0]!.body)).not.toContain('127.0.0.1')
+    // The same address on the 0.3 channel is counted once more, under an unrelated hash.
+    await fetch(`${base}/latest.json`, { headers: { 'user-agent': 'node' } })
+    await settle()
+    expect(sink.reports).toHaveLength(2)
+    expect(sink.reports[1]!.body.product).toBe('bake')
+    expect(sink.reports[1]!.body.channel).toBeUndefined()
+    expect(sink.reports[1]!.body.visitor).not.toBe(sink.reports[0]!.body.visitor)
   } finally { sink.stop() }
 })
 

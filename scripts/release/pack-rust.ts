@@ -129,9 +129,16 @@ export function hostTarget(): string {
   return `${process.platform}-${process.arch}`
 }
 
-/** The preview archive's name; the `bake-rs-` prefix keeps it apart from the TypeScript `bake-v…` archives. */
+/**
+ * The prefix of every native archive's name, which keeps it apart from the
+ * TypeScript `bake-v…` archives. The native publication route matches it, so a
+ * rename of the archive is one edit here.
+ */
+export const NATIVE_ARCHIVE_PREFIX = 'bake-rs-'
+
+/** The native archive's name, under {@link NATIVE_ARCHIVE_PREFIX}. */
 export function archiveName(version: string, target: RustTarget): string {
-  return `bake-rs-v${version}-${target}.tar.gz`
+  return `${NATIVE_ARCHIVE_PREFIX}v${version}-${target}.tar.gz`
 }
 
 function sha256(bytes: Uint8Array | string): string {
