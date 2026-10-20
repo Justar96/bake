@@ -48,6 +48,13 @@ fn a_refused_request_starts_no_thread_and_releases_its_hook() {
     assert_eq!(exits.load(Ordering::SeqCst), 1);
 }
 
+/// The deadline of the hanging script's timeout arm. It outlasts the
+/// script's start, which takes about 30 ms and has been seen to take 270 ms
+/// on a loaded machine, so a slow shared runner reaches the script's call
+/// before the deadline. The spinning script below needs no such margin: its
+/// loop never has to reach anything.
+const HANG_DEADLINE_MS: u64 = 2000;
+
 #[derive(Clone, Copy, Debug)]
 enum End {
     Abort,
@@ -67,7 +74,7 @@ async fn settles_abort_timeout_and_drop_and_the_thread_exits() {
         );
         request.tools = vec![ToolDeclaration::named("hang")];
         if matches!(end, End::Timeout) {
-            request.source.options.timeout_ms = Some(100);
+            request.source.options.timeout_ms = Some(HANG_DEADLINE_MS);
         }
         let mut run = match engine().start(request) {
             Ok(run) => run,
@@ -110,7 +117,7 @@ async fn settles_abort_timeout_and_drop_and_the_thread_exits() {
                     _ => assert_eq!(
                         outcome.result,
                         Err(Failure::Timeout {
-                            message: "Execution timed out after 100 ms".to_owned()
+                            message: format!("Execution timed out after {HANG_DEADLINE_MS} ms")
                         })
                     ),
                 }

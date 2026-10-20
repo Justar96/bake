@@ -310,6 +310,42 @@ async fn exposes_tools_as_async_functions_and_records_calls() {
     assert_eq!(calls, [("add", &CallStatus::Ok), ("add", &CallStatus::Ok)]);
 }
 
+/// A record says Ok or Error whenever the script received the call's result;
+/// cancelled is only for a call the run abandoned. `hold_answered_calls`
+/// holds each call's task past its answer, so the script ends and the host
+/// reads its records while every task is still running: only a status the
+/// task wrote before it answered can be read.
+#[tokio::test]
+async fn records_a_call_the_script_received_the_result_of_before_the_run_ends() {
+    let execution = execute(
+        "return await tools.echo(1)",
+        Setup {
+            tools: vec![echo()],
+            hold_answered_calls: true,
+            ..Setup::default()
+        },
+    )
+    .await;
+    assert_eq!(execution.value(), Some(&json!(1)));
+    assert_eq!(execution.calls[0].status, CallStatus::Ok);
+}
+
+/// As above for a call the script caught the error of.
+#[tokio::test]
+async fn records_a_call_the_script_caught_the_error_of_before_the_run_ends() {
+    let execution = execute(
+        "try { await tools.fail(); } catch (error) { return error.message; }",
+        Setup {
+            tools: vec![tool("fail", |_| Err("tool exploded".to_owned()))],
+            hold_answered_calls: true,
+            ..Setup::default()
+        },
+    )
+    .await;
+    assert_eq!(execution.value(), Some(&json!("tool exploded")));
+    assert_eq!(execution.calls[0].status, CallStatus::Error);
+}
+
 fn delay() -> Tool {
     async_tool("delay", |args, _| async move {
         tokio::time::sleep(Duration::from_millis(20)).await;

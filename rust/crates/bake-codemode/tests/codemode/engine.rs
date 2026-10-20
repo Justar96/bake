@@ -252,7 +252,10 @@ async fn dropping_a_run_on_a_runtime_ends_its_thread() {
 /// The watchdog stops a run at its deadline while the host awaits something
 /// other than `Run::next`, here inside three long built-ins that neither poll
 /// QuickJS's interrupt handler nor return to the driver (about 3.5 s
-/// without the watchdog's epoch increment).
+/// without the watchdog's epoch increment). The deadline outlasts the
+/// script's start, which has been seen to take 270 ms on a loaded machine,
+/// so the call is made before it; the thread's exit is bounded well below
+/// the time the built-ins would take unstopped.
 #[tokio::test]
 async fn stops_at_the_deadline_while_nothing_awaits_next() {
     let exits = Arc::new(AtomicUsize::new(0));
@@ -261,7 +264,7 @@ async fn stops_at_the_deadline_while_nothing_awaits_next() {
         &exits,
     );
     request.tools = vec![ToolDeclaration::named("echo")];
-    request.source.options.timeout_ms = Some(300);
+    request.source.options.timeout_ms = Some(1000);
     engine();
     let started = Instant::now();
     let mut run = match engine().start(request) {
@@ -270,7 +273,7 @@ async fn stops_at_the_deadline_while_nothing_awaits_next() {
     };
     while exits.load(Ordering::SeqCst) == 0 {
         assert!(
-            started.elapsed() < Duration::from_millis(1500),
+            started.elapsed() < Duration::from_millis(2500),
             "the script ran past its deadline"
         );
         tokio::time::sleep(Duration::from_millis(5)).await;
@@ -284,7 +287,7 @@ async fn stops_at_the_deadline_while_nothing_awaits_next() {
     assert_eq!(
         outcome.result,
         Err(Failure::Timeout {
-            message: "Execution timed out after 300 ms".to_owned()
+            message: "Execution timed out after 1000 ms".to_owned()
         })
     );
 }
@@ -412,10 +415,16 @@ fn pending_bytes_message() -> String {
 
 /// A script that calls in a loop without awaiting fails at the pending-call
 /// limit instead of filling the heap with calls the VM never settles, with a
-/// deadline or without one.
+/// deadline or without one. The deadline is far longer than queueing
+/// [`MAX_PENDING_CALLS`] calls takes (about 100 ms in a debug build, and
+/// under 400 ms on a loaded machine), so the run reaches the limit before
+/// its deadline on a slow shared runner too.
 #[tokio::test]
 async fn calls_in_a_loop_without_awaiting_stop_at_the_pending_call_limit() {
-    for timeout_ms in [Some(300), None] {
+    // The first run in a process compiles the engine; that is not the run's
+    // time, and the wall-time assertion below bounds the run alone.
+    engine();
+    for timeout_ms in [Some(10_000), None] {
         let started = Instant::now();
         let execution = execute(
             "for (;;) tools.echo({ a: 'y'.repeat(1000) })",

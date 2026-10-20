@@ -5,8 +5,8 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use bake_codemode::{
@@ -93,6 +93,11 @@ pub struct Setup {
     pub timeout_ms: Option<u64>,
     pub store: StoreValues,
     pub limits: Option<Limits>,
+    /// Holds every call's task alive after it has answered, so
+    /// [`Event::Done`] always arrives before the loop could join it: the
+    /// seam that proves a record settles with its answer and not with its
+    /// task.
+    pub hold_answered_calls: bool,
 }
 
 impl Setup {
@@ -102,6 +107,12 @@ impl Setup {
             ..Self::default()
         }
     }
+}
+
+/// A poisoned record list is still the records, so a panicking call's test
+/// reports its own assertion instead of a lock error.
+fn lock<T>(records: &Mutex<T>) -> MutexGuard<'_, T> {
+    records.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 #[derive(Debug)]
@@ -210,38 +221,55 @@ async fn execute_unbounded(code: &str, setup: &Setup) -> Execution {
     let mut run = start(code, setup);
     // Each call's task answers through its own handle, as a host whose
     // nested calls run apart from the loop that owns the run would.
-    let mut tasks: JoinSet<(u32, bool, Result<(), AnswerError>)> = JoinSet::new();
+    let mut tasks: JoinSet<(u32, Result<(), AnswerError>)> = JoinSet::new();
     let mut output = Vec::new();
-    let mut calls: Vec<CallRecord> = Vec::new();
-    let mut records: HashMap<u32, usize> = HashMap::new();
+    let calls: Arc<Mutex<Vec<CallRecord>>> = Arc::default();
     let mut flags: HashMap<u32, Arc<AtomicBool>> = HashMap::new();
     loop {
         tokio::select! {
             event = run.next() => match event {
                 Event::Call(call) => {
-                    let (execute, id, args) = match &call {
+                    let (execute, id, args, record) = match &call {
                         HostCall::Tool { id, name, args } => {
-                            records.insert(*id, calls.len());
-                            calls.push(CallRecord { name: name.clone(), status: CallStatus::Cancelled });
-                            (setup.tools.iter().find(|tool| &tool.name == name).map(|tool| Arc::clone(&tool.execute)), *id, args.clone())
+                            let mut records = lock(&calls);
+                            records.push(CallRecord { name: name.clone(), status: CallStatus::Cancelled });
+                            let index = records.len() - 1;
+                            drop(records);
+                            (setup.tools.iter().find(|tool| &tool.name == name).map(|tool| Arc::clone(&tool.execute)), *id, args.clone(), Some(index))
                         }
                         HostCall::Global { id, name, args } => (
                             setup.globals.iter().find(|(global, _)| &global.name == name).map(|(_, execute)| Arc::clone(execute)),
                             *id,
                             args.clone(),
+                            None,
                         ),
                     };
                     let cancelled = Arc::new(AtomicBool::new(false));
                     flags.insert(id, Arc::clone(&cancelled));
                     let name = call.name().to_owned();
                     let handle = run.handle();
+                    let records = Arc::clone(&calls);
+                    let hold = setup.hold_answered_calls;
                     tasks.spawn(async move {
                         let result = match execute {
                             Some(execute) => execute(args, cancelled).await,
                             None => Err(format!("Unknown tool \"{name}\"")),
                         };
-                        let ok = result.is_ok();
-                        (id, ok, handle.answer(id, result.map_err(CallError::new)))
+                        // The record settles before the answer, as the
+                        // codemode tool's `settle_nested_call` does: the
+                        // script may end as soon as it has the result, and
+                        // the `Event::Done` that follows reports the records
+                        // as they stand.
+                        if let Some(index) = record
+                            && let Some(call) = lock(&records).get_mut(index)
+                        {
+                            call.status = if result.is_ok() { CallStatus::Ok } else { CallStatus::Error };
+                        }
+                        let answer = handle.answer(id, result.map_err(CallError::new));
+                        if hold {
+                            std::future::pending::<()>().await;
+                        }
+                        (id, answer)
                     });
                 }
                 Event::Output(item) => output.push(item),
@@ -251,16 +279,14 @@ async fn execute_unbounded(code: &str, setup: &Setup) -> Execution {
                     }
                     tasks.abort_all();
                     let outcome = Arc::unwrap_or_clone(outcome);
+                    let calls = lock(&calls).clone();
                     return Execution { outcome, output, calls };
                 }
                 Event::Started { .. } | Event::Idle { .. } => {}
             },
             Some(joined) = tasks.join_next(), if !tasks.is_empty() => {
-                let Ok((id, ok, answer)) = joined else { continue };
+                let Ok((id, answer)) = joined else { continue };
                 flags.remove(&id);
-                if let Some(index) = records.get(&id) {
-                    calls[*index].status = if ok { CallStatus::Ok } else { CallStatus::Error };
-                }
                 assert!(answer.is_ok(), "{answer:?}");
             }
         }
