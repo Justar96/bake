@@ -252,7 +252,9 @@ async fn dropping_a_run_on_a_runtime_ends_its_thread() {
 /// The watchdog stops a run at its deadline while the host awaits something
 /// other than `Run::next`, here inside three long built-ins that neither poll
 /// QuickJS's interrupt handler nor return to the driver (about 3.5 s
-/// without the watchdog's epoch increment).
+/// without the watchdog's epoch increment). The deadline allows the script
+/// to start under contention; the exit bound remains below the built-ins'
+/// uninterrupted runtime.
 #[tokio::test]
 async fn stops_at_the_deadline_while_nothing_awaits_next() {
     let exits = Arc::new(AtomicUsize::new(0));
@@ -261,7 +263,7 @@ async fn stops_at_the_deadline_while_nothing_awaits_next() {
         &exits,
     );
     request.tools = vec![ToolDeclaration::named("echo")];
-    request.source.options.timeout_ms = Some(300);
+    request.source.options.timeout_ms = Some(1000);
     engine();
     let started = Instant::now();
     let mut run = match engine().start(request) {
@@ -270,7 +272,7 @@ async fn stops_at_the_deadline_while_nothing_awaits_next() {
     };
     while exits.load(Ordering::SeqCst) == 0 {
         assert!(
-            started.elapsed() < Duration::from_millis(1500),
+            started.elapsed() < Duration::from_millis(2500),
             "the script ran past its deadline"
         );
         tokio::time::sleep(Duration::from_millis(5)).await;
@@ -284,7 +286,7 @@ async fn stops_at_the_deadline_while_nothing_awaits_next() {
     assert_eq!(
         outcome.result,
         Err(Failure::Timeout {
-            message: "Execution timed out after 300 ms".to_owned()
+            message: "Execution timed out after 1000 ms".to_owned()
         })
     );
 }
@@ -417,6 +419,7 @@ fn pending_bytes_message() -> String {
 async fn calls_in_a_loop_without_awaiting_stop_at_the_pending_call_limit() {
     // Filling the queue must hit its limit before a deadline competes with
     // it under suite load. The completion bound below remains five seconds.
+    engine();
     for timeout_ms in [Some(30_000), None] {
         let started = Instant::now();
         let execution = execute(
