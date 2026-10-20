@@ -116,8 +116,9 @@ The prompt keeps Pi's mechanism: an untagged `preamble`, then named sections wra
 | 7 | `skills` | The skills the model may load, when any load ([Skills section](#skills-section)) | When the skills change between runs |
 | 8 | `permissions` | The run's sandbox and approval sentences ([D24](scope-00/support.md#decision-register)) | When the permission changes |
 | 9 | `environment` | Working directory, platform, shell, git repository or not, session start date | When one of them changes between runs |
+| 10 | `mcp_servers` | One attributed line per connected MCP server with a configured description or its bounded instructions, angle brackets and control characters neutralized, Pi's `renderServersSection` ([mcp.md](../../../rust/crates/bake-cli/docs/mcp.md#server-instructions)); absent without such a server | When a server connects, reconnects, or stops |
 
-Pi's `tools` section is removed: it repeats the tool schemas the request already carries, plus a sentence about custom tools that `bake-rs` cannot load. Pi's `cwd` section becomes the first line of `environment`. A custom prompt (`--system-prompt`, scope 10) replaces `preamble`, `rules`, and `docs`, as in Pi, and keeps the other sections, since they state facts the harness enforces. Pi's `skills` section, the list of loaded skills, follows `project_context` when skills load: like the context files, it changes only between runs.
+Pi's `tools` section is removed: it repeats the tool schemas the request already carries, plus a sentence about custom tools that `bake-rs` cannot load. Pi's `cwd` section becomes the first line of `environment`. A custom prompt (`--system-prompt`, scope 10) replaces `preamble`, `rules`, and `docs`, as in Pi, and keeps the other sections, since they state facts the harness enforces. Pi's `skills` section, the list of loaded skills, follows `project_context` when skills load: like the context files, it changes only between runs. The `mcp_servers` section comes last because servers connect in the background: a server that connects after the first request patches only that section.
 
 ### The text
 
