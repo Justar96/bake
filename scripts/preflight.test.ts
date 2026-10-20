@@ -3,7 +3,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
 import {
-  bunTests, changelogGap, failedBuild, parseOptions, runStep, runtimeArgs, selectSteps, STEPS, strayBuildOutput, type Scope,
+  bunTests, changelogGap, failedBuild, parseOptions, runStep, runtimeArgs, rustDocArgs, rustTestArgs, selectSteps, STEPS, strayBuildOutput,
+  summaryRecord, type Result, type Scope,
 } from './preflight.ts'
 
 const scope = (files: readonly string[]): Scope => ({ base: 'origin/develop', mergeBase: 'abc123', files })
@@ -52,9 +53,10 @@ describe('preflight', () => {
     expect(selected(['--fast', '--only', 'native'])).toEqual([])
     expect(STEPS.find(step => step.name === 'rust')?.command?.(parseOptions([]), scope([])))
       .toEqual(['cargo', 'build', '--workspace', '--locked'])
-    expect(STEPS.find(step => step.name === 'rust-test')?.command?.(parseOptions([]), scope([])))
+    const rustChange = scope(['rust/crates/bake-ai/src/lib.rs'])
+    expect(STEPS.find(step => step.name === 'rust-test')?.command?.(parseOptions(['--full']), rustChange))
       .toEqual(['bun', 'run', 'test:rust'])
-    expect(STEPS.find(step => step.name === 'rust-doc')?.command?.(parseOptions([]), scope([])))
+    expect(STEPS.find(step => step.name === 'rust-doc')?.command?.(parseOptions([]), rustChange))
       .toEqual(['cargo', 'test', '--workspace', '--locked', '--doc', '--no-fail-fast'])
     expect(STEPS.find(step => step.name === 'rust-pty')?.command?.(parseOptions([]), scope([])))
       .toEqual(['bun', 'run', 'test:rust:pty'])
@@ -113,6 +115,40 @@ describe('preflight', () => {
     expect(runtimeArgs(options, scope(['docs/development.md', 'apps/tui/packages/ui/src/app.tsx']))).toHaveProperty('skip')
     expect(runtimeArgs(options, unresolved)).toEqual(['node', 'node_modules/vitest/vitest.mjs', 'run'])
     expect(runtimeArgs(parseOptions(['--full']), scope(['docs/x.md']))).not.toHaveProperty('skip')
+  })
+
+  it('runs the Rust tests the change reaches, every one when asked or unscoped, or none', () => {
+    const options = parseOptions([])
+    const doc = ['cargo', 'test', '--workspace', '--locked', '--doc', '--no-fail-fast']
+    expect(rustTestArgs(options, scope(['rust/crates/bake-tui-view/src/lib.rs']), false)).toEqual(['bun', 'run', 'test:rust', '--changed', 'abc123'])
+    expect(rustTestArgs(options, scope(['CHANGELOG.md']), false)).toEqual(['bun', 'run', 'test:rust', '--changed', 'abc123'])
+    for (const files of [[], ['docs/development.md', 'packages/core/agent/src/index.ts']]) {
+      expect(rustTestArgs(options, scope(files), false)).toEqual({ skip: 'no Rust input changed (--full runs it anyway)' })
+      expect(rustDocArgs(options, scope(files), false)).toEqual({ skip: 'no Rust input changed (--full runs it anyway)' })
+      // --full, CI, and a missing merge base each run everything.
+      expect(rustTestArgs(parseOptions(['--full']), scope(files), false)).toEqual(['bun', 'run', 'test:rust'])
+      expect(rustTestArgs(options, scope(files), true)).toEqual(['bun', 'run', 'test:rust'])
+      expect(rustDocArgs(options, scope(files), true)).toEqual(doc)
+    }
+    expect(rustTestArgs(options, unresolved, false)).toEqual(['bun', 'run', 'test:rust'])
+    expect(rustDocArgs(options, unresolved, false)).toEqual(doc)
+    expect(rustDocArgs(options, scope(['rust/Cargo.lock']), false)).toEqual(doc)
+  })
+
+  it('records each run step in table order with its outcome and seconds', () => {
+    const results = new Map<string, Result>([
+      ['rust-test', { outcome: 'fail', seconds: 12.345, note: '.preflight/rust-test.log' }],
+      ['rust-fmt', { outcome: 'pass', seconds: 1.26 }],
+      ['rust-doc', { outcome: 'skip', seconds: 0, note: 'no Rust input changed (--full runs it anyway)' }],
+    ])
+    expect(summaryRecord(results, 20.04)).toEqual({
+      seconds: 20,
+      steps: [
+        { step: 'rust-fmt', outcome: 'pass', seconds: 1.3 },
+        { step: 'rust-test', outcome: 'fail', seconds: 12.3, note: '.preflight/rust-test.log' },
+        { step: 'rust-doc', outcome: 'skip', seconds: 0, note: 'no Rust input changed (--full runs it anyway)' },
+      ],
+    })
   })
 
   it('finds compiled output that shadows a source file, and nothing else', () => {

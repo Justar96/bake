@@ -14,6 +14,7 @@ import { availableParallelism } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { dropRepositoryGitEnv } from './git-env.ts'
+import { isRustInput } from './rust-scope.ts'
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)))
 const LOG_DIR = join(ROOT, '.preflight')
@@ -132,6 +133,31 @@ export function runtimeArgs(options: Options, scope: Scope): readonly string[] |
   return node(VITEST, 'run', '--changed', scope.mergeBase)
 }
 
+/** Whether this run tests the whole Rust workspace instead of the packages the change reaches. */
+function rustFull(options: Options, scope: Scope, ci: boolean): boolean {
+  return options.full || ci || scope.mergeBase === undefined
+}
+
+const RUST_SKIP = { skip: 'no Rust input changed (--full runs it anyway)' } as const
+
+/**
+ * The Rust test command for this run: every test, the packages the change reaches
+ * and their reverse dependents (see rust-scope.ts), or none when no Rust input changed.
+ */
+export function rustTestArgs(options: Options, scope: Scope, ci: boolean): readonly string[] | { readonly skip: string } {
+  if (rustFull(options, scope, ci)) return bun('run', 'test:rust')
+  if (!scope.files.some(isRustInput)) return RUST_SKIP
+  return bun('run', 'test:rust', '--changed', scope.mergeBase ?? '')
+}
+
+/** Documentation tests run whole, since they are quick, unless no Rust input changed. */
+export function rustDocArgs(options: Options, scope: Scope, ci: boolean): readonly string[] | { readonly skip: string } {
+  if (!rustFull(options, scope, ci) && !scope.files.some(isRustInput)) return RUST_SKIP
+  return ['cargo', 'test', '--workspace', '--locked', '--doc', '--no-fail-fast']
+}
+
+const CI = process.env['CI'] === 'true'
+
 export const STEPS: readonly Step[] = [
   {
     name: 'stray-output', phase: 'static', group: 'hygiene',
@@ -225,13 +251,13 @@ export const STEPS: readonly Step[] = [
   },
   {
     name: 'rust-test', phase: 'build', group: 'native', needsBuild: true,
-    summary: 'Rust tests, with parallel execution when cargo-nextest is installed',
-    command: () => bun('run', 'test:rust'),
+    summary: 'Rust tests the change reaches, with parallel execution when cargo-nextest is installed',
+    command: (options, scope) => rustTestArgs(options, scope, CI),
   },
   {
     name: 'rust-doc', phase: 'build', group: 'native', needsBuild: true, cwd: 'rust',
     summary: 'locked Rust workspace documentation tests',
-    command: () => ['cargo', 'test', '--workspace', '--locked', '--doc', '--no-fail-fast'],
+    command: (options, scope) => rustDocArgs(options, scope, CI),
   },
   {
     name: 'rust', phase: 'build', group: 'native', needsBuild: true,
@@ -343,12 +369,12 @@ const USAGE = `usage: bun run preflight [options]
 Run every gate CI runs and report all of them. Exit 1 if any failed.
 
   --base <ref>    measure the change from <ref> (default: origin/develop, else develop)
-  --full          run the whole runtime suite, not only the tests the change reaches
+  --full          run the whole runtime and Rust suites, not only the tests the change reaches
   --fast          skip the build, component specs, runtime suite, and PTY scenarios
   --only <names>  run only these steps or groups (comma-separated, repeatable)
   --skip <names>  leave out these steps or groups
   --list          print the steps and groups
-Logs: .preflight/<step>.log`
+Logs: .preflight/<step>.log; step times: .preflight/summary.json`
 
 /** Run a command and return its stdout; reject when it fails. */
 async function capture(argv: readonly string[]): Promise<string> {
@@ -381,7 +407,8 @@ async function resolveScope(options: Options): Promise<Scope> {
   for (const base of candidates) {
     const mergeBase = await capture(['git', 'merge-base', base, 'HEAD']).then(out => out.trim(), () => undefined)
     if (mergeBase === undefined) continue
-    const changed = await capture(['git', 'diff', '--name-only', mergeBase])
+    // Both sides of a rename, so moving a file out of a tree still changes that tree.
+    const changed = await capture(['git', 'diff', '--name-only', '--no-renames', mergeBase])
     const untracked = await capture(['git', 'ls-files', '--others', '--exclude-standard'])
     const files = [...new Set([...changed.split('\n'), ...untracked.split('\n')].filter(Boolean))].sort()
     return { base, mergeBase, files }
@@ -406,6 +433,28 @@ export async function runStep(step: Step, options: Options, scope: Scope, logDir
   const code = await logged(command, log, resolve(ROOT, step.cwd ?? '.'))
   const note = `.preflight/${step.name}.log`
   return { outcome: code === 0 ? 'pass' : 'fail', seconds: seconds(), note }
+}
+
+/** One step's line in `.preflight/summary.json`. */
+export interface SummaryEntry {
+  readonly step: string
+  readonly outcome: Outcome
+  readonly seconds: number
+  readonly note?: string
+}
+
+/** The machine-readable record of a run, in step order, for CI timing summaries. */
+export function summaryRecord(
+  results: ReadonlyMap<string, Result>, seconds: number,
+): { readonly seconds: number; readonly steps: readonly SummaryEntry[] } {
+  const round = (value: number) => Math.round(value * 10) / 10
+  const steps = STEPS.flatMap((step): SummaryEntry[] => {
+    const result = results.get(step.name)
+    if (result === undefined) return []
+    const entry = { step: step.name, outcome: result.outcome, seconds: round(result.seconds) }
+    return [result.note === undefined ? entry : { ...entry, note: result.note }]
+  })
+  return { seconds: round(seconds), steps }
 }
 
 /** Run up to `limit` tasks at once. */
@@ -479,14 +528,15 @@ async function main(argv: readonly string[]): Promise<number> {
     await pooled(tasks, phase === 'static' || phase === 'tui' ? width : 1)
   }
   const failed = [...results.entries()].filter(([, result]) => result.outcome === 'fail')
-  const ci = process.env['CI'] === 'true'
   for (const [name, result] of failed) {
     if (result.note?.endsWith('.log') !== true) continue
     console.log(`\n--- ${name}: last lines of ${result.note}`)
-    console.log(tail(result.note, ci ? 400 : 40))
+    console.log(tail(result.note, CI ? 400 : 40))
   }
+  const elapsed = (performance.now() - started) / 1000
+  writeFileSync(join(LOG_DIR, 'summary.json'), `${JSON.stringify(summaryRecord(results, elapsed), null, 2)}\n`)
   const counted = (outcome: Outcome) => [...results.values()].filter(result => result.outcome === outcome).length
-  console.log(`\npreflight: ${counted('pass')} passed, ${counted('fail')} failed, ${counted('warn')} warned, ${counted('skip')} skipped in ${((performance.now() - started) / 1000).toFixed(0)}s`)
+  console.log(`\npreflight: ${counted('pass')} passed, ${counted('fail')} failed, ${counted('warn')} warned, ${counted('skip')} skipped in ${elapsed.toFixed(0)}s`)
   return failed.length === 0 ? 0 : 1
 }
 
