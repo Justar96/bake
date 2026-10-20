@@ -490,4 +490,64 @@ mod tests {
         assert_eq!(version(serde_json::json!([3])), 3.0);
         assert!(version(Value::from("inf")).is_nan());
     }
+
+    mod properties {
+        use proptest::prelude::*;
+        use serde_json::json;
+
+        use super::*;
+        use crate::session::json::js_stringify;
+
+        /// A session's lines as Pi writes them: a header, then entries whose
+        /// text holds JSON escapes, multibyte and astral characters, and
+        /// lone surrogate escapes (written for U+E000).
+        fn session_lines() -> impl Strategy<Value = Vec<String>> {
+            let text = "[a-z \"\\\\\n\u{e9}\u{1F600}\u{E000}]{0,12}";
+            prop::collection::vec(text, 0..6).prop_map(|texts| {
+                let header = json!({ "type": "session", "version": 3, "id": "s", "cwd": "/w" });
+                let mut lines = vec![js_stringify(&header)];
+                for (index, text) in texts.into_iter().enumerate() {
+                    let entry = json!({
+                        "type": "message",
+                        "id": format!("e{index}"),
+                        "parentId": index.checked_sub(1).map(|parent| format!("e{parent}")),
+                        "text": text,
+                    });
+                    lines.push(js_stringify(&entry).replace('\u{E000}', "\\ud800"));
+                }
+                lines
+            })
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(256))]
+
+            #[test]
+            fn every_torn_session_reads_as_its_complete_lines(
+                lines in session_lines(),
+                cuts in prop::collection::vec(any::<prop::sample::Index>(), 1..16),
+            ) {
+                let content: String = lines.iter().map(|line| format!("{line}\n")).collect();
+                for cut in cuts {
+                    // A torn write ends anywhere; the reader decodes it lossily.
+                    let cut = cut.index(content.len() + 1);
+                    let torn = String::from_utf8_lossy(&content.as_bytes()[..cut]);
+                    let torn = torn.as_ref();
+                    let read: Vec<String> =
+                        parse_session_entries(torn).iter().map(FileEntry::to_line).collect();
+                    let mut end = 0;
+                    let complete: Vec<&String> = lines
+                        .iter()
+                        .take_while(|line| {
+                            end += line.len();
+                            let whole = end <= cut;
+                            end += 1;
+                            whole
+                        })
+                        .collect();
+                    prop_assert_eq!(read.iter().collect::<Vec<_>>(), complete, "cut at {}", cut);
+                }
+            }
+        }
+    }
 }

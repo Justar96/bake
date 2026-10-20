@@ -418,4 +418,154 @@ mod tests {
             }]
         );
     }
+
+    mod properties {
+        use proptest::prelude::*;
+
+        use super::*;
+
+        /// Every item a stream decodes to, in order, and the error that
+        /// ended it, if any.
+        fn decode_items(chunks: &[&[u8]], limit: usize) -> (Vec<SseItem>, Option<TooLarge>) {
+            let mut decoder = SseDecoder::new(limit);
+            let mut items = Vec::new();
+            for chunk in chunks {
+                let mut input = *chunk;
+                loop {
+                    match decoder.next(&mut input) {
+                        Ok(Some(item)) => items.push(item),
+                        Ok(None) => break,
+                        Err(error) => return (items, Some(error)),
+                    }
+                }
+            }
+            match decoder.finish() {
+                Ok(rest) => {
+                    items.extend(rest);
+                    (items, None)
+                }
+                Err(error) => (items, Some(error)),
+            }
+        }
+
+        fn fragment() -> impl Strategy<Value = Vec<u8>> {
+            prop_oneof![
+                Just(b"data:".to_vec()),
+                Just(b"data: ".to_vec()),
+                Just(b"event: ".to_vec()),
+                Just(b"event: message".to_vec()),
+                Just(b"id: ".to_vec()),
+                Just(b"retry: ".to_vec()),
+                Just(b": ping".to_vec()),
+                Just(b"\n".to_vec()),
+                Just(b"\r".to_vec()),
+                Just(b"\r\n".to_vec()),
+                Just(b"\xEF\xBB\xBF".to_vec()),
+                Just(b"\xEF\xBB".to_vec()),
+                "[0-9]{1,3}".prop_map(String::into_bytes),
+                "\\PC{0,8}".prop_map(String::into_bytes),
+                prop::collection::vec(any::<u8>(), 0..4),
+            ]
+        }
+
+        /// A stream that may open with all or part of a BOM.
+        fn stream() -> impl Strategy<Value = Vec<u8>> {
+            let opening = prop_oneof![
+                Just(&b""[..]),
+                Just(&b"\xEF"[..]),
+                Just(&b"\xEF\xBB"[..]),
+                Just(&b"\xEF\xBB\xBF"[..]),
+            ];
+            (opening, prop::collection::vec(fragment(), 0..40))
+                .prop_map(|(opening, parts)| [opening.to_vec(), parts.concat()].concat())
+        }
+
+        /// Cut points, half of them in the first bytes, where the decoder
+        /// decides whether the stream opens with a BOM.
+        fn cuts() -> impl Strategy<Value = Vec<usize>> {
+            prop::collection::vec(prop_oneof![0..4usize, any::<usize>()], 0..8)
+        }
+
+        fn chunks<'a>(bytes: &'a [u8], cuts: &[usize]) -> Vec<&'a [u8]> {
+            let mut cuts: Vec<usize> = cuts.iter().map(|cut| cut % (bytes.len() + 1)).collect();
+            cuts.sort_unstable();
+            let mut chunks = Vec::new();
+            let mut start = 0;
+            for cut in cuts {
+                chunks.push(&bytes[start..cut]);
+                start = cut;
+            }
+            chunks.push(&bytes[start..]);
+            chunks
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(512))]
+
+            #[test]
+            fn any_split_of_a_stream_decodes_to_the_same_items_and_limit_error(
+                bytes in stream(),
+                cuts in cuts(),
+                limit in prop_oneof![0..24usize, Just(1024usize)],
+            ) {
+                let whole = decode_items(&[&bytes], limit);
+                prop_assert_eq!(decode_items(&chunks(&bytes, &cuts), limit), whole);
+            }
+
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(256))]
+
+            #[test]
+            fn no_decoded_event_holds_more_data_than_the_limit(
+                bytes in stream(),
+                cuts in cuts(),
+                limit in 0..24usize,
+            ) {
+                let (items, _) = decode_items(&chunks(&bytes, &cuts), limit);
+                for item in items {
+                    if let SseItem::Event { data, .. } = item {
+                        prop_assert!(data.len() <= limit, "{} bytes over {limit}", data.len());
+                    }
+                }
+            }
+
+            #[test]
+            fn events_written_with_any_line_ending_decode_to_their_ids_and_data(
+                events in prop::collection::vec(
+                    (
+                        prop::option::of("[!-~]{1,6}"),
+                        prop::option::of(prop_oneof![Just("message"), Just("ping")]),
+                        prop::collection::vec("[^\r\n]{0,12}", 1..4),
+                    ),
+                    0..6,
+                ),
+                ending in prop_oneof![Just("\n"), Just("\r"), Just("\r\n")],
+                cuts in cuts(),
+            ) {
+                let mut text = String::new();
+                let mut expected = Vec::new();
+                for (id, event, lines) in &events {
+                    if let Some(id) = id {
+                        text.push_str(&format!("id: {id}{ending}"));
+                        expected.push(SseItem::Id(HeaderValue::from_str(id).unwrap()));
+                    }
+                    if let Some(event) = event {
+                        text.push_str(&format!("event: {event}{ending}"));
+                    }
+                    for line in lines {
+                        text.push_str(&format!("data: {line}{ending}"));
+                    }
+                    text.push_str(ending);
+                    expected.push(SseItem::Event {
+                        message: event.is_none_or(|event| event == "message"),
+                        data: lines.join("\n").into_bytes(),
+                    });
+                }
+                let decoded = decode_items(&chunks(text.as_bytes(), &cuts), 1024);
+                prop_assert_eq!(decoded, (expected, None));
+            }
+        }
+    }
 }

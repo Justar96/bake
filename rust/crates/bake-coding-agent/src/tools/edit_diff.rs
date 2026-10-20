@@ -436,3 +436,111 @@ pub fn generate_diff_string(old_content: &str, new_content: &str) -> DiffString 
         first_changed_line,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use proptest::prelude::*;
+
+    use super::*;
+
+    /// Line text with the characters fuzzy matching rewrites: typographic
+    /// quotes, dashes, and spaces, a ligature and a fullwidth letter that
+    /// NFKC folds, and tabs and spaces that trail a line.
+    fn line_text() -> impl Strategy<Value = String> {
+        "[a-z \t\u{2019}\u{201C}\u{2014}\u{a0}\u{fb01}\u{ff21}]{0,10}"
+    }
+
+    /// Replacement text, already LF-normalized as the edit tool passes it.
+    fn new_text() -> impl Strategy<Value = String> {
+        "[a-z \n\u{e9}\u{1F600}]{0,10}"
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(256))]
+
+        #[test]
+        fn unique_exact_edits_replace_exactly_their_matches_in_any_order(
+            fillers in prop::collection::vec("[a-z \n\u{4e2d}]{0,8}", 4),
+            targets in prop::collection::vec(("[a-z\n]{0,4}", new_text()), 1..4),
+            rotation in any::<usize>(),
+        ) {
+            // `<k|…|>` marks make each old text unique.
+            let mut content = fillers[0].clone();
+            let mut expected = content.clone();
+            let mut edits = Vec::new();
+            for (k, (body, replacement)) in targets.iter().enumerate() {
+                let old_text = format!("<{k}|{body}|>");
+                content.push_str(&old_text);
+                content.push_str(&fillers[k + 1]);
+                expected.push_str(replacement);
+                expected.push_str(&fillers[k + 1]);
+                edits.push(Edit { old_text, new_text: replacement.clone() });
+            }
+            let len = edits.len();
+            edits.rotate_left(rotation % len);
+            let applied = apply_edits_to_normalized_content(&content, &edits, "f");
+            if expected == content {
+                prop_assert!(applied.is_err());
+            } else {
+                let applied = applied.map_err(TestCaseError::fail)?;
+                prop_assert_eq!(applied.base_content, content);
+                prop_assert_eq!(applied.new_content, expected);
+            }
+        }
+
+        #[test]
+        fn an_old_text_found_twice_is_refused(
+            before in "[a-z \n]{0,6}",
+            between in "[a-z \n]{0,6}",
+            after in "[a-z \n]{0,6}",
+            old_text in "[a-z\u{2019}\n]{1,6}",
+            replacement in new_text(),
+        ) {
+            let content = format!("{before}{old_text}{between}{old_text}{after}");
+            let edit = Edit { old_text, new_text: replacement };
+            let error = apply_edits_to_normalized_content(&content, &[edit], "f");
+            prop_assert!(
+                error.as_ref().is_err_and(|message| message.contains("occurrences")),
+                "{error:?}"
+            );
+        }
+
+        #[test]
+        fn a_fuzzy_edit_rewrites_only_the_lines_it_matches(
+            texts in prop::collection::vec(line_text(), 1..8),
+            range in (0..8usize, 1..4usize),
+            replacement in new_text(),
+        ) {
+            // `<k>` opens each line, so the matched lines occur once.
+            let lines: Vec<String> = texts
+                .iter()
+                .enumerate()
+                .map(|(k, text)| format!("<{k}>{text}"))
+                .collect();
+            let start = range.0 % lines.len();
+            let end = (start + range.1).min(lines.len());
+            let content = lines.join("\n");
+            let old_text = normalize_for_fuzzy_match(&lines[start..end].join("\n"));
+            let edit = Edit { old_text, new_text: replacement.clone() };
+            let before: String = lines[..start].iter().map(|line| format!("{line}\n")).collect();
+            let after: String = lines[end..].iter().map(|line| format!("\n{line}")).collect();
+            match apply_edits_to_normalized_content(&content, &[edit], "f") {
+                Ok(applied) => {
+                    // Untouched lines are kept byte for byte; only blanks an
+                    // exact match left at the end of its last line remain.
+                    let edited = applied
+                        .new_content
+                        .strip_prefix(before.as_str())
+                        .and_then(|rest| rest.strip_suffix(after.as_str()))
+                        .and_then(|rest| rest.strip_prefix(replacement.as_str()));
+                    prop_assert!(
+                        edited.is_some_and(|rest| rest.trim().is_empty()),
+                        "{:?} does not keep {before:?} and {after:?} around {replacement:?}",
+                        applied.new_content
+                    );
+                }
+                Err(message) => prop_assert!(message.starts_with("No changes"), "{message}"),
+            }
+        }
+    }
+}
