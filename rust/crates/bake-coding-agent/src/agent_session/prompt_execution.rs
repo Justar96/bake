@@ -762,6 +762,18 @@ impl PromptExecution {
         // The rules match the declarations the request carries, which
         // leave out the caller's hidden tools too.
         options.hidden_tools.extend(hidden);
+        // The `mcp_servers` section lists the servers connected now, as
+        // Pi's `before_agent_start` handler does; a session without one
+        // adds no section and its requests are unchanged.
+        if let Some(section) = self
+            .mcp
+            .get()
+            .and_then(crate::mcp::McpServers::servers_prompt_section)
+        {
+            options
+                .sections
+                .push((crate::mcp::MCP_SERVERS_SECTION.to_owned(), section));
+        }
         let sections = build_system_prompt_sections(&options).map_err(|error| error.to_string())?;
         let systems: Vec<Message> = self
             .agent

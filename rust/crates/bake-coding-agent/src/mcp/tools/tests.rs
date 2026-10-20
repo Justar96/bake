@@ -70,7 +70,7 @@ fn result(value: Value) -> CallToolResult {
 }
 
 async fn convert(value: Value) -> AgentToolResult {
-    convert_result("docs", "t", result(value), &WorkGate::default()).await
+    convert_result("docs", "t", result(value), false, &WorkGate::default()).await
 }
 
 #[test]
@@ -276,6 +276,29 @@ async fn describes_resource_links_and_saves_binary_resources() {
     assert_eq!(texts[3], "{\"a\":1}");
 }
 
+// Pi's `readableResources`: a link of a server whose resources
+// `read_mcp_resource` reaches names that tool and the server.
+#[tokio::test]
+async fn a_resource_link_names_the_read_tool_when_resources_are_readable() {
+    let link = json!({
+        "content": [{ "type": "resource_link", "uri": "docs://guide", "name": "guide" }]
+    });
+    let readable = convert_result(
+        "docs",
+        "t",
+        result(link.clone()),
+        true,
+        &WorkGate::default(),
+    )
+    .await;
+    assert_eq!(
+        texts(&readable.content),
+        ["[Resource docs://guide \"guide\". Read it with read_mcp_resource (server \"docs\")]"]
+    );
+    let plain = convert_result("docs", "t", result(link), false, &WorkGate::default()).await;
+    assert_eq!(texts(&plain.content), ["[Resource docs://guide \"guide\"]"]);
+}
+
 #[tokio::test]
 async fn malformed_blocks_become_notes() {
     let converted = convert(json!({
@@ -346,6 +369,7 @@ async fn a_closed_session_saves_nothing_and_says_so() {
         "docs",
         "t",
         result(json!({ "content": [{ "type": "text", "text": "x".repeat(MCP_OUTPUT_MAX_BYTES + 1) }] })),
+        false,
         &gate,
     )
     .await;

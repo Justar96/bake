@@ -7,9 +7,15 @@ https://github.com/earendil-works/pi
 Release v1.3.0, revision 71023aec1546d6d677a65669c5665c0927ce0dd0.
 Ported: the JSON-RPC message shapes and checks of src/protocol/jsonrpc.ts, the
 protocol versions and initialize, tool, and tool-result shapes of
-src/protocol/types.ts and src/protocol/content.ts, the request correlation,
-initialization, tool listing and calling, cancellation, and close behavior of
-src/client.ts, the transport contract of src/transports/transport.ts, and the
+src/protocol/types.ts and src/protocol/content.ts, the resource, resource
+template, and resource-contents shapes and their checks of
+src/protocol/types.ts and src/client.ts (isResource, isResourceTemplate,
+toResource, toResourceTemplate, validateListPage, and
+validateReadResourceResult), the request correlation,
+initialization, tool listing and calling, the resource listings,
+resources/read, and the method-not-found rule for
+resources/templates/list (withoutTemplates), cancellation, and close
+behavior of src/client.ts, the transport contract of src/transports/transport.ts, and the
 newline-delimited framing and the process lifecycle of
 src/transports/stdio.ts (process-tree ownership, the stdin-close, SIGTERM, and
 SIGKILL shutdown sequence, and the bounded standard error tail), and the
@@ -22,7 +28,7 @@ Not ported: the OAuth client and the auth provider (src/oauth/,
 src/auth-provider.ts; Pi adapted src/oauth/ from the MIT-licensed Model
 Context Protocol TypeScript SDK, whose notice Pi keeps under
 packages/mcp/LICENSES/), cross-spawn's Windows command resolution, the
-process-exit hook, resources, progress, and roots.
+process-exit hook, resource subscriptions, progress, and roots.
 --------------------------------------------------------------------------------
 MIT License
 

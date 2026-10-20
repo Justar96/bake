@@ -4,9 +4,10 @@
 //! release v1.3.0, revision `71023aec1546d6d677a65669c5665c0927ce0dd0`, MIT;
 //! see the crate's `NOTICE`): the connection's initialization and capability
 //! negotiation, `tools/list` with pagination and
-//! `notifications/tools/list_changed`, `tools/call`, JSON-RPC errors,
-//! cancellation, and awaited shutdown, over owned stdio and Streamable HTTP
-//! transports or one the caller supplies.
+//! `notifications/tools/list_changed`, `tools/call`, the resource listings
+//! and `resources/read`, JSON-RPC errors, cancellation, and awaited
+//! shutdown, over owned stdio and Streamable HTTP transports or one the
+//! caller supplies.
 //!
 //! | Module | Pi source |
 //! |---|---|
@@ -38,9 +39,13 @@
 //! Not implemented here: OAuth and the auth provider (Pi `src/oauth/`,
 //! `src/auth-provider.ts`), re-initialization after an HTTP session expires,
 //! which belongs to the transport's owner (Bake's `mcp::http` starts a new
-//! transport and client), resources, prompts, progress notifications
+//! transport and client), resource subscriptions (`resources/subscribe`),
+//! prompts, progress notifications
 //! and their timeout renewal, roots, sampling, elicitation, and the stateless
 //! MCP 2026-07-28 revision (`server/discover`, per-request version metadata).
+//! `notifications/resources/list_changed` is reported as a
+//! [`ClientEvent::Notification`], as Pi handles it: resource listings are
+//! made on demand, so the next one already shows the new set.
 //! The client negotiates only the handshake-based revisions of
 //! [`ProtocolVersion::SUPPORTED`], as Pi v1.3.0 does. Tool name mapping,
 //! content conversion, the model tool adapter, configuration, and reconnects
@@ -67,7 +72,8 @@ pub use http::{
 };
 pub use jsonrpc::{JsonRpcError, RequestId};
 pub use protocol::{
-    CallToolResult, Implementation, InitializeResult, ProtocolVersion, ServerCapabilities, Tool,
+    CallToolResult, Implementation, InitializeResult, ProtocolVersion, ReadResourceResult,
+    Resource, ResourceContents, ResourcesCapability, ResourcesPage, ServerCapabilities, Tool,
     ToolsCapability, ToolsPage,
 };
 pub use stdio::{

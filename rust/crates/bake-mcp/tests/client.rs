@@ -166,6 +166,163 @@ async fn paginates_tools_and_preserves_protocol_tool_definitions() {
 }
 
 #[tokio::test]
+async fn paginates_resources_and_fills_in_missing_names() {
+    // Pi `client.test.ts` resource listings: `listResources`,
+    // `listResourceTemplates`, and `toResource`'s name fallback.
+    let (client, _events, mut server) = connect().await;
+    let (resources, ()) = exchange!(client.list_resources(), async {
+        let (id, params) = server.request("resources/list").await;
+        assert_eq!(params, Value::Null);
+        server
+            .reply(
+                &id,
+                json!({
+                    "resources": [{"uri": "docs://intro", "name": "intro", "mimeType": "text/markdown"}],
+                    "nextCursor": "page-2",
+                }),
+            )
+            .await;
+        let (id, params) = server.request("resources/list").await;
+        assert_eq!(params, json!({"cursor": "page-2"}));
+        // Some servers omit `name`, although the schema requires it.
+        server
+            .reply(
+                &id,
+                json!({"resources": [{"uri": "docs://unnamed"}], "nextCursor": ""}),
+            )
+            .await;
+    });
+    let resources = resources.unwrap();
+    assert_eq!(
+        resources
+            .iter()
+            .map(|resource| (resource.address(), resource.name()))
+            .collect::<Vec<_>>(),
+        [
+            ("docs://intro", "intro"),
+            ("docs://unnamed", "docs://unnamed")
+        ]
+    );
+    assert_eq!(
+        Value::Object(resources[0].entry().clone()),
+        json!({"uri": "docs://intro", "name": "intro", "mimeType": "text/markdown"})
+    );
+
+    let (templates, ()) = exchange!(client.list_resource_templates(), async {
+        let (id, _) = server.request("resources/templates/list").await;
+        server
+            .reply(
+                &id,
+                json!({"resourceTemplates": [{"uriTemplate": "docs://pages/{slug}"}]}),
+            )
+            .await;
+    });
+    let templates = templates.unwrap();
+    assert_eq!(templates[0].address(), "docs://pages/{slug}");
+    assert_eq!(templates[0].name(), "docs://pages/{slug}");
+
+    // Pi's `withoutTemplates`: a server without the method has none.
+    let (none, ()) = exchange!(client.list_resource_templates(), async {
+        let (id, _) = server.request("resources/templates/list").await;
+        server
+            .reply_error(&id, json!({"code": -32601, "message": "Method not found"}))
+            .await;
+    });
+    assert_eq!(none.unwrap(), Vec::new());
+
+    // One page at a time, for the resource tools' `cursor` argument.
+    let (page, ()) = exchange!(client.list_resources_page(Some("page-7")), async {
+        let (id, params) = server.request("resources/list").await;
+        assert_eq!(params, json!({"cursor": "page-7"}));
+        server
+            .reply(
+                &id,
+                json!({"resources": [{"uri": "docs://last", "name": "last"}], "nextCursor": "page-8"}),
+            )
+            .await;
+    });
+    let page = page.unwrap();
+    assert_eq!(page.next_cursor.as_deref(), Some("page-8"));
+    common::bounded("shutdown", client.shutdown()).await;
+}
+
+#[tokio::test]
+async fn reads_resources_and_refuses_contents_without_a_body() {
+    // Pi `validateReadResourceResult`: every entry needs a `uri` and either
+    // `text` or `blob`.
+    let (client, _events, mut server) = connect().await;
+    let (read, ()) = exchange!(client.read_resource("docs://intro"), async {
+        let (id, params) = server.request("resources/read").await;
+        assert_eq!(params, json!({"uri": "docs://intro"}));
+        server
+            .reply(
+                &id,
+                json!({"contents": [
+                    {"uri": "docs://intro", "mimeType": "text/markdown", "text": "# intro"},
+                    {"uri": "docs://logo", "mimeType": "image/png", "blob": "AAAA"},
+                ]}),
+            )
+            .await;
+    });
+    let read = read.unwrap();
+    assert_eq!(read.contents.len(), 2);
+    assert_eq!(read.contents[0].uri(), "docs://intro");
+    assert_eq!(read.contents[1].entry()["blob"], "AAAA");
+
+    for bad in [
+        json!({"contents": "x"}),
+        json!({"contents": [{"uri": "docs://x"}]}),
+        json!({"contents": [{"text": "x"}]}),
+        json!({}),
+    ] {
+        let (refused, ()) = exchange!(client.read_resource("docs://bad"), async {
+            let (id, _) = server.request("resources/read").await;
+            server.reply(&id, bad.clone()).await;
+        });
+        assert!(
+            matches!(
+                refused,
+                Err(RequestError::InvalidResult {
+                    method: "resources/read",
+                    ..
+                })
+            ),
+            "{refused:?}: {bad}"
+        );
+    }
+    common::bounded("shutdown", client.shutdown()).await;
+}
+
+#[tokio::test]
+async fn a_resource_list_change_is_reported_as_a_notification() {
+    // Pi registers no handler for `notifications/resources/list_changed`:
+    // listings are made on demand, so the client reports it and keeps
+    // serving.
+    let (client, mut events, mut server) = connect().await;
+    server
+        .notify("notifications/resources/list_changed", None)
+        .await;
+    sync(&client, &mut server).await;
+    assert_eq!(
+        events.try_recv(),
+        Some(ClientEvent::Notification {
+            method: "notifications/resources/list_changed".into(),
+            params: None,
+        })
+    );
+    // The connection is unaffected: the next listing shows the new set.
+    let (resources, ()) = exchange!(client.list_resources(), async {
+        let (id, _) = server.request("resources/list").await;
+        server
+            .reply(&id, json!({"resources": [{"uri": "docs://new"}]}))
+            .await;
+    });
+    assert_eq!(resources.unwrap()[0].address(), "docs://new");
+    assert_eq!(client.close_reason(), None);
+    common::bounded("shutdown", client.shutdown()).await;
+}
+
+#[tokio::test]
 async fn returns_structured_tool_content_and_surfaces_json_rpc_errors() {
     // Pi: "returns structured tool content and surfaces JSON-RPC errors".
     let (client, _events, mut server) = connect().await;
@@ -736,8 +893,17 @@ async fn an_invalid_response_fails_its_request() {
 
 /// Serve `tools/list` pages from `page(index, cursor)` until `pages` were sent.
 async fn serve_pages(server: &mut Server, pages: usize, page: impl Fn(usize, &Value) -> Value) {
+    serve_list_pages(server, "tools/list", pages, page).await;
+}
+
+async fn serve_list_pages(
+    server: &mut Server,
+    method: &str,
+    pages: usize,
+    page: impl Fn(usize, &Value) -> Value,
+) {
     for index in 0..pages {
-        let (id, params) = server.request("tools/list").await;
+        let (id, params) = server.request(method).await;
         server.reply(&id, page(index, &params)).await;
     }
 }
@@ -852,6 +1018,47 @@ async fn pagination_stops_at_the_tool_and_byte_limits() {
         RequestError::ListTooLarge {
             method: "tools/list",
             limit: 400,
+        }
+    );
+    common::bounded("shutdown", client.shutdown()).await;
+}
+
+#[tokio::test]
+async fn resource_pagination_stops_at_its_own_item_limit() {
+    let mut options = options();
+    options.limits.max_listed_resources = std::num::NonZeroUsize::new(2).unwrap();
+    let (client, _events, mut server, _, _) =
+        connect_wire(wire(64 * 1024, 1 << 20), options, init_result()).await;
+    let page = |index: usize| {
+        let next = if index == 0 {
+            json!("next")
+        } else {
+            Value::Null
+        };
+        json!({
+            "resources": [{"uri": format!("docs://{index}a")}, {"uri": format!("docs://{index}b")}],
+            "nextCursor": next,
+        })
+    };
+    // Control: two resources fit.
+    let (result, ()) = exchange!(
+        client.list_resources(),
+        serve_list_pages(&mut server, "resources/list", 1, |_, _| json!({
+            "resources": [{"uri": "docs://a"}, {"uri": "docs://b"}]
+        }))
+    );
+    assert_eq!(result.unwrap().len(), 2);
+    let (result, ()) = exchange!(
+        client.list_resources(),
+        serve_list_pages(&mut server, "resources/list", 2, move |index, _| page(
+            index
+        ))
+    );
+    assert_eq!(
+        result.unwrap_err(),
+        RequestError::TooManyItems {
+            method: "resources/list",
+            limit: 2,
         }
     );
     common::bounded("shutdown", client.shutdown()).await;

@@ -1,5 +1,5 @@
 //! The MCP shapes this client reads and writes: protocol versions, the
-//! initialize result, tools, and tool results.
+//! initialize result, tools, tool results, and resources.
 //!
 //! Ported from Pi's `packages/mcp/src/protocol/types.ts` and the result checks
 //! of `src/client.ts` (v1.3.0). Each type keeps the server's whole JSON object
@@ -119,6 +119,18 @@ impl ServerCapabilities {
         })
     }
 
+    /// The server's `resources` capability, if it declared one. Pi's coding
+    /// agent offers its resource tools only for servers that declared it
+    /// (`McpServerConnection.hasResources`); a server without it need not
+    /// answer `resources/list`.
+    pub fn resources(&self) -> Option<ResourcesCapability> {
+        let resources = self.raw.get("resources")?.as_object()?;
+        Some(ResourcesCapability {
+            list_changed: resources.get("listChanged").and_then(Value::as_bool) == Some(true),
+            subscribe: resources.get("subscribe").and_then(Value::as_bool) == Some(true),
+        })
+    }
+
     /// The capabilities object as the server sent it.
     pub fn raw(&self) -> &Map<String, Value> {
         &self.raw
@@ -130,6 +142,17 @@ impl ServerCapabilities {
 pub struct ToolsCapability {
     /// Whether the server said it sends `notifications/tools/list_changed`.
     pub list_changed: bool,
+}
+
+/// The server's `resources` capability.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ResourcesCapability {
+    /// Whether the server said it sends
+    /// `notifications/resources/list_changed`.
+    pub list_changed: bool,
+    /// Whether the server said it accepts `resources/subscribe`, which this
+    /// client does not send.
+    pub subscribe: bool,
 }
 
 /// The server's answer to `initialize`, checked as Pi checks it.
@@ -295,6 +318,177 @@ pub(crate) fn tools_page(value: Value) -> Result<ToolsPage, String> {
     Ok(ToolsPage { tools, next_cursor })
 }
 
+/// A resource from `resources/list`, or a template from
+/// `resources/templates/list`.
+///
+/// Only the addressing field (`uri` or `uriTemplate`) and, when present,
+/// `name` are checked, as in Pi's `isResource` and `isResourceTemplate`; the
+/// rest of the entry is kept as the server sent it. Pi's `toResource` and
+/// `toResourceTemplate` fill a missing `name` with the address, which some
+/// servers omit although the schema requires it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Resource {
+    entry: Map<String, Value>,
+}
+
+impl Resource {
+    /// `uri` for a resource, `uriTemplate` for a template.
+    pub fn address(&self) -> &str {
+        self.entry
+            .get("uri")
+            .or_else(|| self.entry.get("uriTemplate"))
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+    }
+
+    /// `name`, which Pi fills with [`Self::address`] when the server omits it.
+    pub fn name(&self) -> &str {
+        self.entry
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+    }
+
+    /// The entry as the server sent it, with `name` filled in.
+    pub fn entry(&self) -> &Map<String, Value> {
+        &self.entry
+    }
+}
+
+/// One page of `resources/list` or `resources/templates/list`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ResourcesPage {
+    /// The page's entries in the server's order.
+    pub resources: Vec<Resource>,
+    /// The cursor of the next page. A `null` or empty cursor ends the list,
+    /// as for [`ToolsPage`].
+    pub next_cursor: Option<String>,
+}
+
+/// Which list a page came from: the result key and the address each entry
+/// must carry.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ResourceKind {
+    /// `resources/list`: `resources` entries with a `uri`.
+    Resource,
+    /// `resources/templates/list`: `resourceTemplates` entries with a
+    /// `uriTemplate`.
+    Template,
+}
+
+impl ResourceKind {
+    pub(crate) fn key(self) -> &'static str {
+        match self {
+            Self::Resource => "resources",
+            Self::Template => "resourceTemplates",
+        }
+    }
+
+    fn address(self) -> &'static str {
+        match self {
+            Self::Resource => "uri",
+            Self::Template => "uriTemplate",
+        }
+    }
+}
+
+pub(crate) fn resources_page(kind: ResourceKind, value: Value) -> Result<ResourcesPage, String> {
+    let key = kind.key();
+    let address = kind.address();
+    let Value::Object(mut object) = value else {
+        return Err("the result is not an object".into());
+    };
+    let Some(Value::Array(items)) = object.remove(key) else {
+        return Err(format!("\"{key}\" is not an array"));
+    };
+    let mut resources = Vec::with_capacity(items.len());
+    for (index, item) in items.into_iter().enumerate() {
+        let Value::Object(mut entry) = item else {
+            return Err(format!("entry {index} is not an object"));
+        };
+        let Some(Value::String(found)) = entry.get(address) else {
+            return Err(format!("entry {index} has no string \"{address}\""));
+        };
+        let found = found.clone();
+        match entry.get("name") {
+            None | Some(Value::Null) => {
+                entry.insert("name".into(), found.into());
+            }
+            Some(Value::String(_)) => {}
+            Some(_) => return Err(format!("entry {index} has a non-string \"name\"")),
+        }
+        resources.push(Resource { entry });
+    }
+    let next_cursor = match object.remove("nextCursor") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(cursor)) if cursor.is_empty() => None,
+        Some(Value::String(cursor)) => Some(cursor),
+        Some(_) => return Err("\"nextCursor\" is not a string".into()),
+    };
+    Ok(ResourcesPage {
+        resources,
+        next_cursor,
+    })
+}
+
+/// One `contents` entry of `resources/read`: text or a base64 blob, with
+/// the rest of the entry as the server sent it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ResourceContents {
+    entry: Map<String, Value>,
+}
+
+impl ResourceContents {
+    /// `uri`, which the result checks require.
+    pub fn uri(&self) -> &str {
+        self.entry
+            .get("uri")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+    }
+
+    /// The entry as the server sent it.
+    pub fn entry(&self) -> &Map<String, Value> {
+        &self.entry
+    }
+}
+
+/// The result of `resources/read`, checked as Pi's
+/// `validateReadResourceResult` checks it: every entry has a `uri` and
+/// either a string `text` or a string `blob`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReadResourceResult {
+    /// The resource's parts, in the server's order.
+    pub contents: Vec<ResourceContents>,
+}
+
+pub(crate) fn read_resource_result(value: Value) -> Result<ReadResourceResult, String> {
+    let Value::Object(mut object) = value else {
+        return Err("the result is not an object".into());
+    };
+    let Some(Value::Array(items)) = object.remove("contents") else {
+        return Err("\"contents\" is not an array".into());
+    };
+    let mut contents = Vec::with_capacity(items.len());
+    for (index, item) in items.into_iter().enumerate() {
+        let Value::Object(entry) = item else {
+            return Err(format!("contents {index} is not an object"));
+        };
+        if !matches!(entry.get("uri"), Some(Value::String(_))) {
+            return Err(format!("contents {index} has no string \"uri\""));
+        }
+        let text = matches!(entry.get("text"), Some(Value::String(_)));
+        let blob = matches!(entry.get("blob"), Some(Value::String(_)));
+        if !text && !blob {
+            return Err(format!(
+                "contents {index} has neither a string \"text\" nor a string \"blob\""
+            ));
+        }
+        contents.push(ResourceContents { entry });
+    }
+    Ok(ReadResourceResult { contents })
+}
+
 /// The result of `tools/call`.
 ///
 /// A tool that failed reports `is_error` with a successful JSON-RPC response;
@@ -452,6 +646,138 @@ mod tests {
         ] {
             let error = tools_page(value).unwrap_err();
             assert!(error.contains(expected), "{error}");
+        }
+    }
+
+    #[test]
+    fn a_resources_capability_must_be_an_object() {
+        let caps = |value: Value| ServerCapabilities {
+            raw: value.as_object().cloned().unwrap(),
+        };
+        assert_eq!(caps(json!({})).resources(), None);
+        assert_eq!(caps(json!({"resources": true})).resources(), None);
+        assert_eq!(
+            caps(json!({"resources": {}})).resources(),
+            Some(ResourcesCapability {
+                list_changed: false,
+                subscribe: false
+            })
+        );
+        assert_eq!(
+            caps(json!({"resources": {"listChanged": true, "subscribe": true}})).resources(),
+            Some(ResourcesCapability {
+                list_changed: true,
+                subscribe: true
+            })
+        );
+        // A server with resources only need not declare tools.
+        assert_eq!(caps(json!({"resources": {}})).tools(), None);
+    }
+
+    #[test]
+    fn resource_pages_check_addresses_names_and_cursors() {
+        let page = resources_page(
+            ResourceKind::Resource,
+            json!({
+                "resources": [
+                    {"uri": "docs://intro", "name": "intro", "_meta": {"x": 1}},
+                    {"uri": "docs://plain"},
+                ],
+                "nextCursor": null,
+            }),
+        )
+        .unwrap();
+        assert_eq!(page.next_cursor, None);
+        assert_eq!(page.resources[0].name(), "intro");
+        // Pi's `toResource`: the address stands in for a missing name.
+        assert_eq!(page.resources[1].name(), "docs://plain");
+        assert_eq!(page.resources[0].entry()["_meta"], json!({"x": 1}));
+
+        let templates = resources_page(
+            ResourceKind::Template,
+            json!({"resourceTemplates": [{"uriTemplate": "docs://p/{s}"}], "nextCursor": "next"}),
+        )
+        .unwrap();
+        assert_eq!(templates.next_cursor.as_deref(), Some("next"));
+        assert_eq!(templates.resources[0].address(), "docs://p/{s}");
+
+        for (kind, value, expected) in [
+            (
+                ResourceKind::Resource,
+                json!({}),
+                "\"resources\" is not an array",
+            ),
+            (
+                ResourceKind::Template,
+                json!({"resources": []}),
+                "\"resourceTemplates\" is not an array",
+            ),
+            (
+                ResourceKind::Resource,
+                json!({"resources": [1]}),
+                "entry 0 is not an object",
+            ),
+            (
+                ResourceKind::Resource,
+                json!({"resources": [{"name": "x"}]}),
+                "entry 0 has no string \"uri\"",
+            ),
+            (
+                ResourceKind::Template,
+                json!({"resourceTemplates": [{"uri": "x"}]}),
+                "entry 0 has no string \"uriTemplate\"",
+            ),
+            (
+                ResourceKind::Resource,
+                json!({"resources": [{"uri": "x", "name": 1}]}),
+                "entry 0 has a non-string \"name\"",
+            ),
+            (
+                ResourceKind::Resource,
+                json!({"resources": [], "nextCursor": 2}),
+                "\"nextCursor\" is not a string",
+            ),
+            (ResourceKind::Resource, json!([]), "not an object"),
+        ] {
+            let error = resources_page(kind, value.clone()).unwrap_err();
+            assert!(error.contains(expected), "{value}: {error}");
+        }
+    }
+
+    #[test]
+    fn read_results_need_a_uri_and_a_body() {
+        let read = read_resource_result(json!({"contents": [
+            {"uri": "docs://a", "text": "x"},
+            {"uri": "docs://b", "blob": "AAAA", "_meta": {"y": 1}},
+        ]}))
+        .unwrap();
+        assert_eq!(read.contents[0].uri(), "docs://a");
+        assert_eq!(read.contents[1].entry()["_meta"], json!({"y": 1}));
+        assert_eq!(
+            read_resource_result(json!({"contents": []}))
+                .unwrap()
+                .contents,
+            Vec::new()
+        );
+        for (value, expected) in [
+            (json!({}), "\"contents\" is not an array"),
+            (json!({"contents": [1]}), "contents 0 is not an object"),
+            (
+                json!({"contents": [{"text": "x"}]}),
+                "contents 0 has no string \"uri\"",
+            ),
+            (
+                json!({"contents": [{"uri": "x"}]}),
+                "neither a string \"text\" nor a string \"blob\"",
+            ),
+            (
+                json!({"contents": [{"uri": "x", "text": 1}]}),
+                "neither a string \"text\" nor a string \"blob\"",
+            ),
+            (json!(null), "the result is not an object"),
+        ] {
+            let error = read_resource_result(value.clone()).unwrap_err();
+            assert!(error.contains(expected), "{value}: {error}");
         }
     }
 

@@ -2,7 +2,8 @@
 //! the session's gate owns (see the [module documentation](super)).
 //!
 //! Adapted from Pi v1.3.0 `src/extensions/mcp/runtime.ts`
-//! (`McpServerConnection`: `connectOnce`, `refreshTools`,
+//! (`McpServerConnection`: `connectOnce`, including its `hasResources` and
+//! `instructions`, `refreshTools`,
 //! `handleClientClose`, `close`) and `createDefaultTransport`. Pi closes a
 //! connection when its session's abort signal fires and lets the transport
 //! end the process; here the same task that started the server stops it,
@@ -27,7 +28,7 @@ use bake_mcp::{
 use bake_sandbox::SandboxProvider;
 use bake_sandbox::provider::confine;
 
-use super::config::{McpServerEntry, McpStdioConfig, McpTransportConfig};
+use super::config::{McpExposure, McpServerEntry, McpStdioConfig, McpTransportConfig};
 use super::tools::{Caller, ListedTool, bind_tools, plan_tools};
 use super::{McpServerState, McpServers};
 use crate::config_value::{
@@ -234,10 +235,17 @@ pub(super) async fn serve(
     *connection = Connection::Client(Arc::clone(&client));
     // Taken before the first listing, so a change during it is not lost.
     let mut changes = client.tool_list_changes();
+    // The resource tools reach a server that declared the `resources`
+    // capability, unless its exposure hides it (Pi's
+    // `serversWithResources`). Fixed for the connection's life: both inputs
+    // are.
+    let readable_resources = client.server().capabilities.resources().is_some()
+        && entry.settings.exposure != McpExposure::Hidden;
     let caller = Arc::new(Caller {
         server: name.clone(),
         client: Arc::clone(&client),
         work: context.work.clone(),
+        readable_resources,
     });
     // Servers without the tools capability need not answer `tools/list`.
     let lists = client.server().capabilities.tools().is_some();
@@ -260,6 +268,13 @@ pub(super) async fn serve(
                 ));
             }
             *generation = first;
+            // After the first generation, so the resource tools and the
+            // server's tools are published together.
+            servers.set_connection(
+                index,
+                client.server().instructions.as_deref(),
+                readable_resources.then(|| Arc::clone(&caller)),
+            );
         }
     }
     let mut events_open = true;

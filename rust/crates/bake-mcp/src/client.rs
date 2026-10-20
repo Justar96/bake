@@ -30,7 +30,8 @@
 //!   dropped and counted ([`McpClient::dropped_events`]), and the driver never
 //!   waits for the consumer.
 //! - Tool lists: `max_list_pages`, `max_listed_tools`, and `max_list_bytes`,
-//!   with repeated cursors refused.
+//!   with repeated cursors refused. Resource lists use `max_list_pages` and
+//!   `max_list_bytes` with `max_listed_resources`.
 //!
 //! # Cancellation and shutdown
 //!
@@ -79,7 +80,7 @@ use tokio::time::Instant;
 use crate::jsonrpc::{self, Incoming, JsonRpcError, Outcome, RequestId, error_codes, preview};
 use crate::protocol::{
     self, CallToolResult, Implementation, InitializeRejection, InitializeResult, ProtocolVersion,
-    Tool, ToolsPage,
+    ReadResourceResult, Resource, ResourceKind, ResourcesPage, Tool, ToolsPage,
 };
 use crate::transport::{DEFAULT_MAX_MESSAGE_BYTES, MessageReceiver, MessageSender, ReceiveError};
 
@@ -118,6 +119,9 @@ pub struct Limits {
     pub max_list_pages: NonZeroUsize,
     /// Tools one [`McpClient::list_tools`] call collects. Default: 10,000.
     pub max_listed_tools: NonZeroUsize,
+    /// Resources or templates one [`McpClient::list_resources`] or
+    /// [`McpClient::list_resource_templates`] call collects. Default: 10,000.
+    pub max_listed_resources: NonZeroUsize,
     /// The total size of one [`McpClient::list_tools`] call's pages, in
     /// bytes. Default: 64 MiB.
     pub max_list_bytes: NonZeroUsize,
@@ -132,6 +136,7 @@ impl Default for Limits {
             max_events: nonzero(256),
             max_list_pages: nonzero(1_000),
             max_listed_tools: nonzero(10_000),
+            max_listed_resources: nonzero(10_000),
             max_list_bytes: nonzero(64 * 1024 * 1024),
         }
     }
@@ -769,6 +774,130 @@ impl McpClient {
         Ok((page, reply.bytes))
     }
 
+    /// One page of `resources/list`, starting at `cursor`.
+    pub async fn list_resources_page(
+        &self,
+        cursor: Option<&str>,
+    ) -> Result<ResourcesPage, RequestError> {
+        self.resources_page(ResourceKind::Resource, RESOURCES_LIST, cursor)
+            .await
+            .map(|(page, _)| page)
+    }
+
+    /// Every resource, following `nextCursor` through all pages within the
+    /// list limits. Like Pi's client it does not check the `resources`
+    /// capability; callers that honor it check
+    /// [`ServerCapabilities::resources`] first.
+    ///
+    /// [`ServerCapabilities::resources`]: crate::ServerCapabilities::resources
+    pub async fn list_resources(&self) -> Result<Vec<Resource>, RequestError> {
+        self.list_all_resources(ResourceKind::Resource, RESOURCES_LIST)
+            .await
+    }
+
+    /// One page of `resources/templates/list`, starting at `cursor`. A
+    /// server that does not implement the method has no templates, as in
+    /// Pi's `withoutTemplates`.
+    pub async fn list_resource_templates_page(
+        &self,
+        cursor: Option<&str>,
+    ) -> Result<ResourcesPage, RequestError> {
+        let page = self
+            .resources_page(ResourceKind::Template, TEMPLATES_LIST, cursor)
+            .await
+            .map(|(page, _)| page);
+        without_templates(page, || ResourcesPage {
+            resources: Vec::new(),
+            next_cursor: None,
+        })
+    }
+
+    /// Every resource template, following `nextCursor` through all pages
+    /// within the list limits. A server that does not implement the method
+    /// has no templates, as in Pi's `withoutTemplates`.
+    pub async fn list_resource_templates(&self) -> Result<Vec<Resource>, RequestError> {
+        let all = self
+            .list_all_resources(ResourceKind::Template, TEMPLATES_LIST)
+            .await;
+        without_templates(all, Vec::new)
+    }
+
+    /// Read the resource `uri`.
+    pub async fn read_resource(&self, uri: &str) -> Result<ReadResourceResult, RequestError> {
+        let mut params = Map::new();
+        params.insert("uri".into(), uri.into());
+        let reply = self
+            .core
+            .request(RESOURCES_READ, Some(params), true)
+            .await?;
+        protocol::read_resource_result(reply.result).map_err(|detail| RequestError::InvalidResult {
+            method: RESOURCES_READ,
+            detail,
+        })
+    }
+
+    async fn list_all_resources(
+        &self,
+        kind: ResourceKind,
+        method: &'static str,
+    ) -> Result<Vec<Resource>, RequestError> {
+        let limits = self.core.limits;
+        let mut resources = Vec::new();
+        let mut cursors = HashSet::new();
+        let mut cursor: Option<String> = None;
+        let mut bytes = 0_usize;
+        for _ in 0..limits.max_list_pages.get() {
+            let (page, page_bytes) = self.resources_page(kind, method, cursor.as_deref()).await?;
+            bytes = bytes.saturating_add(page_bytes);
+            if bytes > limits.max_list_bytes.get() {
+                return Err(RequestError::ListTooLarge {
+                    method,
+                    limit: limits.max_list_bytes.get(),
+                });
+            }
+            if resources.len().saturating_add(page.resources.len())
+                > limits.max_listed_resources.get()
+            {
+                return Err(RequestError::TooManyItems {
+                    method,
+                    limit: limits.max_listed_resources.get(),
+                });
+            }
+            resources.extend(page.resources);
+            let Some(next) = page.next_cursor else {
+                return Ok(resources);
+            };
+            if !cursors.insert(next.clone()) {
+                return Err(RequestError::RepeatedCursor {
+                    method,
+                    cursor: preview(&next, 64),
+                });
+            }
+            cursor = Some(next);
+        }
+        Err(RequestError::TooManyPages {
+            method,
+            limit: limits.max_list_pages.get(),
+        })
+    }
+
+    async fn resources_page(
+        &self,
+        kind: ResourceKind,
+        method: &'static str,
+        cursor: Option<&str>,
+    ) -> Result<(ResourcesPage, usize), RequestError> {
+        let params = cursor.map(|cursor| {
+            let mut params = Map::new();
+            params.insert("cursor".into(), cursor.into());
+            params
+        });
+        let reply = self.core.request(method, params, true).await?;
+        let page = protocol::resources_page(kind, reply.result)
+            .map_err(|detail| RequestError::InvalidResult { method, detail })?;
+        Ok((page, reply.bytes))
+    }
+
     /// Call a tool. A tool that fails reports
     /// [`CallToolResult::is_error`]; an `Err` is a protocol failure.
     pub async fn call_tool(
@@ -891,6 +1020,23 @@ impl Connecting {
 
 const TOOLS_LIST: &str = "tools/list";
 const TOOLS_CALL: &str = "tools/call";
+const RESOURCES_LIST: &str = "resources/list";
+const TEMPLATES_LIST: &str = "resources/templates/list";
+const RESOURCES_READ: &str = "resources/read";
+
+/// Pi's `withoutTemplates`: a server that answers `resources/templates/list`
+/// with `method not found` has no templates.
+fn without_templates<T>(
+    result: Result<T, RequestError>,
+    empty: impl FnOnce() -> T,
+) -> Result<T, RequestError> {
+    match result {
+        Err(RequestError::Server { error, .. }) if error.code == error_codes::METHOD_NOT_FOUND => {
+            Ok(empty())
+        }
+        other => other,
+    }
+}
 
 /// The handle side of a connection.
 #[derive(Debug)]
@@ -1349,6 +1495,10 @@ impl<R: MessageReceiver, S: MessageSender> Driver<R, S> {
             // The client answers server requests at once, so there is nothing
             // in progress for the server to cancel.
             "notifications/cancelled" => {}
+            // `notifications/resources/list_changed` lands here, as in Pi,
+            // which registers no handler for it: resources are listed on
+            // demand, so the next listing already shows the new set and
+            // nothing is cached to invalidate.
             _ => self.event(ClientEvent::Notification { method, params }),
         }
     }

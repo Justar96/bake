@@ -14,8 +14,9 @@
 //! resources other than images are saved to a private file the note names,
 //! and model-facing text over 20 KB keeps its start and end with the full
 //! text saved beside it. `isError` results are error results whose text the
-//! model sees. Bake has no `read_mcp_resource` tool yet, so resource links
-//! do not name one.
+//! model sees. A resource link of a server whose resources
+//! [`super::resources`] can read names `read_mcp_resource` and that server,
+//! as Pi's `readableResources` does.
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -53,6 +54,11 @@ pub(crate) struct Caller {
     pub(crate) server: String,
     pub(crate) client: Arc<McpClient>,
     pub(crate) work: WorkGate,
+    /// Whether `read_mcp_resource` reaches this server, so its resource
+    /// links name it. Pi reads `readableResources()` per call; here a
+    /// server's `resources` capability and its exposure are both fixed for
+    /// the connection's life, so the answer is too.
+    pub(crate) readable_resources: bool,
 }
 
 /// A listed tool as the adapter reads it.
@@ -236,7 +242,14 @@ fn agent_tool(caller: Arc<Caller>, planned: PlannedTool) -> AgentTool {
                     None => call.await,
                 };
                 let result = result.map_err(|error| error.to_string())?;
-                Ok(convert_result(&caller.server, &tool, result, &caller.work).await)
+                Ok(convert_result(
+                    &caller.server,
+                    &tool,
+                    result,
+                    caller.readable_resources,
+                    &caller.work,
+                )
+                .await)
             })
         },
     );
@@ -348,16 +361,13 @@ pub(crate) async fn convert_result(
     server: &str,
     tool: &str,
     result: CallToolResult,
+    readable_resources: bool,
     work: &WorkGate,
 ) -> AgentToolResult {
     let mut content = if result.content.is_empty() {
         structured_text(result.structured_content.as_ref())
     } else {
-        let mut content = Vec::with_capacity(result.content.len());
-        for block in &result.content {
-            content.extend(block_to_content(block, work).await);
-        }
-        content
+        to_model_content(server, &result.content, readable_resources, work).await
     };
     if result.is_error && text_of(&content).is_empty() {
         content.push(text(format!("MCP tool {server}/{tool} returned an error")));
@@ -380,7 +390,7 @@ pub(crate) async fn convert_result(
     }
 }
 
-fn text(text: impl Into<String>) -> UserContentBlock {
+pub(crate) fn text(text: impl Into<String>) -> UserContentBlock {
     UserContentBlock::Text(TextContent::new(text))
 }
 
@@ -405,8 +415,27 @@ fn structured_text(structured: Option<&Value>) -> Vec<UserContentBlock> {
         .collect()
 }
 
+/// Pi's `toModelContent`: the model-facing content of `blocks`.
+pub(crate) async fn to_model_content(
+    server: &str,
+    blocks: &[Value],
+    readable_resources: bool,
+    work: &WorkGate,
+) -> Vec<UserContentBlock> {
+    let mut content = Vec::with_capacity(blocks.len());
+    for block in blocks {
+        content.extend(block_to_content(server, block, readable_resources, work).await);
+    }
+    content
+}
+
 /// Pi's `blockToContent`, then `toLlmContent`'s `blockToLlmContent`.
-async fn block_to_content(block: &Value, work: &WorkGate) -> Vec<UserContentBlock> {
+async fn block_to_content(
+    server: &str,
+    block: &Value,
+    readable_resources: bool,
+    work: &WorkGate,
+) -> Vec<UserContentBlock> {
     let field = |name: &str| block.get(name).and_then(Value::as_str);
     let kind = field("type").unwrap_or_default();
     let unsupported = || vec![text(format!("[unsupported MCP content {kind}]"))];
@@ -424,7 +453,12 @@ async fn block_to_content(block: &Value, work: &WorkGate) -> Vec<UserContentBloc
             field("mimeType").unwrap_or("unknown type")
         ))],
         "resource_link" => match (field("uri"), field("name")) {
-            (Some(uri), Some(name)) => vec![text(resource_link(block, uri, name))],
+            (Some(uri), Some(name)) => vec![text(resource_link(
+                block,
+                uri,
+                name,
+                readable_resources.then_some(server),
+            ))],
             _ => unsupported(),
         },
         "resource" => match block.get("resource") {
@@ -435,8 +469,10 @@ async fn block_to_content(block: &Value, work: &WorkGate) -> Vec<UserContentBloc
     }
 }
 
-/// `[Resource <uri> "<title>" (<type>, <size>): <description>]`.
-fn resource_link(block: &Value, uri: &str, name: &str) -> String {
+/// `[Resource <uri> "<title>" (<type>, <size>): <description>]`, with Pi's
+/// sentence naming `read_mcp_resource` when `readable` gives the server
+/// whose resources that tool reaches.
+fn resource_link(block: &Value, uri: &str, name: &str, readable: Option<&str>) -> String {
     let title = block.get("title").and_then(Value::as_str).unwrap_or(name);
     let mut details = Vec::new();
     if let Some(mime_type) = block.get("mimeType").and_then(Value::as_str)
@@ -456,7 +492,13 @@ fn resource_link(block: &Value, uri: &str, name: &str) -> String {
         Some(description) if !description.is_empty() => format!(": {description}"),
         _ => String::new(),
     };
-    format!("[Resource {uri} \"{title}\"{details}{description}]")
+    let read = readable.map_or_else(String::new, |server| {
+        format!(
+            ". Read it with {} (server \"{server}\")",
+            super::resources::READ_MCP_RESOURCE_TOOL
+        )
+    });
+    format!("[Resource {uri} \"{title}\"{details}{description}{read}]")
 }
 
 async fn embedded_resource(resource: &Value, work: &WorkGate) -> Vec<UserContentBlock> {
@@ -569,7 +611,7 @@ async fn save(data: Vec<u8>, extension: String, work: &WorkGate) -> Result<PathB
 /// Pi's `limitMcpContent`: text within [`MCP_OUTPUT_MAX_BYTES`] as it is;
 /// longer text becomes one block in Codex's truncation format, naming the
 /// file that holds all of it, followed by the images.
-async fn limit_content(
+pub(crate) async fn limit_content(
     content: Vec<UserContentBlock>,
     work: &WorkGate,
 ) -> (Vec<UserContentBlock>, Option<PathBuf>) {
