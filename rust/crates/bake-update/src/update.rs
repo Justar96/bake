@@ -134,6 +134,11 @@ impl Updater {
 
     /// Report whether a newer release is published, installing nothing.
     ///
+    /// This writes nothing under the root and takes no install lock, as
+    /// the lock's owner kinds say: it is held by an install, an update, a
+    /// rollback, and a prune. So `--check` still answers while one of
+    /// those runs.
+    ///
     /// # Errors
     ///
     /// The manifest's own failures; an older published version is
