@@ -1,8 +1,10 @@
 //! Streamable HTTP MCP servers a session owns, against loopback servers the
-//! test owns: the egress policy (cross-origin redirects, pinned addresses,
-//! payload bounds), re-initialization after an expired session, a call that
-//! fails without a retry, a stalled startup, the session `DELETE`, an
-//! awaited shutdown, the OAuth refusal, and redaction.
+//! test owns: the egress policy (cross-origin redirects, the hop bound, the
+//! POST a followed redirect resends, pinned addresses, payload bounds),
+//! re-initialization after an expired session, the resource tools and
+//! instructions a reconnection republishes, a call that fails without a
+//! retry, a stalled startup, the session `DELETE`, an awaited shutdown, the
+//! OAuth refusal, and redaction.
 //!
 //! The cases named after a Pi case follow `packages/mcp/test/streamable-http.test.ts`
 //! (v1.3.0) through the session instead of the transport; the rest are
@@ -23,7 +25,7 @@ use super::super::egress::{HostResolver, MAX_REDIRECTS};
 use super::super::http_test_server::{Call, Initialize, Redirect, Server, Shared, protocol};
 use super::super::{
     McpHttpOptions, McpOptions, McpServerState, McpServers, McpTimings, McpToolFilter,
-    parse_mcp_config,
+    READ_MCP_RESOURCE_TOOL, RESOURCE_TOOL_NAMES, parse_mcp_config,
 };
 use crate::owned_work::WorkGate;
 use crate::permissions::{ApprovalPolicy, StandingPermissions};
@@ -56,11 +58,16 @@ impl Started {
             .unwrap_or_else(|| panic!("{name} is not published: {:?}", self.servers.tool_names()))
     }
 
-    /// Calls a published tool as the agent would.
+    /// Calls a published tool without arguments, as the agent would.
     async fn call(&self, name: &str) -> Result<String, String> {
+        self.call_with(name, json!({})).await
+    }
+
+    /// Calls a published tool with `params`.
+    async fn call_with(&self, name: &str, params: Value) -> Result<String, String> {
         let result = (self.tool(name).execute)(
             "call".into(),
-            json!({}),
+            params,
             None,
             AgentToolUpdateCallback::ignore(),
             ToolContext::detached(),
@@ -435,6 +442,105 @@ async fn an_expired_session_re_initializes_and_republishes_its_tools() {
     );
     assert_eq!(started.call("mcp__remote__added").await, Ok("hello".into()));
     started.shutdown().await;
+    server.stop().await;
+}
+
+// Bake's own, over the shared `serve` path: the resource tools and the
+// `mcp_servers` section belong to the connection that published them. A
+// reconnection withdraws both with the retired client and publishes them
+// again, so a read after it goes through the new client and the section
+// carries the new connection's instructions.
+#[tokio::test]
+async fn a_reconnection_republishes_the_resource_tools_and_the_instructions() {
+    let state = Shared::default();
+    state.set(|state| {
+        state.resources = vec![("docs://intro".to_owned(), "the first connection".to_owned())];
+        state.instructions = Some("Docs the first connection reports.".to_owned());
+    });
+    let server = Server::start(protocol(&state)).await;
+    let started = start(entry(&server.url), quick(), None);
+    started.wait_for("the first generation", connected).await;
+    let published = || started.servers.tool_names();
+    assert!(
+        RESOURCE_TOOL_NAMES
+            .iter()
+            .all(|name| published().iter().any(|published| published == name)),
+        "{:?}",
+        published()
+    );
+    let section = started.servers.servers_prompt_section().expect("a section");
+    assert!(
+        section.contains("Docs the first connection reports."),
+        "{section}"
+    );
+    assert_eq!(
+        started
+            .call_with(
+                READ_MCP_RESOURCE_TOOL,
+                json!({ "server": "remote", "uri": "docs://intro" }),
+            )
+            .await,
+        Ok("the first connection".into())
+    );
+
+    // The server expires the session and answers the next connection with
+    // another resource and other instructions.
+    state.set(|state| {
+        state.expired.insert("session-1".to_owned());
+        state.session = "session-2".to_owned();
+        state.resources = vec![(
+            "docs://intro".to_owned(),
+            "the second connection".to_owned(),
+        )];
+        state.instructions = Some("Docs the second connection reports.".to_owned());
+    });
+    started
+        .call("mcp__remote__echo")
+        .await
+        .expect_err("the expired session fails the call");
+    // Nothing of the retired client is declared once it is withdrawn,
+    // whether it is still `Stopping` or the next attempt is `Connecting`.
+    // The assertions below hold no `await`, so this runtime's single thread
+    // cannot run the reconnection past the withdrawal between them.
+    started
+        .wait_for("the retired connection", |state| !connected(state))
+        .await;
+    assert!(published().is_empty(), "{:?}", published());
+    assert_eq!(started.servers.servers_prompt_section(), None);
+
+    started
+        .wait_for("the second generation", |state| {
+            connected(state) && generation(state) == 2
+        })
+        .await;
+    assert!(
+        RESOURCE_TOOL_NAMES
+            .iter()
+            .all(|name| published().iter().any(|published| published == name)),
+        "{:?}",
+        published()
+    );
+    // The read goes through the new client, which carries the new session.
+    assert_eq!(
+        started
+            .call_with(
+                READ_MCP_RESOURCE_TOOL,
+                json!({ "server": "remote", "uri": "docs://intro" }),
+            )
+            .await,
+        Ok("the second connection".into())
+    );
+    let reads = server.rpc("resources/read");
+    assert_eq!(reads.len(), 2);
+    assert_eq!(reads[1].header("mcp-session-id"), Some("session-2"));
+    let section = started.servers.servers_prompt_section().expect("a section");
+    assert!(
+        section.contains("Docs the second connection reports."),
+        "{section}"
+    );
+    assert!(!section.contains("first connection"), "{section}");
+    started.shutdown().await;
+    assert!(started.servers.tool_names().is_empty());
     server.stop().await;
 }
 

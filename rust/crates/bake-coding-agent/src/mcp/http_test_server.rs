@@ -281,6 +281,12 @@ pub(crate) struct State {
     pub(crate) expired: HashSet<String>,
     /// The tool names `tools/list` answers with.
     pub(crate) tools: Vec<String>,
+    /// The resources `resources/list` answers with and `resources/read`
+    /// reads, as `(uri, text)`. A server with none declares no `resources`
+    /// capability.
+    pub(crate) resources: Vec<(String, String)>,
+    /// The `instructions` the next `initialize` answers with.
+    pub(crate) instructions: Option<String>,
     /// A `tools/list` answer padded to this many bytes.
     pub(crate) oversized_list: Option<usize>,
     /// Answer a POST with a 307 instead of serving it.
@@ -301,6 +307,8 @@ impl Default for State {
             session: "session-1".to_owned(),
             expired: HashSet::new(),
             tools: vec!["echo".to_owned()],
+            resources: Vec::new(),
+            instructions: None,
             oversized_list: None,
             redirect: None,
             initialize: Initialize::Answer,
@@ -325,6 +333,8 @@ impl Shared {
             session: state.session.clone(),
             expired: state.expired.clone(),
             tools: state.tools.clone(),
+            resources: state.resources.clone(),
+            instructions: state.instructions.clone(),
             oversized_list: state.oversized_list,
             redirect: state.redirect.clone(),
             initialize: state.initialize.clone(),
@@ -334,10 +344,12 @@ impl Shared {
     }
 }
 
-/// The MCP endpoint: `initialize` assigns a session, `tools/list` answers
-/// with the state's tools, `tools/call` answers as the state says, a GET has
-/// no server stream (405), and a DELETE succeeds. A request that carries an
-/// expired session gets 404, as the specification asks.
+/// The MCP endpoint: `initialize` assigns a session and reports the state's
+/// instructions, `tools/list` answers with the state's tools, `tools/call`
+/// answers as the state says, `resources/list` and `resources/read` answer
+/// with the state's resources, a GET has no server stream (405), and a
+/// DELETE succeeds. A request that carries an expired session gets 404, as
+/// the specification asks.
 pub(crate) fn protocol(shared: &Shared) -> Handler {
     let shared = shared.clone();
     Arc::new(move |request: &Request| {
@@ -369,7 +381,7 @@ pub(crate) fn protocol(shared: &Shared) -> Handler {
             Some("initialize") => match state.initialize {
                 Initialize::Answer => json_reply(
                     &[("mcp-session-id", &state.session)],
-                    &initialize_result(&id),
+                    &initialize_result(&id, &state),
                 ),
                 Initialize::Stall(wait) => vec![Step::Sleep(wait), Step::Close],
                 Initialize::Status(code, ref challenge) => match challenge {
@@ -398,6 +410,37 @@ pub(crate) fn protocol(shared: &Shared) -> Handler {
                 }
                 json_reply(&[], &result)
             }
+            Some("resources/list") => {
+                let resources: Vec<Value> = state
+                    .resources
+                    .iter()
+                    .map(|(uri, _)| json!({"uri": uri, "name": uri, "mimeType": "text/plain"}))
+                    .collect();
+                json_reply(
+                    &[],
+                    &json!({"jsonrpc": "2.0", "id": id, "result": {"resources": resources}}),
+                )
+            }
+            Some("resources/read") => {
+                let uri = message["params"]["uri"].as_str().unwrap_or_default();
+                let found = state
+                    .resources
+                    .iter()
+                    .find(|(known, _)| known == uri)
+                    .map(|(_, text)| text.clone());
+                match found {
+                    Some(text) => json_reply(
+                        &[],
+                        &json!({"jsonrpc": "2.0", "id": id, "result": {
+                            "contents": [{"uri": uri, "mimeType": "text/plain", "text": text}],
+                        }}),
+                    ),
+                    None => json_reply(
+                        &[],
+                        &json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32602, "message": "no such resource"}}),
+                    ),
+                }
+            }
             Some("tools/call") => match state.call {
                 Call::Answer(ref text) => json_reply(&[], &tool_result(&id, text)),
                 Call::Disconnect => vec![
@@ -419,16 +462,26 @@ pub(crate) fn protocol(shared: &Shared) -> Handler {
     })
 }
 
-pub(crate) fn initialize_result(id: &Value) -> Value {
-    json!({
+/// The `initialize` result: the state's instructions, and the `resources`
+/// capability when the state has resources.
+pub(crate) fn initialize_result(id: &Value, state: &State) -> Value {
+    let mut capabilities = json!({"tools": {"listChanged": true}});
+    if !state.resources.is_empty() {
+        capabilities["resources"] = json!({});
+    }
+    let mut result = json!({
         "jsonrpc": "2.0",
         "id": id,
         "result": {
             "protocolVersion": "2025-11-25",
-            "capabilities": {"tools": {"listChanged": true}},
+            "capabilities": capabilities,
             "serverInfo": {"name": "http-fixture", "version": "1.0.0"},
         },
-    })
+    });
+    if let Some(instructions) = &state.instructions {
+        result["result"]["instructions"] = instructions.clone().into();
+    }
+    result
 }
 
 pub(crate) fn tool_result(id: &Value, text: &str) -> Value {
