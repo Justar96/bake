@@ -108,7 +108,7 @@ describe('ConPty against a stand-in host', () => {
     const { dir, script } = await standIn()
     const received: string[] = []
     const pty = new ConPty({
-      host: [process.execPath, script], program: 'bake-rs.exe', args: ['--inline'], cwd: dir, env: { PATH: process.env.PATH ?? '' },
+      host: [process.execPath, script], program: 'bake.exe', args: ['--inline'], cwd: dir, env: { PATH: process.env.PATH ?? '' },
       cols: 80, rows: 24, history: true, onData: data => received.push(Buffer.from(data).toString('utf8')),
     })
     try {
@@ -134,7 +134,7 @@ describe('ConPty against a stand-in host', () => {
   it('fails every wait with the host’s error when it exits before closing', async () => {
     const { dir, script } = await standIn()
     const pty = new ConPty({
-      host: [process.execPath, script, '--early-exit'], program: 'bake-rs.exe', args: [], cwd: dir, env: { PATH: process.env.PATH ?? '' },
+      host: [process.execPath, script, '--early-exit'], program: 'bake.exe', args: [], cwd: dir, env: { PATH: process.env.PATH ?? '' },
       cols: 80, rows: 24, history: false, onData: () => {},
     })
     try {

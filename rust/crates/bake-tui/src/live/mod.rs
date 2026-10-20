@@ -78,7 +78,7 @@ use mcp::McpNotices;
 use projection::Projector;
 
 /// Pi v1.2.0's built-in slash commands (`core/slash-commands.ts`) that
-/// `bake-rs` does not run yet; [`commands::COMMANDS`] are the ones it
+/// `bake` does not run yet; [`commands::COMMANDS`] are the ones it
 /// runs. A prompt that names one is refused instead of reaching the model.
 const PI_COMMANDS: &[&str] = &[
     "scoped-models",
@@ -1319,7 +1319,7 @@ fn work_outcome(outcome: &commands::Outcome) -> Outcome {
 const INTERRUPTED_PROMPT: &str = "Stopped before it was sent; your prompt is back in the draft.";
 
 /// Why a slash prompt is refused: it names one of Pi's built-in commands,
-/// which `bake-rs` does not run yet, or another command-like word that is
+/// which `bake` does not run yet, or another command-like word that is
 /// neither `/skill:name` nor one of `templates`. Text whose first word is
 /// not command-like, such as a path, goes to the model as Pi sends it.
 fn refused_command(text: &str, templates: &[String]) -> Option<String> {
@@ -1340,7 +1340,7 @@ fn refused_command(text: &str, templates: &[String]) -> Option<String> {
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
     if PI_COMMANDS.contains(&word) {
         Some(format!(
-            "/{word} is not available in bake-rs yet; your draft is kept."
+            "/{word} is not available in bake yet; your draft is kept."
         ))
     } else if command_like {
         Some(format!(

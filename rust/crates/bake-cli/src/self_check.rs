@@ -1,4 +1,4 @@
-//! `bake-rs --self-check`: proof that this executable loads on its host and
+//! `bake --self-check`: proof that this executable loads on its host and
 //! carries what a release needs, for the native packager
 //! (`scripts/release/pack-rust.ts`) to check before it archives the binary.
 //!
@@ -13,7 +13,7 @@ use serde_json::{Map, Value};
 use crate::docs::Topic;
 
 /// The record's `kind`, which names the producer.
-pub const KIND: &str = "bake-rs-self-check";
+pub const KIND: &str = "bake-self-check";
 
 /// The record's `schema`. A change to the record's members or their meaning
 /// takes a new number, and the packager accepts only the numbers it knows.
@@ -42,7 +42,7 @@ pub fn host_platform() -> Option<&'static str> {
 /// The self-check record, one line of JSON ending in a newline:
 ///
 /// ```json
-/// {"kind":"bake-rs-self-check","schema":1,"version":"0.4.0-dev","runtime":"rust",
+/// {"kind":"bake-self-check","schema":1,"version":"0.4.0-dev","runtime":"rust",
 ///  "target":"linux-x64","docs":{"cli":"<sha-256 hex>",...}}
 /// ```
 ///
@@ -148,7 +148,7 @@ mod tests {
         assert_eq!(
             value,
             serde_json::json!({
-                "kind": "bake-rs-self-check",
+                "kind": "bake-self-check",
                 "schema": 1,
                 "version": "1.2.3-dev",
                 "runtime": "rust",

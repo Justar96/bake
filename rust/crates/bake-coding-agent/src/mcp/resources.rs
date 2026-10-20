@@ -29,7 +29,7 @@
 //! its start and end beside the file holding all of it. Scripts receive the
 //! JSON payload as the tool's structured content.
 //!
-//! Deviations from Pi, both because a `bake-rs` session owns its work
+//! Deviations from Pi, both because a `bake` session owns its work
 //! ([`WorkGate`]) rather than spawning unowned promises:
 //!
 //! - a listing without a `server` lists the servers one after another, where

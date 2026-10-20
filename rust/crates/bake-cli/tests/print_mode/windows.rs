@@ -188,7 +188,7 @@ fn cancel_full_pipe() {
             .stdout(writer)
             .stderr(File::create(&errors).expect("CLI error log"))
             .spawn()
-            .expect("bake-rs starts"),
+            .expect("bake starts"),
     );
     let deadline = Instant::now() + RUN_TIMEOUT;
     // Drain startup only. The large delta proves that signal registration

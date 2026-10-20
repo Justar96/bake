@@ -92,7 +92,7 @@ type Opened = trust::TrustedPath;
 type Opened = std::convert::Infallible;
 
 /// Why no plugin can be enabled where [`trust::SUPPORTED`] is false.
-const UNSUPPORTED: &str = "bake-rs cannot yet check who can change plugin files on this platform (it checks owners and permissions on Linux and macOS only), so it enables no plugin here";
+const UNSUPPORTED: &str = "bake cannot yet check who can change plugin files on this platform (it checks owners and permissions on Linux and macOS only), so it enables no plugin here";
 
 /// Why a plugin-home operation did nothing. The message names the file or
 /// the plugin; it may quote a plugin's text, so escape it before showing it
@@ -141,7 +141,7 @@ fn parse_hash(text: &str) -> Result<String, PluginHomeError> {
         Ok(hash.to_owned())
     } else {
         Err(error(format!(
-            "{:?} is not a package hash: give the 64 lowercase hex digits `bake-rs plugin install` printed",
+            "{:?} is not a package hash: give the 64 lowercase hex digits `bake plugin install` printed",
             super::truncate(text, 80)
         )))
     }
@@ -640,7 +640,7 @@ impl PluginHome {
         if !enabled.is_empty() {
             if !trust::SUPPORTED {
                 return Err(self.untrusted(format!(
-                    "{UNSUPPORTED}. Run `bake-rs plugin disable` for each enabled plugin, or remove the file"
+                    "{UNSUPPORTED}. Run `bake plugin disable` for each enabled plugin, or remove the file"
                 )));
             }
             #[cfg(unix)]
@@ -661,7 +661,7 @@ impl PluginHome {
             let plugin = match failure {
                 Some(failure) => {
                     warnings.push(format!(
-                        "Plugin {id} failed earlier ({}), so it blocks {tools} until `bake-rs plugin disable {id}`",
+                        "Plugin {id} failed earlier ({}), so it blocks {tools} until `bake plugin disable {id}`",
                         failure.kind.as_str()
                     ));
                     Contribution::Blocked(failure)
@@ -727,7 +727,7 @@ impl PluginHome {
         let command = setup
             .command
             .clone()
-            .ok_or_else(|| "this bake-rs has no plugin helper".to_owned())?;
+            .ok_or_else(|| "this bake has no plugin helper".to_owned())?;
         Ok((package, command))
     }
 }

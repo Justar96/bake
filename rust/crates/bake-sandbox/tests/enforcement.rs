@@ -9,7 +9,7 @@
 //!
 //! The binary has its own `main` (`harness = false`) so it can also serve as
 //! the Landlock helper: a first argument of `__bake-landlock-run` runs
-//! [`helper_main`], exactly as `bake-rs` does, and every Landlock test
+//! [`helper_main`], exactly as `bake` does, and every Landlock test
 //! confines through a real self-re-exec of this binary. The small runner
 //! below accepts libtest's filter, `--exact`, `--list`, `--ignored`,
 //! `--include-ignored`, and `--test-threads`.
@@ -936,13 +936,13 @@ fn bwrap_in_a_workspace_path_entry_is_refused() {
 }
 
 /// The Landlock helper (the current executable) copied into the workspace,
-/// as when a developer runs `target/debug/bake-rs` inside the Bake repo:
+/// as when a developer runs `target/debug/bake` inside the Bake repo:
 /// every mode refuses rather than run a helper a confined command could
 /// overwrite.
 #[cfg(target_os = "linux")]
 fn landlock_helper_inside_the_workspace_is_refused() {
     let (workspace, _outside, _) = workspace_and_outside(SandboxMode::WorkspaceWrite);
-    let helper = workspace.join("bake-rs");
+    let helper = workspace.join("bake");
     std::fs::copy(std::env::current_exe().expect("exe"), &helper).expect("copy");
     let provider = LocalProvider::with_chain(vec![Runner::Landlock])
         .with_landlock_helper(helper.clone(), [OsString::from(HELPER_ARG)]);

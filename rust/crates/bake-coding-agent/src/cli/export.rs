@@ -9,7 +9,7 @@
 //! definitions, because no session is set up to supply them.
 //!
 //! The default output name is Pi's, with Bake's program name:
-//! `bake-rs-session-<input file name without .jsonl>.html`, in the working
+//! `bake-session-<input file name without .jsonl>.html`, in the working
 //! directory.
 //!
 //! Deviation from Pi: the input is read without the file's writer lock, as
@@ -88,7 +88,7 @@ fn default_output_name(input: &Path) -> String {
                 .to_owned()
         })
         .unwrap_or_default();
-    format!("bake-rs-session-{stem}.html")
+    format!("bake-session-{stem}.html")
 }
 
 #[cfg(test)]
@@ -212,11 +212,11 @@ mod tests {
     fn the_default_name_drops_one_jsonl_suffix() {
         assert_eq!(
             default_output_name(Path::new("/a/b/2026-01-01T00-00-00-abc.jsonl")),
-            "bake-rs-session-2026-01-01T00-00-00-abc.html"
+            "bake-session-2026-01-01T00-00-00-abc.html"
         );
         assert_eq!(
             default_output_name(Path::new("session")),
-            "bake-rs-session-session.html"
+            "bake-session-session.html"
         );
     }
 }

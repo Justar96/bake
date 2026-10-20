@@ -53,7 +53,7 @@
 //!   `Debug` output: a refusal names a header, and `bake-mcp` redacts the
 //!   configured values, the URL, and the session ID from server text.
 //!
-//! The connection is made by the `bake-rs` process, not by a sandboxed
+//! The connection is made by the `bake` process, not by a sandboxed
 //! child, so it is allowed in every sandbox mode, as the web tools are
 //! (D40): the owner configured the origin, and `bake-sandbox` has no network
 //! policy for it to bypass.

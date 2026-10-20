@@ -1,7 +1,7 @@
 //! Wasm plugins that a Bake home enables, through real `AgentSession`s:
 //! the faux model asks for real `write` and `edit` calls (and calls to
 //! marker tools named after the hostile fixture's behaviours), the shipped
-//! `bake-rs` runs each plugin as its helper, and every case checks the
+//! `bake` runs each plugin as its helper, and every case checks the
 //! files, the session file on disk, `plugins.json`, and the helper
 //! processes. Each test owns its temporary home and workspace.
 //!
@@ -152,7 +152,7 @@ impl Fixture {
 
     /// A session over Pi's file tools under danger-full-access, where D24
     /// allows every write, and the `markers`, with the plugins the home
-    /// enables now, loaded as `bake-rs` loads them.
+    /// enables now, loaded as `bake` loads them.
     async fn session(&self, store: SessionManager, markers: &[&str]) -> AgentSession {
         let loaded = self
             .home
@@ -193,7 +193,7 @@ impl Fixture {
             tools,
             tool_prompts: Vec::new(),
             system_prompt: SystemPromptOptions::new(ws.to_string_lossy()),
-            docs_command: "bake-rs docs".into(),
+            docs_command: "bake docs".into(),
             plugins: loaded.registry,
             work: None,
             jobs: None,

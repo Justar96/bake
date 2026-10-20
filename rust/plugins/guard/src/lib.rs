@@ -86,7 +86,7 @@ mod tests {
     }
 
     // The blocking branch calls the host's `log`, which only a Wasm build
-    // can reach; the process tests cover it through `bake-rs`.
+    // can reach; the process tests cover it through `bake`.
     #[test]
     fn other_tools_and_paths_continue_and_bad_arguments_fail() {
         assert!(matches!(

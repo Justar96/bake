@@ -1,4 +1,4 @@
-//! End-to-end RPC mode: the built `bake-rs` with `--mode rpc`, driven by a
+//! End-to-end RPC mode: the built `bake` with `--mode rpc`, driven by a
 //! small test client over its pipes. Each test owns a temporary Bake home
 //! and project directory; no model request is made, so nothing reaches the
 //! network and no key is needed.
@@ -30,7 +30,7 @@ impl Workspace {
     fn new(name: &str) -> Self {
         static COUNTER: AtomicUsize = AtomicUsize::new(0);
         let root = std::env::temp_dir().join(format!(
-            "bake-rs-rpc-{name}-{}-{}",
+            "bake-rpc-{name}-{}-{}",
             std::process::id(),
             COUNTER.fetch_add(1, Ordering::SeqCst)
         ));
@@ -55,7 +55,7 @@ impl Workspace {
     }
 
     fn command(&self, args: &[&str]) -> Command {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_bake-rs"));
+        let mut command = Command::new(env!("CARGO_BIN_EXE_bake"));
         command
             .args(args)
             .current_dir(self.root.join("project"))
@@ -75,18 +75,18 @@ impl Workspace {
         command
     }
 
-    /// Starts `bake-rs --mode rpc` with a client on its pipes.
+    /// Starts `bake --mode rpc` with a client on its pipes.
     fn rpc(&self, args: &[&str]) -> Client {
         let mut full = vec!["--mode", "rpc", "--model", "loop-model"];
         full.extend_from_slice(args);
         Client::start(self.command(&full))
     }
 
-    /// Runs `bake-rs` to completion with nothing on standard input.
+    /// Runs `bake` to completion with nothing on standard input.
     fn run(&self, args: &[&str]) -> Output {
-        let mut child = self.command(args).spawn().expect("bake-rs starts");
+        let mut child = self.command(args).spawn().expect("bake starts");
         drop(child.stdin.take());
-        child.wait_with_output().expect("bake-rs output")
+        child.wait_with_output().expect("bake output")
     }
 }
 
@@ -109,7 +109,7 @@ struct Client {
 
 impl Client {
     fn start(mut command: Command) -> Self {
-        let mut child = command.spawn().expect("bake-rs starts");
+        let mut child = command.spawn().expect("bake starts");
         let input = child.stdin.take();
         let records = Arc::new(Mutex::new(Vec::new()));
         let stderr = Arc::new(Mutex::new(String::new()));
@@ -242,7 +242,7 @@ impl Client {
                     let _ = self.child.kill();
                     let _ = self.child.wait();
                     panic!(
-                        "bake-rs did not exit; records: {:?}, stderr: {}",
+                        "bake did not exit; records: {:?}, stderr: {}",
                         self.records(),
                         self.stderr()
                     );

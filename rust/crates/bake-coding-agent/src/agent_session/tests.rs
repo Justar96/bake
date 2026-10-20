@@ -78,7 +78,7 @@ pub(crate) fn options(
         active_tool_names: Vec::new(),
         tool_prompts: Vec::new(),
         system_prompt: SystemPromptOptions::new(cwd),
-        docs_command: "/opt/bake/bin/bake-rs docs".into(),
+        docs_command: "/opt/bake/bin/bake docs".into(),
         plugins: crate::plugins::PluginRegistry::default(),
         work: None,
         jobs: None,
@@ -184,7 +184,7 @@ async fn declares_the_prompt_once_and_reuses_it_across_resume() {
     assert_eq!(names, ["preamble", "rules", "docs", "run", "environment"]);
     let mut expected = SystemPromptOptions::new(cwd.clone());
     expected.selected_tools = Vec::new();
-    expected.docs_command = "/opt/bake/bin/bake-rs docs".into();
+    expected.docs_command = "/opt/bake/bin/bake docs".into();
     assert_eq!(
         get_system_message_text(&head),
         build_system_prompt(&expected).expect("prompt")
@@ -730,13 +730,11 @@ async fn prompts_need_a_model_with_auth() {
     assert!(session.model().is_none());
     assert_eq!(
         session.model_fallback_message(),
-        Some(format_no_models_available_message("/opt/bake/bin/bake-rs docs").as_str())
+        Some(format_no_models_available_message("/opt/bake/bin/bake docs").as_str())
     );
     assert_eq!(
         session.prompt("hi", Vec::new()).await,
-        Err(format_no_model_selected_message(
-            "/opt/bake/bin/bake-rs docs"
-        ))
+        Err(format_no_model_selected_message("/opt/bake/bin/bake docs"))
     );
     session.shutdown().await;
 
@@ -752,7 +750,7 @@ async fn prompts_need_a_model_with_auth() {
         session.prompt("hi", Vec::new()).await,
         // Bake names its docs command where Pi names its docs files.
         Err(
-            "No API key found for faux.\n\nAdd a provider to models.json in the Bake home, and its API key to models.json or auth.json. See:\n  /opt/bake/bin/bake-rs docs models"
+            "No API key found for faux.\n\nAdd a provider to models.json in the Bake home, and its API key to models.json or auth.json. See:\n  /opt/bake/bin/bake docs models"
                 .into()
         )
     );

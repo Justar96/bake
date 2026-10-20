@@ -453,7 +453,7 @@ mod tests {
                 false,
             ),
         ];
-        let table = format_models_list(&models, None, "bake-rs docs");
+        let table = format_models_list(&models, None, "bake docs");
         assert_eq!(
             table,
             concat!(
@@ -463,11 +463,11 @@ mod tests {
             )
         );
 
-        let filtered = format_models_list(&models, Some("sonnet"), "bake-rs docs");
+        let filtered = format_models_list(&models, Some("sonnet"), "bake docs");
         assert!(filtered.contains("claude-sonnet-4-5"));
         assert!(!filtered.contains("gpt-5"));
 
-        let none = format_models_list(&models, Some("nonexistent"), "bake-rs docs");
+        let none = format_models_list(&models, Some("nonexistent"), "bake docs");
         assert_eq!(none, "No models matching \"nonexistent\"\n");
     }
 
@@ -499,7 +499,7 @@ mod tests {
             sample_model("Anthropic", "claude", 1_000, 1_000, false, false),
             sample_model("openai", "claude", 1_000, 1_000, false, false),
         ];
-        let table = format_models_list(&models, None, "bake-rs docs");
+        let table = format_models_list(&models, None, "bake docs");
         let order: Vec<(&str, &str)> = table
             .lines()
             .skip(1)

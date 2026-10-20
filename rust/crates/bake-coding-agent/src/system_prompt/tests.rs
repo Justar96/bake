@@ -34,7 +34,7 @@ fn names(options: &SystemPromptOptions) -> Vec<String> {
         .collect()
 }
 
-/// `bake-rs -p` with Pi's four default tools and their guidelines
+/// `bake -p` with Pi's four default tools and their guidelines
 /// (`tools/{read,edit,write}.ts`; `bash` contributes none), the
 /// `workspace-write` preset with no one to answer approvals, and the facts
 /// of a Linux repository: the example in
@@ -55,7 +55,7 @@ fn default_options() -> SystemPromptOptions {
         ("write".into(), vec!["Use write only for new files or complete rewrites.".into()]),
     ];
     options.permissions = "File sandbox: workspace-write. Sandboxed tools can modify files under \"/home/user/project\", and possibly in some temporary directories.\n\nApproval prompts: disabled. Actions that need approval are rejected automatically, so do not request sandbox escalation with `sandbox_permissions`.".into();
-    options.docs_command = "/usr/local/bin/bake-rs docs".into();
+    options.docs_command = "/usr/local/bin/bake docs".into();
     options.environment = Environment {
         platform: "linux".into(),
         shell: "bash".into(),

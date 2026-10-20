@@ -1,4 +1,4 @@
-//! `bake-rs plugin check <dir> [<tool> <args-json>]`: a diagnostic that
+//! `bake plugin check <dir> [<tool> <args-json>]`: a diagnostic that
 //! starts one Wasm plugin package in its helper process with the default
 //! plugin limits, prints what the helper established, optionally asks the
 //! plugin about one tool call, and shuts the helper down. It loads nothing

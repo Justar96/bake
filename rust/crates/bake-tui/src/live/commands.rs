@@ -456,7 +456,7 @@ impl Context {
 pub fn refuse_argument(name: &str, argument: &str) -> Option<String> {
     match name {
         "login" | "logout" if !argument.is_empty() && argument != CLIPROXYAPI_ID => Some(format!(
-            "/{name} knows only CLIProxyAPI in bake-rs, not {argument}; your draft is kept."
+            "/{name} knows only CLIProxyAPI in bake, not {argument}; your draft is kept."
         )),
         "refresh-models" | "settings" | "session" | "new" | "resume" | "tree" | "fork"
         | "clone" | "changelog" | "share"
@@ -1722,7 +1722,7 @@ async fn logout(context: &Context) -> Outcome {
 
 /// Bake's `cliProxyModelsInUse` for this session: the current model and
 /// the new-session default, which a refresh keeps even when the proxy no
-/// longer lists them. `bake-rs` has no subagent allow-list.
+/// longer lists them. `bake` has no subagent allow-list.
 fn models_in_use(current: Option<&Model>, settings: &Settings) -> Vec<String> {
     in_use(
         current.map(|model| (model.provider.as_str(), model.id.as_str())),

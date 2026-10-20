@@ -8,7 +8,7 @@ import { isEdit } from './metrics.ts'
 import { usesAgentInstructions } from './scenarios.ts'
 
 /**
- * A native `bake-rs` binary, a built TypeScript Bake checkout, or an installed
+ * A native `bake` binary, a built TypeScript Bake checkout, or an installed
  * pi CLI. A native root is the checkout whose Rust workspace built the binary,
  * or a prebuilt binary's directory; a pi root is its package directory.
  * Bake overlays apply only to the TypeScript arm. Native settings use
@@ -64,7 +64,14 @@ function piArm(spec: string): Arm {
 const EVALUATOR_ROOT = resolve(import.meta.dir, '../..')
 
 /**
- * The `bake-rs` executable a Cargo build reported, from its
+ * The Cargo bin targets this evaluator measures: `bake` today, and `bake-rs`
+ * as checkouts before the rename name it. The product ships only `bake`; a
+ * paired run against an older base still has to load that base's binary.
+ */
+export const NATIVE_BIN_TARGETS = ['bake', 'bake-rs'] as const
+
+/**
+ * The native executable a Cargo build reported, from its
  * `--message-format=json-render-diagnostics` stdout. Cargo names the path
  * wherever `CARGO_TARGET_DIR` or `build.target-dir` put it, so this never
  * guesses a path that could hold an older build.
@@ -75,7 +82,7 @@ export function builtExecutable(stdout: string): string | undefined {
     if (!line.startsWith('{')) continue
     let message: any
     try { message = JSON.parse(line) } catch { continue }
-    if (message.reason === 'compiler-artifact' && message.target?.name === 'bake-rs'
+    if (message.reason === 'compiler-artifact' && (NATIVE_BIN_TARGETS as readonly string[]).includes(message.target?.name)
       && message.target.kind?.includes('bin') && typeof message.executable === 'string') found = message.executable
   }
   return found
@@ -102,14 +109,14 @@ function nativeArm(path: string): Arm {
   } else {
     if (!existsSync(join(target, 'rust/Cargo.toml'))) {
       const typescript = existsSync(join(target, 'apps/cli/lib/bin.js')) ? `; name=ts:${path} runs its TypeScript agent` : ''
-      throw new Error(`EVAL_ARMS: ${target} has no rust/Cargo.toml; pass a checkout or a bake-rs binary${typescript}`)
+      throw new Error(`EVAL_ARMS: ${target} has no rust/Cargo.toml; pass a checkout or a bake binary${typescript}`)
     }
     const build = spawnSync('cargo', ['build', '--locked', '--release', '-p', 'bake-cli', '--message-format=json-render-diagnostics'], {
       cwd: join(target, 'rust'), stdio: ['ignore', 'pipe', 2], encoding: 'utf8', maxBuffer: 256 * 1024 * 1024,
     })
     if (build.error !== undefined || build.status !== 0) throw new Error(`EVAL_ARMS: cargo build --locked --release in ${join(target, 'rust')} failed${build.error ? `: ${build.error.message}` : ''}`)
     const executable = builtExecutable(build.stdout)
-    if (executable === undefined) throw new Error(`EVAL_ARMS: cargo build in ${join(target, 'rust')} reported no bake-rs executable`)
+    if (executable === undefined) throw new Error(`EVAL_ARMS: cargo build in ${join(target, 'rust')} reported no ${NATIVE_BIN_TARGETS.join(' or ')} executable`)
     bin = realpathSync(executable)
     const vcs = (...args: string[]) => spawnSync('git', ['-C', target, ...args], { encoding: 'utf8' })
     const head = vcs('rev-parse', 'HEAD')
@@ -118,7 +125,7 @@ function nativeArm(path: string): Arm {
       : { prebuilt: false, commit: null, dirty: null }
   }
   const probe = spawnSync(bin, ['--version'], { encoding: 'utf8', timeout: 10_000 })
-  if (probe.status !== 0) throw new Error(`EVAL_ARMS: ${bin} --version failed; is it a bake-rs binary?`)
+  if (probe.status !== 0) throw new Error(`EVAL_ARMS: ${bin} --version failed; is it a bake binary?`)
   return {
     kind: 'native', root: prebuilt ? dirname(bin) : target, bin, version: probe.stdout.trim(),
     binarySha256: createHash('sha256').update(readFileSync(bin)).digest('hex'), revision,
@@ -128,7 +135,7 @@ function nativeArm(path: string): Arm {
 
 /**
  * Resolve arms and read their compositions before any sample launches. A bare
- * checkout or binary, `native`, or `native:<path>` is the native `bake-rs`;
+ * checkout or binary, `native`, or `native:<path>` is the native `bake`;
  * `ts:<checkout>` is the frozen TypeScript agent of a built checkout; `pi` or
  * `pi:<bin>` is pi. `env` supplies per-arm values: EVAL_SETTINGS for a native
  * or TypeScript arm, EVAL_NATIVE_SESSION for a native arm, and EVAL_EXTRA for
@@ -211,7 +218,7 @@ export function nativeSettings(text: string, provider: string, model: string,
  * The tools a native sample's settings ask the model to be offered: the plain
  * names of `defaultTools`, or only `codemode` when `codemode.mode` is `only`,
  * which presents the others through it. Undefined when `defaultTools` is unset
- * or uses `+`/`-` modifiers on bake-rs's own defaults. bake-rs, as pi does,
+ * or uses `+`/`-` modifiers on bake's own defaults. bake, as pi does,
  * drops a name it does not register without a word, so a binary built before a
  * tool existed would measure an arm without it.
  */
@@ -246,7 +253,7 @@ export const NATIVE_PERMISSIONS = ['danger-full-access', 'workspace-write'] as c
 export type NativePermission = typeof NATIVE_PERMISSIONS[number]
 
 /**
- * The `bake-rs` print-mode launch for one native sample: Pi's JSON event
+ * The `bake` print-mode launch for one native sample: Pi's JSON event
  * stream, no session file by default, the permission preset (the TypeScript
  * arms' `danger-full-access` unless the run asks for the default
  * `workspace-write`), and the route's model and effort. Persistent
@@ -268,11 +275,11 @@ export interface StaleInjection { injected: boolean; raced: boolean }
 
 /**
  * The stale writer for a native arm, which has no extensions: it reads
- * `bake-rs`'s `--mode json` events as the evaluator receives them and, after
+ * `bake`'s `--mode json` events as the evaluator receives them and, after
  * the first successful `read` of `target`, prepends the comment the fix must
  * keep and writes `injectionPath`, once.
  *
- * The write lands after `bake-rs` has already moved on, so it is ordered only
+ * The write lands after `bake` has already moved on, so it is ordered only
  * against later model responses. An edit in the same response as that read,
  * whether its `tool_execution_start` comes before or after the write, may run
  * before the write lands; such an injection is `raced`, and the sample says
@@ -311,12 +318,12 @@ export function nativeStaleWriter(workspace: string, target: string, injectionPa
   }
 }
 
-/** The context file names `bake-rs` loads from a directory, after Pi's, in its order. */
+/** The context file names `bake` loads from a directory, after Pi's, in its order. */
 export const NATIVE_CONTEXT_FILES = ['AGENTS.override.md', 'AGENTS.md', 'AGENTS.MD']
 
 /**
  * Context files and skill directories a native sample would load but the
- * scenario does not own. `bake-rs` reads `~/.agents/AGENTS.md` and
+ * scenario does not own. `bake` reads `~/.agents/AGENTS.md` and
  * `~/.agents/skills` under the user's home, one context file from each
  * directory between the filesystem root and its working directory, and the
  * `.agents/skills` of each directory from its working directory up to the git

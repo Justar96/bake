@@ -808,7 +808,7 @@ mod integrity {
     #[test]
     fn a_helper_inside_the_workspace_is_refused_in_every_mode() {
         let dir = Dir::new("helper");
-        let helper = dir.0.join("bake-rs");
+        let helper = dir.0.join("bake");
         std::fs::write(&helper, "").expect("helper");
         let provider = LocalProvider::with_chain(vec![Runner::Landlock])
             .with_landlock_helper(helper.clone(), [OsString::from(landlock::HELPER_ARG)]);

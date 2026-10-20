@@ -176,7 +176,7 @@ impl Harness {
             tools,
             tool_prompts: Vec::new(),
             system_prompt: crate::system_prompt::SystemPromptOptions::new("/tmp"),
-            docs_command: "bake-rs docs".into(),
+            docs_command: "bake docs".into(),
             plugins: crate::plugins::PluginRegistry::default(),
             work: Some(work),
             jobs: Some(jobs),

@@ -49,7 +49,7 @@ testing = []
 
 # Real enforcement through each OS backend. Its own `main` serves as the
 # Landlock helper when re-executed, so the tests confine through a real
-# self-re-exec exactly as `bake-rs` does.
+# self-re-exec exactly as `bake` does.
 [[test]]
 name = "enforcement"
 path = "tests/enforcement.rs"

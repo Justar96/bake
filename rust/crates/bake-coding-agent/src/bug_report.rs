@@ -11,7 +11,7 @@
 //! the working directory as `<project>` and the home directory as `~`; the
 //! transcript, when the person includes it, goes only into the local zip
 //! archive, with the working directory Pi lists beside it. The metadata keeps
-//! Pi's shape, with Bake's facts: the `bake-rs` version and user agent, the
+//! Pi's shape, with Bake's facts: the `bake` version and user agent, the
 //! `BAKE_`/`DSH_` variable names (never their values), and `settings.json`
 //! of the Bake home, which is Bake's only settings scope. Not ported: the
 //! model-written summary, crash records (`crashes` stays empty), extension
@@ -605,7 +605,7 @@ pub fn issue_body_within(
     );
     let environment = &bundle.metadata["environment"];
     let footer = bundle.redact_paths(&format!(
-        "---\nReport ID: `{}` · bake-rs {} · {}/{}\nFiled with `/bug`. The session transcript is not included.",
+        "---\nReport ID: `{}` · bake {} · {}/{}\nFiled with `/bug`. The session transcript is not included.",
         bundle.id(),
         environment["version"].as_str().unwrap_or("unknown"),
         environment["platform"].as_str().unwrap_or("unknown"),

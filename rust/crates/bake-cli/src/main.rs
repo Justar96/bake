@@ -1,14 +1,14 @@
-//! `bake-rs`: Bake's native agent (Rust preview).
+//! `bake`: Bake's native agent (Rust preview).
 //!
-//! `bake-rs` in a terminal opens an interactive session in the terminal
-//! frontend ([`bake_tui::run_live`]); `bake-rs -p "prompt"` runs one
+//! `bake` in a terminal opens an interactive session in the terminal
+//! frontend ([`bake_tui::run_live`]); `bake -p "prompt"` runs one
 //! headless turn through [`bake_coding_agent::cli`], a port of Pi's print
-//! mode. Both set the session up through [`cli::start`]. `bake-rs preview`
-//! opens the sample terminal preview, and `bake-rs docs` prints the user
-//! documentation ([`docs`]). `bake-rs --self-check` reports that the
+//! mode. Both set the session up through [`cli::start`]. `bake preview`
+//! opens the sample terminal preview, and `bake docs` prints the user
+//! documentation ([`docs`]). `bake --self-check` reports that the
 //! executable loads and carries its documentation ([`self_check`]);
-//! `bake-rs plugin check` starts one Wasm plugin package in its helper
-//! ([`plugin_check`]). These commands need no Bake home; `bake-rs plugin
+//! `bake plugin check` starts one Wasm plugin package in its helper
+//! ([`plugin_check`]). These commands need no Bake home; `bake plugin
 //! install`, `enable`, `disable`, and `list` manage the Wasm plugins the
 //! Bake home enables for sessions ([`plugin_manage`]). `bake update`
 //! installs a published release over the native install this executable
@@ -37,27 +37,27 @@ use bake_tui::{LiveSession, PreviewExit, ScreenMode};
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 const HELP: &str = "\
-bake-rs: Bake's native agent (Rust preview)
+bake: Bake's native agent (Rust preview)
 
 Usage:
-  bake-rs [options] [messages...]
+  bake [options] [messages...]
                               Start an interactive session in this terminal,
                               or print one answer with -p
-  bake-rs preview [--inline]  Open the sample preview in an interactive terminal
-  bake-rs docs [topic]        List the documentation topics, or print one
-  bake-rs --self-check        Check that this executable runs on this host,
+  bake preview [--inline]     Open the sample preview in an interactive terminal
+  bake docs [topic]           List the documentation topics, or print one
+  bake --self-check           Check that this executable runs on this host,
                               and print a JSON record of its version and
                               platform
-  bake-rs plugin check <dir> [<tool> <args-json>]
+  bake plugin check <dir> [<tool> <args-json>]
                               Start a Wasm plugin package in its helper, and
                               optionally ask it about one tool call
-  bake-rs plugin install <dir>
+  bake plugin install <dir>
                               Check a Wasm plugin package and copy it into the
                               Bake home's plugin store, named by its hash
-  bake-rs plugin enable <sha256>
+  bake plugin enable <sha256>
                               Enable an installed package for new sessions
-  bake-rs plugin disable <id> Disable a plugin, clearing a recorded failure
-  bake-rs plugin list         List the enabled plugins and their state
+  bake plugin disable <id>    Disable a plugin, clearing a recorded failure
+  bake plugin list            List the enabled plugins and their state
   bake update                 Install the published release over this native
                               install and make it current
   bake update --check         Report a published release, installing nothing,
@@ -67,16 +67,16 @@ Usage:
                               not newer than the installed one
   bake update --rollback      Make the release the last update replaced
                               current again
-  bake-rs auth check --provider <name> [--model <id>] [--json]
+  bake auth check --provider <name> [--model <id>] [--json]
                               [--credentials] [--no-refresh]
                               Report whether a provider is ready to send
-  bake-rs auth print-api-key --provider <name> [--model <id>]
+  bake auth print-api-key --provider <name> [--model <id>]
                               Print a provider's API key on standard output
-  bake-rs auth print-bearer-token --provider <name> [--model <id>]
+  bake auth print-bearer-token --provider <name> [--model <id>]
                               [--min-expiry <duration>]
-                              Print an OAuth bearer token; bake-rs has no
+                              Print an OAuth bearer token; bake has no
                               OAuth provider, so this always fails
-  bake-rs auth                Show the auth commands' help
+  bake auth                   Show the auth commands' help
 
 Options:
   -p, --print               Send the prompts, print the final answer, and exit
@@ -132,7 +132,7 @@ Options:
       --approval <policy>   ask or never
       --offline             Run no startup network operation (BAKE_OFFLINE,
                             then DSH_OFFLINE, set to 1, true, or yes)
-      --verbose             Accepted and without effect: bake-rs has no quiet
+      --verbose             Accepted and without effect: bake has no quiet
                             startup to force, and always reports its startup
   -a, --approve             Refused, with the reason: Pi's project trust is
   -na, --no-approve         not ported, so a project's own files are always
@@ -152,7 +152,7 @@ calls are refused. Escalations need approval: under --approval ask an
 interactive session asks, Y then Enter allowing that one call; print mode
 cannot ask, so it refuses.
 
-bake-rs is interactive when both standard streams are terminals and neither
+bake is interactive when both standard streams are terminals and neither
 -p nor --mode is given; otherwise it prints. Interactive messages run in
 order as the session's first prompts. Enter sends a prompt, or steers the
 running turn; Esc stops the turn and puts unsent prompts back in the draft;
@@ -162,7 +162,7 @@ Ctrl+C twice quits. Slash commands such as /model are not available yet;
 Models come from models.json and keys from auth.json in the Bake home
 (BAKE_HOME, then DSH_HOME, then ~/.bake), which also holds settings.json, the
 saved sessions, and mcp.json, the stdio MCP servers each session starts under
-its sandbox mode; bake-rs refuses an mcp.json that other users, the working
+its sandbox mode; bake refuses an mcp.json that other users, the working
 directory, or a git repository could change. Instructions come from ~/.agents/AGENTS.md and the
 AGENTS.md files from the filesystem root down to the working directory.
 Skills come from ~/.agents/skills and every .agents/skills from the working
@@ -176,10 +176,10 @@ settings.json, reach no network, and write nothing. A key reaches standard
 output only from 'auth print-api-key' and 'auth check --credentials', whose
 purpose is to print it.
 
-With --mode rpc, bake-rs serves Pi's JSONL protocol instead of printing: it
+With --mode rpc, bake serves Pi's JSONL protocol instead of printing: it
 takes commands on standard input and writes responses, the json mode's events,
 and approval questions on standard output, until that input ends. Message and
-@file arguments are not prompts there; see 'bake-rs docs rpc'.
+@file arguments are not prompts there; see 'bake docs rpc'.
 
 'bake update' installs the release published for this platform beside the
 running one and makes it current only after the new binary passes its own
@@ -188,7 +188,7 @@ running one and makes it current only after the new binary passes its own
 update is available. Every run takes the install lock, and needs the install
 the Bake installer made (BAKE_NATIVE_ROOT names another one).
 
-Run 'bake-rs docs' for the documentation: the Bake home, settings, models,
+Run 'bake docs' for the documentation: the Bake home, settings, models,
 permissions, sessions, plugins, context files, skills, MCP servers, the RPC
 protocol, updates, and the command line.
 ";
@@ -197,17 +197,17 @@ protocol, updates, and the command line.
 enum Command {
     Help,
     Preview(ScreenMode),
-    /// `bake-rs docs`, with a topic or without one.
+    /// `bake docs`, with a topic or without one.
     Docs(Option<String>),
-    /// `bake-rs --self-check`, alone.
+    /// `bake --self-check`, alone.
     SelfCheck,
-    /// `bake-rs plugin check`: a package directory and an optional call.
+    /// `bake plugin check`: a package directory and an optional call.
     PluginCheck(PathBuf, Option<plugin_check::Call>),
-    /// `bake-rs plugin install | enable | disable | list`.
+    /// `bake plugin install | enable | disable | list`.
     PluginManage(plugin_manage::Manage),
     /// `bake update [--check] [--force <version>] [--rollback]`.
     Update(update::Request),
-    /// `bake-rs auth <command>`: the arguments from `auth` on.
+    /// `bake auth <command>`: the arguments from `auth` on.
     Auth(Vec<String>),
     Agent(Vec<String>),
 }
@@ -332,15 +332,15 @@ fn main() -> ExitCode {
         Ok(Command::Agent(args)) => agent(&args),
         Err(message) => {
             // A closed standard error is not a panic.
-            let _ = io::stderr().lock().write_all(
-                format!("bake-rs: {message}\n\nRun 'bake-rs --help' for usage.\n").as_bytes(),
-            );
+            let _ = io::stderr()
+                .lock()
+                .write_all(format!("bake: {message}\n\nRun 'bake --help' for usage.\n").as_bytes());
             ExitCode::from(2)
         }
     }
 }
 
-/// `bake-rs auth <command>`: Pi's `runAuthCommand` over the Bake home,
+/// `bake auth <command>`: Pi's `runAuthCommand` over the Bake home,
 /// reading its files and reaching no network. The Bake 0.3 route is
 /// imported as a run imports it (D25), so a provider it contributes is
 /// checked too.
@@ -367,16 +367,16 @@ fn exit_code(code: i32) -> ExitCode {
     ExitCode::from(u8::try_from(code).unwrap_or(1))
 }
 
-/// How to run `bake-rs docs` from this executable, for the prompt's
+/// How to run `bake docs` from this executable, for the prompt's
 /// `docs` section and the messages that point at the documentation.
 fn docs_command() -> String {
     match std::env::current_exe() {
         Ok(exe) => docs::docs_command(&exe),
-        Err(_) => "bake-rs docs".to_owned(),
+        Err(_) => "bake docs".to_owned(),
     }
 }
 
-/// `bake-rs docs [topic]`: the topic's Markdown, or the topic list. An
+/// `bake docs [topic]`: the topic's Markdown, or the topic list. An
 /// unknown topic fails with status 2 and the list on standard error.
 fn show_docs(topic: Option<&str>) -> ExitCode {
     match topic {
@@ -387,7 +387,7 @@ fn show_docs(topic: Option<&str>) -> ExitCode {
                 // A closed standard error is not a panic either.
                 let _ = io::stderr().lock().write_all(
                     format!(
-                        "bake-rs: unknown docs topic '{name}'\n\n{}",
+                        "bake: unknown docs topic '{name}'\n\n{}",
                         docs::topic_list()
                     )
                     .as_bytes(),
@@ -398,7 +398,7 @@ fn show_docs(topic: Option<&str>) -> ExitCode {
     }
 }
 
-/// `bake-rs --self-check`: the record on standard output and status 0, or
+/// `bake --self-check`: the record on standard output and status 0, or
 /// the reason on standard error and status 1. A closed standard output is
 /// status 1, not a panic, so a reader never mistakes a cut record for a pass.
 fn run_self_check() -> ExitCode {
@@ -407,7 +407,7 @@ fn run_self_check() -> ExitCode {
         Err(reason) => {
             let _ = io::stderr()
                 .lock()
-                .write_all(format!("bake-rs: self-check failed: {reason}\n").as_bytes());
+                .write_all(format!("bake: self-check failed: {reason}\n").as_bytes());
             ExitCode::FAILURE
         }
     }
@@ -499,7 +499,7 @@ fn agent(args: &[String]) -> ExitCode {
     let action = cli::plan(args, stdin_is_terminal, io::stdout().is_terminal(), &stderr);
     let run = match action {
         Action::Help => return print(HELP),
-        Action::Version => return print(&format!("bake-rs {VERSION}\n")),
+        Action::Version => return print(&format!("bake {VERSION}\n")),
         Action::Export(input, output) => {
             let stdout: SharedWriter = Arc::new(Mutex::new(io::stdout()));
             return exit_code(cli::run_export(&input, output.as_deref(), &stdout, &stderr));
@@ -681,7 +681,7 @@ fn interactive(runtime: &tokio::runtime::Runtime, args: cli::Args, stderr: Share
     match bake_tui::run_live(screen, live) {
         Ok(exit) => exit_status(exit),
         Err(err) => {
-            eprintln!("bake-rs: interactive mode failed: {err}");
+            eprintln!("bake: interactive mode failed: {err}");
             1
         }
     }
@@ -728,14 +728,14 @@ fn preview(mode: ScreenMode) -> ExitCode {
     // Checked before any terminal mode changes.
     if let Some(name) = non_terminal_stream(io::stdin().is_terminal(), io::stdout().is_terminal()) {
         eprintln!(
-            "bake-rs: preview needs an interactive terminal, but standard {name} is not a terminal"
+            "bake: preview needs an interactive terminal, but standard {name} is not a terminal"
         );
         return ExitCode::FAILURE;
     }
     match bake_tui::run_preview_mode(mode) {
         Ok(exit) => exit_code(exit_status(exit)),
         Err(err) => {
-            eprintln!("bake-rs: preview failed: {err}");
+            eprintln!("bake: preview failed: {err}");
             ExitCode::FAILURE
         }
     }

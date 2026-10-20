@@ -83,7 +83,7 @@ async fn fixture_with_session(
             active_tool_names: Vec::new(),
             tool_prompts: Vec::new(),
             system_prompt: SystemPromptOptions::new("/tmp"),
-            docs_command: "bake-rs docs".into(),
+            docs_command: "bake docs".into(),
             plugins: crate::plugins::PluginRegistry::default(),
             work: None,
             jobs: None,

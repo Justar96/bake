@@ -1,4 +1,4 @@
-//! `bake-rs plugin install | enable | disable | list`: the owner's
+//! `bake plugin install | enable | disable | list`: the owner's
 //! management of the Wasm plugins in the Bake home
 //! ([`bake_coding_agent::plugins::installed`]). Sessions started
 //! afterwards load what `plugins.json` enables; a running session keeps
@@ -72,7 +72,7 @@ fn manage(command: &Manage) -> Result<(), Failure> {
             ))?;
             if let Some(failure) = &enabled.record.failure {
                 line(&format!(
-                    "it is failed ({}); run 'bake-rs plugin disable {}' then enable it again to reset it",
+                    "it is failed ({}); run 'bake plugin disable {}' then enable it again to reset it",
                     escape(&failure.kind),
                     escape(&enabled.id)
                 ))?;
@@ -110,7 +110,7 @@ fn install(home: &PluginHome, dir: &Path) -> Result<(), Failure> {
         installed.sha256
     ))?;
     line(&format!(
-        "enable it with: bake-rs plugin enable {}",
+        "enable it with: bake plugin enable {}",
         installed.sha256
     ))
 }

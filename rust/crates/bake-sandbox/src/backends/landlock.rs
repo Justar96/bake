@@ -5,7 +5,7 @@
 //! `native/system/packages/entry/src/main.c` (BSD-3-Clause, see the crate
 //! `NOTICE`), with its CLI contract from `native/system/docs/cli-contract.md`
 //! and the constants of `native/system/packages/entry/src/index.ts`. Bake's
-//! Rust binary serves as its own helper: `bake-rs` dispatches a first
+//! Rust binary serves as its own helper: `bake` dispatches a first
 //! argument of [`HELPER_ARG`] to [`helper_main`] before anything else runs, so
 //! the release ships one executable and the helper is always the build that
 //! wrapped the command.

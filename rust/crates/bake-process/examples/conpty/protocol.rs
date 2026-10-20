@@ -474,7 +474,7 @@ mod tests {
             r"C:\tmp\ä b",
             "--history",
             "--",
-            r"C:\Program Files\bake-rs.exe",
+            r"C:\Program Files\bake.exe",
             "--inline",
             "--",
             "a \"b\"",
@@ -487,7 +487,7 @@ mod tests {
                 rows: 24,
                 cwd: Some(r"C:\tmp\ä b".into()),
                 history: true,
-                program: os(&[r"C:\Program Files\bake-rs.exe", "--inline", "--", "a \"b\""]),
+                program: os(&[r"C:\Program Files\bake.exe", "--inline", "--", "a \"b\""]),
             }
         );
         for (args, reason) in [

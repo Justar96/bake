@@ -82,7 +82,7 @@ impl Harness {
             active_tool_names: active,
             tool_prompts: Vec::new(),
             system_prompt: crate::system_prompt::SystemPromptOptions::new("/tmp"),
-            docs_command: "bake-rs docs".into(),
+            docs_command: "bake docs".into(),
             plugins: crate::plugins::PluginRegistry::default(),
             work: None,
             jobs: None,
@@ -858,7 +858,7 @@ async fn a_new_sessions_model_and_level_are_one_group() {
             active_tool_names: Vec::new(),
             tool_prompts: Vec::new(),
             system_prompt: crate::system_prompt::SystemPromptOptions::new("/tmp"),
-            docs_command: "bake-rs docs".into(),
+            docs_command: "bake docs".into(),
             plugins: Default::default(),
             work: None,
             jobs: None,
@@ -1051,7 +1051,7 @@ fn name_events(session: &AgentSession) -> (SessionSubscription, Arc<Mutex<Vec<Op
 // newlines when AgentSession.setSessionName is called" and
 // 3686-session-name-event.test.ts "emits session_info_changed when
 // AgentSession.setSessionName is called". The extension cases are not
-// ported: bake-rs has no extensions.
+// ported: bake has no extensions.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_session_name_is_normalized_recorded_and_announced() {
     let h = harness();

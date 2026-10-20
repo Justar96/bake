@@ -36,7 +36,7 @@ pub use context::{ContextFile, load_project_context_files, resolve_prompt_input,
 /// How the session runs, which the `run` section states.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum RunMode {
-    /// `bake-rs -p`: no one can answer a question.
+    /// `bake -p`: no one can answer a question.
     #[default]
     Print,
     /// A user at the terminal can answer.
@@ -110,7 +110,7 @@ pub struct SystemPromptOptions {
     /// The permission statement; empty for none.
     pub permissions: String,
     /// The command that lists Bake's documentation topics, such as
-    /// `/usr/local/bin/bake-rs docs`, already shell-quoted; empty for none.
+    /// `/usr/local/bin/bake docs`, already shell-quoted; empty for none.
     pub docs_command: String,
     /// How the session runs.
     pub run_mode: RunMode,
