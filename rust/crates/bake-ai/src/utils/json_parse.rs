@@ -605,4 +605,121 @@ mod tests {
         let at_cap = "[".repeat(MAX_PARTIAL_DEPTH);
         assert!(parse_partial(&at_cap).is_ok());
     }
+
+    mod properties {
+        use proptest::prelude::*;
+
+        use super::*;
+
+        /// JSON values as tool arguments carry them: unicode, quotes,
+        /// backslashes, and control characters in strings and keys, and
+        /// integers and finite floats.
+        fn value() -> impl Strategy<Value = Value> {
+            let text = "(\\PC|[\"\\\\/\u{0}-\u{1f}]){0,8}";
+            let leaf = prop_oneof![
+                Just(Value::Null),
+                any::<bool>().prop_map(Value::Bool),
+                any::<i64>().prop_map(Value::from),
+                any::<f64>()
+                    .prop_filter("finite", |n| n.is_finite())
+                    .prop_map(Value::from),
+                text.prop_map(Value::String),
+            ];
+            leaf.prop_recursive(3, 24, 4, move |inner| {
+                prop_oneof![
+                    prop::collection::vec(inner.clone(), 0..4).prop_map(Value::Array),
+                    prop::collection::vec((text, inner), 0..4)
+                        .prop_map(|members| Value::Object(members.into_iter().collect())),
+                ]
+            })
+        }
+
+        fn object() -> impl Strategy<Value = Value> {
+            prop::collection::vec(("[a-z\u{e9}\u{1F648}]{0,4}", value()), 0..4)
+                .prop_map(|members| Value::Object(members.into_iter().collect()))
+        }
+
+        /// Whether `partial`, read from a prefix of `full`'s text, holds only
+        /// what `full` holds: a prefix of its members or items, each equal
+        /// but the last, which is itself partial; a string's prefix; any
+        /// number, since a cut number reads as a shorter one.
+        fn is_partial_of(partial: &Value, full: &Value) -> bool {
+            match (partial, full) {
+                (Value::Object(partial), Value::Object(full)) => {
+                    partial.len() <= full.len()
+                        && partial.iter().zip(full).enumerate().all(
+                            |(index, ((key, value), (full_key, full_value)))| {
+                                key == full_key
+                                    && if index + 1 == partial.len() {
+                                        is_partial_of(value, full_value)
+                                    } else {
+                                        value == full_value
+                                    }
+                            },
+                        )
+                }
+                (Value::Array(partial), Value::Array(full)) => {
+                    partial.len() <= full.len()
+                        && partial
+                            .iter()
+                            .zip(full)
+                            .enumerate()
+                            .all(|(index, (item, full_item))| {
+                                if index + 1 == partial.len() {
+                                    is_partial_of(item, full_item)
+                                } else {
+                                    item == full_item
+                                }
+                            })
+                }
+                (Value::String(partial), Value::String(full)) => full.starts_with(partial.as_str()),
+                (Value::Number(_), Value::Number(_)) => true,
+                _ => partial == full,
+            }
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(256))]
+
+            #[test]
+            fn the_partial_parser_reads_complete_json_as_json_does(
+                full in value(),
+                pretty in any::<bool>(),
+            ) {
+                let text = if pretty {
+                    serde_json::to_string_pretty(&full).unwrap()
+                } else {
+                    serde_json::to_string(&full).unwrap()
+                };
+                prop_assert_eq!(parse_partial(&text), Ok(full));
+            }
+
+        }
+
+        // Each case parses every prefix of its text.
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(96))]
+
+            #[test]
+            fn every_streamed_prefix_of_arguments_holds_only_what_the_arguments_hold(
+                full in object(),
+                pretty in any::<bool>(),
+            ) {
+                let text = if pretty {
+                    serde_json::to_string_pretty(&full).unwrap()
+                } else {
+                    serde_json::to_string(&full).unwrap()
+                };
+                for (cut, _) in text.char_indices() {
+                    let prefix = &text[..cut];
+                    let partial = parse_streaming_json(Some(prefix));
+                    prop_assert!(
+                        is_partial_of(&partial, &full),
+                        "{prefix:?} read as {partial}, not part of {full}"
+                    );
+                }
+                prop_assert_eq!(parse_streaming_json(Some(&text)), full);
+            }
+        }
+    }
 }

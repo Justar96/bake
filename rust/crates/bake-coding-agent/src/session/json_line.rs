@@ -879,4 +879,141 @@ mod tests {
         assert!(unchanged);
         assert_eq!(written, expected);
     }
+
+    mod properties {
+        use proptest::prelude::*;
+
+        use super::*;
+        use crate::session::json::js_stringify;
+
+        /// Stands for a lone surrogate escape in generated text: a
+        /// private-use character the generator writes, replaced in the
+        /// line's text by `\ud800`.
+        const LONE: char = '\u{E000}';
+
+        fn text() -> impl Strategy<Value = String> {
+            "[a-z0-9\"\\\\/\u{0}-\u{1f}\u{e9}\u{2028}\u{1F600}\u{E000}]{0,6}"
+        }
+
+        /// Values `JSON.stringify` writes, numbers in JavaScript's range.
+        fn value() -> impl Strategy<Value = Value> {
+            let leaf = prop_oneof![
+                Just(Value::Null),
+                any::<bool>().prop_map(Value::Bool),
+                (-1_000_000i64..1_000_000).prop_map(Value::from),
+                (-1e30f64..1e30).prop_map(Value::from),
+                text().prop_map(Value::String),
+            ];
+            leaf.prop_recursive(4, 32, 4, |inner| {
+                prop_oneof![
+                    prop::collection::vec(inner.clone(), 0..4).prop_map(Value::Array),
+                    prop::collection::vec((text(), inner), 0..4)
+                        .prop_map(|members| Value::Object(members.into_iter().collect())),
+                ]
+            })
+        }
+
+        /// JSON text near the grammar: written values, some with a byte
+        /// inserted, removed, or replaced, and runs of JSON tokens in any
+        /// order.
+        fn json_text() -> impl Strategy<Value = String> {
+            let byte = prop_oneof![
+                prop::sample::select(b"{}[],:\"".to_vec()),
+                prop::sample::select(b"0123456789-+.eEtrufalsn \\u\t\n".to_vec()),
+            ];
+            let edit = (any::<usize>(), 0..3u8, byte);
+            let edited = (value(), prop::collection::vec(edit, 0..3)).prop_map(|(value, edits)| {
+                let mut text = js_stringify(&value).replace(LONE, "\\ud800").into_bytes();
+                for (at, kind, byte) in edits {
+                    let at = at % (text.len() + 1);
+                    match kind {
+                        0 => text.insert(at, byte),
+                        1 if at < text.len() => {
+                            text.remove(at);
+                        }
+                        _ if at < text.len() => text[at] = byte,
+                        _ => {}
+                    }
+                }
+                String::from_utf8_lossy(&text).into_owned()
+            });
+            let near_miss = (value(), any::<usize>(), 0..4u8)
+                .prop_map(|(value, at, defect)| near_miss(&js_stringify(&value), at, defect));
+            prop_oneof![edited, near_miss]
+        }
+
+        /// `text` with one structural defect `JSON.parse` refuses, at the
+        /// `at`th separator or closing bracket outside strings: a trailing
+        /// comma, a missing comma or colon, or a doubled comma.
+        fn near_miss(text: &str, at: usize, defect: u8) -> String {
+            let mut in_string = false;
+            let mut escaped = false;
+            let mut places = Vec::new();
+            for (index, byte) in text.bytes().enumerate() {
+                if in_string {
+                    match byte {
+                        _ if escaped => escaped = false,
+                        b'\\' => escaped = true,
+                        b'"' => in_string = false,
+                        _ => {}
+                    }
+                } else if byte == b'"' {
+                    in_string = true;
+                } else if matches!(byte, b',' | b':' | b']' | b'}') {
+                    places.push(index);
+                }
+            }
+            let Some(&index) = places.get(at % places.len().max(1)) else {
+                return text.to_owned();
+            };
+            let (before, after) = text.split_at(index);
+            match (defect, after.as_bytes()[0]) {
+                (0, b']' | b'}') => format!("{before},{after}"),
+                (1, b',' | b':') => format!("{before}{}", &after[1..]),
+                (2, b',') => format!("{before},{after}"),
+                (_, b':') => format!("{before},{}", &after[1..]),
+                _ => format!("{before},{after}"),
+            }
+        }
+
+        /// Whether `JSON.parse` reads `text` where `serde_json` refuses it:
+        /// an escaped lone surrogate or a number beyond the double range.
+        fn only_json_parse_reads(text: &str, error: &serde_json::Error) -> bool {
+            let lower = text.to_ascii_lowercase();
+            [
+                "\\ud8", "\\ud9", "\\uda", "\\udb", "\\udc", "\\udd", "\\ude", "\\udf",
+            ]
+            .iter()
+            .any(|escape| lower.contains(escape))
+                || error.to_string().contains("number out of range")
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(1024))]
+
+            #[test]
+            fn a_line_reads_as_serde_json_reads_it_wherever_serde_json_can(text in json_text()) {
+                let ours = parse_json_line(&text);
+                match serde_json::from_str::<Value>(&text) {
+                    Ok(theirs) => {
+                        let ours = ours.map(|parsed| parsed.value);
+                        prop_assert_eq!(ours, Some(theirs), "{:?}", text);
+                    }
+                    Err(error) => prop_assert!(
+                        ours.is_none() || only_json_parse_reads(&text, &error),
+                        "{text:?} read, but serde_json refuses it: {error}"
+                    ),
+                }
+            }
+
+            #[test]
+            fn a_line_json_stringify_wrote_is_rewritten_byte_for_byte(value in value()) {
+                let line = js_stringify(&value).replace(LONE, "\\ud800");
+                let parsed = parse_json_line(&line);
+                prop_assert!(parsed.is_some(), "{line:?} does not read");
+                let parsed = parsed.unwrap();
+                prop_assert_eq!(js_stringify_held(&parsed.value, &parsed.verbatim), line);
+            }
+        }
+    }
 }

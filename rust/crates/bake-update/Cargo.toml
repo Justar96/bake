@@ -30,3 +30,4 @@ windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_
 [dev-dependencies]
 # The release fixtures the tests serve are built with the crate's own reader.
 tokio = { workspace = true, features = ["rt", "macros", "time"] }
+proptest.workspace = true

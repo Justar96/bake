@@ -239,4 +239,114 @@ mod tests {
             [(None, "bom")]
         );
     }
+
+    mod properties {
+        use proptest::prelude::*;
+
+        use super::*;
+
+        /// Pieces SSE streams are made of, with the bytes that test the
+        /// decoder's carried state: line breaks, a BOM, invalid and split
+        /// UTF-8.
+        fn fragment() -> impl Strategy<Value = Vec<u8>> {
+            prop_oneof![
+                Just(b"data:".to_vec()),
+                Just(b"data: ".to_vec()),
+                Just(b"event: ".to_vec()),
+                Just(b": ping".to_vec()),
+                Just(b"\n".to_vec()),
+                Just(b"\r".to_vec()),
+                Just(b"\r\n".to_vec()),
+                Just(b"\xEF\xBB\xBF".to_vec()),
+                Just(b"\xFF".to_vec()),
+                Just(b"\xF0\x9F".to_vec()),
+                "\\PC{0,8}".prop_map(String::into_bytes),
+                prop::collection::vec(any::<u8>(), 0..4),
+            ]
+        }
+
+        /// A stream that may open with all or part of a BOM.
+        fn stream() -> impl Strategy<Value = Vec<u8>> {
+            let opening = prop_oneof![
+                Just(&b""[..]),
+                Just(&b"\xEF"[..]),
+                Just(&b"\xEF\xBB"[..]),
+                Just(&b"\xEF\xBB\xBF"[..]),
+            ];
+            (opening, prop::collection::vec(fragment(), 0..40))
+                .prop_map(|(opening, parts)| [opening.to_vec(), parts.concat()].concat())
+        }
+
+        /// Cut points, half of them in the first bytes, where the decoder
+        /// decides whether the stream opens with a BOM.
+        fn cuts() -> impl Strategy<Value = Vec<usize>> {
+            prop::collection::vec(prop_oneof![0..4usize, any::<usize>()], 0..8)
+        }
+
+        fn chunks<'a>(bytes: &'a [u8], cuts: &[usize]) -> Vec<&'a [u8]> {
+            let mut cuts: Vec<usize> = cuts.iter().map(|cut| cut % (bytes.len() + 1)).collect();
+            cuts.sort_unstable();
+            let mut chunks = Vec::new();
+            let mut start = 0;
+            for cut in cuts {
+                chunks.push(&bytes[start..cut]);
+                start = cut;
+            }
+            chunks.push(&bytes[start..]);
+            chunks
+        }
+
+        /// A data line's value: no line break, and a leading space kept by
+        /// the one `data: ` drops.
+        fn data_line() -> impl Strategy<Value = String> {
+            "[^\r\n]{0,12}"
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(512))]
+
+            #[test]
+            fn any_split_of_a_stream_decodes_to_the_same_events(
+                bytes in stream(),
+                cuts in cuts(),
+            ) {
+                let whole = decode_all(&[&bytes]);
+                prop_assert_eq!(decode_all(&chunks(&bytes, &cuts)), whole);
+            }
+
+            #[test]
+            fn events_written_with_any_line_ending_decode_to_their_data(
+                events in prop::collection::vec(
+                    (
+                        prop::option::of("[a-z_]{1,8}"),
+                        prop::collection::vec(data_line(), 1..4),
+                    ),
+                    0..6,
+                ),
+                ending in prop_oneof![Just("\n"), Just("\r"), Just("\r\n")],
+                cuts in cuts(),
+            ) {
+                let mut text = String::new();
+                for (event, lines) in &events {
+                    if let Some(event) = event {
+                        text.push_str(&format!("event: {event}{ending}"));
+                    }
+                    for line in lines {
+                        text.push_str(&format!("data: {line}{ending}"));
+                    }
+                    text.push_str(ending);
+                }
+                let decoded = decode_all(&chunks(text.as_bytes(), &cuts));
+                let expected: Vec<(Option<&str>, String)> = events
+                    .iter()
+                    .map(|(event, lines)| (event.as_deref(), lines.join("\n")))
+                    .collect();
+                let actual: Vec<(Option<&str>, String)> = decoded
+                    .iter()
+                    .map(|event| (event.event.as_deref(), event.data.clone()))
+                    .collect();
+                prop_assert_eq!(actual, expected);
+            }
+        }
+    }
 }
