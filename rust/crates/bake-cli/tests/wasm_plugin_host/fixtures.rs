@@ -1,4 +1,4 @@
-//! Shared fixtures for the Wasm plugin host tests: the shipped `bake-rs`
+//! Shared fixtures for the Wasm plugin host tests: the shipped `bake`
 //! as the helper, the committed guest components, components built from
 //! core-module text, synthetic slow-to-compile components, and process
 //! observation.
@@ -17,7 +17,7 @@ use serde_json::Value;
 use tokio::sync::watch;
 
 /// The shipped binary, which serves as the helper.
-pub const BAKE_RS: &str = env!("CARGO_BIN_EXE_bake-rs");
+pub const BAKE: &str = env!("CARGO_BIN_EXE_bake");
 
 /// The `rust/` directory.
 pub fn rust_dir() -> PathBuf {
@@ -26,7 +26,7 @@ pub fn rust_dir() -> PathBuf {
 
 /// The production helper command.
 pub fn command() -> HelperCommand {
-    HelperCommand::new(BAKE_RS, [HELPER_ARG])
+    HelperCommand::new(BAKE, [HELPER_ARG])
 }
 
 fn read(path: &str) -> Vec<u8> {
@@ -502,7 +502,7 @@ pub fn held_command(dir: &TempDir) -> (HelperCommand, Holder) {
             [
                 "-c".to_owned(),
                 script,
-                BAKE_RS.to_owned(),
+                BAKE.to_owned(),
                 HELPER_ARG.to_owned(),
             ],
         ),

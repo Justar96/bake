@@ -43,7 +43,7 @@
 //!   generation; the attempt still counts, so a server that answers 404
 //!   forever stops within the same budget.
 //! - A server that answers 401, or 403 with an `insufficient_scope`
-//!   challenge, needs OAuth, which `bake-rs` does not support yet: the
+//!   challenge, needs OAuth, which `bake` does not support yet: the
 //!   server fails with that message and is not retried.
 //! - A tool call in flight when a connection ends fails with the
 //!   transport's error. It is never retried and never sent again, on this
@@ -128,7 +128,7 @@ pub(super) async fn run(
         }
         if attempts >= settings.max_reconnect_attempts {
             let error = format!(
-                "{error}; bake-rs gave up after {attempts} reconnect attempts for MCP server \"{}\"",
+                "{error}; bake gave up after {attempts} reconnect attempts for MCP server \"{}\"",
                 entry.name
             );
             return servers.set_state(index, ended(ever_served, error));
@@ -233,7 +233,7 @@ fn classify(name: &str, end: End, failure: Option<HttpError>) -> Attempt {
     }
     match failure {
         Some(HttpError::AuthorizationRequired { status, .. }) => Attempt::Unauthorized(format!(
-            "MCP server \"{name}\" requires authorization (HTTP {status}); bake-rs does not support OAuth sign-in yet, so give the server a credential in its \"headers\" in mcp.json"
+            "MCP server \"{name}\" requires authorization (HTTP {status}); bake does not support OAuth sign-in yet, so give the server a credential in its \"headers\" in mcp.json"
         )),
         Some(HttpError::SessionExpired { .. }) => Attempt::Expired(format!(
             "MCP server \"{name}\" ended: the server expired its HTTP session"

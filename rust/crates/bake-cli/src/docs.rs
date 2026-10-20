@@ -1,4 +1,4 @@
-//! `bake-rs docs`: Bake's 0.4 user documentation, compiled into the binary
+//! `bake docs`: Bake's 0.4 user documentation, compiled into the binary
 //! so it always describes the installed version and needs no files,
 //! network, or Bake home. Each topic is a Markdown file in `docs/` and is
 //! printed as written.
@@ -7,7 +7,7 @@ use std::path::Path;
 
 /// One documentation topic.
 pub struct Topic {
-    /// The name `bake-rs docs <name>` takes.
+    /// The name `bake docs <name>` takes.
     pub name: &'static str,
     /// One line for the topic list.
     pub summary: &'static str,
@@ -94,7 +94,7 @@ pub fn topic(name: &str) -> Option<&'static Topic> {
     TOPICS.iter().find(|topic| topic.name == name)
 }
 
-/// The topic list `bake-rs docs` prints.
+/// The topic list `bake docs` prints.
 pub fn topic_list() -> String {
     let width = TOPICS
         .iter()
@@ -110,19 +110,19 @@ pub fn topic_list() -> String {
             width = width
         ));
     }
-    list.push_str("\nRead one with: bake-rs docs <topic>\n");
+    list.push_str("\nRead one with: bake docs <topic>\n");
     list
 }
 
-/// How to run `bake-rs docs` through `exe`, as a POSIX shell command: the
+/// How to run `bake docs` through `exe`, as a POSIX shell command: the
 /// model runs it with the bash tool, which is Git Bash on Windows. Windows
 /// separators become `/`, as in the prompt's working directory, and a path
 /// holding anything but letters, digits, and `-_./:,+=@%` is single-quoted.
 /// A plain path also runs in PowerShell; a quoted one needs `& ` there. A
-/// path that is not UTF-8 cannot be named, so it gives `bake-rs docs`.
+/// path that is not UTF-8 cannot be named, so it gives `bake docs`.
 pub fn docs_command(exe: &Path) -> String {
     let Some(path) = exe.to_str() else {
-        return "bake-rs docs".to_owned();
+        return "bake docs".to_owned();
     };
     let path = if cfg!(windows) {
         path.replace('\\', "/")
@@ -184,8 +184,8 @@ mod tests {
     #[test]
     fn topics_name_only_topics_that_exist() {
         for topic in TOPICS {
-            for (index, _) in topic.text.match_indices("bake-rs docs ") {
-                let rest = &topic.text[index + "bake-rs docs ".len()..];
+            for (index, _) in topic.text.match_indices("bake docs ") {
+                let rest = &topic.text[index + "bake docs ".len()..];
                 let name: String = rest
                     .chars()
                     .take_while(|c| c.is_ascii_lowercase())
@@ -204,21 +204,21 @@ mod tests {
     #[test]
     fn plain_paths_are_not_quoted() {
         assert_eq!(
-            docs_command(Path::new("/usr/local/bin/bake-rs")),
-            "/usr/local/bin/bake-rs docs"
+            docs_command(Path::new("/usr/local/bin/bake")),
+            "/usr/local/bin/bake docs"
         );
-        assert_eq!(docs_command(Path::new("bake-rs")), "bake-rs docs");
+        assert_eq!(docs_command(Path::new("bake")), "bake docs");
     }
 
     #[test]
     fn other_paths_are_single_quoted() {
         assert_eq!(
-            docs_command(Path::new("/opt/My Apps/bake-rs")),
-            "'/opt/My Apps/bake-rs' docs"
+            docs_command(Path::new("/opt/My Apps/bake")),
+            "'/opt/My Apps/bake' docs"
         );
         assert_eq!(
-            docs_command(Path::new("/opt/it's/$x/bake-rs")),
-            r"'/opt/it'\''s/$x/bake-rs' docs"
+            docs_command(Path::new("/opt/it's/$x/bake")),
+            r"'/opt/it'\''s/$x/bake' docs"
         );
         assert_eq!(docs_command(Path::new("")), "'' docs");
     }
@@ -227,8 +227,8 @@ mod tests {
     #[test]
     fn a_path_that_is_not_utf8_gives_the_bare_command() {
         use std::os::unix::ffi::OsStrExt;
-        let exe = std::ffi::OsStr::from_bytes(b"/opt/\xff/bake-rs");
-        assert_eq!(docs_command(Path::new(exe)), "bake-rs docs");
+        let exe = std::ffi::OsStr::from_bytes(b"/opt/\xff/bake");
+        assert_eq!(docs_command(Path::new(exe)), "bake docs");
     }
 
     // Git Bash would drop unquoted backslashes.
@@ -236,12 +236,12 @@ mod tests {
     #[test]
     fn windows_paths_use_forward_slashes() {
         assert_eq!(
-            docs_command(Path::new(r"C:\Tools\bake-rs.exe")),
-            "C:/Tools/bake-rs.exe docs"
+            docs_command(Path::new(r"C:\Tools\bake.exe")),
+            "C:/Tools/bake.exe docs"
         );
         assert_eq!(
-            docs_command(Path::new(r"C:\Program Files\Bake\bake-rs.exe")),
-            "'C:/Program Files/Bake/bake-rs.exe' docs"
+            docs_command(Path::new(r"C:\Program Files\Bake\bake.exe")),
+            "'C:/Program Files/Bake/bake.exe' docs"
         );
     }
 }

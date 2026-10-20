@@ -5,7 +5,7 @@
 //! generation, a crashed server, a resumed session that declares no stale
 //! tool, the resource tools of a server that offers resources, the prompt
 //! section a server's instructions reach, and the replay class of every
-//! tool `bake-rs` composes, which no request carries. Each case names the Pi v1.3.0 or Bake TypeScript case it follows,
+//! tool `bake` composes, which no request carries. Each case names the Pi v1.3.0 or Bake TypeScript case it follows,
 //! where one exists.
 //!
 //! The binary is its own fixture server (`fixture.rs`), so it has its own
@@ -570,7 +570,7 @@ async fn build_session(
             active_tool_names: Vec::new(),
             tool_prompts: Vec::new(),
             system_prompt: SystemPromptOptions::new(&cwd),
-            docs_command: "bake-rs docs".into(),
+            docs_command: "bake docs".into(),
             plugins,
             work: Some(WorkGate::default()),
             jobs: None,
@@ -1544,7 +1544,7 @@ async fn the_probe_observes_real_processes(_case: Arc<Case>) {
     assert!(probe::Process::observe(u32::MAX).is_err());
 }
 
-/// The replay class of every tool `bake-rs` composes with every opt-in on
+/// The replay class of every tool `bake` composes with every opt-in on
 /// (scope 08, D37): reads rerun, effects do not, and no MCP server's own
 /// read-only claim is trusted.
 const REPLAY_CLASSES: [(&str, ToolReplay); 22] = [
@@ -1665,7 +1665,7 @@ async fn first_request(tools: Vec<Arc<AgentTool>>) -> Vec<String> {
     ]
 }
 
-// Scope 08: every tool `bake-rs` composes, built through the CLI with the
+// Scope 08: every tool `bake` composes, built through the CLI with the
 // task-document, schedule, and subagent opt-ins and an MCP server with
 // resources, has a replay class, the one recovery reads (`run_journal`):
 // every MCP tool is `Never`, and the three resource tools, whose MCP read
@@ -1718,7 +1718,7 @@ async fn every_composed_tool_has_a_replay_class_no_request_carries(case: Arc<Cas
         cwd: case.workspace(),
         home: Some(home),
         user_home: Some(user),
-        docs_command: "bake-rs docs".into(),
+        docs_command: "bake docs".into(),
         stdin_is_terminal: true,
         stdin: Box::new(std::io::empty()),
         stdout: Arc::new(Mutex::new(Vec::<u8>::new())),

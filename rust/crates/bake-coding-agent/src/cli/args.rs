@@ -19,7 +19,7 @@
 //! [`crate::permissions`]).
 //!
 //! `--verbose` is accepted and changes nothing. Pi's flag forces verbose
-//! startup over its `quietStartup` setting; `bake-rs` has no such setting
+//! startup over its `quietStartup` setting; `bake` has no such setting
 //! and no quiet startup, so its startup already reports what Pi's verbose
 //! startup reports: the session file, the model fallback, every setup
 //! warning, and each MCP server's failure.
@@ -80,7 +80,7 @@ impl Diagnostic {
 pub struct Args {
     /// `--help`, `-h`.
     pub help: bool,
-    /// `--version`, `-v` (and `-V`, which `bake-rs` kept).
+    /// `--version`, `-v` (and `-V`, which `bake` kept).
     pub version: bool,
     /// `--print`, `-p`.
     pub print: bool,
@@ -101,11 +101,11 @@ pub struct Args {
     /// `--offline`: run no startup network operation. The environment can
     /// set it too ([`crate::cli::offline_mode`]).
     pub offline: bool,
-    /// `--verbose`: force verbose startup. `bake-rs` has no quiet startup
+    /// `--verbose`: force verbose startup. `bake` has no quiet startup
     /// to override, so nothing changes; see the module documentation.
     pub verbose: bool,
     /// Pi's `projectTrustOverride`: `--approve` (`-a`) is `Some(true)` and
-    /// `--no-approve` (`-na`) is `Some(false)`. `bake-rs` has no project
+    /// `--no-approve` (`-na`) is `Some(false)`. `bake` has no project
     /// trust, so [`crate::cli::plan`] refuses both; see the module
     /// documentation.
     pub project_trust_override: Option<bool>,
@@ -467,7 +467,7 @@ pub fn unknown_flags_message(flags: &[(String, Option<String>)]) -> Option<Strin
 #[cfg(test)]
 mod tests {
     //! Cases from Pi `test/args.test.ts` (v1.3.0,
-    //! `71023aec1546d6d677a65669c5665c0927ce0dd0`) for every flag `bake-rs`
+    //! `71023aec1546d6d677a65669c5665c0927ce0dd0`) for every flag `bake`
     //! accepts, and for the flags it excludes, which it refuses as Pi
     //! refuses an option no extension registered. Bake's own flags have
     //! their own cases.
@@ -709,7 +709,7 @@ mod tests {
     }
 
     // Pi `args.ts`: the project-trust flags take no value, and the last
-    // one wins. `bake-rs` refuses them later ([`crate::cli::plan`]).
+    // one wins. `bake` refuses them later ([`crate::cli::plan`]).
     #[test]
     fn project_trust_flags_parse_to_one_override() {
         assert_eq!(parse(&["-p", "hi"]).project_trust_override, None);
@@ -725,7 +725,7 @@ mod tests {
         assert!(args.diagnostics.is_empty() && args.unknown_flags.is_empty());
     }
 
-    // Pi `args.ts`: `--verbose` takes no value. `bake-rs` accepts it and
+    // Pi `args.ts`: `--verbose` takes no value. `bake` accepts it and
     // starts the same session; nothing else in `Args` changes.
     #[test]
     fn verbose_flag_is_accepted_and_changes_nothing_else() {
@@ -864,7 +864,7 @@ mod tests {
     }
 
     // Pi `args.test.ts` "--mode flag" (issue #9045), for the two modes
-    // `bake-rs` runs: an invalid or missing value is an error and takes no
+    // `bake` runs: an invalid or missing value is an error and takes no
     // other argument with it.
     #[test]
     fn mode_errors_take_no_other_argument() {
@@ -1027,7 +1027,7 @@ mod tests {
     }
 
     // Pi's extension and theme flags, and `--tui-mode`, are excluded from
-    // `bake-rs`: a long one becomes an unknown flag and a short one an
+    // `bake`: a long one becomes an unknown flag and a short one an
     // unknown option, both of which the caller refuses
     // ([`crate::cli::plan`]). `--ui-mode`, which Pi also does not take, is
     // no different.

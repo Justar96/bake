@@ -1,5 +1,5 @@
 //! The Wasm plugin host end to end: `bake-coding-agent`'s parent API
-//! driving the shipped `bake-rs` binary as its helper, with the committed
+//! driving the shipped `bake` binary as its helper, with the committed
 //! `guard` and hostile components and components built here from
 //! core-module text.
 //!
@@ -935,13 +935,13 @@ fn kill_externally(pid: u32) {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn helper_startup_failures_are_reported_and_reaped() {
     // No such program.
-    let missing = HelperCommand::new("/nonexistent/bake-rs", [HELPER_ARG]);
+    let missing = HelperCommand::new("/nonexistent/bake", [HELPER_ARG]);
     assert!(matches!(
         try_start_with(&missing, &guard(), &limits(), None).await,
         Err(StartError::Spawn(_))
     ));
     // The helper refuses its arguments before any Hello.
-    let usage = HelperCommand::new(BAKE_RS, [HELPER_ARG, "--bogus", "1"]);
+    let usage = HelperCommand::new(BAKE, [HELPER_ARG, "--bogus", "1"]);
     let Err(StartError::Handshake { message, exit }) =
         try_start_with(&usage, &guard(), &limits(), None).await
     else {
@@ -954,7 +954,7 @@ async fn helper_startup_failures_are_reported_and_reaped() {
     );
     assert!(exit.stderr.contains("unknown argument --bogus"), "{exit:?}");
     // A program that is not the helper.
-    let other = HelperCommand::new(BAKE_RS, ["--help"]);
+    let other = HelperCommand::new(BAKE, ["--help"]);
     assert!(matches!(
         try_start_with(&other, &guard(), &limits(), None).await,
         Err(StartError::Handshake { .. })
@@ -991,7 +991,7 @@ async fn a_helper_with_the_medium_allocator_refuses_to_start() {
             "MallocMaxMagazines",
         ),
     ] {
-        let command = HelperCommand::new("/bin/sh", ["-c", script, BAKE_RS, HELPER_ARG]);
+        let command = HelperCommand::new("/bin/sh", ["-c", script, BAKE, HELPER_ARG]);
         let Err(StartError::Handshake { exit, .. }) =
             try_start_with(&command, &guard(), &limits(), None).await
         else {
@@ -1005,7 +1005,7 @@ async fn a_helper_with_the_medium_allocator_refuses_to_start() {
         assert!(exit.stderr.contains(setting), "{name}: {exit:?}");
     }
     // The same shell path with the setting kept loads the guard.
-    let kept = HelperCommand::new("/bin/sh", ["-c", "exec \"$0\" \"$@\"", BAKE_RS, HELPER_ARG]);
+    let kept = HelperCommand::new("/bin/sh", ["-c", "exec \"$0\" \"$@\"", BAKE, HELPER_ARG]);
     let host = try_start_with(&kept, &guard(), &limits(), None)
         .await
         .expect("the guard loads with MallocMediumZone=0");
@@ -1024,7 +1024,7 @@ async fn a_helper_without_its_memory_limit_refuses_to_start() {
         [
             "-c",
             "ulimit -v 262144 && exec \"$0\" \"$@\"",
-            BAKE_RS,
+            BAKE,
             HELPER_ARG,
         ],
     );
@@ -1183,7 +1183,7 @@ struct RawProcess(tokio::process::Child);
 #[cfg(unix)]
 impl RawProcess {
     async fn spawn(args: &[String]) -> (Self, RawIn, RawOut, RawOut) {
-        let mut child = tokio::process::Command::new(BAKE_RS)
+        let mut child = tokio::process::Command::new(BAKE)
             .args(args)
             .env_clear()
             // As the host starts it; see `a_helper_with_the_medium_allocator_refuses_to_start`.
@@ -1237,7 +1237,7 @@ impl RawProcess {
         let args: Vec<std::ffi::OsString> = args.iter().map(Into::into).collect();
         // The process exists only once this returns (after its last await),
         // and is owned at once.
-        let spawned = process::spawn(std::path::Path::new(BAKE_RS), &args, RAW_BUDGET)
+        let spawned = process::spawn(std::path::Path::new(BAKE), &args, RAW_BUDGET)
             .await
             .expect("spawn the helper");
         (
@@ -1632,7 +1632,7 @@ async fn the_host_refuses_malformed_and_mismatched_helper_frames() {
         ..limits()
     };
     let budget = limits.memory_budget;
-    let build = concat!("bake-rs ", env!("CARGO_PKG_VERSION"), " wasmtime 49.0.3");
+    let build = concat!("bake ", env!("CARGO_PKG_VERSION"), " wasmtime 49.0.3");
     // A tiny component: the fake never compiles it, and its Load fits the pipe.
     let tiny = package("fake", &["write"], b"\0asm\x0d\0\x01\0".to_vec());
     let hello = frame(0x81, &hello_payload(GENERATION, budget, build));
@@ -1685,7 +1685,7 @@ async fn the_host_refuses_malformed_and_mismatched_helper_frames() {
     assert!(
         start_failure(vec![frame(
             0x81,
-            &hello_payload(GENERATION, budget, "bake-rs 0.0.0")
+            &hello_payload(GENERATION, budget, "bake 0.0.0")
         )])
         .await
         .contains("build")
@@ -1758,19 +1758,19 @@ async fn the_host_refuses_malformed_and_mismatched_helper_frames() {
     );
 }
 
-/// `bake-rs plugin check`, the product consumer: the guard blocks a
+/// `bake plugin check`, the product consumer: the guard blocks a
 /// protected write, and an unlisted tool fails with exit 1.
 #[test]
 fn plugin_check_runs_the_guard_through_the_command_line() {
     let guard_dir = rust_dir().join("plugins/guard");
     let run = |args: &[&str]| {
-        std::process::Command::new(BAKE_RS)
+        std::process::Command::new(BAKE)
             .args(["plugin", "check"])
             .arg(&guard_dir)
             .args(args)
             .env_clear()
             .output()
-            .expect("run bake-rs")
+            .expect("run bake")
     };
     let blocked = run(&["write", r#"{"path":"config/.env"}"#]);
     let stdout = String::from_utf8_lossy(&blocked.stdout);
@@ -2016,7 +2016,7 @@ async fn call_inputs_are_bounded_before_they_are_sent() {
     finish(&host).await;
 }
 
-/// A package directory for `bake-rs plugin check`.
+/// A package directory for `bake plugin check`.
 fn check_dir(dir: &TempDir, id: &str, tools: &[&str], component: &[u8]) -> std::path::PathBuf {
     let path = dir.path().join(id);
     std::fs::create_dir(&path).expect("package dir");
@@ -2026,7 +2026,7 @@ fn check_dir(dir: &TempDir, id: &str, tools: &[&str], component: &[u8]) -> std::
     path
 }
 
-/// `bake-rs plugin check` escapes a guest's error text on standard error:
+/// `bake plugin check` escapes a guest's error text on standard error:
 /// an error answer carrying ANSI sequences and a bell.
 #[test]
 fn plugin_check_escapes_guest_diagnostics() {
@@ -2035,13 +2035,13 @@ fn plugin_check_escapes_guest_diagnostics() {
     let body = "i32.const 0\n i32.const 1\n i32.store8\n i32.const 4\n i32.const 2048\n i32.store\n i32.const 8\n i32.const 9\n i32.store";
     let component = wat_plugin(body, r#"(data (i32.const 2048) "\1b[31mred\07")"#);
     let package = check_dir(&dir, "ansi", &["write"], &component);
-    let out = std::process::Command::new(BAKE_RS)
+    let out = std::process::Command::new(BAKE)
         .args(["plugin", "check"])
         .arg(&package)
         .args(["write", "{}"])
         .env_clear()
         .output()
-        .expect("run bake-rs");
+        .expect("run bake");
     assert_eq!(out.status.code(), Some(1), "{out:?}");
     assert!(
         !out.stderr.contains(&0x1b) && !out.stderr.contains(&0x07),
@@ -2055,7 +2055,7 @@ fn plugin_check_escapes_guest_diagnostics() {
     assert!(stdout.contains("helper ready: "), "{stdout}");
 }
 
-/// Ctrl+C during `bake-rs plugin check` cancels the call through its
+/// Ctrl+C during `bake plugin check` cancels the call through its
 /// signal: the helper is torn down, and the command exits 130 without a
 /// teardown complaint.
 ///
@@ -2073,7 +2073,7 @@ fn plugin_check_handles_ctrl_c_during_a_call() {
         .expect("hostile component");
     let package = check_dir(&dir, "hostile", &HOSTILE_TOOLS, &component);
     let mut run = OwnedRun::spawn(
-        std::process::Command::new(BAKE_RS)
+        std::process::Command::new(BAKE)
             .args(["plugin", "check"])
             .arg(&package)
             .args(["sleep", "{}"]),
@@ -2181,7 +2181,7 @@ impl OwnedRun {
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .spawn()
-            .expect("run bake-rs");
+            .expect("run bake");
         let child_fd = pidfd_open(child.id()).expect("a pidfd for our own child");
         let stdout = child.stdout.take().expect("stdout");
         let mut stderr = child.stderr.take().expect("stderr");

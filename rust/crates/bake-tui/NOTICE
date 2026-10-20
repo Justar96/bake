@@ -12,7 +12,7 @@ return queued prompts to the editor and abort; the initial and later
 command-line messages run in order; handleEvent's mapping of agent and session
 events to the transcript; and renderSessionContext's replay of a resumed
 session), the built-in command names of src/core/slash-commands.ts, which
-bake-rs refuses until they are ported, and, in src/live/commands.rs, the
+bake refuses until they are ported, and, in src/live/commands.rs, the
 /model, /thinking, and /settings commands of interactive-mode.ts
 (handleModelCommand, its exact match from regression 7443,
 showModelSelector, the thinking selector, and showSettingsSelector), and

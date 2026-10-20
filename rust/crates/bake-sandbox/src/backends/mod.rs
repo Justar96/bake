@@ -10,8 +10,8 @@
 //! | Module | Contents |
 //! |---|---|
 //! | [`profiles`] | the bubblewrap, Landlock, and Seatbelt profile builders |
-//! | [`landlock`] | the Landlock helper `bake-rs` re-executes itself as |
-//! | [`windows_acl`] | the Windows restricted-token runner `bake-rs` re-executes itself as |
+//! | [`landlock`] | the Landlock helper `bake` re-executes itself as |
+//! | [`windows_acl`] | the Windows restricted-token runner `bake` re-executes itself as |
 //! | [`windows_appcontainer`] | the unqualified Windows AppContainer runner and its grant policy |
 //!
 //! Selection is by platform first and probes second: a chain with one

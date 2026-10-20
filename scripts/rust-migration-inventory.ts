@@ -152,7 +152,7 @@ const PACKAGE_OVERRIDES: Readonly<Record<string, Partial<Rule>>> = {
 /** Tests outside any workspace package, by area; the first matching prefix wins. */
 const TEST_AREAS: readonly (Rule & { readonly id: string; readonly prefixes: readonly string[] })[] = [
   { id: 'scripts:qualification-ledger', prefixes: ['scripts/rust-migration-ledger.'], scopes: ['01', '17'], disposition: 'reuse-oracle', reason: 'Evidence record integrity is separate from accepting a migration scope or release.' },
-  { id: 'scripts:rust-pty', prefixes: ['scripts/rust-pty-'], scopes: ['14', '15'], disposition: 'replace-tooling', reason: 'The Rust PTY driver\'s Windows ConPTY client; native terminal qualification tooling for bake-rs, not a TypeScript contract.' },
+  { id: 'scripts:rust-pty', prefixes: ['scripts/rust-pty-'], scopes: ['14', '15'], disposition: 'replace-tooling', reason: 'The Rust PTY driver\'s Windows ConPTY client; native terminal qualification tooling for bake, not a TypeScript contract.' },
   { id: 'scripts:rust-tests', prefixes: ['scripts/rust-test.'], scopes: ['01'], disposition: 'replace-tooling', reason: 'Native test execution, Cargo filters, and failure reporting for development and qualification.' },
   { id: 'scripts:migration', prefixes: ['scripts/rust-migration-'], scopes: ['00'], disposition: 'replace-tooling', reason: 'Scope-00 migration bookkeeping; retired with the TypeScript oracle in scope 17.' },
   { id: 'scripts:release', prefixes: ['scripts/release/'], scopes: ['16'], disposition: 'replace-tooling', reason: 'Release packing, installers, and manifest tooling; scope 16 changes the archive layout for native artifacts.' },

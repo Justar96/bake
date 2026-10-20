@@ -1,4 +1,4 @@
-//! The shipped `bake-rs` binary as the consumer of the Bake home's
+//! The shipped `bake` binary as the consumer of the Bake home's
 //! `mcp.json`: print mode against a loopback model server that answers
 //! `POST /v1/responses` with OpenAI Responses event streams, and real stdio
 //! MCP servers. A configured server's tools are declared, called, and
@@ -17,14 +17,14 @@
 //! to the standard output the protocol uses. Processes are observed through
 //! the same crate's stable identities (`tests/mcp_session/probe.rs`: a Linux
 //! pidfd, a Windows process handle, or a macOS pid with its start time). A
-//! server is observed while `bake-rs`, which holds it unreaped until it
+//! server is observed while `bake`, which holds it unreaped until it
 //! settles it, is waiting on the model or on standard input, and the
 //! server's later events show it was still that process; a case that
 //! expects a process fails if it cannot observe one. Each check that a
-//! process is gone is made at once after `bake-rs` exits, with no wait.
+//! process is gone is made at once after `bake` exits, with no wait.
 //!
 //! Each case owns a temporary directory, a model server, and every process
-//! it starts; whatever its outcome, a `bake-rs` still running is killed and
+//! it starts; whatever its outcome, a `bake` still running is killed and
 //! awaited, then each observed process still running is killed and awaited
 //! within a bound, descendants first, which fails the case.
 
@@ -50,11 +50,11 @@ use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
-/// How long one `bake-rs` run may take before the case fails.
+/// How long one `bake` run may take before the case fails.
 const RUN_BOUND: Duration = Duration::from_secs(60);
 /// How long a case waits for something it already caused.
 const BOUND: Duration = Duration::from_secs(20);
-/// A variable `bake-rs` holds that the scrub must keep from servers.
+/// A variable `bake` holds that the scrub must keep from servers.
 const SECRET: &str = "BAKE_MCP_CLI_TEST_SECRET_TOKEN";
 const SECRET_VALUE: &str = "leaked-secret-value";
 /// A variable no process sets.
@@ -212,12 +212,12 @@ fn run_case(name: &str, body: CaseBody) -> Result<(), String> {
     }
 }
 
-/// One case's directory, its running `bake-rs`, if any, and the processes
+/// One case's directory, its running `bake`, if any, and the processes
 /// it observed, each marked whether it is a descendant of a server.
 struct Case {
     root: PathBuf,
     child: Mutex<Option<Child>>,
-    /// The pid of the `bake-rs` last started, while it is unreaped.
+    /// The pid of the `bake` last started, while it is unreaped.
     pid: Mutex<Option<u32>>,
     processes: Mutex<Vec<(bool, probe::Process)>>,
 }
@@ -225,7 +225,7 @@ struct Case {
 impl Case {
     fn new(name: &str) -> Self {
         let root = std::env::temp_dir().join(format!(
-            "bake-rs-mcp-{name}-{}-{}",
+            "bake-mcp-{name}-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -326,10 +326,10 @@ impl Case {
         }
     }
 
-    /// Starts `bake-rs` with `args` in the project; standard input is a
+    /// Starts `bake` with `args` in the project; standard input is a
     /// pipe the caller holds when `hold_stdin`, else empty.
     fn spawn(&self, args: &[&str], hold_stdin: bool, env: &[(&str, &str)]) -> Option<ChildStdin> {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_bake-rs"));
+        let mut command = Command::new(env!("CARGO_BIN_EXE_bake"));
         command
             .args(args)
             .current_dir(self.project())
@@ -355,22 +355,22 @@ impl Case {
         for (key, value) in env {
             command.env(key, value);
         }
-        let mut child = command.spawn().expect("bake-rs starts");
+        let mut child = command.spawn().expect("bake starts");
         let stdin = child.stdin.take();
         *lock(&self.pid) = Some(child.id());
         *lock(&self.child) = Some(child);
         stdin
     }
 
-    /// The running `bake-rs`'s pid; [`Self::wait`] may be waiting for it.
+    /// The running `bake`'s pid; [`Self::wait`] may be waiting for it.
     fn child_pid(&self) -> u32 {
-        lock(&self.pid).expect("bake-rs runs")
+        lock(&self.pid).expect("bake runs")
     }
 
-    /// Waits, bounded, for the running `bake-rs` to exit and reads its
+    /// Waits, bounded, for the running `bake` to exit and reads its
     /// output.
     fn wait(&self) -> Run {
-        let mut child = lock(&self.child).take().expect("bake-rs runs");
+        let mut child = lock(&self.child).take().expect("bake runs");
         let drain = |pipe: Option<Box<dyn Read + Send>>| {
             std::thread::spawn(move || {
                 let mut bytes = Vec::new();
@@ -384,7 +384,7 @@ impl Case {
         let stderr = drain(child.stderr.take().map(|pipe| Box::new(pipe) as _));
         let deadline = Instant::now() + RUN_BOUND;
         let status = loop {
-            match child.try_wait().expect("bake-rs status") {
+            match child.try_wait().expect("bake status") {
                 Some(status) => {
                     *lock(&self.pid) = None;
                     break status;
@@ -393,7 +393,7 @@ impl Case {
                 None => {
                     // Put back for the cleanup, which kills and reaps it.
                     *lock(&self.child) = Some(child);
-                    panic!("bake-rs ran longer than {RUN_BOUND:?}");
+                    panic!("bake ran longer than {RUN_BOUND:?}");
                 }
             }
         };
@@ -404,7 +404,7 @@ impl Case {
         }
     }
 
-    /// Runs `bake-rs -p` to its end with `args` before the prompt.
+    /// Runs `bake -p` to its end with `args` before the prompt.
     fn run(&self, args: &[&str]) -> Run {
         let mut all = vec!["-p"];
         all.extend_from_slice(args);
@@ -414,7 +414,7 @@ impl Case {
     }
 
     /// Observes the server whose events name its pid, as a descendant of
-    /// the running `bake-rs`, and its `grandchild` when it logged one.
+    /// the running `bake`, and its `grandchild` when it logged one.
     /// Fails the case when a process cannot be observed.
     fn observe_server(&self, server: &str) -> Vec<u32> {
         let pid = |event: &str| -> u32 {
@@ -460,14 +460,14 @@ impl Case {
         found.iter().all(|exited| *exited)
     }
 
-    /// Kills and reaps a `bake-rs` still running, then kills and awaits,
+    /// Kills and reaps a `bake` still running, then kills and awaits,
     /// bounded, each observed process still running, descendants first;
     /// either fails the case. Removes the directory.
     fn clean_up(&self) -> Result<(), String> {
         let mut problems = Vec::new();
         if let Some(mut child) = lock(&self.child).take() {
             if matches!(child.try_wait(), Ok(None)) {
-                problems.push("bake-rs was still running".to_owned());
+                problems.push("bake was still running".to_owned());
                 let _ = child.kill();
             }
             let _ = child.wait();
@@ -503,7 +503,7 @@ fn chmod(path: &Path, mode: u32) {
 #[cfg(not(unix))]
 fn chmod(_path: &Path, _mode: u32) {}
 
-/// How one `bake-rs` run ended.
+/// How one `bake` run ended.
 struct Run {
     status: ExitStatus,
     stdout: String,
@@ -806,7 +806,7 @@ fn descendants_running(root: u32, marker: &str) -> Vec<u32> {
 // carrying a `block` reason. That call never reaches the server and its
 // file is not written; the decision precedes the denial in the session
 // file; the same tool without a reason runs. The plugin's helper and the
-// server are observed while `bake-rs` waits on the model, and both are
+// server are observed while `bake` waits on the model, and both are
 // gone at once when it exits, so its shutdown awaited both owners. Only
 // Linux and macOS check who can change plugin files, so only they enable
 // one.
@@ -859,7 +859,7 @@ fn an_enabled_plugin_vetoes_an_mcp_call_and_both_owners_end(case: &Arc<Case>) {
             if index != 1 {
                 return;
             }
-            // `bake-rs` waits for this reply: the vetoing helper and the
+            // `bake` waits for this reply: the vetoing helper and the
             // server it asked about both still run.
             let mut pids = hook_case.observe_server("fx");
             let bake = probe::Process::observe(hook_case.child_pid())
@@ -884,7 +884,7 @@ fn an_enabled_plugin_vetoes_an_mcp_call_and_both_owners_end(case: &Arc<Case>) {
     // At once: the binary's shutdown returned only once they were gone.
     assert!(
         case.all_exited(&pids),
-        "the server or the plugin helper outlived bake-rs"
+        "the server or the plugin helper outlived bake"
     );
     assert_eq!(pids.len(), 2, "the server and the helper: {pids:?}");
     model.assert_hook_passed();
@@ -926,7 +926,7 @@ fn an_enabled_plugin_vetoes_an_mcp_call_and_both_owners_end(case: &Arc<Case>) {
 // exposed MCP tools to the model", through the shipped binary: the first
 // request declares the server's tools after the built-in ones, the call
 // reaches the server, its result reaches the model and the session file,
-// and the server and its descendant are gone when `bake-rs` exits.
+// and the server and its descendant are gone when `bake` exits.
 #[cfg(unix)]
 fn a_configured_tool_is_declared_called_and_logged(case: &Arc<Case>) {
     let observed: Arc<Mutex<Vec<u32>>> = Arc::default();
@@ -943,7 +943,7 @@ fn a_configured_tool_is_declared_called_and_logged(case: &Arc<Case>) {
             let mut expected: Vec<&str> = BUILTIN.to_vec();
             expected.extend(FIXTURE_TOOLS);
             assert_eq!(declared(body), expected);
-            // `bake-rs` waits for this reply, so its server is serving.
+            // `bake` waits for this reply, so its server is serving.
             *lock(&observed_hook) = hook_case.observe_server("fx");
         }),
     );
@@ -955,7 +955,7 @@ fn a_configured_tool_is_declared_called_and_logged(case: &Arc<Case>) {
     let run = case.run(&["--sandbox", "danger-full-access"]);
     let pids = lock(&observed).clone();
     // At once: the binary's shutdown returned only once they were gone.
-    assert!(case.all_exited(&pids), "a server process outlived bake-rs");
+    assert!(case.all_exited(&pids), "a server process outlived bake");
     assert_eq!(pids.len(), 2, "the server and its descendant: {pids:?}");
     model.assert_hook_passed();
     assert_eq!(run.stderr, "");
@@ -997,7 +997,7 @@ fn a_configured_tool_is_declared_called_and_logged(case: &Arc<Case>) {
     );
 }
 
-// `bake-rs -p` reads a resource of a configured server: the three resource
+// `bake -p` reads a resource of a configured server: the three resource
 // tools are declared beside the server's own, `read_mcp_resource` returns
 // the resource's text to the model, and the server's instructions reach the
 // system prompt attributed to it.
@@ -1073,7 +1073,7 @@ fn a_configured_server_resource_is_listed_and_read(case: &Arc<Case>) {
 }
 
 // Bake's `transport.ts` `buildChildEnv` over `scrubbedParentEnv`: a
-// credential-shaped variable of `bake-rs` never reaches a server unless the
+// credential-shaped variable of `bake` never reaches a server unless the
 // entry names it, and an entry's template passes it.
 #[cfg(unix)]
 fn the_scrub_drops_credentials_an_entry_does_not_name(case: &Arc<Case>) {
@@ -1208,7 +1208,7 @@ fn admission_follows_the_sessions_sandbox(case: &Arc<Case>) {
     // Outside every writable root: Cargo's target tmpdir is not under the
     // system temporary directories.
     let outside = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
-        .join(format!("bake-rs-mcp-confined-{}", std::process::id()));
+        .join(format!("bake-mcp-confined-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&outside);
     std::fs::create_dir_all(&outside).expect("outside dir");
     let target = outside.join("escaped.txt");
@@ -1304,7 +1304,7 @@ fn an_unsafe_configuration_starts_nothing(case: &Arc<Case>) {
     );
 }
 
-/// Starts `bake-rs -p` with its standard input held open, so its setup
+/// Starts `bake -p` with its standard input held open, so its setup
 /// waits for the input after the session, and its servers, started, and
 /// observes the server once it is connected.
 fn start_held(case: &Case) -> (ChildStdin, Vec<u32>) {
@@ -1328,7 +1328,7 @@ fn a_setup_failure_after_servers_start_leaves_no_process(case: &Arc<Case>) {
     let (stdin, pids) = start_held(case);
     drop(stdin);
     let run = case.wait();
-    assert!(case.all_exited(&pids), "a server process outlived bake-rs");
+    assert!(case.all_exited(&pids), "a server process outlived bake");
     assert_eq!(pids.len(), 2, "{pids:?}");
     assert_eq!(run.status.code(), Some(1), "{}", run.stderr);
     assert!(run.stderr.contains("No models available"), "{}", run.stderr);
@@ -1345,7 +1345,7 @@ fn a_stop_during_setup_shuts_the_servers_down(case: &Arc<Case>) {
     // SAFETY: this process's own unreaped child, so the pid is still it.
     assert_eq!(unsafe { libc::kill(pid, libc::SIGTERM) }, 0);
     let run = case.wait();
-    assert!(case.all_exited(&pids), "a server process outlived bake-rs");
+    assert!(case.all_exited(&pids), "a server process outlived bake");
     drop(stdin);
     assert_eq!(run.status.code(), Some(143), "{}", run.stderr);
     assert!(model.requests().is_empty());
@@ -1514,7 +1514,7 @@ fn serve_mcp(mut socket: TcpStream, seen: &Mutex<Vec<(String, String, String)>>)
     let _ = socket.flush();
 }
 
-// A `url` server in the home's `mcp.json`: `bake-rs -p` admits its origin,
+// A `url` server in the home's `mcp.json`: `bake -p` admits its origin,
 // declares its tool beside the built-ins, calls it, logs the result, and
 // ends its HTTP session with a `DELETE` carrying the configured header
 // before it exits. The connection is the agent process's own, so no
@@ -1599,7 +1599,7 @@ fn an_existing_configuration_is_refused_where_its_owner_cannot_be_checked(case: 
     assert_eq!(declared(&model.requests()[0]), BUILTIN);
 }
 
-/// Sends `signal` to the running `bake-rs`, this process's own unreaped
+/// Sends `signal` to the running `bake`, this process's own unreaped
 /// child, so the pid is still it.
 #[cfg(unix)]
 fn send_signal(case: &Case, signal: libc::c_int) {
@@ -1613,12 +1613,12 @@ fn wait_exited(pid: u32) {
     let process = probe::Process::observe(pid).unwrap_or_else(|error| panic!("{error}"));
     let deadline = Instant::now() + BOUND;
     while !process.exited() {
-        assert!(Instant::now() < deadline, "bake-rs {pid} did not exit");
+        assert!(Instant::now() < deadline, "bake {pid} did not exit");
         std::thread::sleep(Duration::from_millis(10));
     }
 }
 
-/// Runs `bake-rs -p` with `args` and one server, answering the model with
+/// Runs `bake -p` with `args` and one server, answering the model with
 /// `replies`; returns the run and the requests.
 #[cfg(unix)]
 fn restricted(case: &Arc<Case>, args: &[&str], replies: Vec<Reply>) -> (Run, Vec<Value>) {
@@ -1850,7 +1850,7 @@ fn ctrl_c_while_setup_waits_for_input_stops_every_server(case: &Arc<Case>) {
     let (stdin, pids) = start_held(case);
     send_signal(case, libc::SIGINT);
     let run = case.wait();
-    assert!(case.all_exited(&pids), "a server process outlived bake-rs");
+    assert!(case.all_exited(&pids), "a server process outlived bake");
     drop(stdin);
     assert_eq!(pids.len(), 2, "{pids:?}");
     assert_eq!(run.status.code(), Some(130), "{}", run.stderr);
@@ -1872,14 +1872,14 @@ fn ctrl_c_during_the_startup_wait_stops_every_server(case: &Arc<Case>) {
     let pids = case.observe_server("fx");
     send_signal(case, libc::SIGINT);
     let run = case.wait();
-    assert!(case.all_exited(&pids), "a server process outlived bake-rs");
+    assert!(case.all_exited(&pids), "a server process outlived bake");
     assert_eq!(pids.len(), 2, "{pids:?}");
     assert_eq!(run.status.code(), Some(130), "{}", run.stderr);
     assert!(model.requests().is_empty());
 }
 
-/// Runs `bake-rs -p` with `prompts`, and on model request `at` observes the
-/// server, sends `SIGINT`, and holds the reply until `bake-rs` has exited.
+/// Runs `bake -p` with `prompts`, and on model request `at` observes the
+/// server, sends `SIGINT`, and holds the reply until `bake` has exited.
 #[cfg(unix)]
 fn ctrl_c_at_request(case: &Arc<Case>, prompts: &[&str], at: usize) -> (Run, Vec<u32>, usize) {
     let observed: Arc<Mutex<Vec<u32>>> = Arc::default();
@@ -1906,7 +1906,7 @@ fn ctrl_c_at_request(case: &Arc<Case>, prompts: &[&str], at: usize) -> (Run, Vec
     case.spawn(&args, false, &[]);
     let run = case.wait();
     let pids = lock(&observed).clone();
-    assert!(case.all_exited(&pids), "a server process outlived bake-rs");
+    assert!(case.all_exited(&pids), "a server process outlived bake");
     model.assert_hook_passed();
     (run, pids, model.requests().len())
 }

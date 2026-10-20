@@ -148,7 +148,7 @@ pub struct Settings {
     pub warnings: Vec<String>,
 }
 
-/// The `cliproxyapi` member of `settings.json`, which `bake-rs` owns: a
+/// The `cliproxyapi` member of `settings.json`, which `bake` owns: a
 /// login writes the route there, a logout writes `null`, and a refresh
 /// replaces its `models`. Any present value, `null` included, takes the
 /// route's place in the read-only 0.3 import (D25), so a signed-out route

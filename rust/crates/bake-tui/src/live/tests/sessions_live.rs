@@ -12,10 +12,10 @@
 //! `test/suite/agent-session-runtime.test.ts` name the case they follow:
 //! "restores model and thinking state from the destination session" in the
 //! round trip. Its "settles the active response before session replacement"
-//! is not followed: Pi aborts the running turn, while bake-rs refuses the
+//! is not followed: Pi aborts the running turn, while bake refuses the
 //! replacement until the turn ends, as the TypeScript navigation did (see
 //! the busy case). Its `session_before_switch` cancellation needs
-//! extensions, which bake-rs does not have; a user's cancellation is
+//! extensions, which bake does not have; a user's cancellation is
 //! covered by the cancelled-resume case instead.
 //!
 //! `/tree` and `/fork` follow Pi v1.2.0 `interactive-mode.ts`
@@ -244,7 +244,7 @@ fn started_harness(
             active_tool_names: active,
             tool_prompts: Vec::new(),
             system_prompt: SystemPromptOptions::new(world.project()),
-            docs_command: "bake-rs docs".into(),
+            docs_command: "bake docs".into(),
             plugins: bake_coding_agent::plugins::PluginRegistry::default(),
             work: None,
             jobs: None,
@@ -258,7 +258,7 @@ fn started_harness(
             ..Args::default()
         },
         world.home(),
-        "bake-rs docs".into(),
+        "bake docs".into(),
         Arc::new(bake_sandbox::provider::UnavailableProvider::new(None)),
         None,
     );
@@ -967,7 +967,7 @@ fn a_session_from_another_directory_is_not_opened() {
             active_tool_names: Vec::new(),
             tool_prompts: Vec::new(),
             system_prompt: SystemPromptOptions::new(world.project()),
-            docs_command: "bake-rs docs".into(),
+            docs_command: "bake docs".into(),
             plugins: bake_coding_agent::plugins::PluginRegistry::default(),
             work: None,
             jobs: None,
@@ -987,7 +987,7 @@ fn a_session_from_another_directory_is_not_opened() {
     let factory = SessionFactory::new(
         Args::default(),
         world.home(),
-        "bake-rs docs".into(),
+        "bake docs".into(),
         Arc::new(bake_sandbox::provider::UnavailableProvider::new(None)),
         None,
     );

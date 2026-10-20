@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Drive the built Rust preview, and live `bake-rs` sessions against a fake
+ * Drive the built Rust preview, and live `bake` sessions against a fake
  * streaming model, in a real terminal and check their return to the shell.
  *
  * On Linux and macOS the terminal is a POSIX PTY (`Bun.Terminal`) with a
@@ -28,7 +28,7 @@ import { buildConPtyHost, ConPty, modeRestoration, rawModeProblem, STATUS_CONTRO
 const root = resolve(import.meta.dir, '..')
 const { values } = parseArgs({ options: { binary: { type: 'string' }, filter: { type: 'string' }, conpty: { type: 'string' } } })
 const windows = process.platform === 'win32'
-const binary = resolve(values.binary ?? join(root, `rust/target/debug/bake-rs${windows ? '.exe' : ''}`))
+const binary = resolve(values.binary ?? join(root, `rust/target/debug/bake${windows ? '.exe' : ''}`))
 /** The ConPTY host, on Windows: given with `--conpty`, or built now. */
 const conptyHost = windows ? values.conpty === undefined ? buildConPtyHost(root) : resolve(values.conpty) : undefined
 
@@ -47,7 +47,7 @@ const gaps = new Set<string>()
 /** A scenario ended where this platform has a named gap: reported as `GAP`, not a pass or a failure. */
 class GapError extends Error {}
 
-const NO_CONSOLE_HANDLER = 'bake-rs installs no Windows console control handler, so'
+const NO_CONSOLE_HANDLER = 'bake installs no Windows console control handler, so'
 
 /** The terminal under the program: a POSIX PTY or a pseudoconsole, and the process on it. */
 interface Backend {
@@ -1206,7 +1206,7 @@ interface LiveWorld {
   readonly home: string
   readonly project: string
   readonly model: FakeModel
-  /** Starts bake-rs in the project; `env` adds to or replaces the session's environment, such as `PATH`. */
+  /** Starts bake in the project; `env` adds to or replaces the session's environment, such as `PATH`. */
   launch(args?: readonly string[], inline?: boolean, env?: Readonly<Record<string, string>>): Preview
   /** Runs `cleanup` once every launched session is closed, whatever the outcome; its failure fails the scenario. */
   defer(cleanup: () => Promise<void>): void
@@ -1557,9 +1557,9 @@ await liveScenario('live command-line prompts run first, and a setup failure exi
   await session.ready()
   await session.wait('both prompts answered', () => session.screen.includes('Echo: from args.') && session.screen.includes('Echo: later arg.')
     && /^ {2}✓ Completed/mu.test(session.screen))
-  // A command bake-rs does not run is refused, and the draft is kept.
+  // A command bake does not run is refused, and the draft is kept.
   session.send('/copy other\r')
-  await session.wait('command refused', () => session.screen.includes('/copy is not available in bake-rs yet')
+  await session.wait('command refused', () => session.screen.includes('/copy is not available in bake yet')
     && session.screen.includes('❯ /copy other'))
   await session.quit()
 
@@ -2565,7 +2565,7 @@ const { alive, identity } = new Function('readFileSync', 'execFileSync', `${IDEN
   readFileSync, execFileSync,
 ) as { alive: (pid: number, start: string) => boolean; identity: (pid: number) => { state: string; start: string } | undefined }
 
-/** The hidden argument that makes `bake-rs` a plugin helper. */
+/** The hidden argument that makes `bake` a plugin helper. */
 const PLUGIN_HELPER_ARG = '__bake-wasm-plugin-host'
 
 /**
@@ -2582,7 +2582,7 @@ async function enableEchoPlugin(world: LiveWorld): Promise<void> {
   const user = join(world.root, 'user')
   const manage = (args: string[]): string => {
     const ran = Bun.spawnSync([binary, 'plugin', ...args], { cwd: world.project, env: { PATH: process.env.PATH, BAKE_HOME: world.home, HOME: user, USERPROFILE: user } })
-    assert.equal(ran.exitCode, 0, `bake-rs plugin ${args.join(' ')}: ${ran.stderr.toString()}`)
+    assert.equal(ran.exitCode, 0, `bake plugin ${args.join(' ')}: ${ran.stderr.toString()}`)
     return ran.stdout.toString()
   }
   const installed = manage(['install', dir])

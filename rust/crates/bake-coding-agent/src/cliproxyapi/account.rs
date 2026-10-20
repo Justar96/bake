@@ -1,4 +1,4 @@
-//! The CLIProxyAPI account `bake-rs` keeps in the Bake home: sign-in,
+//! The CLIProxyAPI account `bake` keeps in the Bake home: sign-in,
 //! sign-out, and catalog refresh, written to `settings.json` and
 //! `auth.json` only. D25 reads Bake 0.3's `settings.yaml` and
 //! `.credentials.yaml` through [`super::import`] and never writes them.
@@ -60,7 +60,7 @@
 //! writes only while the route is still the one it fetched for.
 //!
 //! An exclusive lock on `.cliproxyapi.account.lock` in the home makes the
-//! sign-ins, sign-outs, and refreshes of every `bake-rs` process take
+//! sign-ins, sign-outs, and refreshes of every `bake` process take
 //! turns. Safety does not depend on it, because each file write holds that
 //! file's own lock and changes only its own member. A write whose directory
 //! flush fails ([`StoreError::Unsynced`]) counts as written, and is

@@ -1,4 +1,4 @@
-//! `bake-rs --self-check` run as the packager runs it: piped streams, a
+//! `bake --self-check` run as the packager runs it: piped streams, a
 //! cleared environment, and a PATH with no Node or Bun.
 
 use std::collections::BTreeMap;
@@ -19,7 +19,7 @@ impl Scratch {
     fn new(name: &str) -> Self {
         static COUNTER: AtomicUsize = AtomicUsize::new(0);
         let path = std::env::temp_dir().join(format!(
-            "bake-rs self-check ñ {name}-{}-{}",
+            "bake self-check ñ {name}-{}-{}",
             std::process::id(),
             COUNTER.fetch_add(1, Ordering::SeqCst)
         ));
@@ -35,10 +35,10 @@ impl Drop for Scratch {
     }
 }
 
-/// `bake-rs` with only the variables the arguments set, plus what Windows
+/// `bake` with only the variables the arguments set, plus what Windows
 /// needs to start a process at all.
 fn command(home: &Path, path: &Path) -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_bake-rs"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_bake"));
     command.env_clear();
     for name in ["SYSTEMROOT", "SystemRoot"] {
         if let Some(value) = std::env::var_os(name) {
@@ -60,7 +60,7 @@ fn self_check(home: &Path, path: &Path, extra: &[&str]) -> Output {
         .arg("--self-check")
         .args(extra)
         .output()
-        .expect("bake-rs runs")
+        .expect("bake runs")
 }
 
 /// Every path under `root` with its bytes and modification time.
@@ -154,7 +154,7 @@ fn the_record_names_this_build_and_its_documentation_sources() {
     assert_eq!(
         record,
         serde_json::json!({
-            "kind": "bake-rs-self-check",
+            "kind": "bake-self-check",
             "schema": 1,
             "version": env!("CARGO_PKG_VERSION"),
             "runtime": "rust",
@@ -180,7 +180,7 @@ fn extra_arguments_are_refused_with_usage_guidance() {
             )),
             "{stderr}"
         );
-        assert!(stderr.contains("bake-rs --help"), "{stderr}");
+        assert!(stderr.contains("bake --help"), "{stderr}");
     }
     assert!(
         snapshot(&home.0).is_empty(),
@@ -201,7 +201,7 @@ fn a_closed_standard_output_fails_without_a_panic() {
         .stdout(writer)
         .stderr(Stdio::piped())
         .output()
-        .expect("bake-rs runs");
+        .expect("bake runs");
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(!stderr.contains("panicked"), "{stderr}");
     assert_eq!(out.status.code(), Some(1), "{stderr}");

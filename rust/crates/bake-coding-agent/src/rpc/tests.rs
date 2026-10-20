@@ -993,7 +993,7 @@ pub(super) fn factory(dir: &TempDir) -> crate::cli::SessionFactory {
             ..crate::cli::Args::default()
         },
         home,
-        "bake-rs docs".into(),
+        "bake docs".into(),
         Arc::new(bake_sandbox::provider::UnavailableProvider::new(None)),
         None,
     )

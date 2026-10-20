@@ -4,7 +4,7 @@
 //! revision `abe508e1b89912adde45528136c3221eb69acdd7`, MIT; see the crate's
 //! `NOTICE`). It holds Pi's session store, Pi's built-in tools (the file
 //! tools and bash) with their output handling and file-mutation ordering, and
-//! the headless agent runtime that `bake-rs -p` uses, plus the retained
+//! the headless agent runtime that `bake -p` uses, plus the retained
 //! CLIProxyAPI route. [`session`] reads and writes Pi's session format and
 //! [`home`] places it under the Bake home (D25, D32).
 //!

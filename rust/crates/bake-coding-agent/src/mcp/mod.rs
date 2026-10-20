@@ -7,7 +7,7 @@
 //! `packages/mcp/mcp-client` ([`names`]), the D24 sandbox, and the session's
 //! [`WorkGate`].
 //!
-//! `bake-rs` reads its servers from `$BAKE_HOME/mcp.json` once the file
+//! `bake` reads its servers from `$BAKE_HOME/mcp.json` once the file
 //! passes [`home`]'s owner rules, and starts them for every session it
 //! builds unless `--no-mcp` is given ([`crate::cli`]).
 //!
@@ -48,7 +48,7 @@
 //! session re-initializes, and a lost connection is retried within Bake
 //! 0.3's reconnect budget, each connection publishing its tools as one new
 //! generation and the retired client drained before the next one serves.
-//! The connection is the `bake-rs` process's own, not a sandboxed child's,
+//! The connection is the `bake` process's own, not a sandboxed child's,
 //! so, like the web tools (D40), it is allowed in every sandbox mode.
 //!
 //! # Lifetime and permission boundaries

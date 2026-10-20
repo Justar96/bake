@@ -1,6 +1,6 @@
 //! Native plugins: the ordered tool-call veto of the proposed native plugin
 //! design under D6 (`docs/roadmap/rust-0.4/native-plugins.md`, in review),
-//! for trusted plugins compiled into `bake-rs` and for third-party Wasm
+//! for trusted plugins compiled into `bake` and for third-party Wasm
 //! plugins ([`wasm`]) that the Bake home installs and enables
 //! ([`installed`]). The other contributions, plugin tools, model-visible
 //! management tools, and restart policy are not here.
@@ -258,7 +258,7 @@ pub enum ToolCallVeto {
     },
 }
 
-/// A trusted plugin compiled into `bake-rs`.
+/// A trusted plugin compiled into `bake`.
 ///
 /// Obligations the dispatcher relies on, since it cannot enforce them on
 /// in-process code:

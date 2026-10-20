@@ -712,7 +712,7 @@ async fn shutdown_waits_for_a_cancelled_bash_call_group() {
             active_tool_names: vec!["bash".into()],
             tool_prompts: Vec::new(),
             system_prompt: SystemPromptOptions::new(&cwd),
-            docs_command: "bake-rs docs".into(),
+            docs_command: "bake docs".into(),
             plugins: bake_coding_agent::plugins::PluginRegistry::default(),
             work: Some(work),
             jobs: None,

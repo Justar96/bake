@@ -4,8 +4,8 @@
  * evals/README.md for the procedure and the regression rule.
  *
  * EVAL_ARMS    name=checkout pairs, comma-separated. A checkout runs the native
- *              bake-rs print mode, built from its rust/ workspace; name=<bin>
- *              runs a prebuilt bake-rs, and name=native, or native:<path>,
+ *              bake print mode, built from its rust/ workspace; name=<bin>
+ *              runs a prebuilt bake, and name=native, or native:<path>,
  *              names the same arm (this evaluator's checkout by default).
  *              name=ts:<checkout> runs a built checkout's frozen TypeScript
  *              headless CLI. name=pi, or name=pi:<bin>, runs the installed pi
@@ -119,10 +119,10 @@ interface Route {
 }
 interface PiRoute { api: string; upstreamBase: string; keyName: string; model: Record<string, unknown> }
 /**
- * A native arm's route: the provider `bake-rs` selects, its wire and upstream,
+ * A native arm's route: the provider `bake` selects, its wire and upstream,
  * and the private Bake home files that point it at the proxy. A `cliproxyapi`
  * model goes through the 0.3 `settings.yaml` and `.credentials.yaml` that
- * `bake-rs` imports read-only (D25), as a TypeScript arm's route does; any other
+ * `bake` imports read-only (D25), as a TypeScript arm's route does; any other
  * model goes through Pi's `models.json` with its key in `keyName`.
  */
 interface NativeRoute {
@@ -212,7 +212,7 @@ function routeOf(entry: string): Route {
         'agent-default-model': { provider: 'deepseek-official', model: rest, reasoningEffort: 'high' },
       }),
       pi: arm => piDeepseek(arm, rest),
-      // bake-rs ships no DeepSeek catalog or Anthropic-format DeepSeek profile,
+      // bake ships no DeepSeek catalog or Anthropic-format DeepSeek profile,
       // so it reaches DeepSeek as pi does, over Chat Completions; the provider
       // id `deepseek` selects its DeepSeek compatibility. The model entry
       // carries the shipped profile's metadata.
@@ -248,7 +248,7 @@ function routeOf(entry: string): Route {
   }
 }
 const routes = models.map(resolveRoute)
-/** Scenarios that need a Bake tool pi does not ship; a pi arm skips them, so it has no pair. A native arm runs them: a bake-rs build without `subagent`, or without `schedules` on, fails them. */
+/** Scenarios that need a Bake tool pi does not ship; a pi arm skips them, so it has no pair. A native arm runs them: a bake build without `subagent`, or without `schedules` on, fails them. */
 const piUnsupported = (scenario: string) => scenario.startsWith('delegation') || scenario === 'reminder'
 /**
  * A credential a pi arm passes to pi: the environment first, then the reference
@@ -327,7 +327,7 @@ async function run(route: Route, scenario: string, trial: number, variant: strin
   const arm = ARMS[variant]!
   const piRoute = arm.kind === 'pi' ? route.pi(arm) : undefined
   const nativeRoute = arm.kind === 'native' ? route.native : undefined
-  // pi and bake-rs write the same `--mode json` event stream.
+  // pi and bake write the same `--mode json` event stream.
   const jsonMode = piRoute !== undefined || nativeRoute !== undefined
   const { model } = route
   const { api, upstreamBase } = piRoute ?? nativeRoute ?? route
@@ -456,7 +456,7 @@ async function run(route: Route, scenario: string, trial: number, variant: strin
     let contextWindowApplied = false
     const env: Record<string, string | undefined> = { ...process.env, NO_COLOR: '1' }
     delete env.DEEPSEEK_API_KEY
-    // bake-rs has no extensions, so a native arm's stale writer acts on its event stream instead (see the stdout reader).
+    // bake has no extensions, so a native arm's stale writer acts on its event stream instead (see the stdout reader).
     let nativeInjection: ReturnType<typeof nativeStaleWriter> | undefined
     // Failures of the evaluator's own work during a sample, such as the stale writer's; any one makes the sample invalid.
     const evaluatorErrors: string[] = []
@@ -476,20 +476,20 @@ async function run(route: Route, scenario: string, trial: number, variant: strin
       }
       // As for pi: agent-level retry off, and a forced window becomes pi's window and compaction settings for it.
       writeFileSync(join(home, 'settings.json'), JSON.stringify(nativeConfig), { mode: 0o600 })
-      // A scenario's MCP server, in the one file bake-rs reads: the private
+      // A scenario's MCP server, in the one file bake reads: the private
       // home, which it owns at mode 0700 with this file at 0600, outside the
-      // workspace and every repository, as bake-rs's ownership rules require.
+      // workspace and every repository, as bake's ownership rules require.
       if (built.mcpServer !== undefined) {
         const { name, command, args } = built.mcpServer
         writeFileSync(join(home, 'mcp.json'), JSON.stringify({ mcpServers: { [name]: { command, args } } }), { mode: 0o600 })
       }
       if (nativeRoute.keyName !== undefined) env.EVAL_API_KEY = credential(nativeRoute.keyName)
-      // bake-rs reads instructions and skills from ~/.agents, so each sample gets an empty user home of its own.
+      // bake reads instructions and skills from ~/.agents, so each sample gets an empty user home of its own.
       const userHome = join(root, 'user'); mkdirSync(userHome, { mode: 0o700 })
       Object.assign(env, { BAKE_HOME: home, DSH_HOME: home, HOME: userHome, USERPROFILE: userHome })
-      // bake-rs also loads an AGENTS.md from every ancestor of its working directory, and .agents/skills up to the git root.
+      // bake also loads an AGENTS.md from every ancestor of its working directory, and .agents/skills up to the git root.
       const stray = strayContextFiles(workspace, userHome, usesAgentInstructions(scenario), usesSkills(scenario))
-      if (stray.length > 0) throw new Error(`${label}: bake-rs would load context files outside the fixture: ${stray.join(', ')}; move them or set TMPDIR to a directory without them`)
+      if (stray.length > 0) throw new Error(`${label}: bake would load context files outside the fixture: ${stray.join(', ')}; move them or set TMPDIR to a directory without them`)
       if (scenario === 'stale_edit') nativeInjection = nativeStaleWriter(workspace, join(workspace, file), injectionPath)
       command = nativeCommand(arm.bin!, nativeRoute.provider, model, route.effort, prompts[scenario]!, nativePermission,
         arm.nativeSession === undefined || arm.nativeSession === 'memory' ? undefined : {
@@ -596,7 +596,7 @@ async function run(route: Route, scenario: string, trial: number, variant: strin
       subagentCalls: byTool.subagent ?? 0,
       routingDecisions: routingDecisions(logged),
       roster: arm.kind === 'bake' ? roster : null,
-      // The rendered prompt and whether it is the shipped composition; pi and bake-rs bring their own prompts, so it is not checked.
+      // The rendered prompt and whether it is the shipped composition; pi and bake bring their own prompts, so it is not checked.
       systemPrompt,
       composition: arm.kind !== 'bake' || systemPrompt === null ? null : compositionCheck(systemPrompt, workspaces),
       requestFloor: requestFloorFor(scenario),
@@ -688,7 +688,7 @@ writeFileSync(join(out, 'design.json'), JSON.stringify({
   node: Bun.spawnSync(['node', '--version']).stdout.toString().trim(), models: routes.map(route => route.model), cases, trials, roster,
   routes: Object.fromEntries(routes.map(route => [route.model, { provider: route.provider, api: route.api, effort: route.effort, owner: ownerOf(route) }])),
   effort: 'each route\'s effort is in routes: medium by default, DeepSeek high (it has no medium), and an EVAL_MODELS @<effort> replaces either', maxOutputTokens: 8192, capMs: wallClockCaps().default, capMsByScenario: wallClockCaps(), maxRequests: requestCaps(), requestFloors: REQUEST_FLOORS, contextWindows: CONTEXT_WINDOWS, maxLogicalTokens,
-  // What pi and bake-rs get for each forced window: Bake's threshold plus pi's default reserve, and Bake's retained tail.
+  // What pi and bake get for each forced window: Bake's threshold plus pi's default reserve, and Bake's retained tail.
   piContextWindows: PI_CONTEXT_WINDOWS,
   piCompaction: PI_COMPACTION,
   nativePermission: armNames.some(name => ARMS[name]!.kind === 'native') ? nativePermission : null,
@@ -697,7 +697,7 @@ writeFileSync(join(out, 'design.json'), JSON.stringify({
   composition: 'Built headless CLI with each revision\'s own headless system-prompt config (harness opener off, working-directory suffix) and its standard-preset persona prefix; host tools retained.'
     + (roster === 'tui' ? ' Roster tui: the standard preset\'s tool-fs, tool-fs-search, and tool-result-pruner configs and the terminal spill-policy inline cap; ask_user_question stays out, having no one to answer it headless.' : ' Roster headless: the headless bundle\'s own tool configs.')
     + ' Session title and ambient AGENTS disabled equally; instructions_file keeps agent-instructions for its own AGENTS.md.'
-    + (armNames.some(name => ARMS[name]!.kind === 'native') ? ' A native arm runs bake-rs -p --mode json with the built binary\'s own system prompt and default tools unless recorded defaultTools overrides them, the recorded session mode (memory uses --no-session), the ' + nativePermission + ' preset, and agent-level retry off; a cliproxyapi model comes through the 0.3 settings.yaml and .credentials.yaml it imports read-only, and a DeepSeek model through models.json over Chat Completions. Its stale writer acts on its event stream. Its recorded EVAL_SETTINGS object configures settings.json except evaluator-controlled route, retry, permission, and scenario policy. Forced windows and compaction settings are recorded in piContextWindows and piCompaction. A scenario that provides an MCP server gets it as the only mcp.json bake-rs reads, in that private home at mode 0600, outside the workspace and every repository.' : '')
+    + (armNames.some(name => ARMS[name]!.kind === 'native') ? ' A native arm runs bake -p --mode json with the built binary\'s own system prompt and default tools unless recorded defaultTools overrides them, the recorded session mode (memory uses --no-session), the ' + nativePermission + ' preset, and agent-level retry off; a cliproxyapi model comes through the 0.3 settings.yaml and .credentials.yaml it imports read-only, and a DeepSeek model through models.json over Chat Completions. Its stale writer acts on its event stream. Its recorded EVAL_SETTINGS object configures settings.json except evaluator-controlled route, retry, permission, and scenario policy. Forced windows and compaction settings are recorded in piContextWindows and piCompaction. A scenario that provides an MCP server gets it as the only mcp.json bake reads, in that private home at mode 0600, outside the workspace and every repository.' : '')
     + (armNames.some(name => ARMS[name]!.kind === 'pi') ? ' A pi arm runs pi --mode json with its own system prompt and default tools, no session, extensions, prompt templates, or context files, no skills but a skill scenario\'s own, agent-level retry off, and pi\'s own wire for each model; it skips scenarios that need a Bake-only tool. Where a scenario forces a context window, pi gets its window for it (piContextWindows), Bake\'s threshold plus pi\'s default reserve, and compaction settings that keep Bake\'s retained tail (piCompaction).' : ''),
   cache: 'Fresh process/home/workspace/session per sample; provider cache is observed, not assumed cold. Pair order alternates by trial and scenario.',
   endpoint: 'Agent exits; external Node test passes without test modification; injected external comment is preserved.',

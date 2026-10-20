@@ -273,7 +273,7 @@ impl Drop for Run {
 }
 
 /// The helper as this test knows it: verified to be the parent's
-/// `bake-rs` helper child while that parent lived, and signalled only
+/// `bake` helper child while that parent lived, and signalled only
 /// through that identity.
 #[cfg(target_os = "linux")]
 mod platform {
@@ -460,7 +460,7 @@ mod platform {
                 .map(|c| *c as u8)
                 .collect();
             assert!(
-                info.pbi_ppid == parent && comm == b"bake-rs",
+                info.pbi_ppid == parent && comm == b"bake",
                 "pid {pid} is not the parent's helper: ppid {}, {:?}",
                 info.pbi_ppid,
                 String::from_utf8_lossy(&comm)
@@ -553,7 +553,7 @@ mod platform {
             };
             let image = String::from_utf16_lossy(&name[..len as usize]);
             assert!(
-                ok != 0 && image.to_ascii_lowercase().ends_with("bake-rs.exe"),
+                ok != 0 && image.to_ascii_lowercase().ends_with("bake.exe"),
                 "pid {pid} is not the helper: {image}"
             );
             helper

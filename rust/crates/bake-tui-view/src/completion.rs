@@ -60,7 +60,7 @@ pub const CATALOG: &[Command] = &[
     ),
 ];
 
-/// The commands a live `bake-rs` session runs.
+/// The commands a live `bake` session runs.
 pub const LIVE_CATALOG: &[Command] = &[
     command("model", Some("[search]"), "Choose the model"),
     command("thinking", Some("[level]"), "Choose the thinking level"),

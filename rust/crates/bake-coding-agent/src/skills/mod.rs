@@ -42,7 +42,7 @@
 //!   larger than [`MAX_SKILL_FILE_BYTES`] is skipped with a warning, and its
 //!   frontmatter is read by the crate's bounded YAML reader, so a parse
 //!   error names the line and column but not the parser's own words.
-//! - **Diagnostics** are returned; `bake-rs -p` does not print them, as Pi's
+//! - **Diagnostics** are returned; `bake -p` does not print them, as Pi's
 //!   print mode does not.
 
 use std::collections::HashSet;

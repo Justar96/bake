@@ -282,7 +282,7 @@ impl fmt::Display for Refusal {
             Refusal::NoOwner => f.write_str("it has no owner"),
             Refusal::ForeignOwner(sid) => write!(f, "it is owned by {sid}, not by you, SYSTEM, Administrators, or TrustedInstaller"),
             Refusal::NullDacl => f.write_str("it has no access control list, so everyone may change it"),
-            Refusal::UnknownAce { index, ace_type } => write!(f, "its ACE {index} has a type ({ace_type:#04x}) bake-rs does not evaluate"),
+            Refusal::UnknownAce { index, ace_type } => write!(f, "its ACE {index} has a type ({ace_type:#04x}) bake does not evaluate"),
             Refusal::ForeignChange { index, sid, rights } => write!(f, "its ACE {index} lets {sid} change it (rights {rights:#010x})"),
             Refusal::LowIntegrity { rid } => write!(f, "its integrity label ({rid:#x}) is below Medium"),
         }

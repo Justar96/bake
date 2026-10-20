@@ -95,7 +95,7 @@ pub fn parse_hooks(raw: &Value, dialect: HookDialect) -> Result<ParsedHooks, Str
             if events.get(event).is_some_and(Value::is_array) {
                 parsed
                     .skipped
-                    .push(format!("{event} hooks are not run by bake-rs"));
+                    .push(format!("{event} hooks are not run by bake"));
             }
         }
     }
@@ -390,8 +390,8 @@ mod tests {
         assert_eq!(
             parsed.skipped,
             [
-                "SubagentStart hooks are not run by bake-rs",
-                "SubagentStop hooks are not run by bake-rs",
+                "SubagentStart hooks are not run by bake",
+                "SubagentStop hooks are not run by bake",
             ]
         );
         let parsed = parse(

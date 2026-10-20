@@ -1,4 +1,4 @@
-//! The helper process: `bake-rs` re-executed with [`HELPER_ARG`]. It sets
+//! The helper process: `bake` re-executed with [`HELPER_ARG`]. It sets
 //! up its memory limit, then compiles one plugin component and answers
 //! calls to it over the [protocol](super::protocol). No native artifact
 //! crosses the pipe: the helper receives component bytes and compiles them
@@ -135,7 +135,7 @@ enum Message {
 }
 
 /// Runs the helper over `args`, the arguments after [`HELPER_ARG`], and
-/// never returns. `bake-rs` calls it before anything else runs, so the
+/// never returns. `bake` calls it before anything else runs, so the
 /// limit is in place before the process starts a thread or reads input.
 pub fn helper_main(args: impl IntoIterator<Item = OsString>) -> ! {
     let args = match parse(args.into_iter().collect()) {

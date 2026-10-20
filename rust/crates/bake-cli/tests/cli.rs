@@ -3,11 +3,11 @@
 use std::process::{Command, Output, Stdio};
 
 fn run(args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_bake-rs"))
+    Command::new(env!("CARGO_BIN_EXE_bake"))
         .args(args)
         .stdin(Stdio::null())
         .output()
-        .expect("bake-rs runs")
+        .expect("bake runs")
 }
 
 fn text(bytes: &[u8]) -> String {
@@ -20,7 +20,7 @@ fn help_and_version_work_without_a_terminal() {
         let out = run(args);
         assert!(out.status.success());
         let help = text(&out.stdout);
-        assert!(help.contains("bake-rs preview"));
+        assert!(help.contains("bake preview"));
         assert!(help.contains("-p, --print"));
         assert!(out.stderr.is_empty());
     }
@@ -29,7 +29,7 @@ fn help_and_version_work_without_a_terminal() {
         assert!(out.status.success());
         assert_eq!(
             text(&out.stdout),
-            format!("bake-rs {}\n", env!("CARGO_PKG_VERSION"))
+            format!("bake {}\n", env!("CARGO_PKG_VERSION"))
         );
     }
 }
@@ -51,7 +51,7 @@ fn unexpected_arguments_fail_with_usage_guidance() {
     assert!(out.stdout.is_empty());
     let stderr = text(&out.stderr);
     assert!(stderr.contains("unexpected argument 'now' for 'preview'"));
-    assert!(stderr.contains("bake-rs --help"));
+    assert!(stderr.contains("bake --help"));
 }
 
 #[test]
@@ -82,13 +82,13 @@ fn inline_preview_is_documented_and_rejects_extra_arguments() {
     assert!(text(&out.stderr).contains("unexpected argument 'now'"));
 }
 
-/// The topic names `bake-rs docs` lists.
+/// The topic names `bake docs` lists.
 fn listed_topics() -> Vec<String> {
     let out = run(&["docs"]);
     assert!(out.status.success());
     assert!(out.stderr.is_empty());
     let list = text(&out.stdout);
-    assert!(list.contains("bake-rs docs <topic>"));
+    assert!(list.contains("bake docs <topic>"));
     list.lines()
         .filter_map(|line| line.strip_prefix("  "))
         .filter_map(|line| line.split_whitespace().next())
@@ -130,7 +130,7 @@ fn an_unknown_docs_topic_fails_with_the_list() {
     assert!(out.stdout.is_empty());
     let stderr = text(&out.stderr);
     assert!(stderr.contains("unknown docs topic 'nope'"));
-    assert!(stderr.contains("bake-rs docs <topic>"));
+    assert!(stderr.contains("bake docs <topic>"));
     let out = run(&["docs", "cli", "extra"]);
     assert_eq!(out.status.code(), Some(2));
     assert!(text(&out.stderr).contains("unexpected argument 'extra' for 'docs'"));
@@ -142,12 +142,12 @@ fn an_unknown_docs_topic_fails_with_the_list() {
 #[test]
 fn update_needs_a_native_install_and_names_a_mistyped_option() {
     let run_update = |args: &[&str]| {
-        Command::new(env!("CARGO_BIN_EXE_bake-rs"))
+        Command::new(env!("CARGO_BIN_EXE_bake"))
             .args(args)
             .env_remove("BAKE_NATIVE_ROOT")
             .stdin(Stdio::null())
             .output()
-            .expect("bake-rs runs")
+            .expect("bake runs")
     };
     for args in [
         &["update"][..],
@@ -173,8 +173,8 @@ fn help_mentions_docs() {
     let out = run(&["--help"]);
     assert!(out.status.success());
     let help = text(&out.stdout);
-    assert!(help.contains("bake-rs docs [topic]"));
-    assert!(help.contains("Run 'bake-rs docs'"));
+    assert!(help.contains("bake docs [topic]"));
+    assert!(help.contains("Run 'bake docs'"));
 }
 
 /// Agent flags named by the documentation. Inline examples of external
@@ -213,13 +213,13 @@ fn documented_flags(page: &str) -> Vec<String> {
 fn external_command_examples_do_not_hide_agent_flags() {
     assert_eq!(
         documented_flags(
-            "`ls -le` and `chmod -a# 0` inspect permissions; `bake-rs --typo` still fails, as does `--unknown`."
+            "`ls -le` and `chmod -a# 0` inspect permissions; `bake --typo` still fails, as does `--unknown`."
         ),
         ["--typo", "--unknown"]
     );
 }
 
-/// The options of `bake-rs auth`, which parses its own command line
+/// The options of `bake auth`, which parses its own command line
 /// ([`bake_coding_agent::cli::auth_command`]) rather than the agent's, so
 /// the agent's parser does not accept them. `--help` still names them.
 const AUTH_OPTIONS: &[&str] = &["--json", "--credentials", "--no-refresh", "--min-expiry"];
@@ -228,7 +228,7 @@ const AUTH_OPTIONS: &[&str] = &["--json", "--credentials", "--no-refresh", "--mi
 /// (`src/update.rs`) rather than the agent's. `--help` names them.
 const UPDATE_OPTIONS: &[&str] = &["--check", "--force", "--rollback"];
 
-/// Pi's options `bake-rs` excludes. The documentation names them to say
+/// Pi's options `bake` excludes. The documentation names them to say
 /// they are refused, so the parser must not accept them and `--help` must
 /// not offer them.
 const EXCLUDED_PI_OPTIONS: &[&str] = &[
@@ -271,7 +271,7 @@ fn flags_named_in_the_docs_are_accepted() {
                             .diagnostics
                             .iter()
                             .any(|diagnostic| diagnostic.message.contains("Unknown option")),
-                    "{topic} calls {flag} excluded, but bake-rs accepts it"
+                    "{topic} calls {flag} excluded, but bake accepts it"
                 );
                 continue;
             }
@@ -293,7 +293,7 @@ fn flags_named_in_the_docs_are_accepted() {
                         .diagnostics
                         .iter()
                         .any(|diagnostic| diagnostic.message.contains("Unknown option")),
-                "{topic} names {flag}, which bake-rs does not accept"
+                "{topic} names {flag}, which bake does not accept"
             );
         }
     }
@@ -343,7 +343,7 @@ fn export_writes_one_page_and_exits() {
     )
     .expect("write session");
     let export = |args: &[&std::ffi::OsStr]| {
-        Command::new(env!("CARGO_BIN_EXE_bake-rs"))
+        Command::new(env!("CARGO_BIN_EXE_bake"))
             .arg("--export")
             .args(args)
             .current_dir(&root.0)
@@ -351,11 +351,11 @@ fn export_writes_one_page_and_exits() {
             .env_remove("DSH_HOME")
             .stdin(Stdio::null())
             .output()
-            .expect("bake-rs runs")
+            .expect("bake runs")
     };
     let out = export(&[session.as_os_str()]);
     assert!(out.status.success(), "{}", text(&out.stderr));
-    let name = "bake-rs-session-2026-01-01T00-00-00-000Z_s1.html";
+    let name = "bake-session-2026-01-01T00-00-00-000Z_s1.html";
     // Pi's default name is relative, so the page lands in the working
     // directory and the printed path is the name itself.
     assert_eq!(text(&out.stdout), format!("Exported to: {name}\n"));
@@ -406,14 +406,14 @@ fn auth_commands_report_a_provider_and_print_its_key() {
     )
     .expect("auth");
     let auth = |args: &[&str]| {
-        Command::new(env!("CARGO_BIN_EXE_bake-rs"))
+        Command::new(env!("CARGO_BIN_EXE_bake"))
             .args(args)
             .env("BAKE_HOME", &home)
             .env_remove("DSH_HOME")
             .current_dir(&root.0)
             .stdin(Stdio::null())
             .output()
-            .expect("bake-rs runs")
+            .expect("bake runs")
     };
     let ready = auth(&["auth", "check", "--provider", "faux"]);
     assert_eq!(ready.status.code(), Some(0));
@@ -458,7 +458,7 @@ fn auth_commands_report_a_provider_and_print_its_key() {
         stderr.contains("Unknown option --theme for \"auth check\"."),
         "{stderr}"
     );
-    assert!(stderr.contains("bake-rs auth check --provider"), "{stderr}");
+    assert!(stderr.contains("bake auth check --provider"), "{stderr}");
 
     // No OAuth provider is ported, so there is no bearer token to print,
     // and the key is not offered in its place.

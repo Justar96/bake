@@ -1,4 +1,4 @@
-//! End-to-end print mode: the built `bake-rs` against a loopback HTTP
+//! End-to-end print mode: the built `bake` against a loopback HTTP
 //! server that answers `POST /v1/responses` with OpenAI Responses event
 //! streams (`fixtures/openai-responses-text.sse`, and a `read` tool call in
 //! `fixtures/openai-responses-read-call.sse`), and `POST
@@ -30,14 +30,14 @@ mod recovery;
 mod docs;
 
 fn docs_command() -> String {
-    docs::docs_command(Path::new(env!("CARGO_BIN_EXE_bake-rs")))
+    docs::docs_command(Path::new(env!("CARGO_BIN_EXE_bake")))
 }
 
 const SSE: &str = include_str!("fixtures/openai-responses-text.sse");
 const READ_CALL_SSE: &str = include_str!("fixtures/openai-responses-read-call.sse");
 const COMPLETIONS_SSE: &str = include_str!("fixtures/openai-completions-text.sse");
 
-/// How long one `bake-rs` run may take before the test fails.
+/// How long one `bake` run may take before the test fails.
 const RUN_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[path = "print_mode/background_accounting.rs"]
@@ -309,7 +309,7 @@ impl Workspace {
     fn new(name: &str, port: u16) -> Self {
         static COUNTER: AtomicUsize = AtomicUsize::new(0);
         let root = std::env::temp_dir().join(format!(
-            "bake-rs-print-{name}-{}-{}",
+            "bake-print-{name}-{}-{}",
             std::process::id(),
             COUNTER.fetch_add(1, Ordering::SeqCst)
         ));
@@ -340,7 +340,7 @@ impl Workspace {
     }
 
     fn command(&self, args: &[&str], piped_stdin: bool) -> Command {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_bake-rs"));
+        let mut command = Command::new(env!("CARGO_BIN_EXE_bake"));
         command
             .args(args)
             .current_dir(self.project())
@@ -366,13 +366,13 @@ impl Workspace {
         command
     }
 
-    /// Runs `bake-rs` in the project, failing the test if it takes longer
+    /// Runs `bake` in the project, failing the test if it takes longer
     /// than [`RUN_TIMEOUT`] rather than hanging it.
     fn run(&self, args: &[&str], stdin: Option<&str>) -> Output {
         let mut child = self
             .command(args, stdin.is_some())
             .spawn()
-            .expect("bake-rs starts");
+            .expect("bake starts");
         let input = child.stdin.take();
         let text = stdin.unwrap_or_default().to_owned();
         let writer = std::thread::spawn(move || {
@@ -394,13 +394,13 @@ impl Workspace {
         let stderr = drain(child.stderr.take().map(|pipe| Box::new(pipe) as _));
         let deadline = Instant::now() + RUN_TIMEOUT;
         let status = loop {
-            match child.try_wait().expect("bake-rs status") {
+            match child.try_wait().expect("bake status") {
                 Some(status) => break status,
                 None if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(10)),
                 None => {
                     let _ = child.kill();
                     let _ = child.wait();
-                    panic!("bake-rs {args:?} ran longer than {RUN_TIMEOUT:?}");
+                    panic!("bake {args:?} ran longer than {RUN_TIMEOUT:?}");
                 }
             }
         };
@@ -487,7 +487,7 @@ fn transcript(request: &Request) -> Vec<String> {
         .collect()
 }
 
-/// The first request of a `bake-rs -p` run, as the fixture under
+/// The first request of a `bake -p` run, as the fixture under
 /// `fixtures/first-request/` holds it: the system prompt's text, then the
 /// rest of the request body with that text left out. The facts that differ
 /// between hosts and runs become placeholders: the project directory, the
@@ -517,7 +517,7 @@ fn first_request_fixture(workspace: &Workspace, request: &Request) -> String {
         serde_json::to_string_pretty(&body).expect("body")
     );
     text.replace(cwd, "<project>")
-        .replace(env!("CARGO_BIN_EXE_bake-rs"), "<bake-rs>")
+        .replace(env!("CARGO_BIN_EXE_bake"), "<bake>")
         .replace(header["id"].as_str().expect("id"), "<session-id>")
         .replace(
             &format!("Platform: {}", std::env::consts::OS),
@@ -769,7 +769,7 @@ fn a_closed_json_output_pipe_reports_failure_after_session_shutdown() {
             .command(&["--mode", "json", "Say hi"], false)
             .stdout(writer)
             .spawn()
-            .expect("bake-rs starts"),
+            .expect("bake starts"),
     );
     let deadline = Instant::now() + RUN_TIMEOUT;
     let status = loop {
@@ -836,7 +836,7 @@ fn a_full_json_output_pipe_can_be_cancelled_without_a_reader() {
             .stdout(writer)
             .stderr(Stdio::piped())
             .spawn()
-            .expect("bake-rs starts"),
+            .expect("bake starts"),
     );
     let deadline = Instant::now() + RUN_TIMEOUT;
     assert_ne!(
@@ -1185,7 +1185,7 @@ fn the_cliproxyapi_route_sends_a_kimi_model_the_system_role() {
     );
 }
 
-/// Pi's agent loop through `bake-rs -p`: the model calls `read` on a
+/// Pi's agent loop through `bake -p`: the model calls `read` on a
 /// project file, the tool result goes back to it, and the session file
 /// records the call and its result.
 #[test]
@@ -1276,7 +1276,7 @@ fn print_mode_reads_agents_instructions_and_skills() {
     write(workspace.home().join("AGENTS.md"), "Bake home rules.");
     write(project.join("AGENTS.md"), "Project agents rules.");
     write(project.join("CLAUDE.md"), "Claude rules.");
-    // Built by component, as bake-rs builds them, so Windows paths match.
+    // Built by component, as bake builds them, so Windows paths match.
     let skill_file = |root: &Path, name: &str| {
         root.join(".agents")
             .join("skills")
@@ -1294,7 +1294,7 @@ fn print_mode_reads_agents_instructions_and_skills() {
         "---\nname: project-skill\ndescription: From the project.\n---\n\nProject body.\n",
     );
 
-    // On Unix the working directory bake-rs reads has its links resolved,
+    // On Unix the working directory bake reads has its links resolved,
     // as macOS's temporary directory needs; Windows reports it as set, in
     // the short form its temporary directory may use, where canonicalizing
     // would give a `\\?\` long path.
@@ -1354,7 +1354,7 @@ fn print_mode_reads_agents_instructions_and_skills() {
     assert!(!system.contains("<name>user-skill</name>"), "{system}");
 }
 
-/// Pi's bash tool through `bake-rs -p`: the command runs in the project
+/// Pi's bash tool through `bake -p`: the command runs in the project
 /// with the session's `BAKE_*` variables, and its output goes back to the
 /// model. `danger-full-access` runs it unconfined, which needs no sandbox
 /// backend on the test host.
@@ -1539,7 +1539,7 @@ fn sent_tool_output(request: &Request) -> String {
     }
 }
 
-/// D24 through `bake-rs -p --permission workspace-write`: the model's
+/// D24 through `bake -p --permission workspace-write`: the model's
 /// `write` outside the project is refused before any effect, and the tool
 /// result sent back is the denial marker (`packages/fs/tool-fs/src/sandbox.ts`
 /// `mapError`), without the escalation hint, since `-p` has no one to
@@ -1558,7 +1558,7 @@ impl Drop for RemoveOnDrop {
 #[test]
 fn print_mode_refuses_a_write_outside_the_project() {
     let outside_root = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
-        .join(format!("bake-rs-print-outside-{}", std::process::id()));
+        .join(format!("bake-print-outside-{}", std::process::id()));
     let _cleanup = RemoveOnDrop(outside_root.clone());
     let temp = std::fs::canonicalize(std::env::temp_dir()).unwrap_or_else(|_| std::env::temp_dir());
     let tmp = std::fs::canonicalize("/tmp").unwrap_or_else(|_| PathBuf::from("/tmp"));
@@ -1621,7 +1621,7 @@ fn print_mode_refuses_a_write_outside_the_project() {
     assert_eq!(result["isError"], true);
 }
 
-/// D24 through `bake-rs -p` on a real backend: under `workspace-write`, a
+/// D24 through `bake -p` on a real backend: under `workspace-write`, a
 /// bash write outside the project and the temporary directories is denied by
 /// the kernel, nothing is created, and the result carries the denial marker
 /// without the escalation hint.
@@ -1631,7 +1631,7 @@ fn workspace_write_confines_bash() {
     // Outside every writable root: Cargo's target tmpdir is not under the
     // system temporary directories.
     let outside = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
-        .join(format!("bake-rs-confined-{}", std::process::id()));
+        .join(format!("bake-confined-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&outside);
     std::fs::create_dir_all(&outside).expect("outside dir");
     let target = outside.join("escaped.txt");
@@ -1839,7 +1839,7 @@ fn print_mode_expands_prompt_templates_and_lists_models() {
 
 /// The owner's plugin flow through the shipped binary: `plugin install`
 /// checks the guard package in a helper and copies it into the home's
-/// store, `plugin enable` pins it, and `bake-rs -p` then blocks the
+/// store, `plugin enable` pins it, and `bake -p` then blocks the
 /// model's write to `.env`: the request after it carries the guard's
 /// denial, the decision precedes the denial in the session file, and
 /// `.env` is unchanged. `plugin disable` turns it off for the next run. A
@@ -1873,7 +1873,7 @@ fn print_mode_runs_the_plugins_the_home_enables() {
         .find_map(|line| line.strip_prefix("installed guard 0.1.0 as sha256:"))
         .unwrap_or_else(|| panic!("{out}"))
         .to_owned();
-    assert!(out.contains(&format!("enable it with: bake-rs plugin enable {hash}")));
+    assert!(out.contains(&format!("enable it with: bake plugin enable {hash}")));
     let listed = workspace.run(&["plugin", "list"], None);
     assert!(text(&listed.stdout).starts_with("No plugin is enabled"));
     let enabled = workspace.run(&["plugin", "enable", &hash], None);

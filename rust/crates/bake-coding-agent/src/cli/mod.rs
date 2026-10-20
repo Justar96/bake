@@ -1,4 +1,4 @@
-//! The `bake-rs` agent command line: arguments, session selection, model
+//! The `bake` agent command line: arguments, session selection, model
 //! selection, and print mode.
 //!
 //! Ported from Pi `packages/coding-agent/src/main.ts` (v1.1.0):
@@ -135,7 +135,7 @@ pub struct CliEnvironment {
     /// The user's home directory, which holds `.agents`; `None` when it
     /// cannot be resolved.
     pub user_home: Option<PathBuf>,
-    /// How to run `bake-rs docs`, which the prompt and startup errors name
+    /// How to run `bake docs`, which the prompt and startup errors name
     /// ([`AgentSessionOptions::docs_command`]).
     pub docs_command: String,
     /// Whether standard input is a terminal.
@@ -197,7 +197,7 @@ pub struct ImportedStartup {
 /// A home without them contributes nothing; an unreadable one contributes
 /// a warning, so a `models.json` route still runs.
 ///
-/// A `bake-rs` sign-in ([`crate::cliproxyapi::account`]) comes first:
+/// A `bake` sign-in ([`crate::cliproxyapi::account`]) comes first:
 /// while `settings.json` has a `cliproxyapi` member, the 0.3 route and key
 /// are not imported. The account itself is applied to the registry later,
 /// from its own read ([`apply_account`]).
@@ -258,7 +258,7 @@ pub fn no_interrupt() -> Interrupt {
     Box::pin(std::future::pending())
 }
 
-/// What `bake-rs` should do with its arguments.
+/// What `bake` should do with its arguments.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
     /// Print help.
@@ -609,14 +609,14 @@ enum SessionStartError {
 }
 
 /// Why `--approve` and `--no-approve` are refused. Pi's project trust
-/// decides whether a project's own files are loaded, and `bake-rs` has no
+/// decides whether a project's own files are loaded, and `bake` has no
 /// such decision: a project's `AGENTS.md` files
 /// ([`crate::system_prompt`]), its `.agents/skills` ([`crate::skills`]),
 /// and its `.bake/prompts` ([`crate::prompt_templates`]) are always
 /// loaded, and it reads no project settings ([`crate::settings`]) and no
 /// project `mcp.json` ([`crate::mcp`]). Bake's `--approval` is a different
 /// thing: the session's approval policy (D24).
-pub const PROJECT_TRUST_REFUSED: &str = "--approve and --no-approve need project trust, which bake-rs does not have: a project's AGENTS.md, .agents/skills, and .bake/prompts are always loaded, and no project settings or mcp.json is read. For the session's approval policy, see --approval";
+pub const PROJECT_TRUST_REFUSED: &str = "--approve and --no-approve need project trust, which bake does not have: a project's AGENTS.md, .agents/skills, and .bake/prompts are always loaded, and no project settings or mcp.json is read. For the session's approval policy, see --approval";
 
 /// `BAKE_OFFLINE`, read before [`DSH_OFFLINE_ENV`].
 pub const BAKE_OFFLINE_ENV: &str = "BAKE_OFFLINE";
@@ -629,7 +629,7 @@ pub const DSH_OFFLINE_ENV: &str = "DSH_OFFLINE";
 /// value counts as unset. The value's test is Pi's `isTruthyEnvFlag`: `1`,
 /// `true`, or `yes`, ignoring case.
 ///
-/// `bake-rs` runs one startup network operation, the interactive
+/// `bake` runs one startup network operation, the interactive
 /// terminal's once-per-launch CLIProxyAPI catalog refresh
 /// (`bake_tui`'s `startup_refresh`), and this stops it. Print mode starts
 /// no network operation of its own: its models, keys, settings, sessions,
@@ -795,7 +795,7 @@ pub struct Started {
     pub resume: bool,
 }
 
-/// Runs `bake-rs` print mode; returns the exit code. Must run inside a
+/// Runs `bake` print mode; returns the exit code. Must run inside a
 /// multi-threaded Tokio runtime.
 pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
     if let Some(search_pattern) = args.list_models.clone() {
@@ -944,7 +944,7 @@ pub fn run_export(
     }
 }
 
-/// Runs `bake-rs` RPC mode (`--mode rpc`); returns the exit status. The
+/// Runs `bake` RPC mode (`--mode rpc`); returns the exit status. The
 /// session is set up as print mode sets it up ([`start_rpc`]), its MCP
 /// servers connect in the background, as in Pi, and then
 /// [`crate::rpc::run_rpc_mode`] serves the protocol on the environment's
@@ -2172,7 +2172,7 @@ async fn start_with(
                 message: warning,
             });
         }
-        // Pi points at `--list-models`, which bake-rs does not have.
+        // Pi points at `--list-models`, which bake does not have.
         if let Some(message) = resolved.error {
             diagnostics.push(Diagnostic {
                 kind: DiagnosticKind::Error,
@@ -2354,7 +2354,7 @@ mod tests {
         assert_eq!(text(&errors), "");
     }
 
-    // The flags `bake-rs` excludes (Pi's extensions, themes, and
+    // The flags `bake` excludes (Pi's extensions, themes, and
     // `--tui-mode`) are refused before anything is loaded, with Pi's
     // unknown-option message and its exit status.
     #[test]
@@ -2862,7 +2862,7 @@ mod tests {
             cwd: dir.join("work"),
             home: Some(dir.join("home")),
             user_home: Some(dir.join("user")),
-            docs_command: "bake-rs docs".into(),
+            docs_command: "bake docs".into(),
             stdin_is_terminal: true,
             stdin: Box::new(std::io::empty()),
             stdout: sink().0,

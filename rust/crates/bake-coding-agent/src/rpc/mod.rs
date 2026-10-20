@@ -8,7 +8,7 @@
 //! writes ([`crate::json_event`]), without print mode's session header,
 //! which Pi's RPC mode does not write either. `docs/rpc.md`,
 //! `docs/rpc-commands.md`, and `docs/rpc-extension-ui.md` describe the
-//! protocol; `bake-rs docs rpc` describes this port.
+//! protocol; `bake docs rpc` describes this port.
 //!
 //! What differs from Pi, in each case because Bake's Rust agent has no
 //! equivalent subsystem:
@@ -417,7 +417,7 @@ impl Handler {
                 // session of this working directory needs none.
                 if parent_session.is_some() {
                     return failed(
-                        "new_session does not take parentSession in bake-rs; use fork or clone."
+                        "new_session does not take parentSession in bake; use fork or clone."
                             .to_owned(),
                     );
                 }
@@ -493,7 +493,7 @@ impl Handler {
                 }
             }
             RpcCommand::SetAutoRetry { .. } => failed(
-                "set_auto_retry is not supported in bake-rs: automatic retry follows settings.json's retry.enabled."
+                "set_auto_retry is not supported in bake: automatic retry follows settings.json's retry.enabled."
                     .to_owned(),
             ),
             RpcCommand::AbortRetry => {
@@ -501,7 +501,7 @@ impl Handler {
                 ok(None)
             }
             RpcCommand::Bash { .. } | RpcCommand::AbortBash => failed(format!(
-                "{kind} is not supported in bake-rs: it runs no shell command outside the model's bash tool."
+                "{kind} is not supported in bake: it runs no shell command outside the model's bash tool."
             )),
             RpcCommand::GetSessionStats => ok(Some(stats(&session.session_stats()))),
             RpcCommand::ExportHtml { output_path } => match self
@@ -787,7 +787,7 @@ impl Handler {
 
     /// Pi's `exportToHtml`: the page, written where the command asks or,
     /// without a path, in the working directory as
-    /// `bake-rs-session-<session file>.html`, the name `bake-rs --export`
+    /// `bake-session-<session file>.html`, the name `bake --export`
     /// gives it ([`crate::cli::export`]); Pi names both after its own
     /// program.
     async fn export_html(
@@ -803,7 +803,7 @@ impl Handler {
                     .session_file()
                     .ok_or_else(|| crate::agent_session::share::EXPORT_IN_MEMORY.to_owned())?;
                 let stem = file.file_stem().unwrap_or_default().to_string_lossy();
-                Path::new(&cwd).join(format!("bake-rs-session-{stem}.html"))
+                Path::new(&cwd).join(format!("bake-session-{stem}.html"))
             }
         };
         tokio::task::spawn_blocking(move || {

@@ -7,7 +7,7 @@ license.workspace = true
 publish.workspace = true
 
 [[bin]]
-name = "bake-rs"
+name = "bake"
 path = "src/main.rs"
 
 [dependencies]
