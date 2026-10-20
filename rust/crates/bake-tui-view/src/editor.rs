@@ -863,8 +863,15 @@ pub fn sanitize(input: &str) -> String {
     out
 }
 
-/// Terminal cells one grapheme other than a tab occupies.
+/// Terminal cells one grapheme other than a tab occupies. A grapheme that
+/// holds a control character (C0, DEL, or C1) takes none: Ratatui's buffer
+/// drops every such grapheme, and its own `cell_width` asserts in debug
+/// builds that none reaches it, while model text reaches the transcript's
+/// wrapping unsanitized.
 pub fn cell_width(grapheme: &str) -> usize {
+    if grapheme.contains(char::is_control) {
+        return 0;
+    }
     usize::from(grapheme.cell_width())
 }
 
@@ -1755,6 +1762,18 @@ mod tests {
         let placed = layout(text, 3, 1);
         assert_eq!(placed.caret, (1, 0));
         assert_eq!(&text[placed.rows[1].start..placed.rows[1].end], "\u{200B}");
+    }
+
+    #[test]
+    fn control_characters_take_no_cells() {
+        // Found by the `tui_text` fuzz target: a carriage return or escape in
+        // model text panicked `transcript::wrap` in debug builds.
+        for control in ["\r", "\u{1b}", "\u{7}", "\u{0}", "\u{7f}", "\u{9b}"] {
+            assert_eq!(cell_width(control), 0, "{control:?}");
+            let text = format!("abcd{control}");
+            assert_eq!(rows_of(&text, 5), [text.as_str()], "{control:?}");
+        }
+        assert_eq!(crate::transcript::wrap("re\u{1b}d\r", 3), ["re\u{1b}d"]);
     }
 
     #[test]
