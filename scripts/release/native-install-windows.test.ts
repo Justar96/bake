@@ -13,7 +13,7 @@
  */
 import { afterEach, describe, expect, test } from 'bun:test'
 import { createPrivateKey, generateKeyPairSync, randomBytes, sign } from 'node:crypto'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import {
@@ -43,7 +43,10 @@ const RUN_TIMEOUT_MS = 120_000
 function scratch(label: string): string {
   const root = mkdtempSync(join(tmpdir(), `bake-native-${label}-`))
   roots.push(root)
-  return root
+  // The real path, because Windows hands Node the 8.3 form of a profile
+  // directory (`RUNNER~1`) while PowerShell reports the long one, and these
+  // tests compare the paths the installer prints and writes.
+  return realpathSync.native(root)
 }
 
 /** Run a PowerShell script, bounded, with its own environment. */
