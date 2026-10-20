@@ -1,0 +1,2 @@
+{"type":"object","properties":{"n":{"type":"integer"},"b":{"type":"boolean"},"s":{"type":["string","null"]},"o":{"anyOf":[{"type":"number"},{"type":"array","items":{"type":"string"},"uniqueItems":true}]}},"required":["n"],"$defs":{"x":{"$ref":"#"}}}
+{"n": "42", "b": "true", "s": null, "o": ["a", "b"]}

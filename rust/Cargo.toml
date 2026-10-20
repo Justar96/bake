@@ -17,6 +17,9 @@ members = [
     "plugins/guard",
     "plugins/fixtures/hostile",
 ]
+# The cargo-fuzz crate is its own workspace on a pinned nightly toolchain
+# (`fuzz/rust-toolchain.toml`), with its own lock.
+exclude = ["fuzz"]
 
 [workspace.package]
 version = "0.4.0-dev"

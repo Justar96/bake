@@ -1,0 +1,2 @@
+{"type":"object","properties":{"value":{"type":"string"},"nested":{"type":"object","properties":{"inner":{"type":"integer"}},"required":["inner","other"]}},"required":["value","nested"],"additionalProperties":false}
+{"value":{"nested":true},"nested":{},"extra":1}

@@ -59,3 +59,12 @@ apps/tui/.smoke/
 # bun run preflight logs
 .preflight/
 rust/target/
+
+# cargo-fuzz (rust/fuzz): builds, crash artifacts, coverage, and the corpus
+# runs grow. Only the `seed-*` inputs under corpus/ are committed.
+rust/fuzz/target/
+rust/fuzz/artifacts/
+rust/fuzz/coverage/
+rust/fuzz/generated/
+rust/fuzz/corpus/*/*
+!rust/fuzz/corpus/*/seed-*

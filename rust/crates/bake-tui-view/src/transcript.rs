@@ -2943,4 +2943,17 @@ mod tests {
             assert_eq!(red == Some(Some(Color::Indexed(1))), coloured, "{tool}");
         }
     }
+
+    #[test]
+    #[ignore = "known: a collapsed tab before a zero-width extender merges with a hanging space; see fuzz tui_text"]
+    fn a_collapsed_tab_keeps_a_wrapped_row_within_its_width() {
+        use unicode_segmentation::UnicodeSegmentation;
+        // Found by the `tui_text` fuzz target: the space and the tab hang
+        // past the one-cell row, the tab is drawn as no spaces, and the
+        // space then joins the zero-width joiner into a one-cell grapheme.
+        for row in wrap("\u{FFFD} \t\u{200D}", 1) {
+            let cells: usize = row.graphemes(true).map(editor::cell_width).sum();
+            assert!(cells <= 1, "wrapped row {row:?} takes {cells} cells");
+        }
+    }
 }

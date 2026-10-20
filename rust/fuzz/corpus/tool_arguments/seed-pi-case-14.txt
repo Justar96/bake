@@ -1,0 +1,2 @@
+{"type":"object","properties":{"v":{"type":"number","exclusiveMaximum":0.5,"exclusiveMinimum":10,"maximum":1e+21,"minimum":100,"multipleOf":0.25}}}
+{"v":11.1}

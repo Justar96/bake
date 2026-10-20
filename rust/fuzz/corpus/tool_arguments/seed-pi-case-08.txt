@@ -1,0 +1,2 @@
+{"type":"object","propertyNames":{"pattern":"^[a-z]+$","maxLength":3}}
+{"Ab":1,"abcd":2,"ok":3}

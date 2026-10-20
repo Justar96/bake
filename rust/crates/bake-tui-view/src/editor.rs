@@ -1788,6 +1788,18 @@ mod tests {
     }
 
     #[test]
+    fn control_characters_take_no_cells() {
+        // Found by the `tui_text` fuzz target: a carriage return or escape in
+        // model text panicked `transcript::wrap` in debug builds.
+        for control in ["\r", "\u{1b}", "\u{7}", "\u{0}", "\u{7f}", "\u{9b}"] {
+            assert_eq!(cell_width(control), 0, "{control:?}");
+            let text = format!("abcd{control}");
+            assert_eq!(rows_of(&text, 5), [text.as_str()], "{control:?}");
+        }
+        assert_eq!(crate::transcript::wrap("re\u{1b}d\r", 3), ["re\u{1b}d"]);
+    }
+
+    #[test]
     fn tabs_reach_the_next_stop() {
         assert_eq!(layout("a\tb", 3, 80).caret, (0, TAB_WIDTH + 1));
         assert_eq!(display("a\tb", 79), "a   b");

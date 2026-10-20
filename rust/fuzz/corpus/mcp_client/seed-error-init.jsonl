@@ -1,0 +1,2 @@
+{"jsonrpc":"2.0","id":1,"error":{"code":-32603,"message":"boom","data":{"detail":[1,2,3]}}}
+[{"batch":true}]

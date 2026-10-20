@@ -1,0 +1,2 @@
+{"type":"object","properties":{"v":{"if":{"type":"string"},"then":{"minLength":3},"else":{"type":"number","minimum":5}}}}
+{"v":2}

@@ -1,0 +1,2 @@
+{"type":"object","properties":{"v":{"type":"array","prefixItems":[{"type":"string"},{"type":"number"}],"items":{"type":"boolean"},"uniqueItems":true}}}
+{"v":[1,"x",3,3]}
