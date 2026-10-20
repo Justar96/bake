@@ -863,11 +863,12 @@ pub fn sanitize(input: &str) -> String {
     out
 }
 
-/// Terminal cells one grapheme other than a tab occupies. An ASCII control
-/// character occupies none: Ratatui's buffer drops it when drawing, and its
-/// measure asserts it is never given one.
+/// Terminal cells one grapheme other than a tab occupies. A grapheme that
+/// holds a control character takes none: Ratatui's buffer never draws one,
+/// and its own `cell_width` asserts in debug builds that none reaches it,
+/// while model text reaches the transcript's wrapping unsanitized.
 pub fn cell_width(grapheme: &str) -> usize {
-    if grapheme.len() == 1 && grapheme.as_bytes()[0].is_ascii_control() {
+    if grapheme.contains(char::is_control) {
         return 0;
     }
     usize::from(grapheme.cell_width())
@@ -1598,6 +1599,11 @@ mod tests {
         assert_eq!(cell_width("\r"), 0);
         assert_eq!(cell_width("\x1b"), 0);
         assert_eq!(cell_width("\x7f"), 0);
+        // Ratatui's buffer also drops a longer grapheme that holds one, such
+        // as a CRLF pair or a C1 control.
+        assert_eq!(cell_width("\r\n"), 0);
+        assert_eq!(cell_width("\u{9b}"), 0);
+        assert_eq!(cell_width("\u{85}"), 0);
         let text = "ab\rcd\x07";
         assert_eq!(
             layout(text, text.len(), 4).rows,
