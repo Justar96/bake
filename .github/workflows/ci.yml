@@ -16,9 +16,10 @@ concurrency:
 # demand. Work reaches develop as direct pushes checked locally: Linux and
 # macOS over SSH before every push, Windows when a Windows host is available.
 # This run is the one CI check of everything a release carries, so it runs
-# every job: TypeScript checks on Linux, the native job on Linux and Windows,
-# and the Windows release check. No job runs on macOS. The release tag after
-# it builds and checks every platform again.
+# every job: TypeScript checks on Linux, the native job on Linux, Windows, and
+# Apple Silicon macOS, and the Windows release check. Developers check an
+# Intel Mac over SSH before pushing; this run is the Apple Silicon check. The
+# release tag after it builds and checks every platform again.
 jobs:
   # TypeScript gates share the local preflight table; Rust has its own matrix.
   preflight:
@@ -81,12 +82,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
     name: rust (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     # Cold Windows Wasmtime checks took 21.5 minutes; setup and the archive
     # check's existing nine-minute bound also need time within this job.
-    timeout-minutes: ${{ matrix.os == 'windows-latest' && 45 || 30 }}
+    timeout-minutes: ${{ matrix.os == 'ubuntu-latest' && 30 || 60 }}
     steps:
       - uses: actions/checkout@v4
       # Defender scans every file Cargo creates, which makes small-file I/O
@@ -116,6 +117,9 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq ripgrep
+      - name: Install ripgrep and fd
+        if: runner.os == 'macOS'
+        run: brew install ripgrep fd
       - name: Install the pinned Rust toolchain
         working-directory: rust
         run: rustup toolchain install --no-self-update
@@ -154,6 +158,24 @@ jobs:
           cargo test --locked -p bake-process --test windows_job_rundown 2>&1 | Tee-Object ../.preflight/windows-job-rundown.log
           exit $LASTEXITCODE
       - run: bun run preflight --only native
+      # install.ps1 carries its own Ed25519 verifier: run its suite under the
+      # Windows PowerShell 5.1 that a plain `irm | iex` install uses, and pwsh.
+      - name: Check the Windows installer under Windows PowerShell 5.1
+        if: runner.os == 'Windows'
+        env:
+          BAKE_TEST_PWSH: powershell.exe
+        run: bun test --timeout=120000 ./scripts/release/native-install-windows.test.ts
+      - name: Check the Windows installer under PowerShell 7
+        if: runner.os == 'Windows'
+        env:
+          BAKE_TEST_PWSH: pwsh
+        run: bun test --timeout=120000 ./scripts/release/native-install-windows.test.ts
+      # install.sh verifies with the host's openssl; record which one macOS has.
+      - name: Check the POSIX installer with the host's openssl
+        if: runner.os != 'Windows'
+        run: |
+          openssl version
+          bun test --timeout=120000 ./scripts/release/native-install.test.ts
       # Per-binary test durations, kept on success to watch the job's budget.
       - uses: actions/upload-artifact@v4
         if: success()
