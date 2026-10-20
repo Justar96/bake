@@ -44,9 +44,9 @@
 //!   `codemode` (the nested executor's tools, which leave out tools whose
 //!   [`AgentTool::nested_callable`] is cleared).
 //! - MCP servers are namespaces named `mcp__<server>` with the server's name
-//!   as alias and its `description`. Bake keeps `-` (`mcp__my-server`),
-//!   where Pi maps it to `_` (`mcp__my_server`). Bake reads no server
-//!   instructions, so namespaces carry none.
+//!   as alias, its `description`, and its bounded `instructions`, as Pi's
+//!   `registerTools` builds them. Bake keeps `-` (`mcp__my-server`), where
+//!   Pi maps it to `_` (`mcp__my_server`).
 //! - The output budget counts characters, where Pi counts UTF-16 units; the
 //!   catalog's token estimate counts UTF-16 units as Pi does. Namespaces
 //!   sort by code point, where Pi uses `localeCompare`.

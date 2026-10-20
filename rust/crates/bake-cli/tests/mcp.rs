@@ -994,13 +994,10 @@ fn a_configured_tool_is_declared_called_and_logged(case: &Arc<Case>) {
     );
 }
 
-// Bake's `transport.ts` `buildChildEnv` over `scrubbedParentEnv`: a
-// credential-shaped variable of `bake-rs` never reaches a server unless the
-// entry names it, and an entry's template passes it.
-/// `bake-rs -p` reads a resource of a configured server: the three resource
-/// tools are declared beside the server's own, `read_mcp_resource` returns
-/// the resource's text to the model, and the server's instructions reach the
-/// system prompt attributed to it.
+// `bake-rs -p` reads a resource of a configured server: the three resource
+// tools are declared beside the server's own, `read_mcp_resource` returns
+// the resource's text to the model, and the server's instructions reach the
+// system prompt attributed to it.
 #[cfg(unix)]
 fn a_configured_server_resource_is_listed_and_read(case: &Arc<Case>) {
     let model = ModelServer::with_hook(
@@ -1072,6 +1069,9 @@ fn a_configured_server_resource_is_listed_and_read(case: &Arc<Case>) {
     assert_eq!(result["message"]["details"]["server"], "fx");
 }
 
+// Bake's `transport.ts` `buildChildEnv` over `scrubbedParentEnv`: a
+// credential-shaped variable of `bake-rs` never reaches a server unless the
+// entry names it, and an entry's template passes it.
 #[cfg(unix)]
 fn the_scrub_drops_credentials_an_entry_does_not_name(case: &Arc<Case>) {
     let model = ModelServer::start(vec![
