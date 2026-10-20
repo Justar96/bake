@@ -12,7 +12,7 @@ $ErrorActionPreference = 'Stop'
 # DER SubjectPublicKeyInfo. A release test holds every copy equal. Tests
 # replace this one line in a private copy of the installer, so the published
 # installer takes no key from its environment.
-$nativeReleaseKey = 'MCowBQYDK2VwAyEAI/nADgDPvSZRQnB+AwkqVzSuo8OcX1sV9PSt0SA0J1c='
+$nativeReleaseKey = 'MCowBQYDK2VwAyEAj4mvx0643TcPtmjwV4Mmj8PNeAqAF0j9LFWqT/+UDTI='
 
 # BEGIN ED25519 VERIFIER
 # Ed25519 verification (RFC 8032 section 5.1.7) in PowerShell, because neither
