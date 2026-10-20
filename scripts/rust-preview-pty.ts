@@ -15,7 +15,7 @@
  */
 import assert from 'node:assert/strict'
 import { appendFileSync, existsSync, readFileSync } from 'node:fs'
-import { chmod, copyFile, mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
+import { chmod, copyFile, cp, mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
 import { execFileSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
@@ -1281,6 +1281,14 @@ async function live(body: (world: LiveWorld) => Promise<void>): Promise<void> {
         const transcript = join(import.meta.dir, '..', '.preflight', `${basename(root).replaceAll(' ', '-')}.ansi`)
         await last.saveFailure(transcript)
         console.error(`Rust PTY transcript: ${transcript}`)
+        // The screen shows a failed turn but not always why, and the
+        // temporary home is removed below: keep its session logs and the
+        // requests the fake model received. Neither holds a real credential.
+        const evidence = `${transcript}.evidence`
+        await cp(join(home, 'sessions'), join(evidence, 'sessions'), { recursive: true }).catch(() => {})
+        await mkdir(evidence, { recursive: true })
+        await writeFile(join(evidence, 'model-requests.json'), `${JSON.stringify({ requests: model.requests, modelLists: model.modelLists }, null, 2)}\n`)
+        console.error(`Rust PTY evidence: ${evidence}`)
       } catch (saveError) { console.error('Rust PTY transcript was not saved:', saveError) }
     }
   }
@@ -1358,7 +1366,10 @@ await liveScenario('a live session streams an answer and a tool call, takes a se
 
 await liveScenario('a codemode call shows a row per nested call live, and the same rows replayed inline', async (world) => {
   await writeFile(join(world.project, 'notes.txt'), 'alpha line\nbeta line\n')
-  const session = world.launch(['--tools', 'read,bash,codemode'])
+  // No Windows sandbox is the default yet (D24), so workspace-write refuses
+  // the nested bash call there; it runs unconfined, still in the session's job.
+  const permission = windows ? ['--permission', 'danger-full-access'] : []
+  const session = world.launch(['--tools', 'read,bash,codemode', ...permission])
   await session.ready()
   session.send('CODEMODE\r')
   // While the bash call holds, the partial results draw the settled read and the running bash.
@@ -1381,7 +1392,7 @@ await liveScenario('a codemode call shows a row per nested call live, and the sa
   const [entries] = await sessionEntries(world.home)
   assert(messageTexts(entries ?? [], 'toolResult').some(text => text.startsWith('Script completed\nWall time ')), 'the script result was not persisted')
   // Resumed inline, the block replays from the session file with the same rows.
-  const resumed = world.launch(['--continue', '--tools', 'read,bash,codemode'], true)
+  const resumed = world.launch(['--continue', '--tools', 'read,bash,codemode', ...permission], true)
   await resumed.ready()
   await resumed.wait('replayed codemode block', () => rows(resumed.history))
   await resumed.quit()
