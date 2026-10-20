@@ -297,10 +297,10 @@ mod tests {
         };
         assert_eq!(
             source
-                .url("releases/0.4.0/bake-rs-v0.4.0-linux-x64.tar.gz")
+                .url("releases/0.4.0/bake-v0.4.0-linux-x64.tar.gz")
                 .map(|url| url.to_string()),
             Ok(
-                "https://bake.justar.dev/native/releases/0.4.0/bake-rs-v0.4.0-linux-x64.tar.gz"
+                "https://bake.justar.dev/native/releases/0.4.0/bake-v0.4.0-linux-x64.tar.gz"
                     .to_owned()
             )
         );

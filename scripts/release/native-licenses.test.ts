@@ -294,7 +294,7 @@ describe('generation refuses', () => {
 
   test('a compiled crate cargo-about did not report, or a reported crate outside the lock', () => {
     const missing = fixture([crates.memchr, crates.apache], { about: (about) => { about.crates.pop() } })
-    expect(failure(() => buildBundle(missing.inputs))).toContain('sync_wrapper@1.0.2 is compiled into bake-rs but cargo-about did not report it')
+    expect(failure(() => buildBundle(missing.inputs))).toContain('sync_wrapper@1.0.2 is compiled into bake but cargo-about did not report it')
     const extra = fixture([crates.memchr], { about: (about) => { about.crates.push({ package: { name: 'openssl', version: '0.10.0' }, license: 'Apache-2.0' }) } })
     expect(failure(() => buildBundle(extra.inputs))).toContain('cargo-about reported openssl@0.10.0, which is not in the locked dependency graph')
   })

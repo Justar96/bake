@@ -38,7 +38,7 @@ const PAYLOAD = {
 }
 
 /** A minimal archive with the native layout, under `dir` and named `name`. */
-function nativeArchive(dir: string, name: string, files: Record<string, string> = { ...PAYLOAD, 'bin/bake-rs': 'native binary\n' }): void {
+function nativeArchive(dir: string, name: string, files: Record<string, string> = { ...PAYLOAD, 'bin/bake': 'native binary\n' }): void {
   const stage = mkdtempSync(join(tmpdir(), 'bake-native-stage-'))
   roots.push(stage)
   for (const [path, contents] of Object.entries(files)) {
@@ -57,7 +57,7 @@ const testKey = key.publicKey.export({ type: 'spki', format: 'der' }).toString('
 /** A source directory of native archives and a service payload holding a frozen 0.3 release. */
 function fixture(version = '0.4.0', targets: RustTarget[] = ['linux-x64']): { root: string; sourceDir: string; publicRoot: string } {
   const root = scratch()
-  const sourceDir = join(root, '.artifacts/bake-rs-release', version)
+  const sourceDir = join(root, '.artifacts/bake-native-release', version)
   for (const target of targets) nativeArchive(sourceDir, archiveName(version, target))
   const publicRoot = join(root, 'distribution/host/public')
   mkdirSync(join(publicRoot, 'releases/0.3.8'), { recursive: true })
@@ -91,7 +91,7 @@ describe('assembling', () => {
     if (artifact === undefined) throw new Error('the manifest lists no linux-x64 archive')
     const bytes = readFileSync(join(publicRoot, 'native/stable.json'))
     expect(bytes.toString('utf8')).toBe(
-      `{"schema":"bake-native-release/1","channel":"stable","version":"0.4.0","published":"2026-10-20T00:00:00Z","artifacts":{"linux-x64":{"file":"bake-rs-v0.4.0-linux-x64.tar.gz","sha256":"${artifact.sha256}","size":${artifact.size}}}}\n`,
+      `{"schema":"bake-native-release/1","channel":"stable","version":"0.4.0","published":"2026-10-20T00:00:00Z","artifacts":{"linux-x64":{"file":"bake-v0.4.0-linux-x64.tar.gz","sha256":"${artifact.sha256}","size":${artifact.size}}}}\n`,
     )
     // Signed as written: these exact bytes, not a re-serialization.
     const signature = Buffer.from(readFileSync(join(publicRoot, 'native/stable.json.sig'), 'utf8').trim(), 'base64')
@@ -128,7 +128,7 @@ describe('assembling', () => {
   })
 
   test('refuses an archive of another version, platform, or name', async () => {
-    for (const name of [archiveName('0.4.1', 'linux-x64'), 'bake-rs-v0.4.0-freebsd-x64.tar.gz', 'bake-v0.4.0-linux-x64.tar.gz', 'notes.txt']) {
+    for (const name of [archiveName('0.4.1', 'linux-x64'), 'bake-v0.4.0-freebsd-x64.tar.gz', 'notes.txt']) {
       const { root, sourceDir, publicRoot } = fixture()
       nativeArchive(sourceDir, name)
       await expect(assembleNativeRelease(options({ root, sourceDir, publicRoot })))
@@ -165,8 +165,8 @@ describe('the channel never moves backward', () => {
   /** Publish `version` locally, then try to publish `next`. */
   async function republish(published: string, next: string, live?: { base: string; fetch: typeof fetch }): Promise<void> {
     const { root, publicRoot } = fixture(published)
-    await assembleNativeRelease(options({ root, sourceDir: join(root, '.artifacts/bake-rs-release', published), publicRoot, version: published }))
-    const sourceDir = join(root, '.artifacts/bake-rs-release', next)
+    await assembleNativeRelease(options({ root, sourceDir: join(root, '.artifacts/bake-native-release', published), publicRoot, version: published }))
+    const sourceDir = join(root, '.artifacts/bake-native-release', next)
     nativeArchive(sourceDir, archiveName(next, 'linux-x64'))
     await assembleNativeRelease(options({ root, sourceDir, publicRoot, version: next, ...live }))
   }

@@ -36,7 +36,7 @@ export const EPHEMERAL_PUBLIC_KEY = 'ephemeral-native-release-key.pub'
 
 /** The default archive directory: `release:pack:rust`'s output for this version. */
 export function nativeSourceDir(root: string, version: string): string {
-  return join(root, '.artifacts/bake-rs-release', version)
+  return join(root, '.artifacts/bake-native-release', version)
 }
 
 /** What {@link assembleNativeRelease} needs; tests own the key, the clock, and the network. */

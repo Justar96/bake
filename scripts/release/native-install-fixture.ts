@@ -108,7 +108,7 @@ export function stubRelease(directory: string, version: string, target: string, 
   mkdirSync(join(stage, 'notices/bake-cli'), { recursive: true })
   mkdirSync(join(stage, 'licenses', target), { recursive: true })
   const record = JSON.stringify({
-    kind: 'bake-rs-self-check',
+    kind: 'bake-self-check',
     schema: 1,
     version: options.reportedVersion ?? version,
     runtime: 'rust',
@@ -152,7 +152,7 @@ esac
     spawnSync('ln', ['-s', '/etc/passwd', join(stage, options.extraMember.name)], { stdio: 'ignore' })
     members.push(options.extraMember.name)
   }
-  const file = `bake-rs-v${version}-${target}.tar.gz`
+  const file = `bake-v${version}-${target}.tar.gz`
   const archive = join(directory, file)
   const names = options.extraMember?.kind === 'parent' ? [...members, options.extraMember.name] : members
   const packed = spawnSync('tar', ['-czf', archive, '-C', stage, ...names], { encoding: 'utf8' })

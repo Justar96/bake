@@ -8,13 +8,16 @@
  * that shipped function against a directory where the native install owns
  * `bake`: it must leave that command alone, because the 0.3 updater only ever
  * adds a missing `dsh` beside a `bake` that still leads to its own release.
- * The frozen TypeScript source is not changed.
+ * Its launch check is here too, because a native archive is named as a 0.3
+ * archive is. The frozen TypeScript source is not changed.
  */
 import { afterEach, expect, test } from 'bun:test'
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { addDshAlias } from '../../packages/boot/updater/src/install.ts'
+import { launchProblem, RELEASE_COMMAND } from '../../packages/boot/updater/src/verify.ts'
+import { archiveName } from './pack-rust.ts'
 
 const roots: string[] = []
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
@@ -37,7 +40,7 @@ function coexisting(): Coexisting {
   writeFileSync(join(legacyRelease, 'bin/bake'), '#!/bin/sh\nprintf \'bake 0.3.8\\n\'\n')
   chmodSync(join(legacyRelease, 'bin/bake'), 0o755)
   symlinkSync(legacyRelease, join(legacyRoot, 'current'))
-  const nativeRoot = join(directory, 'share/bake-rs')
+  const nativeRoot = join(directory, 'share/bake-native')
   const nativeRelease = join(nativeRoot, 'releases/0.4.0')
   mkdirSync(join(nativeRelease, 'bin'), { recursive: true })
   writeFileSync(join(nativeRelease, 'bin/bake'), '#!/bin/sh\nprintf \'bake 0.4.0\\n\'\n')
@@ -82,6 +85,16 @@ test('a 0.3 update still adds dsh beside its own bake, which the native install 
   await addDshAlias('linux', world.legacyRoot, undefined, world.binDir)
 
   expect(readlinkSync(join(world.binDir, 'dsh'))).toBe(world.legacyTarget)
+})
+
+test('the 0.3 launch check refuses an unpacked native release, which is named as its own', async () => {
+  const world = coexisting()
+  // Both routes publish bake-v<version>-<target>.tar.gz, so only the release's
+  // layout keeps a native tree out of a 0.3 install.
+  expect(archiveName('0.4.0', 'linux-x64')).toBe('bake-v0.4.0-linux-x64.tar.gz')
+  const release = join(world.nativeRoot, 'releases/0.4.0')
+
+  expect(await launchProblem({ node: process.execPath, release, version: '0.4.0' })).toBe(`${RELEASE_COMMAND} is missing`)
 })
 
 test('a 0.3 update never rewrites a Windows bake.cmd, whoever wrote it', async () => {

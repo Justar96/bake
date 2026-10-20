@@ -10,18 +10,15 @@
  * both read the archive's entries and require the layout of their own route.
  */
 
-import { NATIVE_ARCHIVE_PREFIX } from './pack-rust.ts'
 import { tarEntries } from './permissions.ts'
 
 /**
  * The native executable, as `pack-rust.ts` archives it.
  *
- * The product's command is `bake`, and the archived executable is being
- * renamed from `bake-rs` to `bake`, so both names are native here; neither
- * identifies an archive on its own, because a 0.3 archive also holds a
- * `bin/bake` launcher script.
+ * It does not identify an archive on its own, because a 0.3 archive also
+ * holds a `bin/bake` launcher script.
  */
-export const NATIVE_EXECUTABLES = ['bin/bake-rs', 'bin/bake-rs.exe', 'bin/bake', 'bin/bake.exe'] as const
+export const NATIVE_EXECUTABLES = ['bin/bake', 'bin/bake.exe'] as const
 
 /** The native license bundle's inventory, which every native archive carries. */
 export const NATIVE_INVENTORY = 'licenses/inventory.json'
@@ -93,11 +90,6 @@ export async function readArchiveLayout(archive: string): Promise<ArchiveLayout>
   return { archive, paths, refusedEntries, nativeExecutables, typescriptMarkers, kind }
 }
 
-/** Whether `file` is named as `pack-rust.ts` names a native archive. */
-export function isNativeArchiveName(file: string): boolean {
-  return file.startsWith(NATIVE_ARCHIVE_PREFIX)
-}
-
 /**
  * Check that `layout` is a native archive the native route may publish.
  * @throws naming the first reason it is not.
@@ -114,11 +106,11 @@ export function assertNativeArchive(layout: ArchiveLayout): void {
 
 /**
  * Check that `file` may be published on the 0.3 route, which only a
- * TypeScript archive may: its updater reads that manifest.
+ * TypeScript archive may: its updater reads that manifest. A native archive
+ * is named as a 0.3 archive is, so only its layout tells them apart.
  * @throws naming why the archive is not a TypeScript release archive.
  */
 export function assertTypeScriptArchive(file: string, layout: ArchiveLayout): void {
-  if (isNativeArchiveName(file)) throw new Error(`${file} is a native archive; publish it with release:assemble:rust, not on the 0.3 route`)
   if (layout.kind === 'native') {
     throw new Error(`${file} holds ${layout.nativeExecutables.join(' and ')} with ${NATIVE_INVENTORY}; a native archive cannot be published to 0.3 updaters`)
   }

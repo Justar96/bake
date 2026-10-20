@@ -4,7 +4,7 @@
  * regular payload files with their modes. These tests run stand-in binaries,
  * shell scripts that print what each case needs, and raw license bundles in
  * the generator's output layout; `pack-rust.native.ts` runs the real
- * `bake-rs` and the real generator.
+ * `bake` and the real generator.
  */
 import { afterEach, describe, expect, test } from 'bun:test'
 import { createHash } from 'node:crypto'
@@ -25,7 +25,7 @@ afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: 
 
 /** A private directory whose path holds spaces and non-ASCII text. */
 function scratch(): string {
-  const root = mkdtempSync(join(tmpdir(), 'bake-rs pack ñ 測試-'))
+  const root = mkdtempSync(join(tmpdir(), 'bake pack ñ 測試-'))
   roots.push(root)
   return root
 }
@@ -40,16 +40,16 @@ const target = host as RustTarget
 /** The record the real binary prints, members in its order. */
 function record(overrides: Record<string, unknown> = {}): string {
   const docs = Object.fromEntries(Object.entries(DOCS).map(([name, text]) => [name, sha(text)]))
-  return `${JSON.stringify({ kind: 'bake-rs-self-check', schema: 1, version: VERSION, runtime: 'rust', target, docs, ...overrides })}\n`
+  return `${JSON.stringify({ kind: 'bake-self-check', schema: 1, version: VERSION, runtime: 'rust', target, docs, ...overrides })}\n`
 }
 
 const quote = (text: string): string => `'${text.replaceAll('\'', '\'\\\'\'')}'`
 
 interface Script { version?: string; check?: string; code?: number; body?: string }
 
-/** A stand-in `bake-rs`: only shell builtins, because the packager runs it with an empty PATH. */
+/** A stand-in `bake`: only shell builtins, because the packager runs it with an empty PATH. */
 function fakeBinary(path: string, script: Script = {}): string {
-  const version = script.version ?? `bake-rs ${VERSION}\n`
+  const version = script.version ?? `bake ${VERSION}\n`
   const check = script.body ?? `printf '%s' ${quote(script.check ?? record())}; exit ${script.code ?? 0}`
   writeFileSync(path, `#!/bin/sh\ncase "$1" in\n  --version) printf '%s' ${quote(version)} ;;\n  --self-check) ${check} ;;\n  *) exit 64 ;;\nesac\n`)
   chmodSync(path, 0o755)
@@ -62,7 +62,7 @@ const ABOUT = 'accepted = ["MIT"]\n'
 
 /** Each platform's stand-in license text; the heading is the generator's. */
 const licenseText = (id: string, triple: string): string =>
-  `Third-party licenses for bake-rs, ${id} (${triple})\n\nmemchr 2.8.3 | Unlicense OR MIT | runtime | MIT-0123456789ab\n\nCopyright (c) 2015 Andrew Gallant (${id})\n`
+  `Third-party licenses for bake, ${id} (${triple})\n\nmemchr 2.8.3 | Unlicense OR MIT | runtime | MIT-0123456789ab\n\nCopyright (c) 2015 Andrew Gallant (${id})\n`
 
 /** The inventory fields the packager reads, as the generator writes them. */
 interface FixtureInventory {
@@ -127,8 +127,8 @@ function fixture(script: Script = {}): { root: string; options: PackOptions; des
   mkdirSync(join(root, 'crates/bake-ai'), { recursive: true })
   writeFileSync(join(root, 'crates/bake-ai/NOTICE'), NOTICE)
   mkdirSync(join(root, 'target'))
-  const binary = fakeBinary(join(root, 'target/bake-rs'), script)
-  const outputDir = join(root, '.artifacts/bake-rs-release', VERSION)
+  const binary = fakeBinary(join(root, 'target/bake'), script)
+  const outputDir = join(root, '.artifacts/bake-native-release', VERSION)
   const options: PackOptions = {
     binary, root, docs: join(root, 'docs'), notices: { 'bake-ai': join(root, 'crates/bake-ai/NOTICE') }, licenses: licenseBundle(), version: VERSION, target, outputDir, timeoutMs: 5_000,
   }
@@ -152,7 +152,7 @@ describe('version and platform names', () => {
   test('every release platform is named and the archive is apart from the TypeScript one', () => {
     for (const name of ['darwin-arm64', 'darwin-x64', 'linux-arm64', 'linux-x64', 'win32-x64']) expect(isRustTarget(name)).toBe(true)
     for (const name of ['win32-arm64', 'linux-ia32', 'freebsd-x64', '']) expect(isRustTarget(name)).toBe(false)
-    expect(archiveName('0.4.0-dev', 'linux-x64')).toBe('bake-rs-v0.4.0-dev-linux-x64.tar.gz')
+    expect(archiveName('0.4.0-dev', 'linux-x64')).toBe('bake-v0.4.0-dev-linux-x64.tar.gz')
   })
 
   test('a native version is SemVer without build metadata', () => {
@@ -173,7 +173,7 @@ describe('version and platform names', () => {
 describe('the self-check record', () => {
   const expected: Expected = { version: VERSION, target: 'linux-x64', docs: { cli: sha(DOCS.cli), home: sha(DOCS.home) } }
   const line = (overrides: Record<string, unknown> = {}): string =>
-    `${JSON.stringify({ kind: 'bake-rs-self-check', schema: 1, version: VERSION, runtime: 'rust', target: 'linux-x64', docs: expected.docs, ...overrides })}\n`
+    `${JSON.stringify({ kind: 'bake-self-check', schema: 1, version: VERSION, runtime: 'rust', target: 'linux-x64', docs: expected.docs, ...overrides })}\n`
 
   test('accepts the record of this build', () => {
     expect(parseSelfCheck(line(), expected).target).toBe('linux-x64')
@@ -186,7 +186,7 @@ describe('the self-check record', () => {
     ['a second line', `${line()}extra\n`, /not one line/],
     ['text that is not JSON', 'ok\n', /not JSON/],
     ['an array', '[]\n', /not a JSON object/],
-    ['another kind', line({ kind: 'bake-self-check' }), /kind/],
+    ['another kind', line({ kind: 'bake-release-check' }), /kind/],
     ['a newer schema', line({ schema: 2 }), /schema 1/],
     ['another runtime', line({ runtime: 'node' }), /runtime/],
     ['an extra member', line({ node: '24' }), /members/],
@@ -335,7 +335,7 @@ describe.skipIf(process.platform === 'win32' || !releaseHost)('packing', () => {
     expect(result.archive).toBe(realpathSync.native(destination))
     expect(result.record.target).toBe(target)
     expect([...result.listing].sort()).toEqual([
-      '0644 LICENSE', '0644 THIRD_PARTY_NOTICES.md', '0755 bin/', '0755 bin/bake-rs',
+      '0644 LICENSE', '0644 THIRD_PARTY_NOTICES.md', '0755 bin/', '0755 bin/bake',
       '0755 licenses/', '0644 licenses/inventory.json', `0755 licenses/${target}/`, `0644 licenses/${target}/THIRD-PARTY-LICENSES.txt`,
       '0755 notices/', '0755 notices/bake-ai/', '0644 notices/bake-ai/NOTICE',
     ].sort())
@@ -343,7 +343,7 @@ describe.skipIf(process.platform === 'win32' || !releaseHost)('packing', () => {
     const unpacked = scratch()
     // -p restores the archived modes instead of applying this shell's umask.
     expect(Bun.spawnSync(['tar', '-xpzf', destination, '-C', unpacked]).exitCode).toBe(0)
-    expect(statSync(join(unpacked, 'bin/bake-rs')).mode & 0o777).toBe(0o755)
+    expect(statSync(join(unpacked, 'bin/bake')).mode & 0o777).toBe(0o755)
     expect(readFileSync(join(unpacked, 'notices/bake-ai/NOTICE'), 'utf8')).toContain('Mario Zechner')
     expect(readdirSync(unpacked).sort()).toEqual(['LICENSE', 'THIRD_PARTY_NOTICES.md', 'bin', 'licenses', 'notices'])
     // This platform's text and the inventory, byte for byte, and no other platform's text.
@@ -382,7 +382,7 @@ describe.skipIf(process.platform === 'win32' || !releaseHost)('packing', () => {
     ['another version', { check: record({ version: '0.4.1' }) }, /reports version "0\.4\.1"/],
     ['a foreign platform', { check: record({ target: target === 'linux-x64' ? 'linux-arm64' : 'linux-x64' }) }, /reports platform/],
     ['stale documentation', { check: record({ docs: { cli: sha('# Old\n'), home: sha(DOCS.home) } }) }, /topic 'cli' differs/],
-    ['another --version', { version: 'bake-rs 0.3.8\n' }, /--version exited 0 with "bake-rs 0\.3\.8\\n"/],
+    ['another --version', { version: 'bake 0.3.8\n' }, /--version exited 0 with "bake 0\.3\.8\\n"/],
     ['a write into the home', { body: `printf x > "$HOME/leak"; printf '%s' ${quote(record())}` }, /wrote leak into its empty home/],
     ['a check that never ends', { body: 'while :; do :; done' }, /did not finish within 1000 ms/],
     ['endless output', { body: 'while :; do printf "%s" xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx; done' }, /more than 1048576 bytes/],
@@ -454,7 +454,7 @@ describe.skipIf(process.platform === 'win32' || !releaseHost)('packing', () => {
     mkdirSync(legacy, { recursive: true })
     // An archive of the same name already there: it must survive untouched.
     writeFileSync(join(legacy, archiveName(VERSION, target)), EARLIER)
-    mkdirSync(join(root, '.artifacts/bake-rs-release'), { recursive: true })
+    mkdirSync(join(root, '.artifacts/bake-native-release'), { recursive: true })
     linkDir(legacy, options.outputDir)
     await expect(packRust(options)).rejects.toThrow(/inside the TypeScript release's \.artifacts\/bake-release\//)
     expect(readdirSync(legacy)).toEqual([archiveName(VERSION, target)])
@@ -464,7 +464,7 @@ describe.skipIf(process.platform === 'win32' || !releaseHost)('packing', () => {
 
   test('refuses a binary that is a symbolic link', async () => {
     const { root, options, destination } = fixture()
-    const link = join(root, 'target/linked-bake-rs')
+    const link = join(root, 'target/linked-bake')
     symlinkSync(options.binary, link)
     await refused({ ...options, binary: link }, destination, /is a symbolic link/)
   })
@@ -496,7 +496,7 @@ describe('the output directory', () => {
     const root = scratch()
     const legacy = join(root, '.artifacts/bake-release/0.3.8')
     const host = join(root, 'distribution/host/public')
-    const native = join(root, '.artifacts/bake-rs-release')
+    const native = join(root, '.artifacts/bake-native-release')
     for (const dir of [legacy, host, native]) mkdirSync(dir, { recursive: true })
     writeFileSync(join(legacy, 'bake-v0.3.8-linux-x64.tar.gz'), 'TypeScript archive\n')
     writeFileSync(join(host, 'latest.json'), '{"version":"0.3.8"}\n')
@@ -517,7 +517,7 @@ describe('the output directory', () => {
     const { root, legacy, host } = repository()
     expect(() => checkOutputDir(root, legacy)).toThrow(/inside the TypeScript release's \.artifacts\/bake-release\//)
     expect(() => checkOutputDir(root, join(host, 'releases'))).toThrow(/inside the TypeScript release's distribution\/host\/public\//)
-    expect(() => checkOutputDir(root, join(root, 'out'))).toThrow(/not under \.artifacts\/bake-rs-release\//)
+    expect(() => checkOutputDir(root, join(root, 'out'))).toThrow(/not under \.artifacts\/bake-native-release\//)
   })
 
   test('refuses a link under the native root, or outside the repository, that leads into a TypeScript output', () => {
@@ -564,7 +564,7 @@ describe.skipIf(process.platform === 'win32')('reading an archive back', () => {
     for (const file of files) writeFileSync(join(stage, file.path), `${file.path}\n`)
     for (const dir of ['', ...dirs]) chmodSync(join(stage, dir), 0o755)
     for (const file of files) chmodSync(join(stage, file.path), file.mode)
-    chmodSync(join(stage, 'bin/bake-rs'), binaryMode)
+    chmodSync(join(stage, 'bin/bake'), binaryMode)
     return stage
   }
   const TOP = ['LICENSE', 'THIRD_PARTY_NOTICES.md', 'bin', 'licenses', 'notices']
@@ -615,10 +615,10 @@ describe.skipIf(process.platform === 'win32')('reading an archive back', () => {
     await expect(verifyArchive(tar(root, stage, TOP), files)).rejects.toThrow(/LICENSE has tar type "2"/)
 
     root = scratch()
-    await expect(verifyArchive(tar(root, tree(root, 0o644), TOP), files)).rejects.toThrow(/bin\/bake-rs is not executable/)
+    await expect(verifyArchive(tar(root, tree(root, 0o644), TOP), files)).rejects.toThrow(/bin\/bake is not executable/)
 
     root = scratch()
-    await expect(verifyArchive(tar(root, tree(root, 0o775), TOP), files)).rejects.toThrow(/bin\/bake-rs is writable by group or others/)
+    await expect(verifyArchive(tar(root, tree(root, 0o775), TOP), files)).rejects.toThrow(/bin\/bake is writable by group or others/)
   })
 
   test('refuses a payload path twice', async () => {

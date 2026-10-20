@@ -26,7 +26,7 @@ pub const SCHEMA: &str = "bake-native-release/1";
 pub const CHANNEL: &str = "stable";
 
 /// The platforms a native release can carry an archive for, as
-/// `bake-rs --self-check` and `scripts/release/pack-rust.ts` name them.
+/// `bake --self-check` and `scripts/release/pack-rust.ts` name them.
 pub const TARGETS: [&str; 5] = [
     "darwin-arm64",
     "darwin-x64",
@@ -71,7 +71,7 @@ pub fn host_target() -> Option<&'static str> {
 /// One platform's archive, as the manifest describes it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Artifact {
-    /// `bake-rs-v<version>-<target>.tar.gz`, relative to
+    /// `bake-v<version>-<target>.tar.gz`, relative to
     /// `native/releases/<version>/`.
     pub file: String,
     /// Lowercase hex SHA-256 of the archive's bytes.
@@ -227,7 +227,7 @@ fn parse_artifact(target: &str, value: &Value, version: &str) -> Result<Artifact
 
 /// The archive `scripts/release/pack-rust.ts` writes for a release.
 pub fn archive_name(version: &str, target: &str) -> String {
-    format!("bake-rs-v{version}-{target}.tar.gz")
+    format!("bake-v{version}-{target}.tar.gz")
 }
 
 /// Whether `value` is the instant a manifest states: `YYYY-MM-DDTHH:MM:SSZ`,
@@ -337,7 +337,7 @@ mod tests {
     }
 
     const VALID: &str = r#"{"schema":"bake-native-release/1","channel":"stable","version":"0.4.0",
-      "published":"2026-10-20T00:00:00Z","artifacts":{"linux-x64":{"file":"bake-rs-v0.4.0-linux-x64.tar.gz",
+      "published":"2026-10-20T00:00:00Z","artifacts":{"linux-x64":{"file":"bake-v0.4.0-linux-x64.tar.gz",
       "sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","size":123}}}"#;
 
     #[test]
@@ -348,7 +348,7 @@ mod tests {
         assert_eq!(
             manifest.artifact("linux-x64"),
             Some(&Artifact {
-                file: "bake-rs-v0.4.0-linux-x64.tar.gz".to_owned(),
+                file: "bake-v0.4.0-linux-x64.tar.gz".to_owned(),
                 sha256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
                     .to_owned(),
                 size: 123,
@@ -395,8 +395,9 @@ mod tests {
                 "artifact is invalid",
             ),
             (
-                &manifest_text(&VALID.replace("bake-rs-v0.4.0-linux-x64", "bake-v0.4.0-linux-x64")),
-                "is not named bake-rs-v0.4.0-linux-x64.tar.gz",
+                // Another platform's archive under the linux-x64 key.
+                &manifest_text(&VALID.replace("bake-v0.4.0-linux-x64", "bake-v0.4.0-linux-arm64")),
+                "is not named bake-v0.4.0-linux-x64.tar.gz",
             ),
             (
                 &manifest_text(&VALID.replace("\"size\":123", "\"size\":123,\"mode\":493")),
@@ -410,7 +411,7 @@ mod tests {
         // An empty artifact list publishes nothing, and an uppercase hash is
         // not the lowercase hex the contract fixes.
         assert!(parse_manifest(&VALID.replace(
-            "{\"linux-x64\":{\"file\":\"bake-rs-v0.4.0-linux-x64.tar.gz\",\n      \"sha256\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\",\"size\":123}}",
+            "{\"linux-x64\":{\"file\":\"bake-v0.4.0-linux-x64.tar.gz\",\n      \"sha256\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\",\"size\":123}}",
             "{}"
         ))
         .is_err());

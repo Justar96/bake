@@ -1,8 +1,7 @@
 //! Unpacking a release archive, in process.
 //!
 //! The archive is `scripts/release/pack-rust.ts`'s layout: `bin/bake`
-//! (`bin/bake.exe` on Windows, or `bin/bake-rs` from an archive built
-//! before the command was renamed), `LICENSE`, `THIRD_PARTY_NOTICES.md`,
+//! (`bin/bake.exe` on Windows), `LICENSE`, `THIRD_PARTY_NOTICES.md`,
 //! `notices/`, and `licenses/`. Only regular files and directories are
 //! unpacked: a member that is absolute, holds `..`, or is a link, device,
 //! or other special file is refused, and so is an archive whose members

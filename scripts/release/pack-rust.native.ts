@@ -1,5 +1,5 @@
 /**
- * `bun run release:pack:rust` end to end on the real `bake-rs`: the debug
+ * `bun run release:pack:rust` end to end on the real `bake`: the debug
  * build the native preflight group has just made is packed into a path with
  * spaces and non-ASCII text, unpacked by the system `tar`, and run with a
  * PATH that holds neither Node nor Bun, in a home whose Bake settings and
@@ -28,7 +28,7 @@ const roots: string[] = []
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
 
 function scratch(label: string): string {
-  const root = mkdtempSync(join(tmpdir(), `bake-rs ${label} ñ 測試-`))
+  const root = mkdtempSync(join(tmpdir(), `bake ${label} ñ 測試-`))
   roots.push(root)
   return root
 }
@@ -216,7 +216,7 @@ function cargoVersion(): string {
   return cli.version
 }
 
-test.skipIf(!isRustTarget(hostTarget()))('the packed bake-rs unpacks and runs without Node, Bun, or a usable Bake home', async () => {
+test.skipIf(!isRustTarget(hostTarget()))('the packed bake unpacks and runs without Node, Bun, or a usable Bake home', async () => {
   const target = hostTarget()
   if (!isRustTarget(target)) return
   const version = cargoVersion()
@@ -246,7 +246,7 @@ test.skipIf(!isRustTarget(hostTarget()))('the packed bake-rs unpacks and runs wi
   } finally {
     closeSync(archiveInput)
   }
-  const exe = target === 'win32-x64' ? 'bake-rs.exe' : 'bake-rs'
+  const exe = target === 'win32-x64' ? 'bake.exe' : 'bake'
   expect(readdirSync(unpacked).sort()).toEqual(['LICENSE', 'THIRD_PARTY_NOTICES.md', 'bin', 'licenses', 'notices'])
   expect(readdirSync(join(unpacked, 'bin'))).toEqual([exe])
   // This host's license text and the inventory, exactly as generated, and no other platform's text.
@@ -257,7 +257,7 @@ test.skipIf(!isRustTarget(hostTarget()))('the packed bake-rs unpacks and runs wi
   expect(readFileSync(join(unpacked, 'licenses', INVENTORY_FILE)).equals(readFileSync(join(reference, INVENTORY_FILE)))).toBe(true)
   const inventory = JSON.parse(readFileSync(join(unpacked, 'licenses', INVENTORY_FILE), 'utf8')) as { platforms: { id: string; sha256: string }[] }
   expect(inventory.platforms.find(entry => entry.id === target)?.sha256).toBe(createHash('sha256').update(text).digest('hex'))
-  expect(text.toString('utf8').split('\n')[0]).toStartWith(`Third-party licenses for bake-rs, ${target} (`)
+  expect(text.toString('utf8').split('\n')[0]).toStartWith(`Third-party licenses for bake, ${target} (`)
   expect(text.toString('utf8')).toContain('Mario Zechner')
   // Every NOTICE is a Bake crate's, and those that port Pi keep its notice.
   const notices = readdirSync(join(unpacked, 'notices')).sort()
@@ -287,7 +287,7 @@ test.skipIf(!isRustTarget(hostTarget()))('the packed bake-rs unpacks and runs wi
     return { code: child.exitCode, stdout: child.stdout.toString(), stderr: child.stderr.toString() }
   }
 
-  expect(run('--version')).toEqual({ code: 0, stdout: `bake-rs ${version}\n`, stderr: '' })
+  expect(run('--version')).toEqual({ code: 0, stdout: `bake ${version}\n`, stderr: '' })
   const check = run('--self-check')
   expect(check.code).toBe(0)
   expect(check.stderr).toBe('')

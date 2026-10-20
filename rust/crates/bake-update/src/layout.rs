@@ -259,18 +259,12 @@ fn write_link(_target: &str, _at: &Path) -> std::io::Result<()> {
     ))
 }
 
-/// A release's own executable: `bin/bake`, and `bin/bake-rs` for an
-/// archive built before the command was renamed. `None` when the release
-/// holds neither.
+/// A release's own executable: `bin/bake`, or `bin/bake.exe` on Windows.
+/// `None` when the release holds neither.
 pub fn executable(release: &Path) -> Option<PathBuf> {
-    let suffix = if cfg!(windows) { ".exe" } else { "" };
-    for name in ["bake", "bake-rs"] {
-        let path = release.join("bin").join(format!("{name}{suffix}"));
-        if path.is_file() {
-            return Some(path);
-        }
-    }
-    None
+    let name = if cfg!(windows) { "bake.exe" } else { "bake" };
+    let path = release.join("bin").join(name);
+    path.is_file().then_some(path)
 }
 
 /// The install root this executable runs from, or the one
@@ -368,22 +362,22 @@ mod tests {
     #[test]
     fn the_root_comes_from_the_environment_or_the_executables_place() {
         let none = |_: &str| None;
-        let named = |name: &str| (name == ROOT_ENV).then(|| OsString::from("/opt/bake-rs"));
+        let named = |name: &str| (name == ROOT_ENV).then(|| OsString::from("/opt/bake-native"));
         assert_eq!(
             detect_root(&named, Some(Path::new("/elsewhere/bin/bake"))),
-            Some(PathBuf::from("/opt/bake-rs"))
+            Some(PathBuf::from("/opt/bake-native"))
         );
         assert_eq!(
             detect_root(
                 &none,
                 Some(Path::new(
-                    "/home/a/.local/share/bake-rs/releases/0.4.0/bin/bake"
+                    "/home/a/.local/share/bake-native/releases/0.4.0/bin/bake"
                 ))
             ),
-            Some(PathBuf::from("/home/a/.local/share/bake-rs"))
+            Some(PathBuf::from("/home/a/.local/share/bake-native"))
         );
         for path in [
-            "/home/a/src/bake/rust/target/debug/bake-rs",
+            "/home/a/src/bake/rust/target/debug/bake",
             "/usr/local/bin/bake",
             "bake",
         ] {
@@ -393,22 +387,18 @@ mod tests {
     }
 
     #[test]
-    fn a_release_is_found_under_either_command_name() {
+    fn a_release_is_found_only_under_the_command_name() {
         let dir = temp_dir("layout-exe");
         let release = dir.path().join("0.4.0");
         fs::create_dir_all(release.join("bin")).expect("bin");
         assert_eq!(executable(&release), None);
-        let old = release.join("bin").join(if cfg!(windows) {
-            "bake-rs.exe"
-        } else {
-            "bake-rs"
-        });
-        fs::write(&old, "").expect("write");
-        assert_eq!(executable(&release), Some(old));
-        let new = release
+        // No native release shipped under another name, so nothing else counts.
+        fs::write(release.join("bin").join("bake-rs"), "").expect("write");
+        assert_eq!(executable(&release), None);
+        let command = release
             .join("bin")
             .join(if cfg!(windows) { "bake.exe" } else { "bake" });
-        fs::write(&new, "").expect("write");
-        assert_eq!(executable(&release), Some(new));
+        fs::write(&command, "").expect("write");
+        assert_eq!(executable(&release), Some(command));
     }
 }
