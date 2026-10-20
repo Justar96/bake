@@ -540,6 +540,85 @@ async fn redirects_are_not_followed_and_configured_secrets_stay_out_of_errors() 
     elsewhere.stop().await;
 }
 
+// Bake's own: a caller that admits egress supplies the HTTP client, which
+// then owns resolution, pinning, and redirects. A redirect its policy
+// follows reaches the new path; one it refuses fails the request, with the
+// policy's reason, and the transport still contacts nobody else.
+#[tokio::test]
+async fn a_supplied_client_owns_the_redirect_policy() {
+    #[derive(Debug)]
+    struct Refused;
+
+    impl std::fmt::Display for Refused {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("a cross-origin redirect is refused")
+        }
+    }
+
+    impl std::error::Error for Refused {}
+
+    let elsewhere = Server::start(handler(protocol)).await;
+    let other_origin = elsewhere.origin.clone();
+    let moved = Arc::new(AtomicUsize::new(0));
+    let counted = Arc::clone(&moved);
+    let server = Server::start(handler(move |request: Request, responder: Responder| {
+        let other = format!("{other_origin}/mcp");
+        let counted = Arc::clone(&counted);
+        async move {
+            if request.path == "/moved" {
+                counted.fetch_add(1, Ordering::SeqCst);
+                return protocol(request, responder).await;
+            }
+            match request.json()["params"]["name"].as_str() {
+                Some("same-origin") => {
+                    responder.send(307, &[("location", "/moved")], b"").await;
+                }
+                Some("cross-origin") => {
+                    responder.send(307, &[("location", &other)], b"").await;
+                }
+                _ => protocol(request, responder).await,
+            }
+        }
+    }))
+    .await;
+    let authorized = reqwest::Url::parse(&server.url).unwrap();
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::custom(move |attempt| {
+            let same = attempt.url().scheme() == authorized.scheme()
+                && attempt.url().host_str() == authorized.host_str()
+                && attempt.url().port() == authorized.port();
+            if same {
+                attempt.follow()
+            } else {
+                attempt.error(Refused)
+            }
+        }))
+        .build()
+        .unwrap();
+    let (transport, receiver, sender) =
+        HttpTransport::start_with_client(http(&server), client).unwrap();
+    let mut connecting = McpClient::start(receiver, sender, client_options()).unwrap();
+    let (client, _events) = bounded("initialize", connecting.initialize())
+        .await
+        .unwrap();
+    let result = client.call_tool("same-origin", None).await.unwrap();
+    assert_eq!(text(&result), "hello");
+    assert_eq!(moved.load(Ordering::SeqCst), 1);
+    let error = client.call_tool("cross-origin", None).await.unwrap_err();
+    assert!(
+        server_error(&error).contains("a cross-origin redirect is refused"),
+        "{error:?}"
+    );
+    assert_eq!(
+        elsewhere.connections(),
+        0,
+        "the refused target was contacted"
+    );
+    close(transport, client).await;
+    server.stop().await;
+    elsewhere.stop().await;
+}
+
 #[tokio::test]
 async fn split_bytes_and_utf8_across_writes_decode_whole() {
     let expected = "héllo 😀 世界";

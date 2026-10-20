@@ -24,6 +24,9 @@
 //! confines it (D24), and gives it its environment. For a remote server,
 //! [`HttpTransport::start`] returns the transport owner and its message halves;
 //! the caller awaits [`HttpTransport::shutdown`] after the client.
+//! [`HttpTransport::start_with_client`] takes the HTTP client from the
+//! caller, which then owns address resolution and pinning, redirects,
+//! proxies, and TLS, as Bake's MCP egress admission does.
 //! [`McpClient::start`] returns a [`Connecting`] that owns the
 //! client's task through initialization, and [`Connecting::shutdown`] and
 //! [`McpClient::shutdown`] return once that task has ended and dropped both
@@ -34,7 +37,8 @@
 //!
 //! Not implemented here: OAuth and the auth provider (Pi `src/oauth/`,
 //! `src/auth-provider.ts`), re-initialization after an HTTP session expires,
-//! resources, prompts, progress notifications
+//! which belongs to the transport's owner (Bake's `mcp::http` starts a new
+//! transport and client), resources, prompts, progress notifications
 //! and their timeout renewal, roots, sampling, elicitation, and the stateless
 //! MCP 2026-07-28 revision (`server/discover`, per-request version metadata).
 //! The client negotiates only the handshake-based revisions of

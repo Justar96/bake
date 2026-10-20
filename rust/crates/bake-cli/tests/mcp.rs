@@ -81,6 +81,11 @@ fn main() {
             "the_scrub_drops_credentials_an_entry_does_not_name",
             the_scrub_drops_credentials_an_entry_does_not_name,
         ),
+        #[cfg(unix)]
+        (
+            "a_url_servers_tool_is_declared_called_and_closed",
+            a_url_servers_tool_is_declared_called_and_closed,
+        ),
         ("no_mcp_starts_nothing", no_mcp_starts_nothing),
         (
             "a_missing_configuration_is_an_ordinary_startup",
@@ -1261,6 +1266,230 @@ fn a_stop_during_setup_shuts_the_servers_down(case: &Arc<Case>) {
 
 // Windows ACLs are not inspected yet, so an existing `mcp.json` is refused
 // unread there and nothing starts; `--no-mcp` reads nothing.
+/// A loopback Streamable HTTP MCP server for the `url` case: one request
+/// per connection, answered with JSON, recording each request's JSON-RPC
+/// method, HTTP method, and `Authorization` header. Stopped and joined on
+/// drop. It is test code with its own HTTP reader, independent of the
+/// transport under test.
+#[cfg(unix)]
+struct McpHttpServer {
+    port: u16,
+    seen: Arc<Mutex<Vec<(String, String, String)>>>,
+    stop: Arc<AtomicBool>,
+    thread: Option<JoinHandle<()>>,
+}
+
+#[cfg(unix)]
+impl McpHttpServer {
+    fn start() -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+        listener.set_nonblocking(true).expect("nonblocking");
+        let port = listener.local_addr().expect("address").port();
+        let seen: Arc<Mutex<Vec<(String, String, String)>>> = Arc::default();
+        let stop = Arc::new(AtomicBool::new(false));
+        let thread = {
+            let (seen, stop) = (Arc::clone(&seen), Arc::clone(&stop));
+            std::thread::spawn(move || {
+                while !stop.load(Ordering::SeqCst) {
+                    match listener.accept() {
+                        Ok((socket, _)) => {
+                            let _ = socket.set_nonblocking(false);
+                            serve_mcp(socket, &seen);
+                        }
+                        Err(_) => std::thread::sleep(Duration::from_millis(5)),
+                    }
+                }
+            })
+        };
+        Self {
+            port,
+            seen,
+            stop,
+            thread: Some(thread),
+        }
+    }
+
+    /// Every request, as (HTTP method, JSON-RPC method, `Authorization`).
+    fn seen(&self) -> Vec<(String, String, String)> {
+        lock(&self.seen).clone()
+    }
+}
+
+#[cfg(unix)]
+impl Drop for McpHttpServer {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+#[cfg(unix)]
+fn serve_mcp(mut socket: TcpStream, seen: &Mutex<Vec<(String, String, String)>>) {
+    let _ = socket.set_read_timeout(Some(Duration::from_secs(10)));
+    let mut buffer = Vec::new();
+    let mut chunk = [0u8; 8192];
+    let head_end = loop {
+        match socket.read(&mut chunk) {
+            Ok(0) | Err(_) => return,
+            Ok(read) => buffer.extend_from_slice(&chunk[..read]),
+        }
+        if let Some(end) = buffer.windows(4).position(|window| window == b"\r\n\r\n") {
+            break end;
+        }
+        if buffer.len() > 1 << 20 {
+            return;
+        }
+    };
+    let head = String::from_utf8_lossy(&buffer[..head_end]).into_owned();
+    let method = head.split_whitespace().next().unwrap_or("").to_owned();
+    let header = |name: &str| {
+        head.lines()
+            .filter_map(|line| line.split_once(':'))
+            .find(|(key, _)| key.trim().eq_ignore_ascii_case(name))
+            .map(|(_, value)| value.trim().to_owned())
+    };
+    let length: usize = header("content-length")
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(0)
+        .min(1 << 20);
+    while buffer.len() < head_end + 4 + length {
+        match socket.read(&mut chunk) {
+            Ok(0) | Err(_) => break,
+            Ok(read) => buffer.extend_from_slice(&chunk[..read]),
+        }
+    }
+    let message: Value = buffer
+        .get(head_end + 4..head_end + 4 + length)
+        .and_then(|body| serde_json::from_slice(body).ok())
+        .unwrap_or(Value::Null);
+    let rpc = message["method"].as_str().unwrap_or_default().to_owned();
+    lock(seen).push((
+        method.clone(),
+        rpc.clone(),
+        header("authorization").unwrap_or_default(),
+    ));
+    let id = message["id"].clone();
+    let (status, headers, body) = match (method.as_str(), rpc.as_str()) {
+        // No server-to-client stream, and the client may end the session.
+        ("GET", _) => (405, Vec::new(), Value::Null),
+        ("DELETE", _) => (200, Vec::new(), Value::Null),
+        (_, "initialize") => (
+            200,
+            vec![("mcp-session-id", "cli-session-1".to_owned())],
+            json!({"jsonrpc": "2.0", "id": id, "result": {
+                "protocolVersion": "2025-11-25",
+                "capabilities": {"tools": {}},
+                "serverInfo": {"name": "cli-http-fixture", "version": "1.0.0"},
+            }}),
+        ),
+        (_, "tools/list") => (
+            200,
+            Vec::new(),
+            json!({"jsonrpc": "2.0", "id": id, "result": {"tools": [
+                {"name": "echo", "description": "Echo text", "inputSchema": {
+                    "type": "object", "properties": {"text": {"type": "string"}},
+                }},
+            ]}}),
+        ),
+        (_, "tools/call") => (
+            200,
+            Vec::new(),
+            json!({"jsonrpc": "2.0", "id": id, "result": {"content": [{
+                "type": "text",
+                "text": format!("http echo: {}", message["params"]["arguments"]["text"].as_str().unwrap_or_default()),
+            }]}}),
+        ),
+        // A notification is accepted without an answer.
+        _ if id.is_null() => (202, Vec::new(), Value::Null),
+        _ => (
+            200,
+            Vec::new(),
+            json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32601, "message": "no such method"}}),
+        ),
+    };
+    let body = if body.is_null() {
+        String::new()
+    } else {
+        body.to_string()
+    };
+    let mut response = format!("HTTP/1.1 {status} X\r\ncontent-length: {}\r\n", body.len());
+    if !body.is_empty() {
+        response.push_str("content-type: application/json\r\n");
+    }
+    for (name, value) in &headers {
+        response.push_str(&format!("{name}: {value}\r\n"));
+    }
+    response.push_str("connection: close\r\n\r\n");
+    response.push_str(&body);
+    let _ = socket.write_all(response.as_bytes());
+    let _ = socket.flush();
+}
+
+// A `url` server in the home's `mcp.json`: `bake-rs -p` admits its origin,
+// declares its tool beside the built-ins, calls it, logs the result, and
+// ends its HTTP session with a `DELETE` carrying the configured header
+// before it exits. The connection is the agent process's own, so no
+// sandbox backend takes part.
+#[cfg(unix)]
+fn a_url_servers_tool_is_declared_called_and_closed(case: &Arc<Case>) {
+    let server = McpHttpServer::start();
+    let model = ModelServer::with_hook(
+        vec![
+            Reply::calls(&[("mcp__web__echo", json!({"text": "hi"}))]),
+            Reply::text(),
+        ],
+        Box::new(|index, body| {
+            if index != 0 {
+                return;
+            }
+            let mut expected: Vec<&str> = BUILTIN.to_vec();
+            expected.push("mcp__web__echo");
+            assert_eq!(declared(body), expected);
+        }),
+    );
+    case.write_models(model.port);
+    case.write_config(
+        &case.home(),
+        &json!({ "mcpServers": { "web": {
+            "url": format!("http://127.0.0.1:{}/mcp", server.port),
+            "headers": { "Authorization": "Bearer cli-test-token" },
+        } } }),
+    );
+    let run = case.run(&["--sandbox", "danger-full-access"]);
+    model.assert_hook_passed();
+    assert_eq!(run.stderr, "");
+    assert_eq!(run.status.code(), Some(0));
+    assert_eq!(run.stdout, format!("{ANSWER}\n"));
+    let requests = model.requests();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(tool_outputs(&requests[1]), ["http echo: hi"]);
+    let seen = server.seen();
+    let rpc: Vec<&str> = seen.iter().map(|(_, rpc, _)| rpc.as_str()).collect();
+    assert!(
+        rpc.contains(&"initialize") && rpc.contains(&"tools/list") && rpc.contains(&"tools/call"),
+        "{seen:?}"
+    );
+    assert!(
+        seen.iter()
+            .all(|(_, _, authorization)| authorization == "Bearer cli-test-token"),
+        "every request carried the configured header: {seen:?}"
+    );
+    // The session was ended before the process exited.
+    assert!(
+        seen.iter().any(|(method, _, _)| method == "DELETE"),
+        "{seen:?}"
+    );
+    let lines = session_lines(case);
+    let result = lines
+        .iter()
+        .find(|line| line["message"]["role"] == "toolResult")
+        .expect("a logged tool result");
+    assert_eq!(result["message"]["toolName"], "mcp__web__echo");
+    assert_eq!(result["message"]["content"][0]["text"], "http echo: hi");
+}
+
 #[cfg(not(unix))]
 fn an_existing_configuration_is_refused_where_its_owner_cannot_be_checked(case: &Arc<Case>) {
     let model = ModelServer::start(vec![Reply::text()]);
