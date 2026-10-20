@@ -15,11 +15,11 @@
 //!   connection's client answers every name with those addresses
 //!   ([`pinned_client_builder`]), so no later lookup can move it: DNS
 //!   rebinding reaches nothing. A reconnect is a new connection and resolves
-//!   again ([`super::http`]).
+//!   again (`super::http`).
 //! - **Same-origin redirects only, within a small bound.** A hop to another
 //!   origin is refused before it is sent, so the configured headers cannot
 //!   reach an origin the owner did not authorize, and at most
-//!   [`MAX_REDIRECTS`] same-origin hops are followed.
+//!   `MAX_REDIRECTS` (three) same-origin hops are followed.
 //! - **`https` for a public destination.** Plain `http` is allowed to a
 //!   loopback or otherwise non-public address, which is what Pi and Bake 0.3
 //!   allow and what a local server needs, and refused when the host resolves

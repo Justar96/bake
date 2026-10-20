@@ -24,9 +24,9 @@
 //! `packages/coding-agent/src/extensions/mcp/runtime.ts` closes the
 //! connection and unregisters the tools. Bake 0.3's supervisor
 //! (`packages/mcp/mcp-client/src/connection.ts`) does reconnect, with one
-//! attempt budget per outage, and under
-//! [the roadmap](../../../../../docs/roadmap/rust-0.4/pi-reference.md)
-//! Bake's budget wins: this module runs 0.3's policy over Pi's transport.
+//! attempt budget per outage, and the roadmap's connection-recovery row
+//! (`docs/roadmap/rust-0.4/pi-reference.md`) keeps Bake's budget where one
+//! exists: this module runs 0.3's policy over Pi's transport.
 //!
 //! - A failed attempt or a lost connection waits
 //!   [`McpHttpOptions::reconnect_initial_delay`], doubling per consecutive

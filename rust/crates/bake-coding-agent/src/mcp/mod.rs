@@ -13,7 +13,7 @@
 //!
 //! [`AgentSession::start_mcp`](crate::agent_session::AgentSession::start_mcp)
 //! starts each enabled server of an [`McpOptions`] as a task the session's
-//! gate owns. For a stdio server ([`server`]) the task, in order:
+//! gate owns. For a stdio server (`server`) the task, in order:
 //!
 //! 1. admits the server under D24 before anything runs: its command is
 //!    wrapped by the session's sandbox provider for the
@@ -35,7 +35,7 @@
 //!    server and its tree are gone. The task's gate permit is released only
 //!    then, so session shutdown returns after every server is gone.
 //!
-//! A `url` server ([`http`]) runs the same steps 3 to 5 over `bake-mcp`'s
+//! A `url` server (`http`) runs the same steps 3 to 5 over `bake-mcp`'s
 //! Streamable HTTP transport, with [`egress`]' D24 network admission in
 //! place of the sandbox and spawn: the owner's `mcp.json` authorizes the
 //! configured origin, whose host is resolved once per connection and
