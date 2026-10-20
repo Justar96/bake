@@ -29,6 +29,18 @@ const OUTPUT_LIMIT: usize = 8 * 1024;
 /// exited; see [`collect`].
 const OUTPUT_GRACE: Duration = Duration::from_secs(2);
 
+/// How long a candidate that was just written may be reported as busy.
+///
+/// A release's binary is executed moments after it is unpacked. On Unix
+/// a `fork` in another thread duplicates every open descriptor until
+/// that child execs, so a descriptor on the new file can still be open
+/// for writing somewhere, and the kernel answers `ETXTBSY`; on Windows a
+/// scanner holds a new file open for a moment and the open is denied.
+/// Both pass; a candidate that cannot be started at all still fails
+/// within this bound.
+const BUSY_RETRY: Duration = Duration::from_millis(50);
+const BUSY_ATTEMPTS: u32 = 40;
+
 /// Runs a candidate release's own self-check. The updater owns one; a
 /// test supplies its own to make a candidate pass or fail without
 /// building a binary.
@@ -127,13 +139,7 @@ struct Run {
 /// Run `command --self-check`, killing it once `timeout` passes, and
 /// return only after it has exited and both readers have finished.
 fn run_bounded(command: &Path, timeout: Duration) -> Result<Run, String> {
-    let mut child = Command::new(command)
-        .arg("--self-check")
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|error| format!("it could not be started: {error}"))?;
+    let mut child = spawn_unbusy(command)?;
     let stdout = child.stdout.take().map(reader);
     let stderr = child.stderr.take().map(reader);
     let deadline = Instant::now() + timeout;
@@ -157,6 +163,48 @@ fn run_bounded(command: &Path, timeout: Duration) -> Result<Run, String> {
         stderr: collect(stderr),
         timed_out,
     })
+}
+
+/// Start the candidate, waiting out a file the host still reports as
+/// busy; see [`BUSY_RETRY`].
+fn spawn_unbusy(command: &Path) -> Result<std::process::Child, String> {
+    let mut attempt = 0;
+    loop {
+        let started = Command::new(command)
+            .arg("--self-check")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn();
+        match started {
+            Ok(child) => return Ok(child),
+            Err(error) if busy(&error) && attempt < BUSY_ATTEMPTS => {
+                attempt += 1;
+                std::thread::sleep(BUSY_RETRY);
+            }
+            Err(error) => return Err(format!("it could not be started: {error}")),
+        }
+    }
+}
+
+/// Whether the host refused to start the file because something still
+/// holds it, rather than because it cannot be run at all.
+fn busy(error: &std::io::Error) -> bool {
+    #[cfg(unix)]
+    {
+        error.raw_os_error() == Some(libc::ETXTBSY)
+    }
+    // `ERROR_ACCESS_DENIED` and `ERROR_SHARING_VIOLATION`, which a
+    // scanner's open produces.
+    #[cfg(windows)]
+    {
+        matches!(error.raw_os_error(), Some(5 | 32))
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = error;
+        false
+    }
 }
 
 /// Read one of the child's streams on its own thread, so a full pipe
@@ -281,6 +329,42 @@ mod tests {
                 .expect_err("exits 1")
                 .starts_with("it exited 1"),
         );
+    }
+
+    /// `ETXTBSY`: the kernel refuses to run a file another descriptor
+    /// still holds open for writing, which a `fork` in another thread
+    /// can keep open for a moment after an update writes the binary.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_candidate_another_descriptor_holds_open_is_waited_for() {
+        use crate::update::tests::fake_release;
+        let dir = crate::update::tests::temp_dir("check-busy");
+        let release = dir.path().join("release");
+        fake_release(&release, "0.4.1", "linux-x64", 0);
+        let command = release.join("bin").join("bake");
+        let writer = std::fs::OpenOptions::new()
+            .write(true)
+            .open(&command)
+            .expect("a second writer");
+        assert!(
+            std::process::Command::new(&command)
+                .arg("--self-check")
+                .output()
+                .is_err(),
+            "the file is not reported as busy"
+        );
+        let holder = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(300));
+            drop(writer);
+        });
+        assert_eq!(
+            SelfCheck {
+                timeout: Duration::from_secs(20),
+            }
+            .check(&release, "0.4.1", "linux-x64"),
+            Ok(())
+        );
+        holder.join().expect("the holder");
     }
 
     #[cfg(unix)]
