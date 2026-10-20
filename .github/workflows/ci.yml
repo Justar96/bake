@@ -67,6 +67,11 @@ jobs:
         if: matrix.name == 'runtime'
         run: npm install --global pnpm@11
       - run: bun run preflight ${{ matrix.args }}
+      # Step durations, including after a failure, in the run's summary page.
+      - name: Summarize timings
+        if: always()
+        continue-on-error: true
+        run: bun scripts/ci-step-summary.ts --title "${{ matrix.name }} (${{ matrix.os }})"
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
@@ -180,6 +185,11 @@ jobs:
           openssl version || true
           bun test --timeout=180000 ./scripts/release/native-install.test.ts ./scripts/release/native-install-ed25519.test.ts
       - run: bun run preflight --only native
+      # Step durations and the slowest nextest cases, including after a failure.
+      - name: Summarize timings
+        if: always()
+        continue-on-error: true
+        run: bun scripts/ci-step-summary.ts --title "rust (${{ matrix.os }})"
       # Keep per-test durations and failures, including when a later gate fails.
       - uses: actions/upload-artifact@v4
         if: always()
