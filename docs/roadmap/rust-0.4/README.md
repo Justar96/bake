@@ -333,9 +333,13 @@ During coexistence, run the current Bake gates for affected TypeScript paths and
 
 ## Dev Note
 
+**Session writer release (2026-10-21).** A session writer explicitly unlocks its file on drop, including when `SessionManager::close_writer` releases it. A Unix child starting in another thread can inherit the descriptor until `exec`; the shared lock is released while that descriptor is still open. The regression test keeps a duplicate descriptor alive across the handoff, checks immediate acquisition by the next writer, and checks that closing the duplicate leaves that next writer protected. It fails without explicit unlocking. Unit tests use the same one-second acquisition bound as the runtime.
+
 **Native command and archive name (2026-10-21).** The Rust executable is `bake` (`bake.exe` on Windows), and native archives hold `bin/bake` or `bin/bake.exe` under the name `bake-v<version>-<target>.tar.gz`, as [D45](scope-00/support.md#decision-register) requires. Native installs use `~/.local/share/bake-native` or `%LOCALAPPDATA%\bake-native`, selected by `BAKE_NATIVE_ROOT` when set. The self-check reports `bake-self-check`, and the updater locates the same executable the packager and installers use. The Bake home remains `~/.bake`.
 
 The publication checks distinguish native and 0.3 archives by their payload even though their file names have the same shape. The evaluator accepts Cargo reports for both `bake` and the earlier Rust target `bake-rs`, so a paired run can build its clean base. CLI and prompt fixtures use the new command; the system prompt names the running executable in its documentation command.
+
+The [paired rename eval](../../../evals/agent-loop/versions/unreleased/2026-10-21-bake-command-rename/REPORT.md) covers all eight standard and extended model routes, the standard scenarios, and three trials: all 384 samples passed with complete usage accounting. DeepSeek v4 Pro's tool errors rose from 0 to 1 after a shell probe of an absent `package.json`; the agent recovered and passed the check. The record accepts this as model-run variation and records the prompt and schema comparison. No token, request-count, or task-failure regression was flagged.
 
 **Rust test workflow and MCP startup (2026-10-20).** Rust formatting, Clippy, tests, doctests, and build are independently selectable preflight gates; artifact checks require their build to pass. Full Linux and Windows test runs use nextest when installed, with the codemode integration suite under Cargo to share its compiled engine; macOS and focused runs use Cargo. Test failures fail their gate without retries. CI retains the Rust logs and nextest JUnit report on success and failure. [Rust checks](../../../rust/README.md#checks) documents the commands and limits.
 

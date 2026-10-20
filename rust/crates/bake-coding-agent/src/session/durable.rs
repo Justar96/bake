@@ -29,12 +29,11 @@
 //! Windows a file opened by `std` may be deleted while open; a sidecar
 //! deleted while held is not detected there. Bake never deletes a sidecar.
 //!
-//! A lock on an open file is also held by every copy of its descriptor. On
-//! Unix, a process starting a child copies all of its descriptors into the
-//! child until the child's `exec` closes them (every `std` descriptor is
-//! close-on-exec), so a lock this process has just released can stay held
-//! for that moment. Taking the lock therefore retries for up to
-//! [`LOCK_WAIT`] before it reports the file as held.
+//! On drop the writer explicitly unlocks before closing its descriptor.
+//! On Unix a child being started inherits the descriptor until `exec`
+//! closes it; explicit unlocking releases the shared open file description
+//! even while that child still has its copy. Taking a held lock waits for
+//! up to [`LOCK_WAIT`] before it reports the file as held.
 //!
 //! On NFS and CIFS, Linux emulates `flock` with POSIX record locks, which
 //! belong to the process rather than the open file: two writers in one
@@ -106,13 +105,7 @@ pub(crate) fn lock_path(session_file: &Path) -> PathBuf {
 }
 
 /// How long [`WriterLock::acquire`] waits for a held lock before it fails.
-#[cfg(not(test))]
 pub(crate) const LOCK_WAIT: Duration = Duration::from_secs(1);
-/// Unit tests share their process with every other test's children, so a
-/// lock one test releases can stay held by another test's child until its
-/// `exec`; on a loaded host that has lasted past a second.
-#[cfg(test)]
-pub(crate) const LOCK_WAIT: Duration = Duration::from_secs(10);
 
 /// How often [`WriterLock::try_acquire`] starts over when the file it
 /// locked was replaced meanwhile.
@@ -124,7 +117,7 @@ pub(crate) struct WriterLock {
     session_file: PathBuf,
     /// Whether the session file itself is locked, for want of a sidecar.
     in_place: bool,
-    _lock: File,
+    lock: File,
 }
 
 fn cannot_create(error: &io::Error) -> bool {
@@ -222,12 +215,13 @@ impl WriterLock {
                 Err(TryLockError::WouldBlock) => return Ok(None),
                 Err(TryLockError::Error(error)) => return Err(error),
             }
-            if still_at(&lock, &target)? {
-                return Ok(Some(Self {
-                    session_file: session_file.to_path_buf(),
-                    in_place,
-                    _lock: lock,
-                }));
+            let held = Self {
+                session_file: session_file.to_path_buf(),
+                in_place,
+                lock,
+            };
+            if still_at(&held.lock, &target)? {
+                return Ok(Some(held));
             }
         }
         Err(io::Error::other(
@@ -244,6 +238,13 @@ impl WriterLock {
     /// place.
     pub(crate) fn in_place(&self) -> bool {
         self.in_place
+    }
+}
+
+impl Drop for WriterLock {
+    fn drop(&mut self) {
+        // A forked child's descriptor must not extend this owner's lock.
+        let _ = self.lock.unlock();
     }
 }
 
@@ -829,6 +830,36 @@ mod tests {
         assert_eq!(names(&dir.0), ["s.jsonl.lock"]);
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn dropping_a_lock_releases_inherited_descriptors() {
+        let dir = Dir::new("inherited-lock");
+        let file = dir.0.join("s.jsonl");
+        let first = WriterLock::acquire(&file).expect("first");
+        // A duplicate shares the open file description, as a child does
+        // between fork and exec, without depending on process timing.
+        let inherited = first.lock.try_clone().expect("copy descriptor");
+        assert!(WriterLock::try_acquire(&file).expect("try held").is_none());
+
+        drop(first);
+        let second = WriterLock::try_acquire(&file)
+            .expect("try released")
+            .expect("the inherited descriptor must not retain the writer lock");
+        assert!(inherited.metadata().is_ok());
+        drop(inherited);
+        assert!(
+            WriterLock::try_acquire(&file)
+                .expect("second held")
+                .is_none()
+        );
+        drop(second);
+        assert!(
+            WriterLock::try_acquire(&file)
+                .expect("second released")
+                .is_some()
+        );
+    }
+
     /// A sidecar replaced while it was being locked is locked again at its
     /// path, so a deleted sidecar cannot leave two holders.
     #[cfg(unix)]
@@ -839,8 +870,8 @@ mod tests {
         let first = WriterLock::acquire(&file).expect("first");
         fs::remove_file(lock_path(&file)).expect("unlink");
         let second = WriterLock::acquire(&file).expect("new sidecar");
-        assert!(!still_at(&first._lock, &lock_path(&file)).expect("stat"));
-        assert!(still_at(&second._lock, &lock_path(&file)).expect("stat"));
+        assert!(!still_at(&first.lock, &lock_path(&file)).expect("stat"));
+        assert!(still_at(&second.lock, &lock_path(&file)).expect("stat"));
     }
 
     /// In a read-only directory an existing sidecar is locked read-only, and
