@@ -489,10 +489,39 @@ async fn the_resource_tools_are_published_with_the_servers_that_offer_resources(
     registry.set_connection(2, None, Some(Arc::clone(&caller)));
     assert!(registry.tool_names().is_empty());
 
-    registry.publish(1, Vec::new(), connected).unwrap();
-    registry.set_connection(1, Some("Docs search."), Some(Arc::clone(&caller)));
-    assert_eq!(registry.tool_names(), RESOURCE_TOOL_NAMES);
-    assert_eq!(registry.declared_tool_names(), RESOURCE_TOOL_NAMES);
+    let server_tool = {
+        let mut tool = AgentTool::new(
+            "mcp__docs__search",
+            "docs/search",
+            "Search",
+            json!({ "type": "object", "properties": {} }),
+            |_, _, _, _, _| Box::pin(async { Ok(AgentToolResult::default()) }),
+        );
+        tool.replay = Some(ToolReplay::Never);
+        Arc::new(tool)
+    };
+    registry
+        .publish(1, vec![Arc::clone(&server_tool)], connected)
+        .unwrap();
+    registry.set_connection(1, Some("  Docs search.  "), Some(Arc::clone(&caller)));
+    // Pi's `registerTools`: the server's namespace carries its instructions,
+    // which `describeNamespace()` returns to scripts.
+    let namespace = registry
+        .tool_namespace("mcp__docs__search")
+        .expect("a namespace");
+    assert_eq!(namespace.namespace.name, "mcp__docs");
+    assert_eq!(namespace.aliases, ["docs"]);
+    assert_eq!(
+        namespace.namespace.instructions.as_deref(),
+        Some("Docs search.")
+    );
+    assert_eq!(
+        registry.tool_names(),
+        ["mcp__docs__search"]
+            .into_iter()
+            .chain(RESOURCE_TOOL_NAMES)
+            .collect::<Vec<_>>()
+    );
     // They belong to no namespace, so scripts call them by name.
     assert!(registry.tool_namespace(READ_MCP_RESOURCE_TOOL).is_none());
     // A read through the published tool reaches the server.

@@ -1663,8 +1663,10 @@ async fn first_request(tools: Vec<Arc<AgentTool>>) -> Vec<String> {
 }
 
 // Scope 08: every tool `bake-rs` composes, built through the CLI with the
-// task-document, schedule, and subagent opt-ins and an MCP server, has a
-// replay class, the one recovery reads (`run_journal`). Plugins add no
+// task-document, schedule, and subagent opt-ins and an MCP server with
+// resources, has a replay class, the one recovery reads (`run_journal`):
+// every MCP tool is `Never`, and the three resource tools, whose MCP read
+// method Bake chooses, are `Safe`. Plugins add no
 // tools, only vetoes (`plugins` module). Neither the class nor `read_only`
 // reaches the provider: the session's request declares exactly each tool's
 // declaration, and flipping or clearing both on every tool leaves the
@@ -1695,7 +1697,8 @@ async fn every_composed_tool_has_a_replay_class_no_request_carries(case: Arc<Cas
     if with_mcp {
         write_owned(
             &home.join("mcp.json"),
-            &json!({ "mcpServers": { "fixture": server_json(&case, "fixture", "") } }).to_string(),
+            &json!({ "mcpServers": { "fixture": server_json(&case, "fixture", "resources") } })
+                .to_string(),
         );
     }
     let faux = Arc::new(FauxProvider::new(FauxProviderOptions::default()));
@@ -1777,8 +1780,16 @@ async fn every_composed_tool_has_a_replay_class_no_request_carries(case: Arc<Cas
         .chain(
             FIXTURE_TOOLS
                 .iter()
+                .chain(std::iter::once(&"mcp__fixture__change_resources"))
                 .filter(|_| with_mcp)
                 .map(|name| ((*name).to_owned(), Some(ToolReplay::Never))),
+        )
+        // Bake's own read methods, not a server's `readOnlyHint` claim.
+        .chain(
+            RESOURCE_TOOL_NAMES
+                .iter()
+                .filter(|_| with_mcp)
+                .map(|name| ((*name).to_owned(), Some(ToolReplay::Safe))),
         )
         .collect();
     assert_eq!(classes, expected);
