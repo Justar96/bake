@@ -3,8 +3,9 @@
 //! called, and logged, Esc ending one call, shutdown during `initialize`,
 //! failed discovery, tool-list refreshes with in-flight calls keeping their
 //! generation, a crashed server, a resumed session that declares no stale
-//! tool, and the replay class of every tool `bake-rs` composes, which no
-//! request carries. Each case names the Pi v1.3.0 or Bake TypeScript case it follows,
+//! tool, the resource tools of a server that offers resources, the prompt
+//! section a server's instructions reach, and the replay class of every
+//! tool `bake-rs` composes, which no request carries. Each case names the Pi v1.3.0 or Bake TypeScript case it follows,
 //! where one exists.
 //!
 //! The binary is its own fixture server (`fixture.rs`), so it has its own
@@ -39,17 +40,18 @@ use bake_ai::providers::faux::{
     FauxProvider, FauxProviderOptions, FauxResponseStep, faux_assistant_blocks,
     faux_assistant_message, faux_model, faux_tool_call,
 };
-use bake_ai::transcript::get_current_tools;
+use bake_ai::transcript::{get_current_system_message, get_current_tools};
 use bake_ai::types::{
     Message, SystemContent, SystemMessage, TranscriptContext, UserContent, UserMessage,
 };
+use bake_ai::utils::text::get_system_message_text;
 use bake_ai::{ApiRegistry, AssistantMessage, StopReason, UserContentBlock};
 use bake_coding_agent::agent_session::{AgentSession, AgentSessionOptions};
 use bake_coding_agent::auth_storage::AuthStorage;
 use bake_coding_agent::cli::{CliEnvironment, no_interrupt, parse_args, start_interactive};
 use bake_coding_agent::mcp::{
     McpHttpOptions, McpOptions, McpServerEntry, McpServerState, McpServers, McpTimings,
-    McpToolFilter, load_mcp_config,
+    McpToolFilter, RESOURCE_TOOL_NAMES, load_mcp_config,
 };
 use bake_coding_agent::model_registry::ModelRegistry;
 use bake_coding_agent::model_registry::config::ModelConfig;
@@ -144,6 +146,23 @@ fn main() {
         }),
         ("the_probe_observes_real_processes", |case| {
             Box::pin(the_probe_observes_real_processes(case))
+        }),
+        ("resource_tools_are_declared_called_and_logged", |case| {
+            Box::pin(resource_tools_are_declared_called_and_logged(case))
+        }),
+        (
+            "the_prompt_changes_only_for_a_server_that_reports_something",
+            |case| {
+                Box::pin(the_prompt_changes_only_for_a_server_that_reports_something(
+                    case,
+                ))
+            },
+        ),
+        ("a_resource_call_runs_through_the_veto_pipeline", |case| {
+            Box::pin(a_resource_call_runs_through_the_veto_pipeline(case))
+        }),
+        ("a_resource_list_change_republishes_nothing", |case| {
+            Box::pin(a_resource_list_change_republishes_nothing(case))
         }),
         (
             "every_composed_tool_has_a_replay_class_no_request_carries",
@@ -414,6 +433,8 @@ struct Model {
     registry: Arc<ModelRegistry>,
     apis: Arc<ApiRegistry>,
     requests: Arc<Mutex<Vec<Vec<String>>>>,
+    /// Each request's system prompt, as the transcript rebuilds it.
+    prompts: Arc<Mutex<Vec<String>>>,
 }
 
 impl Model {
@@ -441,6 +462,7 @@ impl Model {
             registry: Arc::new(registry),
             apis,
             requests: Arc::default(),
+            prompts: Arc::default(),
         }
     }
 
@@ -450,6 +472,7 @@ impl Model {
             .into_iter()
             .map(|message| {
                 let requests = Arc::clone(&self.requests);
+                let prompts = Arc::clone(&self.prompts);
                 FauxResponseStep::from_fn(move |context, _, _, _| {
                     let declared = get_current_tools(context.messages())
                         .into_iter()
@@ -459,6 +482,13 @@ impl Model {
                         .lock()
                         .unwrap_or_else(PoisonError::into_inner)
                         .push(declared);
+                    let prompt = get_current_system_message(context.messages())
+                        .map(|system| get_system_message_text(&system))
+                        .unwrap_or_default();
+                    prompts
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .push(prompt);
                     Ok(message.clone())
                 })
             })
@@ -468,6 +498,13 @@ impl Model {
 
     fn requests(&self) -> Vec<Vec<String>> {
         self.requests
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    fn prompts(&self) -> Vec<String> {
+        self.prompts
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .clone()
@@ -487,6 +524,30 @@ fn calls(calls: &[(&str, Value, &str)]) -> AssistantMessage {
 /// A session over `model` with no built-in tools, persisted in `dir` when
 /// it is given.
 async fn session(case: &Case, model: &Model, store: Option<SessionManager>) -> Arc<AgentSession> {
+    build_session(
+        case,
+        model,
+        store,
+        bake_coding_agent::plugins::PluginRegistry::default(),
+    )
+    .await
+}
+
+/// A session like [`session`] whose `plugins` veto its calls.
+async fn session_with_plugins(
+    case: &Case,
+    model: &Model,
+    plugins: bake_coding_agent::plugins::PluginRegistry,
+) -> Arc<AgentSession> {
+    build_session(case, model, None, plugins).await
+}
+
+async fn build_session(
+    case: &Case,
+    model: &Model,
+    store: Option<SessionManager>,
+    plugins: bake_coding_agent::plugins::PluginRegistry,
+) -> Arc<AgentSession> {
     let cwd = case.workspace().to_string_lossy().into_owned();
     let store = store.unwrap_or_else(|| {
         SessionManager::in_memory(Some(&cwd), NewSessionOptions::default(), Vec::new())
@@ -507,7 +568,7 @@ async fn session(case: &Case, model: &Model, store: Option<SessionManager>) -> A
             tool_prompts: Vec::new(),
             system_prompt: SystemPromptOptions::new(&cwd),
             docs_command: "bake-rs docs".into(),
-            plugins: bake_coding_agent::plugins::PluginRegistry::default(),
+            plugins,
             work: Some(WorkGate::default()),
             jobs: None,
         })
@@ -1771,4 +1832,406 @@ async fn every_composed_tool_has_a_replay_class_no_request_carries(case: Arc<Cas
         tool.read_only = false;
     });
     assert_eq!(first_request(cleared).await, original);
+}
+
+/// The content blocks of the result of call `id`, images named by their
+/// media type and data.
+fn result_blocks(session: &AgentSession, id: &str) -> Vec<String> {
+    session
+        .messages()
+        .iter()
+        .filter_map(|message| message.as_tool_result())
+        .find(|result| result.tool_call_id == id)
+        .map(|result| {
+            result
+                .content
+                .iter()
+                .map(|block| match block {
+                    UserContentBlock::Text(text) => text.text.clone(),
+                    UserContentBlock::Image(image) => {
+                        format!("image {} {}", image.mime_type, image.data)
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_else(|| panic!("no result for {id}"))
+}
+
+/// The JSON payload of a resource listing's result, as the model reads it.
+fn result_payload(session: &AgentSession, id: &str) -> Value {
+    let text = result_blocks(session, id).join("\n");
+    serde_json::from_str(&text).unwrap_or_else(|error| panic!("{id} is not JSON: {error}: {text}"))
+}
+
+/// The tools a server with the `resources` fixture mode publishes: its own,
+/// then the three shared resource tools.
+fn resource_fixture_tools() -> Vec<String> {
+    let mut names: Vec<String> = FIXTURE_TOOLS.map(str::to_owned).to_vec();
+    names.push("mcp__fixture__change_resources".into());
+    names.extend(RESOURCE_TOOL_NAMES.map(str::to_owned));
+    names
+}
+
+// Pi `test/suite/agent-session-mcp.test.ts`, "lists and reads resources
+// with Codex's resource tools": a server that declares the `resources`
+// capability publishes the three resource tools with its own generation,
+// the model lists, lists templates, and reads through them, an oversized
+// read is bounded, an image is projected, and the session file logs the
+// generation so a resumed session rebuilds the same declarations.
+async fn resource_tools_are_declared_called_and_logged(case: Arc<Case>) {
+    let model = Model::new();
+    let sessions_dir = case.dir.join("sessions");
+    let cwd = case.workspace().to_string_lossy().into_owned();
+    let store = SessionManager::create(&cwd, Some(&sessions_dir), NewSessionOptions::default())
+        .expect("store");
+    let session = session(&case, &model, Some(store)).await;
+    let servers = entries(
+        &case,
+        json!({ "fixture": server_json(&case, "fixture", "resources") }),
+    );
+    let servers = session
+        .start_mcp(options(
+            &case,
+            servers,
+            SandboxMode::DangerFullAccess,
+            Arc::new(Wrapping::default()),
+        ))
+        .expect("start");
+    model.respond(vec![
+        calls(&[
+            ("list_mcp_resources", json!({}), "list-1"),
+            (
+                "list_mcp_resource_templates",
+                json!({ "server": "fixture" }),
+                "templates-1",
+            ),
+            (
+                "read_mcp_resource",
+                json!({ "server": "fixture", "uri": "docs://intro" }),
+                "read-1",
+            ),
+            (
+                "read_mcp_resource",
+                json!({ "server": "fixture", "uri": "docs://logo" }),
+                "read-image",
+            ),
+            (
+                "read_mcp_resource",
+                json!({ "server": "fixture", "uri": "docs://huge" }),
+                "read-huge",
+            ),
+            (
+                "read_mcp_resource",
+                json!({ "server": "nope", "uri": "docs://intro" }),
+                "read-nope",
+            ),
+            (
+                "read_mcp_resource",
+                json!({ "server": "fixture", "uri": "docs://missing" }),
+                "read-missing",
+            ),
+        ]),
+        faux_assistant_message("done"),
+    ]);
+    session.prompt("read", Vec::new()).await.expect("prompt");
+
+    // The first request declared the server's tools and the resource tools.
+    assert_eq!(model.requests()[0], resource_fixture_tools());
+    // The `ui://` resource is left out, and `_meta` with it.
+    // The model reads the payload as compact JSON, as Codex sends it.
+    assert_eq!(
+        result_blocks(&session, "list-1"),
+        [serde_json::to_string(&json!({
+            "resources": [
+                { "server": "fixture", "uri": "docs://intro", "name": "intro", "mimeType": "text/markdown" },
+                { "server": "fixture", "uri": "docs://logo", "name": "logo", "mimeType": "image/png" },
+            ],
+        }))
+        .unwrap()]
+    );
+    // Icons are left out of a template listing.
+    assert_eq!(
+        result_payload(&session, "templates-1"),
+        json!({
+            "server": "fixture",
+            "resourceTemplates": [
+                { "server": "fixture", "uriTemplate": "docs://pages/{slug}", "name": "page" },
+            ],
+        })
+    );
+    assert_eq!(
+        result_text(&session, "read-1"),
+        ("# docs://intro".into(), false)
+    );
+    assert_eq!(
+        result_blocks(&session, "read-image"),
+        [format!("image image/png {}", fixture::TINY_PNG)]
+    );
+    let huge = result_blocks(&session, "read-huge").join("\n");
+    assert!(huge.starts_with("Warning: truncated output"), "{huge}");
+    assert!(
+        huge.len() < bake_coding_agent::mcp::MCP_OUTPUT_MAX_BYTES + 1_024,
+        "{}",
+        huge.len()
+    );
+    let saved = huge
+        .lines()
+        .last()
+        .and_then(|line| line.strip_prefix("[Full output: "))
+        .and_then(|rest| rest.strip_suffix(" (read it with offset/limit)]"))
+        .unwrap_or_else(|| panic!("{huge}"));
+    assert_eq!(
+        std::fs::read_to_string(saved)
+            .expect("the saved output")
+            .len(),
+        fixture::HUGE_RESOURCE_BYTES
+    );
+    std::fs::remove_dir_all(Path::new(saved).parent().expect("a private directory"))
+        .expect("remove the spill directory");
+    // Pi names the servers that have resources when one does not.
+    assert_eq!(
+        result_text(&session, "read-nope"),
+        (
+            "MCP server \"nope\" has no resources. Servers with resources: fixture".into(),
+            true
+        )
+    );
+    let (missing, is_error) = result_text(&session, "read-missing");
+    assert!(missing.contains("Resource not found"), "{missing}");
+    assert!(is_error);
+
+    // The declaration is in the session file, so a resumed session rebuilds
+    // the same request; the server is gone, so it declares them removed.
+    let file = session.session_file().expect("persisted");
+    assert_eq!(
+        logged_tool_changes(&file),
+        [(resource_fixture_tools(), Vec::new())]
+    );
+    session.shutdown().await;
+    assert!(servers.tool_names().is_empty());
+
+    let reopened = SessionManager::open(&file, Some(&sessions_dir), None).expect("reopen");
+    let resumed = build_session(
+        &case,
+        &model,
+        Some(reopened),
+        bake_coding_agent::plugins::PluginRegistry::default(),
+    )
+    .await;
+    let resumed_servers = resumed
+        .start_mcp(options(
+            &case,
+            entries(
+                &case,
+                json!({ "fixture": server_json(&case, "again", "resources") }),
+            ),
+            SandboxMode::DangerFullAccess,
+            Arc::new(Wrapping::default()),
+        ))
+        .expect("start");
+    wait_for(&resumed_servers, "the second server", |states| {
+        connected(&states[0], 1)
+    })
+    .await;
+    model.respond(vec![faux_assistant_message("again")]);
+    resumed.prompt("again", Vec::new()).await.expect("prompt");
+    assert_eq!(model.requests()[2], resource_fixture_tools());
+    // Nothing was added or removed: the resumed session rebuilt the set.
+    assert_eq!(
+        logged_tool_changes(&resumed.session_file().expect("persisted")).len(),
+        1
+    );
+}
+
+// Bake's model-visible rule: a session with no MCP server, and one whose
+// server reports neither resources nor instructions, send the same system
+// prompt; only a server that reports instructions adds the `mcp_servers`
+// section, bounded to its first line and attributed to the server.
+async fn the_prompt_changes_only_for_a_server_that_reports_something(case: Arc<Case>) {
+    let plain_model = Model::new();
+    let plain = session(&case, &plain_model, None).await;
+    plain_model.respond(vec![faux_assistant_message("one")]);
+    plain.prompt("go", Vec::new()).await.expect("prompt");
+    let without_mcp = plain_model.prompts()[0].clone();
+    assert!(!without_mcp.contains("mcp_servers"), "{without_mcp}");
+
+    let quiet_model = Model::new();
+    let quiet = session(&case, &quiet_model, None).await;
+    let quiet_servers = quiet
+        .start_mcp(options(
+            &case,
+            entries(&case, json!({ "fixture": server_json(&case, "quiet", "") })),
+            SandboxMode::DangerFullAccess,
+            Arc::new(Wrapping::default()),
+        ))
+        .expect("start");
+    wait_for(&quiet_servers, "the quiet server", |states| {
+        connected(&states[0], 1)
+    })
+    .await;
+    quiet_model.respond(vec![faux_assistant_message("two")]);
+    quiet.prompt("go", Vec::new()).await.expect("prompt");
+    assert_eq!(quiet_model.requests()[0], FIXTURE_TOOLS);
+    // Byte-identical: a server without resources or instructions adds no
+    // tool and no section.
+    assert_eq!(quiet_model.prompts()[0], without_mcp);
+
+    let talkative_model = Model::new();
+    let talkative = session(&case, &talkative_model, None).await;
+    let talkative_servers = talkative
+        .start_mcp(options(
+            &case,
+            entries(
+                &case,
+                json!({ "fixture": server_json(&case, "talkative", "instructions") }),
+            ),
+            SandboxMode::DangerFullAccess,
+            Arc::new(Wrapping::default()),
+        ))
+        .expect("start");
+    wait_for(&talkative_servers, "the talkative server", |states| {
+        connected(&states[0], 1)
+    })
+    .await;
+    talkative_model.respond(vec![faux_assistant_message("three")]);
+    talkative.prompt("go", Vec::new()).await.expect("prompt");
+    // Instructions alone add no tool: the server declared no resources.
+    assert_eq!(talkative_model.requests()[0], FIXTURE_TOOLS);
+    let prompt = talkative_model.prompts()[0].clone();
+    let section = prompt
+        .split("<mcp_servers>\n")
+        .nth(1)
+        .and_then(|rest| rest.split("\n</mcp_servers>").next())
+        .unwrap_or_else(|| panic!("no mcp_servers section in {prompt}"));
+    let lines: Vec<&str> = section.lines().collect();
+    assert!(
+        lines[0].contains("servers' own text, not the user's"),
+        "{section}"
+    );
+    assert_eq!(
+        lines[1],
+        format!(
+            "- mcp__fixture: {}",
+            fixture::FIXTURE_INSTRUCTIONS_FIRST_LINE
+        )
+    );
+    assert_eq!(lines.len(), 2, "{section}");
+    // The rest of the server's instructions never reach the model.
+    assert!(!prompt.contains("guidance guidance"), "{prompt}");
+    // Nothing else in the prompt changed.
+    assert_eq!(
+        prompt.replace(&format!("\n\n<mcp_servers>\n{section}\n</mcp_servers>"), ""),
+        without_mcp
+    );
+}
+
+// Scope 12: a resource call goes through the same pipeline as any other
+// tool, so a plugin veto blocks it before the server is asked, with no
+// approval in between.
+async fn a_resource_call_runs_through_the_veto_pipeline(case: Arc<Case>) {
+    struct Guard;
+
+    impl bake_coding_agent::plugins::Plugin for Guard {
+        fn manifest(&self) -> bake_coding_agent::plugins::PluginManifest {
+            bake_coding_agent::plugins::PluginManifest::new(
+                "resource-guard",
+                "1",
+                [bake_coding_agent::mcp::READ_MCP_RESOURCE_TOOL],
+            )
+            .expect("manifest")
+        }
+
+        fn on_tool_call<'a>(
+            &'a self,
+            _call: bake_coding_agent::plugins::ToolCallView<'a>,
+        ) -> bake_agent::BoxFuture<'a, Result<bake_coding_agent::plugins::ToolCallVeto, String>>
+        {
+            Box::pin(async {
+                Ok(bake_coding_agent::plugins::ToolCallVeto::Block {
+                    reason: "resource reads are not allowed here".into(),
+                    terminate: false,
+                })
+            })
+        }
+    }
+
+    let model = Model::new();
+    let mut plugins = bake_coding_agent::plugins::PluginRegistry::new();
+    plugins.register(Arc::new(Guard), 0).expect("register");
+    let session = session_with_plugins(&case, &model, plugins).await;
+    let servers = session
+        .start_mcp(options(
+            &case,
+            entries(
+                &case,
+                json!({ "fixture": server_json(&case, "fixture", "resources") }),
+            ),
+            SandboxMode::DangerFullAccess,
+            Arc::new(Wrapping::default()),
+        ))
+        .expect("start");
+    wait_for(&servers, "the server", |states| connected(&states[0], 1)).await;
+    model.respond(vec![
+        calls(&[
+            (
+                "read_mcp_resource",
+                json!({ "server": "fixture", "uri": "docs://intro" }),
+                "read-1",
+            ),
+            ("list_mcp_resources", json!({}), "list-1"),
+        ]),
+        faux_assistant_message("done"),
+    ]);
+    session.prompt("read", Vec::new()).await.expect("prompt");
+    assert_eq!(
+        result_text(&session, "read-1"),
+        ("resource reads are not allowed here".into(), true)
+    );
+    // The listing the manifest does not name still runs.
+    assert!(!result_text(&session, "list-1").1);
+    let events = case.events("fixture");
+    assert!(
+        !events.iter().any(|event| event.starts_with("read ")),
+        "the blocked call reached the server: {events:?}"
+    );
+    assert!(
+        events.iter().any(|event| event == "resources/list"),
+        "{events:?}"
+    );
+}
+
+// `notifications/resources/list_changed` republishes nothing, as in Pi: the
+// generation stays, and the next listing shows the server's new set.
+async fn a_resource_list_change_republishes_nothing(case: Arc<Case>) {
+    let model = Model::new();
+    let session = session(&case, &model, None).await;
+    let servers = session
+        .start_mcp(options(
+            &case,
+            entries(
+                &case,
+                json!({ "fixture": server_json(&case, "fixture", "resources") }),
+            ),
+            SandboxMode::DangerFullAccess,
+            Arc::new(Wrapping::default()),
+        ))
+        .expect("start");
+    model.respond(vec![
+        calls(&[("mcp__fixture__change_resources", json!({}), "change-1")]),
+        calls(&[("list_mcp_resources", json!({}), "list-1")]),
+        faux_assistant_message("done"),
+    ]);
+    session.prompt("change", Vec::new()).await.expect("prompt");
+    assert_eq!(result_text(&session, "change-1"), ("added".into(), false));
+    // The published generation is the first one still: no tool changed.
+    assert!(connected(&servers.statuses()[0].state, 1));
+    assert_eq!(servers.tool_names(), resource_fixture_tools());
+    let listed = result_payload(&session, "list-1");
+    let uris: Vec<&str> = listed["resources"]
+        .as_array()
+        .expect("resources")
+        .iter()
+        .filter_map(|resource| resource["uri"].as_str())
+        .collect();
+    assert_eq!(uris, ["docs://intro", "docs://logo", "docs://extra"]);
 }
