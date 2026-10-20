@@ -50,6 +50,18 @@ function scratch(label: string): string {
 }
 
 /** Run a PowerShell script, bounded, with its own environment. */
+/**
+ * What a run printed, as one line of plain text. PowerShell 7 renders a
+ * thrown error in its concise view, colored and wrapped at the console width
+ * behind `|` gutters, so a message can be split anywhere.
+ */
+function said(run: InstallerRun): string {
+  return `${run.stdout}${run.stderr}`
+    .replace(/\u001b\[[0-9;]*m/gu, '')
+    .replace(/\s*\|\s*/gu, ' ')
+    .replace(/\s+/gu, ' ')
+}
+
 function runPowerShell(script: string, args: readonly string[], env: Record<string, string> = {}): Promise<InstallerRun> {
   if (PWSH === undefined) throw new Error('No PowerShell available')
   // Windows PowerShell needs its own module path, not PowerShell Core's.
@@ -253,7 +265,7 @@ describe.skipIf(PWSH === undefined)('the Windows installer', () => {
     writeFileSync(join(binDir, 'bake.cmd'), mine)
     const refused = await runPowerShell(installer, [], env)
     expect(refused.status).not.toBe(0)
-    expect(`${refused.stdout}${refused.stderr}`).toContain('no Bake installer made it')
+    expect(said(refused)).toContain('no Bake installer made it')
     expect(readFileSync(join(binDir, 'bake.cmd'), 'utf8')).toBe(mine)
 
     const replaced = await runPowerShell(installer, [], { ...env, BAKE_REPLACE_COMMAND: '1' })
@@ -376,7 +388,7 @@ Invoke-Expression (Get-Content -Raw -LiteralPath $env:BAKE_TEST_INSTALLER)
       BAKE_SKIP_PATH_UPDATE: '1',
     })
     expect(result.status).not.toBe(0)
-    expect(`${result.stdout}${result.stderr}`).toContain('signature did not verify')
+    expect(said(result)).toContain('signature did not verify')
     expect(existsSync(join(root, 'current.txt'))).toBe(false)
     expect(existsSync(join(binDir, 'bake.cmd'))).toBe(false)
   }, 180_000)

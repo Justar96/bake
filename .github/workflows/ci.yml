@@ -157,7 +157,8 @@ jobs:
           New-Item -ItemType Directory -Force ../.preflight | Out-Null
           cargo test --locked -p bake-process --test windows_job_rundown 2>&1 | Tee-Object ../.preflight/windows-job-rundown.log
           exit $LASTEXITCODE
-      - run: bun run preflight --only native
+      # The installer checks run before the native gate, so a failure there
+      # cannot hide their evidence.
       # install.ps1 carries its own Ed25519 verifier: run its suite under the
       # Windows PowerShell 5.1 that a plain `irm | iex` install uses, and pwsh.
       - name: Check the Windows installer under Windows PowerShell 5.1
@@ -180,6 +181,7 @@ jobs:
         run: |
           openssl version || true
           bun test --timeout=180000 ./scripts/release/native-install.test.ts ./scripts/release/native-install-ed25519.test.ts
+      - run: bun run preflight --only native
       # Per-binary test durations, kept on success to watch the job's budget.
       - uses: actions/upload-artifact@v4
         if: success()
