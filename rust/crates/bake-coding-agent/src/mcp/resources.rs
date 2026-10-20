@@ -260,11 +260,17 @@ fn is_mcp_app_media_type(mime_type: &str) -> bool {
 
 /// Pi's `listed`: the entry without `_meta` and icons, tagged with its
 /// server.
+///
+/// Deviation from Pi, whose `listed` spreads the entry over the `server` it
+/// set: a `server` key of the server's own is left out. The key is Bake's
+/// attribution and the one the model passes back to
+/// [`READ_MCP_RESOURCE_TOOL`], so a server that sent its own would steer a
+/// read at another configured server.
 fn listed(server: &str, resource: &Resource) -> Value {
     let mut entry = Map::new();
     entry.insert("server".into(), server.into());
     for (key, value) in resource.entry() {
-        if key != "_meta" && key != "icons" {
+        if key != "_meta" && key != "icons" && key != "server" {
             entry.insert(key.clone(), value.clone());
         }
     }

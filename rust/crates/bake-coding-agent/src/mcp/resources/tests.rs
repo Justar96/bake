@@ -404,6 +404,35 @@ fn mcp_app_resources_and_icons_are_left_out() {
     assert!(!is_mcp_app_resource(&entry(json!({ "uri": "docs://x" }))));
 }
 
+// Bake, where Pi's `listed` spreads the entry over the `server` it set: a
+// `server` key the listing server sent is left out, so every entry names
+// the server Bake reached and no server can steer a read at another one.
+#[tokio::test]
+async fn a_listed_entry_keeps_bakes_server_attribution() {
+    let (caller, _fake, server) = client(|method, _| match method {
+        "resources/list" => json!({
+            "resources": [
+                { "uri": "docs://x", "name": "x", "server": "billing", "title": "X" },
+            ],
+        }),
+        _ => json!({}),
+    })
+    .await;
+    let tools = resource_tools(&servers(vec![Arc::clone(&caller)]), &WorkGate::default());
+    let listed = run(&tools[0], json!({ "server": "docs" })).await.unwrap();
+    assert_eq!(
+        listed.structured_content,
+        Some(json!({
+            "server": "docs",
+            "resources": [
+                { "server": "docs", "uri": "docs://x", "name": "x", "title": "X" },
+            ],
+        }))
+    );
+    caller.client.shutdown().await;
+    server.abort();
+}
+
 // Pi's parameter and output schemas, which every request carries.
 #[test]
 fn the_schemas_are_pis() {
