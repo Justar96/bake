@@ -124,12 +124,13 @@ lock_stale() {
   return 0
 }
 
-# A stalled host fails the install rather than holding it open forever.
+# A stalled host fails the install rather than holding it open forever: the
+# third argument is how many seconds the whole transfer may take.
 fetch_to() {
   if need curl; then
-    curl -fsSL --connect-timeout 20 --max-time 1800 "$1" -o "$2" || fail "could not download $1"
+    curl -fsSL --connect-timeout 20 --max-time "$3" "$1" -o "$2" || fail "could not download $1"
   else
-    wget -q --timeout=20 --tries=3 -O "$2" "$1" || fail "could not download $1"
+    wget -q --timeout=20 --tries=2 -O "$2" "$1" || fail "could not download $1"
   fi
 }
 
@@ -370,8 +371,8 @@ install_release() {
   set_pointer_mv
 
   step 'Verifying the native release manifest'
-  fetch_to "$download_url/native/stable.json" "$temporary/stable.json"
-  fetch_to "$download_url/native/stable.json.sig" "$temporary/stable.json.sig"
+  fetch_to "$download_url/native/stable.json" "$temporary/stable.json" 60
+  fetch_to "$download_url/native/stable.json.sig" "$temporary/stable.json.sig" 60
   {
     printf '%s\n' '-----BEGIN PUBLIC KEY-----'
     printf '%s\n' "$native_release_key" | fold -w 64
@@ -424,7 +425,7 @@ install_release() {
   step "Found Bake $version for $target"
 
   step "Downloading $file"
-  fetch_to "$download_url/native/releases/$version/$file" "$temporary/$file"
+  fetch_to "$download_url/native/releases/$version/$file" "$temporary/$file" 1800
   actual_size=$(wc -c < "$temporary/$file" | tr -d ' ')
   [ "$actual_size" = "$size" ] || fail "$file is $actual_size bytes, not the $size the manifest states"
   actual=$(sha256_of "$temporary/$file")

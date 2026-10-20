@@ -169,10 +169,10 @@ export function startReleaseHost(files: () => HostFiles): ReleaseHost {
       const { pathname } = new URL(request.url)
       requests.push(pathname)
       const served = files()
-      if (pathname === '/native/stable.json') return new Response(served.manifest)
+      if (pathname === '/native/stable.json') return new Response(new Uint8Array(served.manifest))
       if (pathname === '/native/stable.json.sig') return new Response(`${served.signature}\n`)
       const release = served.releases.get(pathname)
-      return release === undefined ? new Response('not found', { status: 404 }) : new Response(release)
+      return release === undefined ? new Response('not found', { status: 404 }) : new Response(new Uint8Array(release))
     },
   })
   return {
@@ -185,6 +185,44 @@ export function startReleaseHost(files: () => HostFiles): ReleaseHost {
 /** The release path a packed archive is served from. */
 export function releasePath(release: NativeRelease): string {
   return `/native/releases/${release.version}/${release.file}`
+}
+
+/** What one installer run reported. */
+export interface InstallerRun {
+  readonly status: number
+  readonly stdout: string
+  readonly stderr: string
+}
+
+/** No installer run in these tests may take longer; the host is on loopback. */
+export const INSTALLER_RUN_TIMEOUT_MS = 60_000
+
+/**
+ * Run an installer, bounded, and collect both streams.
+ *
+ * Asynchronous on purpose: the release host runs in this process, so a
+ * blocking spawn would stop it answering the installer's own download.
+ * @param argv - the command and its arguments.
+ * @param env - the whole environment the installer runs with.
+ * @param timeoutMs - how long the run may take before its process group is killed.
+ */
+export async function runInstaller(
+  argv: readonly string[], env: Record<string, string>, timeoutMs = INSTALLER_RUN_TIMEOUT_MS,
+): Promise<InstallerRun> {
+  const child = Bun.spawn([...argv], {
+    stdin: 'ignore', stdout: 'pipe', stderr: 'pipe', detached: process.platform !== 'win32', env,
+  })
+  let killed = false
+  const watchdog = setTimeout(() => {
+    killed = true
+    try { process.kill(-child.pid, 'SIGKILL') } catch { child.kill('SIGKILL') }
+  }, timeoutMs)
+  const [status, stdout, stderr] = await Promise.all([
+    child.exited, new Response(child.stdout).text(), new Response(child.stderr).text(),
+  ])
+  clearTimeout(watchdog)
+  if (killed) throw new Error(`${argv.join(' ')} did not finish within ${String(timeoutMs)} ms\n${stdout}\n${stderr}`)
+  return { status, stdout, stderr }
 }
 
 /** The line each installer embeds the native release key in. */

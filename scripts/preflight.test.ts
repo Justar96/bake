@@ -47,7 +47,7 @@ describe('preflight', () => {
   })
 
   it('checks the Rust workspace before its PTY, package, and eval scenarios and excludes them from --fast', () => {
-    expect(selected(['--only', 'native'])).toEqual(['rust', 'rust-pty', 'rust-package', 'rust-eval'])
+    expect(selected(['--only', 'native'])).toEqual(['rust', 'rust-pty', 'rust-package', 'rust-install', 'rust-eval'])
     expect(selected(['--fast', '--only', 'native'])).toEqual([])
     expect(STEPS.find(step => step.name === 'rust')?.command?.(parseOptions([]), scope([])))
       .toEqual(['bun', 'run', 'check:rust'])
@@ -55,12 +55,16 @@ describe('preflight', () => {
       .toEqual(['bun', 'run', 'test:rust:pty'])
     expect(STEPS.find(step => step.name === 'rust-package')?.command?.(parseOptions([]), scope([])))
       .toEqual(['bun', 'run', 'test:rust:package'])
+    expect(STEPS.find(step => step.name === 'rust-install')?.command?.(parseOptions([]), scope([])))
+      .toEqual(process.platform === 'win32'
+        ? { skip: 'the native installer rehearsal needs a POSIX shell; install.ps1 is checked on Windows' }
+        : ['bun', 'run', 'test:rust:install'])
     expect(STEPS.find(step => step.name === 'rust-eval')?.command?.(parseOptions([]), scope([])))
       .toEqual(['bun', 'run', 'test:rust:eval'])
   })
 
   it('blocks artifact checks after their own build fails, without blocking the other workspace', () => {
-    for (const step of STEPS.filter(entry => ['e2e', 'rust-pty', 'rust-package', 'rust-eval'].includes(entry.name))) {
+    for (const step of STEPS.filter(entry => ['e2e', 'rust-pty', 'rust-package', 'rust-install', 'rust-eval'].includes(entry.name))) {
       const owner = step.name === 'e2e' ? 'build' : 'rust'
       const other = owner === 'rust' ? 'build' : 'rust'
       expect(failedBuild(step, new Map([[owner, { outcome: 'fail' }], [other, { outcome: 'pass' }]]))).toBe(owner)

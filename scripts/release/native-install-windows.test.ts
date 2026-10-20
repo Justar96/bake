@@ -17,8 +17,8 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, wr
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import {
-  ed25519VerifierRegion, ephemeralKey, installerTrusting, manifestBytes, releasePath, signManifest, startReleaseHost, stubRelease,
-  type HostFiles, type ReleaseHost,
+  ed25519VerifierRegion, ephemeralKey, installerTrusting, manifestBytes, releasePath, runInstaller, signManifest, startReleaseHost,
+  stubRelease, type HostFiles, type InstallerRun, type ReleaseHost,
 } from './native-install-fixture.ts'
 
 const roots: string[] = []
@@ -47,25 +47,17 @@ function scratch(label: string): string {
 }
 
 /** Run a PowerShell script, bounded, with its own environment. */
-async function runPowerShell(
-  script: string, args: readonly string[], env: Record<string, string> = {},
-): Promise<{ status: number; stdout: string; stderr: string }> {
+function runPowerShell(script: string, args: readonly string[], env: Record<string, string> = {}): Promise<InstallerRun> {
   if (PWSH === undefined) throw new Error('No PowerShell available')
-  const child = Bun.spawn([PWSH, '-NoProfile', '-NonInteractive', '-File', script, ...args], {
-    stdin: 'ignore', stdout: 'pipe', stderr: 'pipe', detached: process.platform !== 'win32',
-    env: { PATH: process.env['PATH'] ?? '', HOME: process.env['HOME'] ?? '', ...env },
-  })
-  let killed = false
-  const watchdog = setTimeout(() => {
-    killed = true
-    try { process.kill(-child.pid, 'SIGKILL') } catch { child.kill('SIGKILL') }
-  }, RUN_TIMEOUT_MS)
-  const [status, stdout, stderr] = await Promise.all([
-    child.exited, new Response(child.stdout).text(), new Response(child.stderr).text(),
-  ])
-  clearTimeout(watchdog)
-  if (killed) throw new Error(`PowerShell did not finish within ${String(RUN_TIMEOUT_MS)} ms\n${stdout}\n${stderr}`)
-  return { status, stdout, stderr }
+  // Windows PowerShell needs its own module path, not PowerShell Core's.
+  const inherited = process.platform === 'win32'
+    ? Object.fromEntries(Object.entries(process.env).filter(([name]) => name.toUpperCase() !== 'PSMODULEPATH'))
+    : { PATH: process.env['PATH'] ?? '', HOME: process.env['HOME'] ?? '' }
+  return runInstaller(
+    [PWSH, '-NoProfile', '-NonInteractive', '-File', script, ...args],
+    { ...inherited, ...env } as Record<string, string>,
+    RUN_TIMEOUT_MS,
+  )
 }
 
 /** One signature the verifier is asked about. */

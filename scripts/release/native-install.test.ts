@@ -17,8 +17,8 @@ import {
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
-  embeddedKey, ephemeralKey, installerTrusting, manifestBytes, releasePath, signManifest, startReleaseHost, stubRelease,
-  type HostFiles, type NativeRelease, type ReleaseHost, type StubOptions,
+  embeddedKey, ephemeralKey, installerTrusting, manifestBytes, releasePath, runInstaller, signManifest, startReleaseHost, stubRelease,
+  type HostFiles, type InstallerRun, type NativeRelease, type ReleaseHost, type StubOptions,
 } from './native-install-fixture.ts'
 
 const roots: string[] = []
@@ -46,16 +46,6 @@ interface Scenario {
   sign(bytes: Buffer): string
   run(args?: readonly string[], env?: Record<string, string>): Promise<InstallerRun>
 }
-
-/** What one installer run reported. */
-interface InstallerRun {
-  readonly status: number
-  readonly stdout: string
-  readonly stderr: string
-}
-
-/** No installer run in these tests may take longer; the host is on loopback and the releases are tiny. */
-const RUN_TIMEOUT_MS = 60_000
 
 function scenario(): Scenario {
   const directory = mkdtempSync(join(tmpdir(), 'bake-native-install-'))
@@ -87,32 +77,16 @@ function scenario(): Scenario {
       this.serve(release)
       return release
     },
-    // Asynchronous: the release host runs in this process, so a blocking
-    // spawn would stop it answering the installer's own download.
-    async run(args = [], env = {}): Promise<InstallerRun> {
-      const child = Bun.spawn(['sh', installer, ...args], {
-        stdin: 'ignore', stdout: 'pipe', stderr: 'pipe', detached: true,
-        env: {
-          PATH: process.env['PATH'] ?? '/usr/bin:/bin',
-          HOME: home,
-          TMPDIR: join(directory, 'tmp'),
-          BAKE_DOWNLOAD_URL: host.origin,
-          BAKE_NATIVE_ROOT: root,
-          BAKE_BIN_DIR: binDir,
-          ...env,
-        },
+    run(args = [], env = {}): Promise<InstallerRun> {
+      return runInstaller(['sh', installer, ...args], {
+        PATH: process.env['PATH'] ?? '/usr/bin:/bin',
+        HOME: home,
+        TMPDIR: join(directory, 'tmp'),
+        BAKE_DOWNLOAD_URL: host.origin,
+        BAKE_NATIVE_ROOT: root,
+        BAKE_BIN_DIR: binDir,
+        ...env,
       })
-      let killed = false
-      const watchdog = setTimeout(() => {
-        killed = true
-        try { process.kill(-child.pid, 'SIGKILL') } catch { child.kill('SIGKILL') }
-      }, RUN_TIMEOUT_MS)
-      const [status, stdout, stderr] = await Promise.all([
-        child.exited, new Response(child.stdout).text(), new Response(child.stderr).text(),
-      ])
-      clearTimeout(watchdog)
-      if (killed) throw new Error(`The installer did not finish within ${String(RUN_TIMEOUT_MS)} ms\n${stdout}\n${stderr}`)
-      return { status, stdout, stderr }
     },
   }
 }

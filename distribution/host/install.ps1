@@ -340,9 +340,11 @@ function BakeIsLegacyShim([string]$text) {
   return ($text -match 'BAKE_RELEASE_ROOT' -and $text -match 'apps\\cli\\lib\\bin\.js')
 }
 
-function BakeFetch([string]$url, [string]$path) {
+# A stalled host fails the install rather than holding it open forever; the
+# manifest and its signature are small, so they get a short deadline.
+function BakeFetch([string]$url, [string]$path, [int]$timeoutSeconds) {
   try {
-    Invoke-WebRequest $url -UseBasicParsing -TimeoutSec 1800 -OutFile $path
+    Invoke-WebRequest $url -UseBasicParsing -TimeoutSec $timeoutSeconds -OutFile $path
   } catch {
     throw "Bake install: could not download $url"
   }
@@ -445,8 +447,8 @@ function BakeInstall() {
   Write-Output 'Verifying the native release manifest'
   $manifestPath = Join-Path $script:temporary 'stable.json'
   $signaturePath = Join-Path $script:temporary 'stable.json.sig'
-  BakeFetch "$downloadUrl/native/stable.json" $manifestPath
-  BakeFetch "$downloadUrl/native/stable.json.sig" $signaturePath
+  BakeFetch "$downloadUrl/native/stable.json" $manifestPath 60
+  BakeFetch "$downloadUrl/native/stable.json.sig" $signaturePath 60
   $key = BakeSpkiPublicKey $nativeReleaseKey
   if ($null -eq $key) { throw 'Bake install: this installer carries no usable native release key' }
   $signatureText = ([IO.File]::ReadAllText($signaturePath)).Trim()
@@ -490,7 +492,7 @@ function BakeInstall() {
 
   Write-Output "Downloading $file"
   $archive = Join-Path $script:temporary $file
-  BakeFetch "$downloadUrl/native/releases/$version/$file" $archive
+  BakeFetch "$downloadUrl/native/releases/$version/$file" $archive 1800
   $actualSize = (Get-Item -LiteralPath $archive).Length
   if ($actualSize -ne $size) { throw "Bake install: $file is $actualSize bytes, not the $size the manifest states" }
   $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash.ToLowerInvariant()
