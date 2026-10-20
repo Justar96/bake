@@ -130,9 +130,13 @@ jobs:
         run: rustup toolchain install --no-self-update
       # Reuse dependency builds across runs; the Windows job otherwise spends
       # most of its time budget compiling the workspace twice (clippy and test).
+      # Save even when a later step fails: a runner whose job fails every run,
+      # as Windows did on its known PTY gaps, otherwise never saves and
+      # rebuilds every dependency each time (run 39502149981: no cache found).
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust -> target
+          cache-on-failure: true
       - name: Install the Rust test runner
         uses: taiki-e/install-action@v2
         with:
@@ -140,9 +144,11 @@ jobs:
       # The package check generates the archive's dependency license text with
       # exactly cargo-about 0.9.2 and fails without it. It is built once per
       # runner OS and architecture, locked, and the build is cached by version.
+      # The build is saved as soon as it is installed, not at the job's end,
+      # so a job that fails later still keeps it.
       - name: Restore cargo-about 0.9.2
         id: cargo-about
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/cargo-about-0.9.2
           key: cargo-about-0.9.2-${{ runner.os }}-${{ runner.arch }}
@@ -151,6 +157,12 @@ jobs:
         working-directory: rust
         shell: bash
         run: cargo install cargo-about --version =0.9.2 --locked --features cli --root "$RUNNER_TEMP/cargo-about-0.9.2"
+      - name: Save cargo-about 0.9.2
+        if: steps.cargo-about.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/cargo-about-0.9.2
+          key: ${{ steps.cargo-about.outputs.cache-primary-key }}
       - name: Select cargo-about 0.9.2
         shell: bash
         run: |

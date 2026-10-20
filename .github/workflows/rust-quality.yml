@@ -55,6 +55,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust -> target
+          # Keep the build when a step fails, as for the CI workflow.
+          cache-on-failure: true
       - name: Install the Rust quality tools
         uses: taiki-e/install-action@v2
         with:
