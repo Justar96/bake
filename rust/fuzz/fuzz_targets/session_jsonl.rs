@@ -23,6 +23,8 @@ use libfuzzer_sys::fuzz_target;
 
 thread_local! {
     /// One scratch file per fuzzing process; jobs are separate processes.
+    /// It is removed after every input, so a direct `cargo fuzz run` leaves
+    /// at most one file behind when the process is killed mid-input.
     static SCRATCH: OnceCell<PathBuf> = const { OnceCell::new() };
 }
 
@@ -49,6 +51,7 @@ fuzz_target!(|data: &[u8]| {
     if std::fs::write(&path, data).is_ok() {
         let _ = load_entries_from_file(&path);
     }
+    let _ = std::fs::remove_file(&path);
 
     migrate_session_entries(&mut entries);
     let tree: Vec<SessionEntry> = entries
