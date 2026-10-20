@@ -107,7 +107,13 @@
 //! A POST is sent once. A network error, a stream that ends, or any other
 //! failure before the request's response arrives fails the request; it is
 //! never retried, since the server may have run it already, and a stream's
-//! end is never taken as an answer. A response stream that breaks after the
+//! end is never taken as an answer. The client of
+//! [`HttpTransport::start`] follows no redirect, so nothing resends a POST
+//! behind the transport's back; a client a caller supplies
+//! ([`HttpTransport::start_with_client`]) whose policy follows one does:
+//! `reqwest` replays the POST body on 307 and 308 and rewrites it into a
+//! GET on 301, 302, and 303, so a POST that crosses a redirect reaches the
+//! server twice. A response stream that breaks after the
 //! server gave an event ID is resumed with GET and `Last-Event-ID`, which
 //! replays the stream without running the request again; the GET stream is
 //! reopened the same way. Both use Pi's bounded backoff ([`Reconnect`]) and
@@ -166,7 +172,8 @@
 //! response fails its request without contacting the target, so caller
 //! headers cannot reach another origin. It reads no proxy environment. With
 //! [`HttpTransport::start_with_client`] those two are the supplied client's
-//! to decide, and a 3xx it does not follow still fails its request. A URL
+//! to decide, a followed redirect resends the request as described above,
+//! and a 3xx it does not follow still fails its request. A URL
 //! with a user name or password is refused either way. `Debug` output of the options, the transport, and its halves
 //! shows the URL's origin only, and no header value or session ID; caller
 //! header values are also marked sensitive for `reqwest`.
@@ -706,7 +713,9 @@ impl HttpTransport {
     /// addresses its policy pinned and whose redirect policy refuses a
     /// cross-origin hop, so the transport reaches only the admitted origin.
     /// A 3xx response the client does not follow is still
-    /// [`HttpError::Redirect`].
+    /// [`HttpError::Redirect`]; one it does follow resends the request,
+    /// which is the caller's exception to this module's "a POST is sent
+    /// once".
     ///
     /// Must be called inside a Tokio runtime.
     pub fn start_with_client(

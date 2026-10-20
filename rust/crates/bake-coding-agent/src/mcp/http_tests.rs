@@ -19,8 +19,8 @@ use bake_agent::{AgentTool, AgentToolUpdateCallback, ToolContext};
 use bake_ai::UserContentBlock;
 use serde_json::{Value, json};
 
-use super::super::egress::HostResolver;
-use super::super::http_test_server::{Call, Initialize, Server, Shared, protocol};
+use super::super::egress::{HostResolver, MAX_REDIRECTS};
+use super::super::http_test_server::{Call, Initialize, Redirect, Server, Shared, protocol};
 use super::super::{
     McpHttpOptions, McpOptions, McpServerState, McpServers, McpTimings, McpToolFilter,
     parse_mcp_config,
@@ -207,7 +207,12 @@ async fn a_redirect_to_another_origin_is_refused() {
     let state = Shared::default();
     let server = Server::start(protocol(&state)).await;
     let other = Server::start(protocol(&Shared::default())).await;
-    state.set(|state| state.redirect = Some(other.url.clone()));
+    state.set(|state| {
+        state.redirect = Some(Redirect {
+            location: other.url.clone(),
+            path: None,
+        });
+    });
     let started = start(entry(&server.url), quick(), None);
     started
         .wait_for("the refusal", |state| {
@@ -229,24 +234,73 @@ async fn a_redirect_to_another_origin_is_refused() {
     server.stop().await;
     other.stop().await;
 
-    // A same-origin redirect is followed, within the bound.
+    // A same-origin redirect is followed, and no more than three hops: the
+    // fixture redirects every POST, so the chain ends at the bound.
     let state = Shared::default();
     let server = Server::start(protocol(&state)).await;
-    state.set(|state| state.redirect = Some(format!("http://127.0.0.1:{}/moved", server.port)));
-    let started = start(entry(&server.url), quick(), None);
+    state.set(|state| {
+        state.redirect = Some(Redirect {
+            location: format!("http://127.0.0.1:{}/moved", server.port),
+            path: None,
+        });
+    });
+    let one_attempt = McpHttpOptions {
+        max_reconnect_attempts: 0,
+        ..quick()
+    };
+    let started = start(entry(&server.url), one_attempt, None);
     started
-        .wait_for("the server to answer somehow", |state| {
-            !matches!(state, McpServerState::Connecting)
+        .wait_for("the exhausted chain", |state| {
+            matches!(state, McpServerState::Failed { .. })
         })
         .await;
-    assert!(
+    assert_eq!(
         server
             .requests()
             .iter()
-            .any(|request| request.path == "/moved"),
+            .filter(|request| request.path == "/moved")
+            .count(),
+        MAX_REDIRECTS,
         "{:?}",
         server.requests()
     );
+    let error = error_text(&started.state());
+    assert!(error.contains("more than 3 redirects"), "{error}");
+    started.shutdown().await;
+    server.stop().await;
+}
+
+// Bake's own, pinning the one exception to "a POST is sent once": the
+// connection's client follows a same-origin redirect, and reqwest resends
+// the POST body on a 307, so a server that answers a POST with one sees
+// that request twice, a tool call included. `super::super::egress`'s
+// redirect bullet documents the exception and why the policy cannot admit
+// `initialize` alone.
+#[tokio::test]
+async fn a_same_origin_redirect_resends_the_post_it_answers() {
+    let state = Shared::default();
+    let server = Server::start(protocol(&state)).await;
+    state.set(|state| {
+        state.redirect = Some(Redirect {
+            location: format!("http://127.0.0.1:{}/moved", server.port),
+            path: Some("/mcp".to_owned()),
+        });
+    });
+    let started = start(entry(&server.url), quick(), None);
+    started.wait_for("the first generation", connected).await;
+    assert_eq!(started.servers.tool_names(), ["mcp__remote__echo"]);
+    let paths = |method: &str| -> Vec<String> {
+        server
+            .rpc(method)
+            .iter()
+            .map(|request| request.path.clone())
+            .collect()
+    };
+    // Each POST arrived twice: at the configured endpoint, which answered
+    // the 307, and at the location it was sent to, which served it.
+    assert_eq!(paths("initialize"), ["/mcp", "/moved"]);
+    assert_eq!(started.call("mcp__remote__echo").await, Ok("hello".into()));
+    assert_eq!(paths("tools/call"), ["/mcp", "/moved"]);
     started.shutdown().await;
     server.stop().await;
 }

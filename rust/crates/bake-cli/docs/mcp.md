@@ -59,7 +59,7 @@ A `url` server starts no process: bake-rs itself connects to it. Like `web_searc
 
 - The host is resolved once per connection and that address is used for every request of it, so a name that later answers with another address cannot move the connection.
 - A loopback or private address is allowed, so a local server works; `http` is refused when the host resolves to an address that leaves this machine's networks, because the `headers` would cross a public network in clear text. Use `https` there.
-- A redirect to another origin is refused; a redirect within the same origin is followed up to three times.
+- A redirect to another origin is refused; a redirect within the same origin is followed up to three times. Following one resends the request, so a server that answers a request with a redirect receives it twice. Point `url` at the endpoint the server redirects to, and each request is sent once.
 - `headers` are the only credentials sent. Their values are never printed in a warning, an error, or a log, and a server that answers with them in its own message has them removed from what bake-rs shows.
 - Connections are made directly. `HTTPS_PROXY`, `HTTP_PROXY`, and `NO_PROXY` are not read: a proxy would resolve the host itself, so the address could not be pinned.
 - A response or a server-sent event over 16 MiB is refused.
@@ -70,7 +70,7 @@ The server's tools are published once it has answered `initialize` and `tools/li
 
 - When the server expires that session (HTTP 404), bake-rs connects again at once, lists the tools afresh, and gives the next prompt the new list. A prompt in flight sees the tools it started with.
 - A lost connection is retried, waiting 500 ms and doubling to 30 seconds, and the server gives up after ten failures in a row; a connection that served for longer than 30 seconds starts that count again.
-- A tool call interrupted by any of this fails with an error: bake-rs never sends a call twice, because the server may have run the first one already.
+- A tool call interrupted by any of this fails with an error: bake-rs never sends a call twice, because the server may have run the first one already. The one exception is a server that answers the call with a same-origin redirect, which bake-rs follows and which resends the call.
 - A server that answers 401, or 403 asking for a wider scope, needs OAuth sign-in, which bake-rs does not support yet: it reports that and stops. Put a token in `headers` instead.
 - Closing a session ends each HTTP session (`DELETE`) before bake-rs exits.
 

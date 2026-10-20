@@ -48,7 +48,12 @@
 //! - A tool call in flight when a connection ends fails with the
 //!   transport's error. It is never retried and never sent again, on this
 //!   connection or the next: the server may have run it already
-//!   (`bake-mcp`'s HTTP transport posts a request once).
+//!   (`bake-mcp`'s HTTP transport posts a request once). The one exception
+//!   is a server that answers the call's POST with a same-origin redirect,
+//!   which [`super::egress`]' policy follows: `reqwest` resends the body on
+//!   the hop, so that server sees the call twice. The [egress
+//!   documentation](super::egress) states why the policy cannot admit
+//!   `initialize` alone.
 //! - A refusal of the configuration itself — an unusable URL, a header that
 //!   runs a command or names an unset variable, plain `http` to a public
 //!   address — is final, since no later attempt would decide otherwise.

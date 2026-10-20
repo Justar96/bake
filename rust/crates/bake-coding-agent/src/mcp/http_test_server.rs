@@ -253,6 +253,14 @@ pub(crate) enum Initialize {
     Status(u16, Option<String>),
 }
 
+/// A 307 answer to a POST: to `location`, for a POST to `path`, or to every
+/// POST when it is `None`, which loops until the client's hop bound.
+#[derive(Clone, Debug)]
+pub(crate) struct Redirect {
+    pub(crate) location: String,
+    pub(crate) path: Option<String>,
+}
+
 /// How the fixture answers `tools/call`.
 #[derive(Clone, Debug)]
 pub(crate) enum Call {
@@ -275,8 +283,8 @@ pub(crate) struct State {
     pub(crate) tools: Vec<String>,
     /// A `tools/list` answer padded to this many bytes.
     pub(crate) oversized_list: Option<usize>,
-    /// Answer every POST with a 307 to this location instead.
-    pub(crate) redirect: Option<String>,
+    /// Answer a POST with a 307 instead of serving it.
+    pub(crate) redirect: Option<Redirect>,
     /// How `initialize` is answered.
     pub(crate) initialize: Initialize,
     /// How `tools/call` is answered.
@@ -339,8 +347,13 @@ pub(crate) fn protocol(shared: &Shared) -> Handler {
             "DELETE" => return status(200),
             _ => {}
         }
-        if let Some(location) = &state.redirect {
-            return reply(307, &[("location", location)], b"");
+        if let Some(redirect) = &state.redirect
+            && redirect
+                .path
+                .as_ref()
+                .is_none_or(|path| request.path == *path)
+        {
+            return reply(307, &[("location", &redirect.location)], b"");
         }
         if request
             .header("mcp-session-id")

@@ -19,7 +19,18 @@
 //! - **Same-origin redirects only, within a small bound.** A hop to another
 //!   origin is refused before it is sent, so the configured headers cannot
 //!   reach an origin the owner did not authorize, and at most
-//!   `MAX_REDIRECTS` (three) same-origin hops are followed.
+//!   `MAX_REDIRECTS` (three) same-origin hops are followed. Following a hop
+//!   resends the request: `reqwest` replays a POST body on 307 and 308 and
+//!   rewrites a POST into a GET on 301, 302, and 303, so a server that
+//!   answers a POST with a same-origin redirect sees that POST twice, a
+//!   tool call's included. That is the one exception to `bake-mcp`'s rule
+//!   that a POST is sent once ([`bake_mcp::HttpTransport`]), and it is not
+//!   narrowed to the connection's `initialize`:
+//!   `reqwest::redirect::Attempt` names only the hop's status and URLs, not
+//!   the request being redirected, and the transport reports no moment at
+//!   which a session exists, so the policy cannot tell one POST from
+//!   another. Configure the endpoint a server redirects to, and a call is
+//!   sent once again.
 //! - **`https` for a public destination.** Plain `http` is allowed to a
 //!   loopback or otherwise local address, which is what Pi and Bake 0.3
 //!   allow and what a local server needs, and refused when the host resolves
