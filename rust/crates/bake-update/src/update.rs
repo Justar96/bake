@@ -424,7 +424,7 @@ pub mod tests {
         format!(
             "#!/bin/sh\n\
              case \"$1\" in\n\
-             --self-check) printf '{{\"kind\":\"bake-rs-self-check\",\"schema\":1,\"version\":\"{version}\",\"runtime\":\"rust\",\"target\":\"{target}\",\"docs\":{{}}}}\\n'; exit {code};;\n\
+             --self-check) printf '{{\"kind\":\"bake-self-check\",\"schema\":1,\"version\":\"{version}\",\"runtime\":\"rust\",\"target\":\"{target}\",\"docs\":{{}}}}\\n'; exit {code};;\n\
              --version) printf 'bake {version}\\n'; exit 0;;\n\
              esac\n\
              exit 2\n"

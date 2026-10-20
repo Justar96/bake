@@ -1,10 +1,10 @@
-//! `bake-rs auth check`, `auth print-api-key`, and `auth print-bearer-token`:
+//! `bake auth check`, `auth print-api-key`, and `auth print-bearer-token`:
 //! whether a provider is ready, and the credential an external client needs.
 //!
 //! Adapted from Pi v1.3.0 (`71023aec1546d6d677a65669c5665c0927ce0dd0`)
 //! `packages/coding-agent/src/cli/{auth-command,auth-check,credential-print}.ts`
 //! and the `runAuthCommand` branch of `src/main.ts`, for the providers
-//! `bake-rs` has: whatever `models.json` composes, the CLIProxyAPI account
+//! `bake` has: whatever `models.json` composes, the CLIProxyAPI account
 //! and the route imported from Bake 0.3 (D8 and D25), and the credentials
 //! `auth.json` holds ([`crate::auth_storage`]).
 //!
@@ -12,7 +12,7 @@
 //! `auth.json`, and `settings.json`. No network operation runs, as in Pi
 //! (`allowModelNetwork: false`, `refreshOnCreate: false`), and nothing is
 //! written, so `--no-refresh` is accepted and changes nothing: Pi's refresh
-//! renews an expired OAuth credential, and `bake-rs` has no OAuth provider
+//! renews an expired OAuth credential, and `bake` has no OAuth provider
 //! to renew. For the same reason `print-bearer-token` has no bearer token
 //! to print and fails with Pi's message, and `--min-expiry` is checked and
 //! then unused.
@@ -87,11 +87,11 @@ impl AuthCommandKind {
     pub fn usage(self) -> &'static str {
         match self {
             Self::Check => {
-                "bake-rs auth check --provider <provider> [--json] [--credentials] [--no-refresh]"
+                "bake auth check --provider <provider> [--json] [--credentials] [--no-refresh]"
             }
-            Self::ApiKey => "bake-rs auth print-api-key --provider <provider> [--model <model>]",
+            Self::ApiKey => "bake auth print-api-key --provider <provider> [--model <model>]",
             Self::BearerToken => {
-                "bake-rs auth print-bearer-token --provider <provider> [--model <model>] [--min-expiry <duration>]"
+                "bake auth print-bearer-token --provider <provider> [--model <model>] [--min-expiry <duration>]"
             }
         }
     }
@@ -106,16 +106,16 @@ pub fn is_auth_command_help(args: &[String]) -> bool {
 }
 
 /// Pi's `printAuthCommandHelp`, with Bake's program name and the providers
-/// `bake-rs` has.
+/// `bake` has.
 pub const AUTH_COMMAND_HELP: &str = "\
 Usage:
-  bake-rs auth print-api-key [--provider <provider>] [--model <model>]
-  bake-rs auth print-bearer-token [--provider <provider>] [--model <model>] [--min-expiry <duration>]
-  bake-rs auth check [--provider <provider>] [--model <model>] [--json] [--credentials] [--no-refresh]
+  bake auth print-api-key [--provider <provider>] [--model <model>]
+  bake auth print-bearer-token [--provider <provider>] [--model <model>] [--min-expiry <duration>]
+  bake auth check [--provider <provider>] [--model <model>] [--json] [--credentials] [--no-refresh]
 
 Auth commands need at least one of --provider or --model. They read the Bake
 home's models.json, auth.json, and settings.json, reach no network, and write
-nothing, so --no-refresh changes nothing: bake-rs has no OAuth provider to
+nothing, so --no-refresh changes nothing: bake has no OAuth provider to
 renew, which is also why print-bearer-token has no token to print.
 --credentials prints the API key, or includes it in the JSON output.
 ";
@@ -132,7 +132,7 @@ pub fn parse_auth_command(args: &[String]) -> Result<Option<AuthCommand>, String
         Some("print-bearer-token") => AuthCommandKind::BearerToken,
         other => {
             return Err(format!(
-                "Unknown auth command \"{}\". Use \"bake-rs auth print-api-key\", \"bake-rs auth print-bearer-token\", or \"bake-rs auth check\".",
+                "Unknown auth command \"{}\". Use \"bake auth print-api-key\", \"bake auth print-bearer-token\", or \"bake auth check\".",
                 other.unwrap_or_default()
             ));
         }
@@ -266,7 +266,7 @@ pub struct AuthCheckResult {
     pub provider: String,
     /// Pi's `AuthCheckReason`, when the status is not `ready`.
     pub reason: Option<&'static str>,
-    /// `api_key` when ready. `bake-rs` has no OAuth provider, so the
+    /// `api_key` when ready. `bake` has no OAuth provider, so the
     /// credential of a ready provider is always a key.
     pub auth_type: Option<&'static str>,
 }
@@ -408,7 +408,7 @@ pub fn resolve_credential_for_print(
     for provider in &providers {
         let stored = stored_credential_type(credentials, provider);
         // Pi skips a provider whose stored credential is the other kind;
-        // `bake-rs` has no OAuth provider, so a bearer token is never found.
+        // `bake` has no OAuth provider, so a bearer token is never found.
         if kind == AuthCommandKind::ApiKey && stored == Some("oauth") {
             continue;
         }
@@ -482,7 +482,7 @@ pub fn run_auth_command(
         write_out(
             stderr,
             &format!(
-                "Unknown option --{name} for \"{}\".\nUse \"bake-rs --help\" or \"{}\".\n",
+                "Unknown option --{name} for \"{}\".\nUse \"bake --help\" or \"{}\".\n",
                 command.kind.name(),
                 command.kind.usage()
             ),
@@ -574,7 +574,7 @@ fn fail(stderr: &SharedWriter, message: &str, code: i32) -> i32 {
 #[cfg(test)]
 mod tests {
     //! Cases from Pi `test/auth-command.test.ts` and
-    //! `test/credential-print.test.ts` for the commands `bake-rs` has.
+    //! `test/credential-print.test.ts` for the commands `bake` has.
 
     use super::*;
     use crate::model_registry::ModelConfig;
@@ -644,7 +644,7 @@ mod tests {
         assert_eq!(command.args, ["--provider", "p"]);
         assert_eq!(
             refusal(&["auth", "login"]),
-            "Unknown auth command \"login\". Use \"bake-rs auth print-api-key\", \"bake-rs auth print-bearer-token\", or \"bake-rs auth check\"."
+            "Unknown auth command \"login\". Use \"bake auth print-api-key\", \"bake auth print-bearer-token\", or \"bake auth check\"."
         );
         assert_eq!(
             refusal(&["auth", "check", "--min-expiry", "1h"]),

@@ -1,6 +1,6 @@
 /**
  * Runs the live evaluator's native arm keylessly: `run.ts` launches the built
- * debug `bake-rs` for two arms, through its capturing proxy, against a local
+ * debug `bake` for two arms, through its capturing proxy, against a local
  * OpenAI Responses server configured as the `cliproxyapi` route of a private
  * Bake home. The server scripts a read, an edit sent with the check, and a
  * final answer, so each sample is a full print-mode turn with tool calls; the
@@ -22,7 +22,7 @@
  *
  * The live evaluator stops its agents through POSIX process groups, so this
  * check is skipped on Windows. The script owns its temporary root, the
- * server's port, and the evaluator processes. A sample's `bake-rs` belongs to
+ * server's port, and the evaluator processes. A sample's `bake` belongs to
  * the evaluator; if the evaluator must be killed, stopping the server and the
  * evaluator's proxy ends any model request the agent still waits on, and
  * retries are off.
@@ -37,7 +37,7 @@ import {
 } from './scenarios.ts'
 
 const root = resolve(import.meta.dir, '../..')
-const binary = join(root, 'rust/target/debug', `bake-rs${process.platform === 'win32' ? '.exe' : ''}`)
+const binary = join(root, 'rust/target/debug', `bake${process.platform === 'win32' ? '.exe' : ''}`)
 const RUN = join(import.meta.dir, 'run.ts')
 const MODEL = 'native-smoke-model'
 const KEY = 'native-smoke-dummy-key'
@@ -89,7 +89,7 @@ const FINAL = { type: 'message', id: 'msg_final', role: 'assistant', status: 'co
 const MCP_TOOL = `mcp__${MCP_DOCS_SERVER}__${MCP_DOCS_TOOL}`
 const DOCUMENT = call('document', MCP_TOOL, { name: 'release-checklist' })
 const CHECKLIST = call('checklist', 'write', { path: 'checklist.txt', content: MCP_CHECKLIST_ITEMS.join('\n') + '\n' })
-/** The tools bake-rs publishes for a server that offers resources; every `mcp_docs` request must carry them. */
+/** The tools bake publishes for a server that offers resources; every `mcp_docs` request must carry them. */
 const RESOURCE_TOOLS = ['list_mcp_resources', 'list_mcp_resource_templates', 'read_mcp_resource']
 
 /** The scripted turn, chosen from the request alone by how many tool outputs it carries. */
@@ -219,7 +219,7 @@ async function smokeNativeArm(): Promise<void> {
     mkdirSync(configHome)
     writeFileSync(join(configHome, 'settings.yaml'), settings(server.port!))
     writeFileSync(join(configHome, '.credentials.yaml'), `version: 1\nrefs:\n  CLIPROXYAPI_API_KEY: ${KEY}\n`, { mode: 0o600 })
-    // The evaluator's own instructions and skills, which bake-rs would read from ~/.agents if a sample shared this home.
+    // The evaluator's own instructions and skills, which bake would read from ~/.agents if a sample shared this home.
     mkdirSync(join(home, '.agents/skills/leak'), { recursive: true })
     writeFileSync(join(home, '.agents/AGENTS.md'), `${LEAK} instructions\n`)
     writeFileSync(join(home, '.agents/skills/leak/SKILL.md'), `---\nname: leak\ndescription: ${LEAK} skill\n---\nBody.\n`)
@@ -283,7 +283,7 @@ async function smokeNativeArm(): Promise<void> {
       const revision = design.revisions[arm]
       // A binary passed by path is prebuilt: it has a digest and version but no commit.
       if (revision.agent !== 'native' || revision.prebuilt !== true || revision.commit !== null
-        || revision.binarySha256?.length !== 64 || !/^bake-rs /.test(revision.version)) {
+        || revision.binarySha256?.length !== 64 || !/^bake /.test(revision.version)) {
         throw new Error(`design.json revision for ${arm}: ${JSON.stringify(revision)}`)
       }
       deepStrictEqual(JSON.parse(design.arms[arm].settings), arm === 'base' ? { images: { autoResize: false } } : { defaultTools: ['read', 'edit', 'bash'] })
@@ -352,7 +352,7 @@ async function smokeNativeArm(): Promise<void> {
     deepStrictEqual(recordDesign.settings.armSettings, { base: '{"backgroundCompaction":false}', candidate: '{"backgroundCompaction":true}' })
     console.log('pass native compaction settings and costs retained by record.ts')
 
-    // The masking fixture's grep calls need ripgrep on PATH, which bake-rs
+    // The masking fixture's grep calls need ripgrep on PATH, which bake
     // looks up and never downloads; without it every call fails and there
     // is nothing to mask.
     if (Bun.which('rg') === null) throw new Error('the native masking smoke needs ripgrep (rg) on PATH for the grep tool')
@@ -446,7 +446,7 @@ async function smokeNativeArm(): Promise<void> {
         { success: false, invalid: 'stale_injection_raced', staleInjection: { injected: true, raced: true }, requests: 2 })
     }
 
-    // Control: an AGENTS.md above the workspace would reach bake-rs's prompt, so the evaluator must refuse before launching it.
+    // Control: an AGENTS.md above the workspace would reach bake's prompt, so the evaluator must refuse before launching it.
     // The evaluator names the real path, which differs where the temporary directory is a symbolic link (macOS).
     const stray = join(realpathSync(samplesDir), 'AGENTS.md')
     writeFileSync(stray, 'stray instructions\n')

@@ -1,25 +1,25 @@
 # Settings
 
-bake-rs reads its settings from `settings.json` in the Bake home, a JSON object read at startup. Only interactive commands write it: Ctrl+S in `/model` and `/thinking` saves `defaultProvider`, `defaultModel`, and `defaultThinkingLevel`; `/settings` saves `steeringMode`, `followUpMode`, and `compaction.enabled`; `/login`, `/logout`, and `/refresh-models` write `cliproxyapi` (`bake-rs docs models`). A write keeps every other member. A missing file means the defaults. A file that is not a JSON object produces a warning and the defaults; a member of the wrong type is ignored. Projects have no settings file of their own.
+bake reads its settings from `settings.json` in the Bake home, a JSON object read at startup. Only interactive commands write it: Ctrl+S in `/model` and `/thinking` saves `defaultProvider`, `defaultModel`, and `defaultThinkingLevel`; `/settings` saves `steeringMode`, `followUpMode`, and `compaction.enabled`; `/login`, `/logout`, and `/refresh-models` write `cliproxyapi` (`bake docs models`). A write keeps every other member. A missing file means the defaults. A file that is not a JSON object produces a warning and the defaults; a member of the wrong type is ignored. Projects have no settings file of their own.
 
 ## Members
 
 | Member | Meaning |
 |---|---|
-| `defaultProvider`, `defaultModel` | The model a new session starts with when `--model` is not given (`bake-rs docs models`) |
+| `defaultProvider`, `defaultModel` | The model a new session starts with when `--model` is not given (`bake docs models`) |
 | `defaultThinkingLevel` | The thinking level when none is given: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`; `medium` when unset |
-| `enabledModels` | Model patterns or globs that scope the available models when `--models` is not passed (`bake-rs docs models`) |
+| `enabledModels` | Model patterns or globs that scope the available models when `--models` is not passed (`bake docs models`) |
 | `modelThinkingLevels` | Thinking levels for particular models, keyed `provider/id`, used when a new session is given no thinking level |
 | `steeringMode`, `followUpMode` | How prompts sent while a turn runs are delivered: `one-at-a-time` (the default) or `all` at the next step |
-| `cliproxyapi` | The CLIProxyAPI account's route, or `null` once signed out; written by `/login` (`bake-rs docs models`) |
+| `cliproxyapi` | The CLIProxyAPI account's route, or `null` once signed out; written by `/login` (`bake docs models`) |
 | `defaultTools` | The tool names a session starts with, in place of `read`, `bash`, `edit`, `write`, the job tools, the web tools `web_search` and `web_fetch`, and `codemode`; `+name` and `-name` add to or remove from `read`, `bash`, `edit`, and `write` |
 | `webSearch.model` | The CLIProxyAPI route model `web_search` runs on: the id of one of the route's Anthropic Messages models, with or without `cliproxyapi/` |
 | `maxConcurrentReadTools` | Optional integer from 1 to 64; bounds concurrent native read tools and runs batches containing other tools sequentially. Absent preserves existing unlimited parallel batches |
 | `taskDocuments` | When `true`, enables the versioned `task_document` tool for plans, todos, and user-requested goals; default `false` |
 | `subagents` | When `true`, gives a top-level session the subagent tools: `subagent`, `send_message`, `interrupt_agent`, `list_agents`, and `list_subagent_models` when more than one model is available; default `false` |
 | `schedules` | When `true`, gives a top-level session the reminder tools `schedule_create`, `schedule_list`, and `schedule_delete`; default `false` |
-| `codemode` | `mode`: how the other tools are presented while the `codemode` tool is active, which it is by default, `on` (default) or `only`; `inlineBudget`: the estimated tokens its description's tool declarations may take, 3000 when unset (`bake-rs docs codemode`) |
-| `maxToolArgumentWhitespace` | The most whitespace a streamed tool call's arguments may end with, outside string values, before bake-rs abandons the response as a retryable error; a positive integer, 2000 when unset |
+| `codemode` | `mode`: how the other tools are presented while the `codemode` tool is active, which it is by default, `on` (default) or `only`; `inlineBudget`: the estimated tokens its description's tool declarations may take, 3000 when unset (`bake docs codemode`) |
+| `maxToolArgumentWhitespace` | The most whitespace a streamed tool call's arguments may end with, outside string values, before bake abandons the response as a retryable error; a positive integer, 2000 when unset |
 | `sessionDir` | One directory to keep every project's sessions in, in place of `sessions/` in the Bake home; continuing and listing still pick the working directory's sessions |
 | `blockImages` | When `true`, images are not sent to the model |
 | `images.autoResize` | Whether the `read` tool shrinks large images before sending them; `true` when unset |
@@ -27,8 +27,8 @@ bake-rs reads its settings from `settings.json` in the Bake home, a JSON object 
 | `backgroundCompaction` | When `true`, prepares one summary while foreground work continues; requires compaction enabled and defaults to `false` |
 | `contextMasking` | When `true`, experimentally replaces older eligible tool observations with logged placeholders; default `false`, with ordinary compaction retained |
 | `retry` | `enabled` (default `true`), `maxRetries` (3), `baseDelayMs` (2000), and `maxAgentDelayMs` (60000) for retrying transient model errors |
-| `permission` | `presets` and `defaultPreset` (`bake-rs docs permissions`) |
-| `hooks` | `claudeCode` and `codex`: the Claude Code and Codex `hooks.json` files whose command hooks run during sessions; unset runs none (`bake-rs docs hooks`) |
+| `permission` | `presets` and `defaultPreset` (`bake docs permissions`) |
+| `hooks` | `claudeCode` and `codex`: the Claude Code and Codex `hooks.json` files whose command hooks run during sessions; unset runs none (`bake docs hooks`) |
 
 An invalid compaction token value is reported, by name, as an error when compaction runs. A malformed `permission` section stops the run, since its presets bound what tools may do.
 

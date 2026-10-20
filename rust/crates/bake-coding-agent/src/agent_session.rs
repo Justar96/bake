@@ -156,9 +156,9 @@ use crate::tools::image::{
     ImageResizeOptions, ProcessedImage, normalize_tool_result_images, process_image,
 };
 
-/// Bake's form of Pi's `getProviderLoginHelp`. `bake-rs` has no `/login`,
+/// Bake's form of Pi's `getProviderLoginHelp`. `bake` has no `/login`,
 /// so the help names the files that configure a model and the `docs` topic
-/// that describes them. `docs_command` runs `bake-rs docs`
+/// that describes them. `docs_command` runs `bake docs`
 /// ([`AgentSessionOptions::docs_command`]).
 fn provider_login_help(docs_command: &str) -> String {
     format!(
@@ -235,7 +235,7 @@ pub struct AgentSessionOptions {
     /// [`Self::tool_prompts`] are added to `tool_guidelines`, winning over
     /// entries for the same tool.
     pub system_prompt: SystemPromptOptions,
-    /// How to run `bake-rs docs`, such as `/usr/local/bin/bake-rs docs`,
+    /// How to run `bake docs`, such as `/usr/local/bin/bake docs`,
     /// which the prompt's `docs` section and the no-model and no-key
     /// messages name.
     pub docs_command: String,

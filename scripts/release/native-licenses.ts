@@ -1,6 +1,6 @@
 /**
  * Generate and check the third-party license bundle for the native agent,
- * `bake-rs`, one text file per release platform plus a machine-readable
+ * `bake`, one text file per release platform plus a machine-readable
  * inventory.
  *
  * Selection, from Cargo's own resolver: a platform's `runtime` crates are
@@ -65,7 +65,7 @@ export const SCHEMA = 'bake-native-licenses/1'
 export const BUNDLE_FILE = 'THIRD-PARTY-LICENSES.txt'
 /** The machine-readable inventory, at `<out>/`. */
 export const INVENTORY_FILE = 'inventory.json'
-/** The package whose binary, `bake-rs`, is distributed. */
+/** The package whose binary, `bake`, is distributed. */
 export const ROOT_PACKAGE = 'bake-cli'
 /** Default output, relative to the repository root; ignored by Git. */
 export const DEFAULT_OUT = '.artifacts/native/licenses'
@@ -533,7 +533,7 @@ export function buildBundle(inputs: BundleInputs): Bundle {
     perPlatform[tree.id] = count
   }
 
-  for (const key of third.keys()) if (!about.crates.has(key)) problems.push(`${key} is compiled into bake-rs but cargo-about did not report it`)
+  for (const key of third.keys()) if (!about.crates.has(key)) problems.push(`${key} is compiled into bake but cargo-about did not report it`)
   // cargo-about evaluates `cfg()` against all its targets at once, so it can
   // report a crate no single target compiles, such as a `target_env = "gnu"`
   // Windows import library. Such a crate is left out and listed as excluded;
@@ -878,11 +878,11 @@ function renderPlatform(
   const keys = new Set(crates.map(entry => entry.pkg.key))
   const label = (key: string): string => key.replace('@', ' ')
   const lines = [
-    `Third-party licenses for bake-rs, ${platform.id} (${platform.triple})`,
+    `Third-party licenses for bake, ${platform.id} (${platform.triple})`,
     '',
     'Bake is MIT-licensed (see LICENSE). This file reproduces, verbatim, the license',
     'texts and notice files found in the source packages of the Rust crates compiled',
-    'into bake-rs for this platform, and the NOTICE files of Bake\'s own crates with',
+    'into bake for this platform, and the NOTICE files of Bake\'s own crates with',
     'the licenses of the third-party artifacts they embed.',
     'Each crate remains under its own license.',
     '',

@@ -2,11 +2,11 @@
 
 ## Summary
 
-`bake-rs` sends the system prompt of Pi v1.1.0 (`abe508e1`), the release it ports, byte for byte, plus Bake's permissions section; Pi v1.2.0 (`06a466935536`) leaves the prompt and the tools' prompt text unchanged. That prompt names the harness `pi`, points the model at Pi documentation that does not ship beside the binary, and lists environment variables named `PI_*`. It also has no guidance on batching tool calls, which Bake's own evals show is the sentence that matters most for some models. This page designs Bake's own system prompt for the Rust harness from three sources: Bake's paired eval records, published research, and the prompts and guides of current coding agents and model vendors.
+`bake` sends the system prompt of Pi v1.1.0 (`abe508e1`), the release it ports, byte for byte, plus Bake's permissions section; Pi v1.2.0 (`06a466935536`) leaves the prompt and the tools' prompt text unchanged. That prompt names the harness `pi`, points the model at Pi documentation that does not ship beside the binary, and lists environment variables named `PI_*`. It also has no guidance on batching tool calls, which Bake's own evals show is the sentence that matters most for some models. This page designs Bake's own system prompt for the Rust harness from three sources: Bake's paired eval records, published research, and the prompts and guides of current coding agents and model vendors.
 
 The design keeps Pi's prompt machinery (named sections that a session records and later patches) and replaces the text: a one-sentence identity, Bake 0.3's measured rules, the tool-contributed guidelines, a one-line pointer to Bake's own documentation, a run-mode line, the permissions section, and a small environment section last. The prompt states the outcome and the boundaries and leaves the method to the model. A rule stays only when an eval or a cited failure shows that the model behaves worse without it, and the one rule that promises harness behavior, that tool calls in one response run in order, is made true by the harness. One prompt serves every model family until a paired eval shows that a family needs a delta.
 
-**Status: implemented, 2026-10-13.** [D33](scope-00/support.md#decision-register) makes the system prompt Bake's own. `bake-rs` sends the prompt this page designs, measured in the [system prompt record](../../../evals/agent-loop/versions/unreleased/2026-10-13-bake-system-prompt/REPORT.md); the [implementation plan](#implementation-plan) and [evaluation plan](#evaluation-plan) record how it landed.
+**Status: implemented, 2026-10-13.** [D33](scope-00/support.md#decision-register) makes the system prompt Bake's own. `bake` sends the prompt this page designs, measured in the [system prompt record](../../../evals/agent-loop/versions/unreleased/2026-10-13-bake-system-prompt/REPORT.md); the [implementation plan](#implementation-plan) and [evaluation plan](#evaluation-plan) record how it landed.
 
 ## Table of Contents
 
@@ -21,7 +21,7 @@ The design keeps Pi's prompt machinery (named sections that a session records an
 
 ## Goals
 
-- **Clean.** Every line describes Bake as it is: its name, its documentation, its environment variables, its permissions, and how it runs tools. No text describes a feature `bake-rs` does not have.
+- **Clean.** Every line describes Bake as it is: its name, its documentation, its environment variables, its permissions, and how it runs tools. No text describes a feature `bake` does not have.
 - **Concise.** The prompt is the smallest set of instructions that fully describes the expected behavior. Brevity is a result, not the goal: a sentence that measurably saves model round trips stays.
 - **Model-driven.** The prompt states what done looks like and where the boundaries are; the model chooses how to get there. Guarantees that must hold every time are enforced by the harness (the sandbox, approvals, and permission presets of [D24](scope-00/support.md#decision-register)), not by prose.
 - **Cache-stable and reconstructable.** The system prompt is byte-stable for a session, with the facts most likely to differ between sessions last. Every change reaches the model as a recorded section patch, so model input stays reconstructable from the session file.
@@ -109,7 +109,7 @@ The prompt keeps Pi's mechanism: an untagged `preamble`, then named sections wra
 |---|---|---|---|
 | 1 | `preamble` | One identity sentence | Never |
 | 2 | `rules` | Bake's five rules, then the tool-contributed guidelines | When the tool set changes |
-| 3 | `docs` | One line naming `bake-rs docs` by the executable's path | When the executable moves |
+| 3 | `docs` | One line naming `bake docs` by the executable's path | When the executable moves |
 | 4 | `run` | The run mode | Never within a session |
 | 5 | `addendum` | `--append-system-prompt` text, when scope 10 adds the flag | Never within a session |
 | 6 | `project_context` | The loaded context files, wrapped with their paths | When the files change between runs |
@@ -118,11 +118,11 @@ The prompt keeps Pi's mechanism: an untagged `preamble`, then named sections wra
 | 9 | `environment` | Working directory, platform, shell, git repository or not, session start date | When one of them changes between runs |
 | 10 | `mcp_servers` | One attributed line per connected MCP server with a configured description or its bounded instructions, angle brackets and control characters neutralized, Pi's `renderServersSection` ([mcp.md](../../../rust/crates/bake-cli/docs/mcp.md#server-instructions)); absent without such a server | When a server connects, reconnects, or stops |
 
-Pi's `tools` section is removed: it repeats the tool schemas the request already carries, plus a sentence about custom tools that `bake-rs` cannot load. Pi's `cwd` section becomes the first line of `environment`. A custom prompt (`--system-prompt`, scope 10) replaces `preamble`, `rules`, and `docs`, as in Pi, and keeps the other sections, since they state facts the harness enforces. Pi's `skills` section, the list of loaded skills, follows `project_context` when skills load: like the context files, it changes only between runs. The `mcp_servers` section comes last because servers connect in the background: a server that connects after the first request patches only that section.
+Pi's `tools` section is removed: it repeats the tool schemas the request already carries, plus a sentence about custom tools that `bake` cannot load. Pi's `cwd` section becomes the first line of `environment`. A custom prompt (`--system-prompt`, scope 10) replaces `preamble`, `rules`, and `docs`, as in Pi, and keeps the other sections, since they state facts the harness enforces. Pi's `skills` section, the list of loaded skills, follows `project_context` when skills load: like the context files, it changes only between runs. The `mcp_servers` section comes last because servers connect in the background: a server that connects after the first request patches only that section.
 
 ### The text
 
-The default prompt for `bake-rs -p` with the four default tools, the `workspace-write` preset, no context files, and a git repository:
+The default prompt for `bake -p` with the four default tools, the `workspace-write` preset, no context files, and a git repository:
 
 ```text
 You are Bake, a coding agent that works in the user's workspace by reading code, running commands, and editing files.
@@ -143,7 +143,7 @@ You are Bake, a coding agent that works in the user's workspace by reading code,
 </rules>
 
 <docs>
-For questions about Bake itself, such as its settings, models, permissions, or sessions, run `/usr/local/bin/bake-rs docs` to list the topics and `/usr/local/bin/bake-rs docs <topic>` to read one.
+For questions about Bake itself, such as its settings, models, permissions, or sessions, run `/usr/local/bin/bake docs` to list the topics and `/usr/local/bin/bake docs <topic>` to read one.
 </docs>
 
 <run>
@@ -182,15 +182,15 @@ Without tools, the round-trip rule is left out. The tool-contributed guidelines 
 | Pi text | Reason |
 |---|---|
 | "You are an expert coding assistant operating inside pi, a coding agent harness." | Names the wrong harness; personas do not improve performance |
-| The `tools` section and "you may have access to other custom tools depending on the project" | Duplicates the tool schemas; `bake-rs` has no custom tools |
+| The `tools` section and "you may have access to other custom tools depending on the project" | Duplicates the tool schemas; `bake` has no custom tools |
 | The `cwd` section | Becomes the first line of `environment` |
 | "You can inspect PI_* environment variables for current model and session details." | No model used it in 144 samples; the variables are renamed (see below) |
-| The `docs` section's eight lines about Pi's README, docs, examples, extensions, themes, MCP, and code mode | Points at files that do not ship and at features `bake-rs` does not have; no model read them |
+| The `docs` section's eight lines about Pi's README, docs, examples, extensions, themes, MCP, and code mode | Points at files that do not ship and at features `bake` does not have; no model read them |
 | "Be concise in your responses", "Show file paths clearly when working with files" | Replaced by Bake 0.3's final-answer rule |
 
 ### Tool calls in one response run in order
 
-Pi runs the tool calls of one response in parallel, serializing only edits to the same file, and so does `bake-rs` today: an edit and the command that checks it, sent together as the round-trip rule asks, can race, and the check can see the old file. `bake-rs` therefore marks `bash`, `edit`, and `write` sequential with Pi's own per-tool execution mode. A response that holds any of them runs one call at a time in the order the model wrote them, and a response of reads alone still runs in parallel. The 0.3 TypeScript agent, whose prompt the rule comes from, ran calls in order.
+Pi runs the tool calls of one response in parallel, serializing only edits to the same file, and so does `bake` today: an edit and the command that checks it, sent together as the round-trip rule asks, can race, and the check can see the old file. `bake` therefore marks `bash`, `edit`, and `write` sequential with Pi's own per-tool execution mode. A response that holds any of them runs one call at a time in the order the model wrote them, and a response of reads alone still runs in parallel. The 0.3 TypeScript agent, whose prompt the rule comes from, ran calls in order.
 
 ### Run mode and permissions
 
@@ -212,7 +212,7 @@ The section comes last because its facts are the most likely to differ between s
 
 ### Self-documentation
 
-The binary carries Bake's 0.4 user documentation, compiled in, so it always matches the installed version and works offline. `bake-rs docs` lists the topics and `bake-rs docs <topic>` prints one: the command line, the Bake home, settings, models and providers (including the imported CLIProxyAPI route), permissions and the sandbox, sessions, context files, and skills. The prompt's `docs` section names that command by the executable's absolute path, shell-quoted when the path holds spaces or other special characters. A built-in skill could replace the line when scope 10 adds skills; the command stays either way.
+The binary carries Bake's 0.4 user documentation, compiled in, so it always matches the installed version and works offline. `bake docs` lists the topics and `bake docs <topic>` prints one: the command line, the Bake home, settings, models and providers (including the imported CLIProxyAPI route), permissions and the sandbox, sessions, context files, and skills. The prompt's `docs` section names that command by the executable's absolute path, shell-quoted when the path holds spaces or other special characters. A built-in skill could replace the line when scope 10 adds skills; the command stays either way.
 
 ### Skills section
 
@@ -222,7 +222,7 @@ Agents present skills in one of two ways (surveyed 2026-10-13 at the named relea
 
 | Agent | Where the listing goes | Entry | How a skill loads | Listing limit |
 |---|---|---|---|---|
-| Pi v1.2.0, `bake-rs` | System prompt | XML: name, description, location | `read` | None |
+| Pi v1.2.0, `bake` | System prompt | XML: name, description, location | `read` | None |
 | [agentskills.io integration guide](https://agentskills.io/client-implementation/adding-skills-support) | System prompt or the activation tool's description, "Both work" | XML, JSON, or bullets | File read or a dedicated tool | About 50–100 tokens per skill |
 | Codex CLI rust-v0.162.1 | Developer message | `- name: description (file: path)` | File read | 2% of the context window; descriptions shortened before entries drop |
 | Claude Code 2.1.296 | System reminder in a user message | `- name: description` | `Skill` tool | 1% of the context window; names always kept |
@@ -232,14 +232,14 @@ Agents present skills in one of two ways (surveyed 2026-10-13 at the named relea
 
 The published evidence is on triggering, not format. Vercel's [AGENTS.md eval](https://vercel.com/blog/agents-md-outperforms-skills-in-our-agent-evals) found a listed skill unused in 56% of runs; an AGENTS.md instruction to use it raised the pass rate from 53% to 79%, but "You MUST invoke the skill" made the agent anchor on the skill and miss project files, and "explore the project first, then invoke the skill" did not. A [sandboxed Claude Code study](https://scottspence.com/posts/measuring-claude-code-skill-activation-with-sandboxed-evals) (22 prompts) found a plain instruction did not change activation. Anthropic's [skill-creator](https://github.com/anthropics/skills) and [agentskills.io](https://agentskills.io/skill-creation/optimizing-descriptions) put the remedy in the description: say what the skill does and when to use it. No controlled comparison of XML and Markdown listings was found.
 
-`bake-rs` keeps Pi's text, placement, and format:
+`bake` keeps Pi's text, placement, and format:
 
 - **Pi first.** The section is Pi's, ported under [D22](scope-00/support.md#decision-register), and it matches the agentskills.io template for agents that load skills with a file read. A dedicated skill tool, as most other agents use, adds a tool schema and diverges from Pi for no measured gain.
 - **No stronger trigger rule.** The prompt's wording follows [principle 7](#principles), and the evidence shows emphatic "must use" wording trading one failure for another. Descriptions carry the match.
 - **No listing budget yet.** The section grows with the skills a user installs. A budget that shortens descriptions before it drops names, as Codex CLI and Claude Code do, is the remedy if a measured skill set makes the section costly.
 - **Cache-stable by construction.** Skills change only between runs, so the section never patches within a session. A mid-session reload, if a later scope adds one, should send the change as a recorded section patch.
 
-The `skill_check` and `skill_distractors` scenarios of the [agent-loop evaluator](../../../evals/README.md) measure the section: whether a model loads the one skill a task needs, and whether it loads skills a task does not need. The [skills section record](../../../evals/agent-loop/versions/unreleased/2026-10-13-skills-section/REPORT.md) pairs `bake-rs` with and without the listing on six models:
+The `skill_check` and `skill_distractors` scenarios of the [agent-loop evaluator](../../../evals/README.md) measure the section: whether a model loads the one skill a task needs, and whether it loads skills a task does not need. The [skills section record](../../../evals/agent-loop/versions/unreleased/2026-10-13-skills-section/REPORT.md) pairs `bake` with and without the listing on six models:
 
 - **The listing is what makes skills work.** With it, every model loaded the skill `skill_check` needs and passed, apart from two GPT runaways unrelated to skills. Without it, Gemini 3.8 Flash never found the skill and failed all three trials, and DeepSeek V4 Pro failed two; Claude and DeepSeek Flash found it only by listing `.agents`, sometimes printing every skill.
 - **No model over-triggers.** With the listing, no sample loaded a skill its task did not need, in either scenario.
@@ -262,9 +262,9 @@ Every family gets the same prompt. A family-specific delta lives in its own `mod
 
 ## Evaluation plan
 
-The candidate is measured against `bake-rs` at its pull request's base, both built in clean worktrees, with the native arm of the agent-loop evaluator:
+The candidate is measured against `bake` at its pull request's base, both built in clean worktrees, with the native arm of the agent-loop evaluator:
 
-- **Runs.** The standard suite and the extended suite, the standard and extended model sets, three trials. The extended suite covers what a prompt can change that the standard suite does not: `unprompted_verify`, `instructions_file`, `explore_answer`, `test_fix_loop`, `noisy_failure`, `edit_recovery`, and `long_session`. `background_test` runs and is judged like the others; `bake-rs` has no background jobs, so the model runs the test in the foreground.
+- **Runs.** The standard suite and the extended suite, the standard and extended model sets, three trials. The extended suite covers what a prompt can change that the standard suite does not: `unprompted_verify`, `instructions_file`, `explore_answer`, `test_fix_loop`, `noisy_failure`, `edit_recovery`, and `long_session`. `background_test` runs and is judged like the others; `bake` has no background jobs, so the model runs the test in the foreground.
 - **What is measured.** The native arm runs `danger-full-access` with `--no-session`, so the measured permissions text is that preset's, the session date comes from the in-memory header, and the `workspace-write` text is pinned by the fixture test only. The candidate also carries the ordered batches, the `BAKE_*` variables, and the spill-file prefixes, so the record measures the whole change.
 - **Expected effects.** Gemini requests fall by at least a third and its repository-check commands stop; Claude's edit-and-check splits fall toward zero; DeepSeek and GPT stay within noise; first-request size falls.
 - **Acceptance.** No model's failures rise beyond gateway errors and noise, and every flagged regression has a stated cause. A second, informational record pairs the candidate with the 0.3 TypeScript agent to show the remaining gap.
@@ -275,7 +275,7 @@ The candidate is measured against `bake-rs` at its pull request's base, both bui
 Three pull requests, each based on the one before, on top of the native eval arm:
 
 1. **Design** (documentation only): this page, D33 in the decision register with its Dev Note entry, and the statements in `AGENTS.md` and the roadmap that said prompts follow Pi.
-2. **`bake-rs docs`** (no model-visible change): the 0.4 user documentation compiled into the binary, the `docs` subcommand, tests that every topic renders and that every flag it names exists, and the user-facing no-model and no-key messages pointing at it instead of Pi's paths.
+2. **`bake docs`** (no model-visible change): the 0.4 user documentation compiled into the binary, the `docs` subcommand, tests that every topic renders and that every flag it names exists, and the user-facing no-model and no-key messages pointing at it instead of Pi's paths.
 3. **The prompt** (model-visible): the sections and text above, the ordered batches, the environment and run sections, the `never` sentence for runs without an approver, the `BAKE_*` variables and spill-file prefixes, a fixture test that pins the full first request for each preset in place of Pi's prompt fixtures, the evaluator's native-arm description, and the eval record.
 
 Pull requests 2 and 3 change the public Rust API, so each updates the `rust/README.md` crate rows and test paragraph and the roadmap Dev Note, runs `bun run gen-rust-migration-inventory`, `verify-rust-migration-inventory`, and `bun run doc-sync`, and pastes a `bun run preflight:mac` summary.

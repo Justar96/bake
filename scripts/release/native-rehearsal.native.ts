@@ -1,5 +1,5 @@
 /**
- * A native release rehearsal on this host: the real `bake-rs` this checkout
+ * A native release rehearsal on this host: the real `bake` this checkout
  * builds is archived in `pack-rust.ts`'s layout, published to a loopback host
  * with an ephemeral key, and installed by the shipped `distribution/host/
  * install.sh`. The installed command then answers `--version` and runs the
@@ -51,14 +51,14 @@ function workspace(): { version: string; target: RustTarget; binary: string; not
   const inputs = workspaceInputs(JSON.parse(metadata.stdout) as Parameters<typeof workspaceInputs>[0])
   const target = hostTarget()
   if (!isRustTarget(target)) throw new Error(`This host is ${target}, which Bake publishes no native release for`)
-  const binary = join(inputs.targetDir, 'debug', process.platform === 'win32' ? 'bake-rs.exe' : 'bake-rs')
+  const binary = join(inputs.targetDir, 'debug', process.platform === 'win32' ? 'bake.exe' : 'bake')
   return { version: inputs.version, target, binary, notices: inputs.notices }
 }
 
 /**
  * A copy of the built binary without its debug information.
  *
- * This checkout's debug `bake-rs` unpacks to about 760 MB, past the 512 MiB
+ * This checkout's debug `bake` unpacks to about 760 MB, past the 512 MiB
  * an install accepts; a release binary is a fraction of that. The rehearsal
  * needs the binary to run its own `--self-check`, not to be debuggable, and
  * `strip -S` removes debug symbols with both GNU binutils and Apple's strip.
@@ -119,17 +119,17 @@ function run(command: string, args: readonly string[], env: Record<string, strin
   return { status: result.status ?? -1, stdout: result.stdout ?? '', stderr: result.stderr ?? '' }
 }
 
-test.skipIf(process.platform === 'win32')('installs the real bake-rs this checkout builds, then keeps it as the release a rollback returns to', async () => {
+test.skipIf(process.platform === 'win32')('installs the real bake this checkout builds, then keeps it as the release a rollback returns to', async () => {
   const build = workspace()
   if (!existsSync(build.binary)) {
-    throw new Error(`${build.binary} is missing; build it first: cd rust && cargo build --locked -p bake-cli --bin bake-rs`)
+    throw new Error(`${build.binary} is missing; build it first: cd rust && cargo build --locked -p bake-cli --bin bake`)
   }
   const directory = mkdtempSync(join(tmpdir(), 'bake-native-rehearsal-'))
   roots.push(directory)
   const real = packRehearsal(directory, build)
   const key = ephemeralKey()
   const home = join(directory, 'home')
-  const nativeRoot = join(home, '.local/share/bake-rs')
+  const nativeRoot = join(home, '.local/share/bake-native')
   const binDir = join(home, '.local/bin')
   mkdirSync(binDir, { recursive: true })
   mkdirSync(join(directory, 'tmp'), { recursive: true })
@@ -168,7 +168,7 @@ test.skipIf(process.platform === 'win32')('installs the real bake-rs this checko
   const selfCheck = run(command, ['--self-check'], { HOME: home, BAKE_HOME: join(home, '.bake') })
   expect(selfCheck.status).toBe(0)
   const record = JSON.parse(selfCheck.stdout) as { kind: string; version: string; target: string; runtime: string }
-  expect(record.kind).toBe('bake-rs-self-check')
+  expect(record.kind).toBe('bake-self-check')
   expect(record.runtime).toBe('rust')
   expect(record.version).toBe(build.version)
   expect(record.target).toBe(build.target)
@@ -177,7 +177,7 @@ test.skipIf(process.platform === 'win32')('installs the real bake-rs this checko
   // `previous` names; the Rust updater's `--rollback` is what returns to it.
   const nextVersion = build.version.replace(/^(\d+)\.(\d+)\.(\d+)(.*)$/u,
     (_, major: string, minor: string, patch: string, rest: string) => `${major}.${minor}.${String(Number(patch) + 1)}${rest}`)
-  const next = stubRelease(directory, nextVersion, build.target, { executableName: 'bake-rs' })
+  const next = stubRelease(directory, nextVersion, build.target)
   publish(nextVersion, next.artifact, next.bytes)
   const updated = await runInstaller(['sh', installer], { PATH: process.env['PATH'] ?? '', ...env }, 300_000)
   expect(updated.stderr).toBe('')
@@ -186,7 +186,7 @@ test.skipIf(process.platform === 'win32')('installs the real bake-rs this checko
   expect(readlinkSync(join(nativeRoot, 'previous'))).toBe(`releases/${build.version}`)
 
   // The release a rollback returns to is intact and still passes its own self-check.
-  const kept = join(nativeRoot, 'releases', build.version, 'bin/bake-rs')
+  const kept = join(nativeRoot, 'releases', build.version, 'bin/bake')
   const keptCheck = run(kept, ['--self-check'], { HOME: home, BAKE_HOME: join(home, '.bake') })
   expect(keptCheck.status).toBe(0)
   expect((JSON.parse(keptCheck.stdout) as { version: string }).version).toBe(build.version)

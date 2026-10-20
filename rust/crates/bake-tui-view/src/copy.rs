@@ -194,7 +194,7 @@ pub const NO_IMAGES: &str = "Images are not sent in this preview. Your draft is 
 pub const IMAGES_WHILE_RUNNING: &str =
     "Wait for the turn to end before sending images. Your draft is kept.";
 /// Ctrl+T or Ctrl+G in a live session: they open the preview's samples.
-pub const PREVIEW_ONLY: &str = "Sample activity and sample agents are only in `bake-rs preview`.";
+pub const PREVIEW_ONLY: &str = "Sample activity and sample agents are only in `bake preview`.";
 /// The runtime gave prompts back to the draft.
 pub const RETURNED: &str = "Unsent prompts are back in your draft.";
 /// `/tree` or `/fork` put the chosen message into the draft.
@@ -301,7 +301,7 @@ pub const UNKNOWN_ERROR: &str = "Unknown error";
 /// goes (`{repository}` names it), and the question its field answers.
 /// Pi's report goes privately to its developers; Bake's is a public issue.
 pub const BUG_TITLE: &str = "Report a bug";
-pub const BUG_DISCLAIMER: &str = "This report becomes a public GitHub issue on {repository}. It includes your bake-rs version, operating system, the current model and provider configuration (without API keys), settings.json with secrets redacted, and provider error diagnostics from this session.";
+pub const BUG_DISCLAIMER: &str = "This report becomes a public GitHub issue on {repository}. It includes your bake version, operating system, the current model and provider configuration (without API keys), settings.json with secrets redacted, and provider error diagnostics from this session.";
 pub const BUG_QUESTION: &str = "What went wrong? (optional)";
 /// The transcript question, Pi's, with where a transcript goes in Bake.
 pub const BUG_TRANSCRIPT_TITLE: &str = "Include the session transcript?";

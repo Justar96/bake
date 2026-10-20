@@ -205,7 +205,7 @@ export function compactionBudget(contextWindow: number) {
  */
 export const PI_RESERVE_TOKENS = 16_384
 /**
- * The context window a pi-family arm (pi or bake-rs) gets in place of a
+ * The context window a pi-family arm (pi or bake) gets in place of a
  * forced window: Bake's threshold at that window plus pi's default reserve,
  * so pi compacts where Bake does with the budgets it ships with.
  */
@@ -397,7 +397,7 @@ export function noteNames(count = 10): string[] {
  * - The ten batches total about 16,500 tokens, so the session reaches the
  *   threshold around the fifth note (4,500 + 5 × 1,650 = 12,750) and
  *   compacts at least once before the last.
- * - pi and bake-rs compare the threshold with the provider's reported count,
+ * - pi and bake compare the threshold with the provider's reported count,
  *   which runs well below the estimate: a note is about 940 tokens to GPT,
  *   Gemini, and DeepSeek and 1,340 to Claude at 4.4 KB, with a 1,700 to
  *   2,700-token prefix. At 6 KB the ten notes take every one of those models

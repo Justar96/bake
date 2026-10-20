@@ -1,4 +1,4 @@
-//! `$BAKE_HOME/mcp.json`, the one MCP configuration `bake-rs` reads, and
+//! `$BAKE_HOME/mcp.json`, the one MCP configuration `bake` reads, and
 //! the checks that make it the owner's.
 //!
 //! Pi v1.3.0 reads `~/.pi/agent/mcp.json` and, for a trusted project, the
@@ -123,7 +123,7 @@ const MCP_RULES: OwnerFile<'static> = OwnerFile {
     kind: "an mcp.json",
     workspace_remedy: "set BAKE_HOME to a directory outside it, or run with --no-mcp",
     repository_remedy: "keep mcp.json in a Bake home outside every repository (set BAKE_HOME), or run with --no-mcp",
-    unchecked: "bake-rs cannot yet check on this platform who may change mcp.json, so it does not read it; remove the file or run with --no-mcp until that check is supported",
+    unchecked: "bake cannot yet check on this platform who may change mcp.json, so it does not read it; remove the file or run with --no-mcp until that check is supported",
 };
 
 /// Opens `rules.name` in the canonical directory `dir` if it passes the
@@ -274,7 +274,7 @@ mod platform {
             };
             let fd = opened.map_err(|error| match error.raw_os_error() {
                 Some(libc::ELOOP | libc::ENOTDIR) => format!(
-                    "{} changed after bake-rs resolved {} (it is now a link or not a directory)",
+                    "{} changed after bake resolved {} (it is now a link or not a directory)",
                     shown.display(),
                     rules.resolved
                 ),
@@ -453,7 +453,7 @@ mod platform {
         use std::os::fd::OwnedFd;
 
         pub(super) fn check(_fd: &OwnedFd, _owner: u32) -> Result<(), String> {
-            Err("bake-rs cannot check this platform's access control lists".to_owned())
+            Err("bake cannot check this platform's access control lists".to_owned())
         }
     }
 
@@ -472,7 +472,7 @@ mod platform {
     ) -> Result<Option<std::fs::File>, String> {
         let chain = match open_chain(dir, rules) {
             Ok(chain) => chain,
-            // No file, nothing to refuse: a directory bake-rs cannot walk is
+            // No file, nothing to refuse: a directory bake cannot walk is
             // not a reason to warn about a file it does not hold.
             Err(_)
                 if std::fs::symlink_metadata(dir.join(rules.name))
@@ -511,14 +511,14 @@ mod platform {
         #[allow(clippy::useless_conversion)]
         let (kind, regular) = (u32::from(libc::S_IFMT), u32::from(libc::S_IFREG));
         if stat.mode & kind != regular {
-            return Err("is not a regular file; bake-rs reads only a regular file".to_owned());
+            return Err("is not a regular file; bake reads only a regular file".to_owned());
         }
         if stat.size > MAX_CONFIG_BYTES {
             return Err(format!("larger than {MAX_CONFIG_BYTES} bytes"));
         }
         if !is_trusted_owner(stat.uid) {
             return Err(format!(
-                "is owned by another user (uid {}); bake-rs reads only {} that you or root own",
+                "is owned by another user (uid {}); bake reads only {} that you or root own",
                 stat.uid, rules.kind
             ));
         }
@@ -530,7 +530,7 @@ mod platform {
         }
         acl::check(file, stat.uid).map_err(|reason| {
             format!(
-                "{reason}; bake-rs reads only {} that only you can change",
+                "{reason}; bake reads only {} that only you can change",
                 rules.kind
             )
         })?;

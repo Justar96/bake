@@ -197,7 +197,7 @@ pub struct McpConfig {
 ///
 /// The file's `env` values may pass variables the scrub drops (see the
 /// module documentation), so `path` must be a file only the user controls.
-/// `bake-rs` reads `$BAKE_HOME/mcp.json` through
+/// `bake` reads `$BAKE_HOME/mcp.json` through
 /// [`load_home_mcp_config`](super::home::load_home_mcp_config), which also
 /// checks who can change it; this function checks only what it opens.
 pub fn load_mcp_config(path: &Path) -> McpConfig {
@@ -248,7 +248,7 @@ pub(crate) fn open_regular_file(path: &Path) -> Result<Option<fs::File>, String>
         }
     }
     if !metadata.is_file() {
-        return Err("is not a regular file; bake-rs reads only a regular file".to_owned());
+        return Err("is not a regular file; bake reads only a regular file".to_owned());
     }
     if metadata.len() > MAX_CONFIG_BYTES {
         return Err(format!("larger than {MAX_CONFIG_BYTES} bytes"));
@@ -257,7 +257,7 @@ pub(crate) fn open_regular_file(path: &Path) -> Result<Option<fs::File>, String>
 }
 
 pub(crate) const LINK_REFUSED: &str =
-    "is a symbolic link; bake-rs reads only a regular file, so replace the link with the file";
+    "is a symbolic link; bake reads only a regular file, so replace the link with the file";
 
 /// Reads and parses an opened configuration file, at most
 /// [`MAX_CONFIG_BYTES`].

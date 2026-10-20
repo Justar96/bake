@@ -41,7 +41,7 @@ const NATIVE_PAYLOAD = {
 }
 
 /** A complete native archive, as `release:pack:rust` writes it today. */
-const NATIVE = { ...NATIVE_PAYLOAD, 'bin/bake-rs': 'native binary\n' }
+const NATIVE = { ...NATIVE_PAYLOAD, 'bin/bake': 'native binary\n' }
 
 const TYPESCRIPT = {
   'bin/bake': '#!/usr/bin/env node\n',
@@ -51,8 +51,8 @@ const TYPESCRIPT = {
   'node_modules/bake-cli/package.json': '{"name":"bake-cli"}\n',
 }
 
-test('a native archive is native, whatever its executable is called', async () => {
-  for (const binary of ['bin/bake-rs', 'bin/bake', 'bin/bake-rs.exe', 'bin/bake.exe']) {
+test('a native archive is native under either platform name for its executable', async () => {
+  for (const binary of ['bin/bake', 'bin/bake.exe']) {
     const layout = await readArchiveLayout(archive({ ...NATIVE_PAYLOAD, [binary]: 'native binary\n' }))
     expect(layout.kind).toBe('native')
     expect(() => { assertNativeArchive(layout) }).not.toThrow()
@@ -70,13 +70,16 @@ test('a 0.3 archive is a TypeScript archive, and its bin/bake is no native execu
 test('the 0.3 route refuses a native archive renamed as its own', async () => {
   const layout = await readArchiveLayout(archive(NATIVE, 'bake-v0.4.0-linux-x64.tar.gz'))
   expect(() => { assertTypeScriptArchive('bake-v0.4.0-linux-x64.tar.gz', layout) })
-    .toThrow(/holds bin\/bake-rs with licenses\/inventory\.json; a native archive cannot be published to 0\.3 updaters/)
+    .toThrow(/holds bin\/bake with licenses\/inventory\.json; a native archive cannot be published to 0\.3 updaters/)
 })
 
-test('the 0.3 route refuses a native archive by name before reading it', async () => {
+test('the native route refuses a 0.3 archive named as a native one', async () => {
+  // Both routes name an archive bake-v<version>-<target>.tar.gz, so only the
+  // layout tells them apart.
+  expect(archiveName('0.4.0', 'linux-x64')).toBe('bake-v0.4.0-linux-x64.tar.gz')
   const layout = await readArchiveLayout(archive(TYPESCRIPT, archiveName('0.4.0', 'linux-x64')))
-  expect(() => { assertTypeScriptArchive(archiveName('0.4.0', 'linux-x64'), layout) })
-    .toThrow(/is a native archive; publish it with release:assemble:rust/)
+  expect(layout.kind).toBe('typescript')
+  expect(() => { assertNativeArchive(layout) }).toThrow(/holds apps\/cli\/lib\/bin\.js of a TypeScript release/)
 })
 
 test('neither route takes an archive of another shape', async () => {

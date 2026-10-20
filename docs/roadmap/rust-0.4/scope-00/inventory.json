@@ -290,7 +290,7 @@
       "reason": "Release packing, installers, and manifest tooling; scope 16 changes the archive layout for native artifacts."
     },
     "scripts:rust-pty": {
-      "reason": "The Rust PTY driver's Windows ConPTY client; native terminal qualification tooling for bake-rs, not a TypeScript contract."
+      "reason": "The Rust PTY driver's Windows ConPTY client; native terminal qualification tooling for bake, not a TypeScript contract."
     },
     "scripts:rust-tests": {
       "reason": "Native test execution, Cargo filters, and failure reporting for development and qualification."

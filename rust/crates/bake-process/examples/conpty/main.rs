@@ -1,5 +1,5 @@
 //! `conpty`: the Windows pseudoconsole host that `scripts/rust-preview-pty.ts`
-//! drives `bake-rs` through on Windows, as it drives a POSIX PTY elsewhere.
+//! drives `bake` through on Windows, as it drives a POSIX PTY elsewhere.
 //! A test helper: an example of `bake-process`, built only for the PTY
 //! scenarios and never part of a release archive.
 //!

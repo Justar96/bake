@@ -16,7 +16,7 @@ You are Bake, a coding agent that works in the user's workspace by reading code,
 </rules>
 
 <docs>
-For questions about Bake itself, such as its settings, models, permissions, or sessions, run `/usr/local/bin/bake-rs docs` to list the topics and `/usr/local/bin/bake-rs docs <topic>` to read one.
+For questions about Bake itself, such as its settings, models, permissions, or sessions, run `/usr/local/bin/bake docs` to list the topics and `/usr/local/bin/bake docs <topic>` to read one.
 </docs>
 
 <run>

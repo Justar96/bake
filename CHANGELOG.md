@@ -4,6 +4,7 @@ Notable changes to Bake. `/changelog` in the terminal prints the section for the
 
 ## [Unreleased]
 
+- Rust builds and native archives use the `bake` executable name (`bake.exe` on Windows). Native installs live in the separate `bake-native` directory; the agent home remains `~/.bake`.
 - Rust MCP startup publishes a server's tools, resource tools, and instructions together, so the first prompt sees the complete connected server.
 - Development: Rust tests accept focused Cargo filters and use parallel execution on Linux and Windows when nextest is installed. Preflight reports Rust checks separately, retains CI test reports, and fails tests without automatic retries.
 - Rust native installation and updates use a separately signed release route, validate archives and self-check binaries before activation, and preserve managed 0.3 command links for restoration.

@@ -192,7 +192,7 @@ const SKILL_FIND = /\bfind\s+(?:\S*\/)?\.agents\b[^;&]*(?:\bxargs\b|-exec\b).*?\
 /**
  * The skills a sample loaded, each once, in the order it first loaded them: a
  * `skill` tool call (Bake 0.3's loader), a `read` of a skill's `SKILL.md`
- * under `.agents/skills` (bake-rs and pi), or a shell command that prints a
+ * under `.agents/skills` (bake and pi), or a shell command that prints a
  * `SKILL.md` and names the skill's directory, as `cat` of the file or `cd`
  * into the directory first does. A command that prints every skill at once,
  * through a glob over the skill directories or a `find` piped to `cat`, loads
@@ -235,7 +235,7 @@ export function compactions(events: readonly { type?: string; data?: any }[]) {
 }
 
 /**
- * Compactions from a Pi-shaped `--mode json` stream, as `bake-rs` writes it:
+ * Compactions from a Pi-shaped `--mode json` stream, as `bake` writes it:
  * a `compaction_end` with a result is a completed summary, and one with an
  * `errorMessage` ended in an error. Aborted compactions count as neither.
  */

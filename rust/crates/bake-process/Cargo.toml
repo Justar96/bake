@@ -44,7 +44,7 @@ windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Securit
 name = "windows_job_rundown"
 harness = false
 
-# The Windows pseudoconsole host the Rust PTY scenarios drive `bake-rs`
+# The Windows pseudoconsole host the Rust PTY scenarios drive `bake`
 # through (`scripts/rust-preview-pty.ts`). A test helper, never packed; its
 # protocol tests run under `cargo test` on every platform.
 [[example]]

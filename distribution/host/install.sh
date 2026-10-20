@@ -14,7 +14,7 @@ set -eu
 
 download_url=${BAKE_DOWNLOAD_URL:-https://bake.justar.dev}
 download_url=${download_url%/}
-native_root=${BAKE_NATIVE_ROOT:-"$HOME/.local/share/bake-rs"}
+native_root=${BAKE_NATIVE_ROOT:-"$HOME/.local/share/bake-native"}
 bin_dir=${BAKE_BIN_DIR:-"$HOME/.local/bin"}
 # The 0.3 TypeScript install, which this installer reads to recognize a
 # Bake-managed `bake` and never writes to.
@@ -42,7 +42,7 @@ Install Bake, the Rust terminal coding agent.
 
 Environment:
   BAKE_DOWNLOAD_URL   release host (default https://bake.justar.dev)
-  BAKE_NATIVE_ROOT    install root (default ~/.local/share/bake-rs)
+  BAKE_NATIVE_ROOT    install root (default ~/.local/share/bake-native)
   BAKE_BIN_DIR        command directory (default ~/.local/bin)
   BAKE_REPLACE_COMMAND=1  as --replace-command, for a piped install
   BAKE_OPENSSL        the openssl that verifies the release signature; when
@@ -527,13 +527,11 @@ point_at() {
   mv $pointer_mv "$pointer_temp" "$pointer"
 }
 
-# The executable inside an unpacked release. The archive's `bin/bake-rs`
-# becomes `bin/bake`, so both names are accepted and `bin/bake` wins.
+# The executable inside an unpacked release, which the archive holds as
+# `bin/bake`.
 release_executable() {
   if [ -f "$1/bin/bake" ]; then
     printf '%s' "$1/bin/bake"
-  elif [ -f "$1/bin/bake-rs" ]; then
-    printf '%s' "$1/bin/bake-rs"
   fi
 }
 
@@ -559,7 +557,7 @@ self_check() {
   wait "$check_pid" || fail "the downloaded Bake $want_version failed its self-check; this install is unchanged"
   record=$(tr -d '[:space:]' < "$temporary/self-check.out")
   case $record in
-    *'"kind":"bake-rs-self-check"'*) ;;
+    *'"kind":"bake-self-check"'*) ;;
     *) fail "the downloaded Bake $want_version printed no self-check record; this install is unchanged" ;;
   esac
   case $record in
@@ -737,7 +735,7 @@ install_release() {
   file=$(printf '%s' "$artifact" | sed -n 's/.*"file":"\([^"]*\)".*/\1/p')
   expected=$(printf '%s' "$artifact" | sed -n 's/.*"sha256":"\([^"]*\)".*/\1/p')
   size=$(printf '%s' "$artifact" | sed -n 's/.*"size":\([0-9]*\).*/\1/p')
-  [ "$file" = "bake-rs-v$version-$target.tar.gz" ] || fail "the manifest names the archive $file, not bake-rs-v$version-$target.tar.gz"
+  [ "$file" = "bake-v$version-$target.tar.gz" ] || fail "the manifest names the archive $file, not bake-v$version-$target.tar.gz"
   case $size in
     0* | '') fail 'the manifest states no archive size' ;;
   esac

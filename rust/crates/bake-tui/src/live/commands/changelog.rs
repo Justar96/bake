@@ -5,7 +5,7 @@
 //! `test/changelog.test.ts`.
 //!
 //! The changelog is the repository's `CHANGELOG.md`, compiled into the
-//! binary as `bake-rs docs` compiles its topics, so it always matches the
+//! binary as `bake docs` compiles its topics, so it always matches the
 //! installed build and needs no files. As in Pi, only `## [x.y.z]` sections
 //! are entries (`Unreleased` is not one), shown oldest first under `What's
 //! New`, with each entry's relative links pinned to its tag on Bake's

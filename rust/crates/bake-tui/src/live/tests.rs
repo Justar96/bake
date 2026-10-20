@@ -118,7 +118,7 @@ fn setup_with(
             active_tool_names: active,
             tool_prompts: Vec::new(),
             system_prompt: SystemPromptOptions::new("/tmp"),
-            docs_command: "bake-rs docs".into(),
+            docs_command: "bake docs".into(),
             plugins: bake_coding_agent::plugins::PluginRegistry::default(),
             work: None,
             jobs: None,

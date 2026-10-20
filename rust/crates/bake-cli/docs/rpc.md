@@ -1,12 +1,12 @@
 # RPC mode
 
-`bake-rs --mode rpc` runs one long-lived session controlled by JSON records on standard input and output. Use it to embed the agent in an editor, another language, or a user interface of your own. It speaks Pi's RPC protocol, so a client written for Pi works, with the differences this page lists.
+`bake --mode rpc` runs one long-lived session controlled by JSON records on standard input and output. Use it to embed the agent in an editor, another language, or a user interface of your own. It speaks Pi's RPC protocol, so a client written for Pi works, with the differences this page lists.
 
 ```sh
-bake-rs --mode rpc --no-session
+bake --mode rpc --no-session
 ```
 
-The other command-line options still select the working directory's session, the model, the tools, the resources, and the permission: `--provider`, `--model`, `--session`, `--session-dir`, `--no-session`, `--name`, `--permission`, `--sandbox`, `--approval`, `--no-mcp`, and the rest of `bake-rs --help`. Message arguments and piped input are not prompts in this mode: standard input carries the protocol, and prompts arrive as `prompt` commands. `@file` arguments are refused. A session still needs a usable model, as `-p` does; without one the startup fails with status 1.
+The other command-line options still select the working directory's session, the model, the tools, the resources, and the permission: `--provider`, `--model`, `--session`, `--session-dir`, `--no-session`, `--name`, `--permission`, `--sandbox`, `--approval`, `--no-mcp`, and the rest of `bake --help`. Message arguments and piped input are not prompts in this mode: standard input carries the protocol, and prompts arrive as `prompt` commands. `@file` arguments are refused. A session still needs a usable model, as `-p` does; without one the startup fails with status 1.
 
 ## Records and framing
 
@@ -43,11 +43,11 @@ A `prompt` response reports what happened to the prompt, not the end of the mode
 - `queued`: the prompt waits for the running turn. A `prompt` with `streamingBehavior` set to `steer` or `followUp` queues while a turn runs, as `steer` and `follow_up` always do.
 - A `prompt` sent while a turn runs without `streamingBehavior` is refused, with the reason to pass one.
 
-Pi's third disposition, `handled`, reports an extension consuming the prompt; `bake-rs` has no extensions, so it never answers `handled`. `/skill:<name>` prompts and prompt templates are expanded as everywhere else and start a turn.
+Pi's third disposition, `handled`, reports an extension consuming the prompt; `bake` has no extensions, so it never answers `handled`. `/skill:<name>` prompts and prompt templates are expanded as everywhere else and start a turn.
 
 ## Commands
 
-The commands `bake-rs` serves, with the data of a successful response:
+The commands `bake` serves, with the data of a successful response:
 
 | Command | Members | Data |
 |---|---|---|
@@ -82,7 +82,7 @@ The commands `bake-rs` serves, with the data of a successful response:
 
 `new_session`, `switch_session`, `fork`, and `clone` replace the session, one replacement at a time: a question the running session had put to the client is withdrawn and recorded as cancelled, its turn is stopped, and it is shut down with its MCP servers and background work; the new session's events then arrive on the same stream, and its tools ask the same client. Its setup warnings go to standard error. `cycle_model` steps through the models with a configured key, and reports `isScoped: false`, since a session keeps no `--models` scope to cycle. `get_commands` lists the prompt templates and skills a prompt can invoke, each with a `sourceInfo` whose `origin` is always `top-level`.
 
-These Pi commands are refused with a reason, because `bake-rs` has no equivalent:
+These Pi commands are refused with a reason, because `bake` has no equivalent:
 
 - `bash` and `abort_bash`: there is no shell execution outside the model's `bash` tool.
 - `set_auto_retry`: automatic retry follows `settings.json`'s `retry.enabled`, which no command changes.
@@ -121,4 +121,4 @@ A line that is not JSON answers as a `parse` failure without an id, and a record
 
 ## Shutdown
 
-Close the child's standard input to shut down: the pending approval question is cancelled, the running turn is stopped, the session is shut down with its MCP servers, background shells, and plugin helpers, their process trees are awaited, and `bake-rs` exits 0. `SIGTERM` exits 143, `SIGHUP` 129, and `SIGINT` 130, each after the same shutdown. A long command in flight does not delay the shutdown: the stop request is taken up at once, the command is stopped with the session, and it answers with its own failure, such as `Compaction cancelled`, before the process exits. Handle the child's unexpected exit too: a request in flight when the child exits gets no response.
+Close the child's standard input to shut down: the pending approval question is cancelled, the running turn is stopped, the session is shut down with its MCP servers, background shells, and plugin helpers, their process trees are awaited, and `bake` exits 0. `SIGTERM` exits 143, `SIGHUP` 129, and `SIGINT` 130, each after the same shutdown. A long command in flight does not delay the shutdown: the stop request is taken up at once, the command is stopped with the session, and it answers with its own failure, such as `Compaction cancelled`, before the process exits. Handle the child's unexpected exit too: a request in flight when the child exits gets no response.

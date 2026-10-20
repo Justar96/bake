@@ -9,7 +9,7 @@
 //! contribution, the tool-call veto, and one host import, `log`.
 //!
 //! [`WasmPluginHost`] runs one plugin generation in its own helper process:
-//! `bake-rs` re-executed with [`HELPER_ARG`] ([`helper_main`]). The helper
+//! `bake` re-executed with [`HELPER_ARG`] ([`helper_main`]). The helper
 //! receives the component's bytes, checks and compiles it with Wasmtime,
 //! and answers calls over a bounded, versioned protocol; nothing compiled
 //! crosses the pipe, and the parent never compiles or runs guest code.
@@ -43,7 +43,7 @@
 //! A session runs the Wasm plugins its Bake home enables
 //! ([`crate::plugins::installed`]) through a per-plugin adapter
 //! (`session.rs`) that owns each helper generation it starts; the
-//! `bake-rs plugin check` diagnostic runs one host directly.
+//! `bake plugin check` diagnostic runs one host directly.
 
 mod engine;
 mod helper;
@@ -104,4 +104,4 @@ pub const MAX_SESSION_LOG_BYTES: usize = 1 << 20;
 /// The build a helper must be: the protocol checks it in the `Hello`.
 /// Builds of one version are not told apart, except that on Linux the
 /// helper is `/proc/self/exe`, the very image the parent runs.
-const BUILD: &str = concat!("bake-rs ", env!("CARGO_PKG_VERSION"), " wasmtime 49.0.3");
+const BUILD: &str = concat!("bake ", env!("CARGO_PKG_VERSION"), " wasmtime 49.0.3");

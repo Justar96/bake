@@ -7,7 +7,7 @@
 //! handler) and its `test/interactive-mode-compaction.test.ts` case
 //! "renders retained entries and appends the latest summary cost at the
 //! bottom" (the kept history, then the compaction note; the cost notice is
-//! not ported). Pi aborts a running response before compacting; bake-rs
+//! not ported). Pi aborts a running response before compacting; bake
 //! refuses `/compact` while a turn runs (see the busy case in
 //! `sessions_live.rs`). Bake's own cases: Esc cancels the summary request
 //! and the draft comes back; prompts and commands typed while it runs are

@@ -186,7 +186,7 @@ impl Fixture {
             tools,
             tool_prompts: Vec::new(),
             system_prompt: SystemPromptOptions::new(ws.to_string_lossy()),
-            docs_command: "bake-rs docs".into(),
+            docs_command: "bake docs".into(),
             plugins,
             work: None,
             jobs: None,

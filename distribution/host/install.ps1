@@ -171,7 +171,7 @@ $downloadUrl = if ($env:BAKE_DOWNLOAD_URL) { $env:BAKE_DOWNLOAD_URL.TrimEnd('/')
 $localAppData = $env:LOCALAPPDATA
 if (-not $localAppData) { $localAppData = [Environment]::GetFolderPath('LocalApplicationData') }
 if (-not $env:BAKE_NATIVE_ROOT -and -not $localAppData) { throw 'Bake install: LOCALAPPDATA names no directory for the install root' }
-$nativeRoot = if ($env:BAKE_NATIVE_ROOT) { $env:BAKE_NATIVE_ROOT } else { Join-Path $localAppData 'bake-rs' }
+$nativeRoot = if ($env:BAKE_NATIVE_ROOT) { $env:BAKE_NATIVE_ROOT } else { Join-Path $localAppData 'bake-native' }
 $nativeRoot = [IO.Path]::GetFullPath($nativeRoot)
 # The 0.3 TypeScript install, which this installer reads to recognize a
 # Bake-managed `bake.cmd` and never writes to.
@@ -304,19 +304,16 @@ function BakeWritePointer([string]$name, [string]$version) {
   Move-Item -Force -LiteralPath $temp -Destination $pointer
 }
 
-# The executable inside an unpacked release. The archive's `bin\bake-rs.exe`
-# becomes `bin\bake.exe`, so both names are accepted and `bake.exe` wins.
+# The executable inside an unpacked release, which the archive holds as
+# `bin\bake.exe`.
 function BakeReleaseExecutable([string]$release) {
-  foreach ($name in @('bake.exe', 'bake-rs.exe')) {
-    $path = Join-Path (Join-Path $release 'bin') $name
-    if (Test-Path -LiteralPath $path -PathType Leaf) { return $path }
-  }
+  $path = Join-Path (Join-Path $release 'bin') 'bake.exe'
+  if (Test-Path -LiteralPath $path -PathType Leaf) { return $path }
   return ''
 }
 
 # The `bake.cmd` the installer writes: it reads the pointer on every run, so
-# an update never rewrites the file a running `cmd.exe` is reading, and it
-# accepts either executable name.
+# an update never rewrites the file a running `cmd.exe` is reading.
 function BakeShimText([string]$root) {
   $literal = $root.Replace('%', '%%')
   return (@(
@@ -327,7 +324,6 @@ function BakeShimText([string]$root) {
     'set /p BAKE_CURRENT=<"%BAKE_NATIVE_ROOT%\current.txt"',
     'if not defined BAKE_CURRENT (echo Bake is not installed correctly; run the installer again. 1>&2 & exit /b 1)',
     'set "BAKE_EXE=%BAKE_NATIVE_ROOT%\releases\%BAKE_CURRENT%\bin\bake.exe"',
-    'if not exist "%BAKE_EXE%" set "BAKE_EXE=%BAKE_NATIVE_ROOT%\releases\%BAKE_CURRENT%\bin\bake-rs.exe"',
     '"%BAKE_EXE%" %*',
     'exit /b %ERRORLEVEL%',
     ''
@@ -501,8 +497,8 @@ function BakeInstall() {
   $file = $found.Groups[1].Value
   $expected = $found.Groups[2].Value
   $size = [long]$found.Groups[3].Value
-  if ($file -ne "bake-rs-v$version-$target.tar.gz") {
-    throw "Bake install: the manifest names the archive $file, not bake-rs-v$version-$target.tar.gz"
+  if ($file -ne "bake-v$version-$target.tar.gz") {
+    throw "Bake install: the manifest names the archive $file, not bake-v$version-$target.tar.gz"
   }
   if ($size -le 0 -or $size -gt 9007199254740991) { throw 'Bake install: the manifest states an impossible archive size' }
 
@@ -582,7 +578,7 @@ function BakeInstall() {
       throw "Bake install: the downloaded Bake $version did not finish its self-check; this install is unchanged"
     }
     $record = $reading.Result -replace '\s', ''
-    if ($record -notmatch '"kind":"bake-rs-self-check"') {
+    if ($record -notmatch '"kind":"bake-self-check"') {
       throw "Bake install: the downloaded Bake $version printed no self-check record; this install is unchanged"
     }
     if ($record -notmatch ('"version":"' + [regex]::Escape($version) + '"')) {

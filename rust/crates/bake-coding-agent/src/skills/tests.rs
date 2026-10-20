@@ -695,7 +695,7 @@ fn built(options: &SystemPromptOptions) -> (Vec<String>, Option<String>) {
 #[test]
 fn the_skills_section_matches_pi() {
     let mut read = prompt_with_skills(&["read", "bash"]);
-    read.docs_command = "bake-rs docs".into();
+    read.docs_command = "bake docs".into();
     read.permissions = "File sandbox: read-only.".into();
     let (names, skills) = built(&read);
     assert_eq!(skills, recorded_section("read", "skills"));

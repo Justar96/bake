@@ -27,7 +27,7 @@ async function serve(redirect?: string, extra: Record<string, string> = {}): Pro
   writeFileSync(join(root, 'public/releases/0.1.1/bake-v0.1.1-linux-x64.tar.gz'), 'held here')
   writeFileSync(join(root, 'public/native/stable.json'), '{"channel":"stable"}')
   writeFileSync(join(root, 'public/native/stable.json.sig'), 'signature\n')
-  writeFileSync(join(root, 'public/native/releases/0.4.0/bake-rs-v0.4.0-linux-x64.tar.gz'), 'native bytes')
+  writeFileSync(join(root, 'public/native/releases/0.4.0/bake-v0.4.0-linux-x64.tar.gz'), 'native bytes')
   const env: Record<string, string | undefined> = { ...process.env, PORT: '0', BAKE_ARCHIVE_REDIRECT: redirect, ...extra }
   const server = Bun.spawn(['node', join(root, 'server.mjs')], { env, stdout: 'pipe', stderr: 'inherit' })
   servers.push(server)
@@ -63,22 +63,28 @@ test('serves an archive it holds, and redirects nothing but archives', async () 
 test('answers 404 for a missing archive without a redirect host', async () => {
   const { base } = await serve()
   expect((await fetch(`${base}/releases/0.1.1/bake-v0.1.1-win32-x64.tar.gz`, { redirect: 'manual' })).status).toBe(404)
-  expect((await fetch(`${base}/native/releases/0.4.0/bake-rs-v0.4.0-win32-x64.tar.gz`, { redirect: 'manual' })).status).toBe(404)
+  expect((await fetch(`${base}/native/releases/0.4.0/bake-v0.4.0-win32-x64.tar.gz`, { redirect: 'manual' })).status).toBe(404)
+  // Both routes name an archive alike, and each serves only its own directory,
+  // so the native archive this image holds is not on the 0.3 route.
+  expect((await fetch(`${base}/releases/0.4.0/bake-v0.4.0-linux-x64.tar.gz`, { redirect: 'manual' })).status).toBe(404)
 })
 
 test('serves the native route, and redirects a native archive it does not hold', async () => {
   const { base } = await serve('https://github.com/Justar96/bake/releases/download')
   expect(await (await fetch(`${base}/native/stable.json`)).text()).toBe('{"channel":"stable"}')
   expect(await (await fetch(`${base}/native/stable.json.sig`)).text()).toBe('signature\n')
-  const held = await fetch(`${base}/native/releases/0.4.0/bake-rs-v0.4.0-linux-x64.tar.gz`, { redirect: 'manual' })
+  const held = await fetch(`${base}/native/releases/0.4.0/bake-v0.4.0-linux-x64.tar.gz`, { redirect: 'manual' })
   expect(held.status).toBe(200)
   expect(await held.text()).toBe('native bytes')
-  const redirected = await fetch(`${base}/native/releases/0.4.0/bake-rs-v0.4.0-win32-x64.tar.gz`, { redirect: 'manual' })
+  const redirected = await fetch(`${base}/native/releases/0.4.0/bake-v0.4.0-win32-x64.tar.gz`, { redirect: 'manual' })
   expect(redirected.status).toBe(302)
-  expect(redirected.headers.get('location')).toBe('https://github.com/Justar96/bake/releases/download/v0.4.0/bake-rs-v0.4.0-win32-x64.tar.gz')
-  // The native manifest is not on the 0.3 route, and nothing else under native/ is served.
+  expect(redirected.headers.get('location')).toBe('https://github.com/Justar96/bake/releases/download/v0.4.0/bake-v0.4.0-win32-x64.tar.gz')
+  // Nothing else under native/ is served, and a 0.3 request that names this
+  // archive is answered from the 0.3 release tag, never with the native bytes.
   expect((await fetch(`${base}/native/stable.json.bak`, { redirect: 'manual' })).status).toBe(404)
-  expect((await fetch(`${base}/releases/0.4.0/bake-rs-v0.4.0-linux-x64.tar.gz`, { redirect: 'manual' })).status).toBe(404)
+  const onLegacyRoute = await fetch(`${base}/releases/0.4.0/bake-v0.4.0-linux-x64.tar.gz`, { redirect: 'manual' })
+  expect(onLegacyRoute.status).toBe(302)
+  expect(onLegacyRoute.headers.get('location')).toBe('https://github.com/Justar96/bake/releases/download/v0.4.0/bake-v0.4.0-linux-x64.tar.gz')
 })
 
 /** A stand-in for gissx.org's activity endpoint that keeps what it is sent. */

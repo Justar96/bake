@@ -1,7 +1,7 @@
 //! The hooks files `settings.json` names, read under the owner rules of
 //! `$BAKE_HOME/mcp.json` ([`crate::mcp::home`]).
 //!
-//! Bake 0.3 pointed each bridge's `configPath` at a `hooks.json`; bake-rs
+//! Bake 0.3 pointed each bridge's `configPath` at a `hooks.json`; bake
 //! takes the same paths from the `hooks` member of `settings.json`
 //! ([`HookSettings`]). A path may start with `~/`; a relative one is read
 //! from the Bake home. A hooks file runs commands and decides which tool
@@ -115,7 +115,7 @@ fn load(
         kind: "a hooks file",
         workspace_remedy: "keep it outside, or remove it from the hooks member of settings.json",
         repository_remedy: "keep it outside every repository, or remove it from the hooks member of settings.json",
-        unchecked: "bake-rs cannot yet check on this platform who may change a hooks file, so it does not read it; remove it from the hooks member of settings.json until that check is supported",
+        unchecked: "bake cannot yet check on this platform who may change a hooks file, so it does not read it; remove it from the hooks member of settings.json until that check is supported",
     };
     let file = open_owner_file(&dir, &rules, workspace, user_home)?
         .ok_or_else(|| "not found".to_owned())?;

@@ -34,7 +34,7 @@ targets = [
 
 # Dev-dependencies never reach the shipped binary. Build dependencies and
 # proc macros run while it is built and are kept: the bundle covers every
-# crate compiled to produce `bake-rs`, marked by role.
+# crate compiled to produce `bake`, marked by role.
 ignore-dev-dependencies = true
 ignore-build-dependencies = false
 

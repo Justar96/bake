@@ -24,8 +24,8 @@ describe('native arms', () => {
     expect(nativeSessionMode(undefined)).toBe('memory')
     for (const invalid of ['', 'true', '--recoverable']) expect(() => nativeSessionMode(invalid)).toThrow()
     for (const mode of ['persistent', 'recoverable'] as const) {
-      const command = nativeCommand('bake-rs', 'p', 'm', 'medium', '-prompt', 'danger-full-access', { mode, path: '/private/session.jsonl', maxModelCalls: 14, timeoutMs: 180_000 })
-      expect(command).toEqual(['bake-rs', '-p', '--mode', 'json', '--session', '/private/session.jsonl',
+      const command = nativeCommand('bake', 'p', 'm', 'medium', '-prompt', 'danger-full-access', { mode, path: '/private/session.jsonl', maxModelCalls: 14, timeoutMs: 180_000 })
+      expect(command).toEqual(['bake', '-p', '--mode', 'json', '--session', '/private/session.jsonl',
         '--max-model-calls', '14', '--run-timeout-ms', '180000', ...mode === 'recoverable' ? ['--recoverable'] : [],
         '--permission', 'danger-full-access', '--model', 'p/m', '--thinking', 'medium', '--', '-prompt'])
     }
@@ -65,24 +65,26 @@ describe('native arms', () => {
   })
 
   test('launch print mode with JSON events, no session, the full-access preset, and the prompt after --', () => {
-    expect(nativeCommand('/bin/bake-rs', 'cliproxyapi', 'gpt-x', 'medium', '-starts with a dash'))
-      .toEqual(['/bin/bake-rs', '-p', '--mode', 'json', '--no-session', '--permission', 'danger-full-access',
+    expect(nativeCommand('/bin/bake', 'cliproxyapi', 'gpt-x', 'medium', '-starts with a dash'))
+      .toEqual(['/bin/bake', '-p', '--mode', 'json', '--no-session', '--permission', 'danger-full-access',
         '--model', 'cliproxyapi/gpt-x', '--thinking', 'medium', '--', '-starts with a dash'])
   })
 
   test('run under the default preset when the evaluation asks for it', () => {
-    expect(nativeCommand('/bin/bake-rs', 'cliproxyapi', 'gpt-x', 'medium', 'go', 'workspace-write'))
-      .toEqual(['/bin/bake-rs', '-p', '--mode', 'json', '--no-session', '--permission', 'workspace-write',
+    expect(nativeCommand('/bin/bake', 'cliproxyapi', 'gpt-x', 'medium', 'go', 'workspace-write'))
+      .toEqual(['/bin/bake', '-p', '--mode', 'json', '--no-session', '--permission', 'workspace-write',
         '--model', 'cliproxyapi/gpt-x', '--thinking', 'medium', '--', 'go'])
   })
 
-  test('the executable is the bake-rs binary Cargo reports, wherever its target directory is', () => {
+  test('the executable is the native binary Cargo reports, wherever its target directory is', () => {
     const artifact = (name: string, kind: string, executable: string | null) =>
       JSON.stringify({ reason: 'compiler-artifact', target: { name, kind: [kind] }, executable })
     expect(builtExecutable([
-      artifact('bake_coding_agent', 'lib', null), 'not json', artifact('bake-rs', 'bin', '/elsewhere/release/bake-rs'),
+      artifact('bake_coding_agent', 'lib', null), 'not json', artifact('bake', 'bin', '/elsewhere/release/bake'),
       JSON.stringify({ reason: 'build-finished', success: true }),
-    ].join('\n'))).toBe('/elsewhere/release/bake-rs')
+    ].join('\n'))).toBe('/elsewhere/release/bake')
+    // A checkout from before the rename builds bake-rs, which a paired base still is.
+    expect(builtExecutable(artifact('bake-rs', 'bin', '/elsewhere/release/bake-rs'))).toBe('/elsewhere/release/bake-rs')
     expect(builtExecutable(artifact('bake-eval-fake-arm', 'bin', '/t/bake-eval-fake-arm'))).toBeUndefined()
   })
 
@@ -91,11 +93,11 @@ describe('native arms', () => {
     const checkout = join(root, 'prebuilt')
     mkdirSync(join(checkout, 'rust'), { recursive: true })
     writeFileSync(join(checkout, 'rust/Cargo.toml'), '[workspace]\n')
-    const text = '#!/bin/sh\necho "bake-rs 9.9.9-test"\n'
-    const bin = script(join(checkout, 'rust/target/release/bake-rs'), text)
+    const text = '#!/bin/sh\necho "bake 9.9.9-test"\n'
+    const bin = script(join(checkout, 'rust/target/release/bake'), text)
     const settings = '{"backgroundCompaction":true,"images":{"autoResize":false}}'
     expect(parseArms(`cand=native:${bin}`, 'headless', { EVAL_SETTINGS_CAND: settings }).cand).toEqual({
-      kind: 'native', root: realpathSync(join(checkout, 'rust/target/release')), bin: realpathSync(bin), version: 'bake-rs 9.9.9-test',
+      kind: 'native', root: realpathSync(join(checkout, 'rust/target/release')), bin: realpathSync(bin), version: 'bake 9.9.9-test',
       binarySha256: sha256(text), revision: { prebuilt: true, commit: null, dirty: null },
       extra: [], settings, nativeSession: 'memory', llmDeepseek: false, composition: [],
     })
@@ -105,20 +107,20 @@ describe('native arms', () => {
     const checkout = join(root, 'checkout')
     mkdirSync(join(checkout, 'rust'), { recursive: true })
     writeFileSync(join(checkout, 'rust/Cargo.toml'), '[workspace]\n')
-    script(join(checkout, 'rust/target/release/bake-rs'), '#!/bin/sh\necho "bake-rs stale"\n')
-    const fresh = '#!/bin/sh\necho "bake-rs fresh"\n'
-    const built = script(join(root, 'redirected-target/release/bake-rs'), fresh)
+    script(join(checkout, 'rust/target/release/bake'), '#!/bin/sh\necho "bake stale"\n')
+    const fresh = '#!/bin/sh\necho "bake fresh"\n'
+    const built = script(join(root, 'redirected-target/release/bake'), fresh)
     const args = join(root, 'cargo-args')
     // A stand-in Cargo that records its arguments and directory and reports the redirected build.
     const bin = join(root, 'fake-bin')
     script(join(bin, 'cargo'), `#!/bin/sh\necho "$PWD $*" > ${JSON.stringify(args)}\n`
-      + `echo '${JSON.stringify({ reason: 'compiler-artifact', target: { name: 'bake-rs', kind: ['bin'] }, executable: built })}'\n`)
+      + `echo '${JSON.stringify({ reason: 'compiler-artifact', target: { name: 'bake', kind: ['bin'] }, executable: built })}'\n`)
     const path = process.env.PATH
     process.env.PATH = `${bin}${delimiter}${path ?? ''}`
     try {
       const arm = parseArms(`cand=native:${checkout}`, 'headless', {}).cand!
       expect(arm.bin).toBe(realpathSync(built))
-      expect(arm.version).toBe('bake-rs fresh')
+      expect(arm.version).toBe('bake fresh')
       expect(arm.binarySha256).toBe(sha256(fresh))
       expect(arm.root).toBe(checkout)
       expect(arm.revision?.prebuilt).toBe(false)
@@ -136,9 +138,9 @@ describe('native arms', () => {
   })
 
   test.skipIf(!posix)('a bare path is the native agent, and ts: names the TypeScript agent', () => {
-    const text = '#!/bin/sh\necho "bake-rs 9.9.9-bare"\n'
-    const bin = script(join(root, 'bare/bake-rs'), text)
-    expect(parseArms(`cand=${bin}`, 'headless', {}).cand).toMatchObject({ kind: 'native', bin: realpathSync(bin), version: 'bake-rs 9.9.9-bare' })
+    const text = '#!/bin/sh\necho "bake 9.9.9-bare"\n'
+    const bin = script(join(root, 'bare/bake'), text)
+    expect(parseArms(`cand=${bin}`, 'headless', {}).cand).toMatchObject({ kind: 'native', bin: realpathSync(bin), version: 'bake 9.9.9-bare' })
     // A built TypeScript checkout without a Rust workspace points at ts:.
     const typescript = join(root, 'typescript')
     mkdirSync(join(typescript, 'apps/cli/lib'), { recursive: true })
@@ -148,7 +150,7 @@ describe('native arms', () => {
   })
 
   test.skipIf(!posix)('per-arm settings and overlays are refused only by an arm that would ignore them', () => {
-    const bin = script(join(root, 'ignored/bake-rs'), '#!/bin/sh\necho "bake-rs 9.9.9-ignored"\n')
+    const bin = script(join(root, 'ignored/bake'), '#!/bin/sh\necho "bake 9.9.9-ignored"\n')
     expect(parseArms(`cand=${bin}`, 'headless', { EVAL_SETTINGS_CAND: '{"a":1}' }).cand?.settings).toBe('{"a":1}')
     expect(() => parseArms(`cand=native:${bin}`, 'headless', { EVAL_EXTRA_CAND: '[]' })).toThrow(/would not apply EVAL_EXTRA_CAND/)
     expect(() => parseArms(`cand=pi:${bin}`, 'headless', { EVAL_SETTINGS_CAND: '{}' })).toThrow(/would not apply EVAL_SETTINGS_CAND/)
@@ -225,7 +227,7 @@ describe('stray context files', () => {
     writeFileSync(join(userHome, '.agents/AGENTS.md'), 'global\n')
     writeFileSync(join(dir, 'a/AGENTS.md'), 'ancestor\n')
     writeFileSync(join(workspace, 'AGENTS.md'), 'fixture\n')
-    // bake-rs no longer reads CLAUDE.md, nor an AGENTS.md beside the user's .agents.
+    // bake no longer reads CLAUDE.md, nor an AGENTS.md beside the user's .agents.
     writeFileSync(join(dir, 'a/CLAUDE.md'), 'ignored\n')
     writeFileSync(join(userHome, 'AGENTS.md'), 'ignored\n')
     const owned = strayContextFiles(workspace, userHome, true)

@@ -14,7 +14,7 @@
 //! with every Win32 call checked: a failure never starts the command
 //! unrestricted. Pi has no sandbox; nothing here comes from Pi.
 //!
-//! Bake's Rust binary serves as its own runner: `bake-rs` dispatches a first
+//! Bake's Rust binary serves as its own runner: `bake` dispatches a first
 //! argument of [`HELPER_ARG`] to [`helper_main`] before anything else runs.
 //!
 //! ```text

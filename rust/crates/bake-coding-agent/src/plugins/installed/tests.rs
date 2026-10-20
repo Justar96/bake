@@ -264,7 +264,7 @@ fn a_recorded_failure_blocks_every_later_load_until_disabled() {
 
     let loaded = home.load(&setup(), None).unwrap();
     assert_eq!(kinds(&loaded), [("guard".into(), "trap")]);
-    assert!(loaded.warnings[0].contains("bake-rs plugin disable guard"));
+    assert!(loaded.warnings[0].contains("bake plugin disable guard"));
     // Enabling again keeps the failure; disabling then enabling resets it.
     assert!(
         home.enable(&installed.sha256)

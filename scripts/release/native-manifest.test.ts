@@ -30,7 +30,7 @@ function manifest(overrides: Partial<NativeManifest> = {}): NativeManifest {
 describe('canonical bytes', () => {
   test('are the contract\'s members in order, with a trailing newline', () => {
     expect(nativeManifestBytes(manifest()).toString('utf8')).toBe(
-      `{"schema":"bake-native-release/1","channel":"stable","version":"0.4.0","published":"2026-10-20T00:00:00Z","artifacts":{"linux-x64":{"file":"bake-rs-v0.4.0-linux-x64.tar.gz","sha256":"${SHA256}","size":20}}}\n`,
+      `{"schema":"bake-native-release/1","channel":"stable","version":"0.4.0","published":"2026-10-20T00:00:00Z","artifacts":{"linux-x64":{"file":"bake-v0.4.0-linux-x64.tar.gz","sha256":"${SHA256}","size":20}}}\n`,
     )
   })
 
@@ -60,8 +60,8 @@ describe('parsing', () => {
     ['a fractional publication time', { published: '2026-10-20T00:00:00.000Z' }, /published time is invalid/],
     ['an impossible publication time', { published: '2026-02-30T00:00:00Z' }, /published time is invalid/],
     ['no artifacts', { artifacts: {} }, /lists no artifacts/],
-    ['an unsupported target', { artifacts: { 'freebsd-x64': { file: 'bake-rs-v0.4.0-freebsd-x64.tar.gz', sha256: SHA256, size: 1 } } }, /unsupported target: freebsd-x64/],
-    ['a TypeScript archive name', { artifacts: { 'linux-x64': { file: 'bake-v0.4.0-linux-x64.tar.gz', sha256: SHA256, size: 1 } } }, /linux-x64 file is "bake-v0\.4\.0-linux-x64\.tar\.gz"/],
+    ['an unsupported target', { artifacts: { 'freebsd-x64': { file: 'bake-v0.4.0-freebsd-x64.tar.gz', sha256: SHA256, size: 1 } } }, /unsupported target: freebsd-x64/],
+    ['an archive name of another version', { artifacts: { 'linux-x64': { file: 'bake-v0.4.1-linux-x64.tar.gz', sha256: SHA256, size: 1 } } }, /linux-x64 file is "bake-v0\.4\.1-linux-x64\.tar\.gz"/],
     ['an uppercase hash', { artifacts: { 'linux-x64': { file: archiveName('0.4.0', 'linux-x64'), sha256: SHA256.toUpperCase(), size: 1 } } }, /linux-x64 sha256 is invalid/],
     ['a zero size', { artifacts: { 'linux-x64': { file: archiveName('0.4.0', 'linux-x64'), sha256: SHA256, size: 0 } } }, /linux-x64 size is invalid/],
     ['an unknown artifact member', { artifacts: { 'linux-x64': { file: archiveName('0.4.0', 'linux-x64'), sha256: SHA256, size: 1, url: 'http://elsewhere' } } }, /linux-x64 artifact has unknown members: url/],
@@ -92,9 +92,12 @@ describe('the native key', () => {
 describe('a 0.3 updater reading the native route', () => {
   const bytes = nativeManifestBytes(manifest())
 
-  test('refuses the native manifest', () => {
-    // The frozen updater's own parser, reused read-only.
-    expect(() => parseManifest(bytes.toString('utf8'))).toThrow(/invalid linux-x64 artifact/)
+  test('cannot tell the native manifest apart by its artifact names', () => {
+    // The frozen updater's own parser, reused read-only. It reads neither
+    // schema nor channel, and both routes name an archive
+    // bake-v<version>-<target>.tar.gz, so this manifest's shape passes: the
+    // native route and the native key are what keep a 0.3 updater off it.
+    expect(parseManifest(bytes.toString('utf8')).version).toBe('0.4.0')
   })
 
   test('refuses a native signature, however it was signed', () => {
@@ -123,7 +126,7 @@ describe('the host gate', () => {
     mkdirSync(join(root, 'public/native/releases/0.4.0'), { recursive: true })
     const artifacts: Record<string, { file: string; sha256: string; size: number }> = {}
     for (const target of platforms) {
-      const file = `bake-rs-v0.4.0-${target}.tar.gz`
+      const file = `bake-v0.4.0-${target}.tar.gz`
       writeFileSync(join(root, 'public/native/releases/0.4.0', file), payload)
       artifacts[target] = { file, sha256: createHash('sha256').update(payload).digest('hex'), size: Buffer.byteLength(payload) }
     }
@@ -154,12 +157,12 @@ describe('the host gate', () => {
 
   test('an archive held elsewhere is allowed, and one it holds is still checked', () => {
     const { root } = fixture(targets)
-    rmSync(join(root, 'public/native/releases/0.4.0/bake-rs-v0.4.0-linux-x64.tar.gz'))
+    rmSync(join(root, 'public/native/releases/0.4.0/bake-v0.4.0-linux-x64.tar.gz'))
     expect(verify(root, ['--complete']).code).not.toBe(0)
     const allowed = verify(root, ['--complete', '--allow-missing-archives'])
     expect(allowed.code).toBe(0)
     expect(allowed.stdout).toContain('archives held elsewhere: linux-x64')
-    writeFileSync(join(root, 'public/native/releases/0.4.0/bake-rs-v0.4.0-win32-x64.tar.gz'), `${PAYLOAD}!`)
+    writeFileSync(join(root, 'public/native/releases/0.4.0/bake-v0.4.0-win32-x64.tar.gz'), `${PAYLOAD}!`)
     expect(verify(root, ['--complete', '--allow-missing-archives']).stderr).toContain('Size mismatch for win32-x64')
   })
 
@@ -196,7 +199,7 @@ describe('the host gate', () => {
     ['a rolled-over publication date', (m: Record<string, unknown>) => { m.published = '2026-02-30T00:00:00Z' }, 'Invalid native release published time'],
     ['no artifacts', (m: Record<string, unknown>) => { m.artifacts = {} }, 'No native release artifacts'],
     ['an unsupported target', (m: Record<string, unknown>) => { (m.artifacts as Record<string, unknown>)['freebsd-x64'] = { file: 'x', sha256: 'y', size: 1 } }, 'Unsupported native release target: freebsd-x64'],
-    ['a TypeScript archive name', (m: Record<string, unknown>) => { ((m.artifacts as Record<string, Record<string, unknown>>)['win32-x64'] as Record<string, unknown>).file = 'bake-v0.4.0-win32-x64.tar.gz' }, 'Missing or invalid win32-x64 artifact'],
+    ['an archive name of another version', (m: Record<string, unknown>) => { ((m.artifacts as Record<string, Record<string, unknown>>)['win32-x64'] as Record<string, unknown>).file = 'bake-v0.4.1-win32-x64.tar.gz' }, 'Missing or invalid win32-x64 artifact'],
     ['an extra artifact member', (m: Record<string, unknown>) => { ((m.artifacts as Record<string, Record<string, unknown>>)['win32-x64'] as Record<string, unknown>).url = 'http://elsewhere' }, 'Unknown win32-x64 artifact members: url'],
     ['a wrong hash', (m: Record<string, unknown>) => { ((m.artifacts as Record<string, Record<string, unknown>>)['win32-x64'] as Record<string, unknown>).sha256 = '0'.repeat(64) }, 'SHA-256 mismatch for win32-x64'],
     ['a wrong size', (m: Record<string, unknown>) => { ((m.artifacts as Record<string, Record<string, unknown>>)['win32-x64'] as Record<string, unknown>).size = 7 }, 'Size mismatch for win32-x64'],

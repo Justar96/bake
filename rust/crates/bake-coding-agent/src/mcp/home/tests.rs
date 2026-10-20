@@ -325,7 +325,7 @@ mod unix {
         }
         let error = refusal(&layout.load(&home)).to_owned();
         assert!(
-            error.contains("changed after bake-rs resolved the Bake home"),
+            error.contains("changed after bake resolved the Bake home"),
             "{error}"
         );
     }

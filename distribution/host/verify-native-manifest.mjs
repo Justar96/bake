@@ -62,7 +62,7 @@ for (const target of targets) {
   if (artifact === null || typeof artifact !== 'object' || Array.isArray(artifact)) throw new Error(`Missing or invalid ${target} artifact`)
   const extra = Object.keys(artifact).filter(key => !['file', 'sha256', 'size'].includes(key))
   if (extra.length > 0) throw new Error(`Unknown ${target} artifact members: ${extra.sort().join(', ')}`)
-  if (artifact.file !== `bake-rs-v${manifest.version}-${target}.tar.gz`
+  if (artifact.file !== `bake-v${manifest.version}-${target}.tar.gz`
     || typeof artifact.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(artifact.sha256)) throw new Error(`Missing or invalid ${target} artifact`)
   if (!Number.isSafeInteger(artifact.size) || artifact.size <= 0) throw new Error(`Invalid archive size for ${target}`)
   const file = new URL(`releases/${manifest.version}/${artifact.file}`, publicRoot)
