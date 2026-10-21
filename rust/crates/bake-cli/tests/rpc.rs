@@ -1,25 +1,215 @@
 //! End-to-end RPC mode: the built `bake` with `--mode rpc`, driven by a
 //! small test client over its pipes. Each test owns a temporary Bake home
-//! and project directory; no model request is made, so nothing reaches the
-//! network and no key is needed.
+//! and project directory. A case that runs a turn owns a loopback model
+//! server answering `POST /v1/responses` with the OpenAI Responses streams
+//! in `fixtures/`; nothing reaches the network and no real key is needed.
 //!
 //! The client stands in for Pi's `RpcClient`
 //! (`packages/coding-agent/src/modes/rpc/rpc-client.ts`), which these
 //! cases follow: `test/rpc-client-clear-queue.test.ts`,
 //! `test/rpc-client-clone.test.ts`, and
-//! `test/rpc-client-process-exit.test.ts`.
+//! `test/rpc-client-process-exit.test.ts`. The rest are scope 13's proofs
+//! through the real binary: D24 approvals answered, refused, and left
+//! unanswered, each against the session file; `abort` and read-only
+//! commands answered while a turn runs; and shutdown on end of input and
+//! on `SIGTERM`, `SIGINT`, and `SIGHUP` with no process left behind.
 
 use std::io::{BufRead, BufReader, Read, Write};
-use std::path::PathBuf;
+use std::net::{TcpListener, TcpStream};
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use bake_coding_agent::permissions::APPROVAL_CUSTOM_TYPE;
 use serde_json::{Value, json};
 
 /// How long one record may take before the test fails.
 const TIMEOUT: Duration = Duration::from_secs(60);
+
+/// The text answer the model server streams.
+const TEXT_SSE: &str = include_str!("fixtures/openai-responses-text.sse");
+
+/// What the model server answers one request with.
+#[derive(Clone)]
+enum Reply {
+    /// An event stream, written whole.
+    Stream(String),
+    /// Nothing, with the connection kept open until the client hangs up or
+    /// the server stops: a model that never answers.
+    Hold,
+}
+
+impl Reply {
+    fn text() -> Self {
+        // The fixture ends with one newline; its last event needs its blank
+        // line.
+        Self::Stream(format!("{TEXT_SSE}\n"))
+    }
+
+    /// One function call of `name` with `arguments`.
+    fn tool_call(name: &str, arguments: &Value) -> Self {
+        let item = json!({"id": "fc_1", "type": "function_call", "status": "completed", "call_id": "call_1", "name": name, "arguments": arguments.to_string()});
+        let events = [
+            json!({"type": "response.created", "response": {"id": "resp_call", "object": "response", "created_at": 1_760_000_000, "status": "in_progress", "model": "loop-model", "output": []}}),
+            json!({"type": "response.output_item.added", "output_index": 0, "item": {"id": "fc_1", "type": "function_call", "status": "in_progress", "call_id": "call_1", "name": name, "arguments": ""}}),
+            json!({"type": "response.function_call_arguments.done", "item_id": "fc_1", "output_index": 0, "arguments": arguments.to_string()}),
+            json!({"type": "response.output_item.done", "output_index": 0, "item": item}),
+            json!({"type": "response.completed", "response": {"id": "resp_call", "object": "response", "created_at": 1_760_000_000, "status": "completed", "model": "loop-model", "output": [item], "usage": {"input_tokens": 40, "input_tokens_details": {"cached_tokens": 0}, "output_tokens": 8, "output_tokens_details": {"reasoning_tokens": 0}, "total_tokens": 48}}}),
+        ];
+        Self::Stream(
+            events
+                .into_iter()
+                .enumerate()
+                .map(|(sequence, mut event)| {
+                    event["sequence_number"] = json!(sequence);
+                    format!(
+                        "event: {}\ndata: {event}\n\n",
+                        event["type"].as_str().unwrap_or_default()
+                    )
+                })
+                .collect(),
+        )
+    }
+}
+
+/// A loopback model server answering its requests with `replies` in turn,
+/// repeating the last, each connection on its own thread; stopped and
+/// joined on drop.
+struct ModelServer {
+    port: u16,
+    requests: Arc<AtomicUsize>,
+    stop: Arc<AtomicBool>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl ModelServer {
+    fn start(replies: Vec<Reply>) -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+        listener.set_nonblocking(true).expect("nonblocking");
+        let port = listener.local_addr().expect("address").port();
+        let requests = Arc::new(AtomicUsize::new(0));
+        let stop = Arc::new(AtomicBool::new(false));
+        let thread = {
+            let (requests, stop) = (Arc::clone(&requests), Arc::clone(&stop));
+            std::thread::spawn(move || {
+                let mut connections = Vec::new();
+                while !stop.load(Ordering::SeqCst) {
+                    match listener.accept() {
+                        Ok((socket, _)) => {
+                            let (replies, requests, stop) =
+                                (replies.clone(), Arc::clone(&requests), Arc::clone(&stop));
+                            connections.push(std::thread::spawn(move || {
+                                answer(socket, &replies, &requests, &stop);
+                            }));
+                        }
+                        Err(_) => std::thread::sleep(Duration::from_millis(5)),
+                    }
+                }
+                for connection in connections {
+                    let _ = connection.join();
+                }
+            })
+        };
+        Self {
+            port,
+            requests,
+            stop,
+            thread: Some(thread),
+        }
+    }
+
+    /// How many model requests have arrived.
+    fn requests(&self) -> usize {
+        self.requests.load(Ordering::SeqCst)
+    }
+}
+
+impl Drop for ModelServer {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+/// Reads one request's head and body, then answers it with the reply its
+/// order selects.
+fn answer(mut socket: TcpStream, replies: &[Reply], requests: &AtomicUsize, stop: &AtomicBool) {
+    let _ = socket.set_nonblocking(false);
+    let _ = socket.set_read_timeout(Some(Duration::from_millis(50)));
+    let mut buffer = Vec::new();
+    let mut chunk = [0u8; 8192];
+    let deadline = Instant::now() + TIMEOUT;
+    let complete = |buffer: &[u8]| {
+        let head_end = buffer.windows(4).position(|window| window == b"\r\n\r\n")?;
+        let head = String::from_utf8_lossy(&buffer[..head_end]).to_lowercase();
+        let length = head
+            .lines()
+            .find_map(|line| line.strip_prefix("content-length:"))
+            .and_then(|value| value.trim().parse::<usize>().ok())
+            .unwrap_or(0);
+        (buffer.len() >= head_end + 4 + length).then_some(())
+    };
+    while complete(&buffer).is_none() {
+        if stop.load(Ordering::SeqCst) || Instant::now() > deadline {
+            return;
+        }
+        match socket.read(&mut chunk) {
+            Ok(0) => return,
+            Ok(read) => buffer.extend_from_slice(&chunk[..read]),
+            Err(_) => {}
+        }
+    }
+    let seen = requests.fetch_add(1, Ordering::SeqCst);
+    match &replies[seen.min(replies.len() - 1)] {
+        Reply::Stream(body) => {
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            let _ = socket.write_all(response.as_bytes());
+            let _ = socket.flush();
+        }
+        Reply::Hold => loop {
+            if stop.load(Ordering::SeqCst) {
+                return;
+            }
+            match socket.read(&mut chunk) {
+                Ok(0) => return,
+                Ok(_) => {}
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                    ) => {}
+                Err(_) => return,
+            }
+        },
+    }
+}
+
+/// The session file's entries.
+fn entries(file: &Path) -> Vec<Value> {
+    std::fs::read_to_string(file)
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|line| serde_json::from_str(line).ok())
+        .collect()
+}
+
+/// The D24 approval records in `entries`, in order.
+fn approvals(entries: &[Value]) -> Vec<Value> {
+    entries
+        .iter()
+        .filter(|entry| {
+            entry["type"] == json!("custom") && entry["customType"] == json!(APPROVAL_CUSTOM_TYPE)
+        })
+        .map(|entry| entry["data"].clone())
+        .collect()
+}
 
 /// A temporary Bake home and project directory, removed on drop.
 struct Workspace {
@@ -28,6 +218,11 @@ struct Workspace {
 
 impl Workspace {
     fn new(name: &str) -> Self {
+        Self::with_model(name, 1)
+    }
+
+    /// A workspace whose `loop` route is the model server on `port`.
+    fn with_model(name: &str, port: u16) -> Self {
         static COUNTER: AtomicUsize = AtomicUsize::new(0);
         let root = std::env::temp_dir().join(format!(
             "bake-rpc-{name}-{}-{}",
@@ -38,12 +233,12 @@ impl Workspace {
         std::fs::create_dir_all(root.join("home")).expect("home");
         std::fs::create_dir_all(root.join("project")).expect("project");
         std::fs::create_dir_all(root.join("user")).expect("user home");
-        // A route that answers nothing: these tests send no prompt, and a
-        // session needs a model with a key to start.
+        // Port 1 answers nothing: a test that sends no prompt still needs
+        // a model with a key to start a session.
         let models = json!({
             "providers": {
                 "loop": {
-                    "baseUrl": "http://127.0.0.1:1/v1",
+                    "baseUrl": format!("http://127.0.0.1:{port}/v1"),
                     "api": "openai-responses",
                     "apiKey": "test-key",
                     "models": [{ "id": "loop-model", "name": "Loop" }],
@@ -215,6 +410,42 @@ impl Client {
 
     fn stderr(&self) -> String {
         self.stderr.lock().expect("stderr").clone()
+    }
+
+    /// The first record that `found` accepts, waited for.
+    fn wait_for(&self, what: &str, found: impl Fn(&Value) -> bool) -> Value {
+        let deadline = Instant::now() + TIMEOUT;
+        loop {
+            if let Some(record) = self.records().into_iter().find(|record| found(record)) {
+                return record;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "no {what}; records: {:?}, stderr: {}",
+                self.records(),
+                self.stderr()
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    /// The records of type `kind`.
+    fn of_kind(&self, kind: &str) -> Vec<Value> {
+        self.records()
+            .into_iter()
+            .filter(|record| record["type"] == json!(kind))
+            .collect()
+    }
+
+    /// The session file, as `get_state` names it.
+    fn session_file(&mut self) -> PathBuf {
+        self.send(json!({ "id": "file", "type": "get_state" }));
+        let state = self.response("file");
+        PathBuf::from(
+            state["data"]["sessionFile"]
+                .as_str()
+                .unwrap_or_else(|| panic!("no session file: {state}")),
+        )
     }
 
     /// Closes standard input, as a client asking for shutdown does, and
@@ -424,4 +655,310 @@ fn an_invalid_mode_lists_rpc() {
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
+}
+
+/// Runs one prompt whose model answer is a `write` of `notes.txt` that
+/// asks to escalate the read-only session to `workspace-write`, and waits
+/// for the approval request. Returns the client, the request's id, the
+/// file the write would create, and the session file.
+fn ask_for_a_write(workspace: &Workspace) -> (Client, String, PathBuf, PathBuf) {
+    let mut client = workspace.rpc(&["--sandbox", "read-only", "--approval", "ask"]);
+    let file = client.session_file();
+    client.send(json!({ "id": "p", "type": "prompt", "message": "write it" }));
+    assert_eq!(
+        client.response("p")["data"],
+        json!({ "disposition": "started" })
+    );
+    let request = client.wait_for("the approval request", |record| {
+        record["type"] == json!("extension_ui_request")
+    });
+    assert_eq!(request["method"], json!("confirm"), "{request}");
+    assert_eq!(request["approval"]["toolName"], json!("write"), "{request}");
+    let id = request["id"].as_str().expect("an id").to_owned();
+    (client, id, workspace.root.join("project/notes.txt"), file)
+}
+
+/// The model's two answers for [`ask_for_a_write`]: the write, then text.
+fn write_then_text() -> ModelServer {
+    ModelServer::start(vec![
+        Reply::tool_call(
+            "write",
+            &json!({
+                "path": "notes.txt",
+                "content": "approved",
+                "sandbox_permissions": "workspace-write",
+                "justification": "to write the notes",
+            }),
+        ),
+        Reply::text(),
+    ])
+}
+
+/// The asked and decided records of the one approval in `file`, and the
+/// index in its entries of the `write` call's result, if it has one.
+fn decision(file: &Path) -> (Vec<Value>, Vec<Value>, Option<usize>) {
+    let entries = entries(file);
+    let approvals = approvals(&entries);
+    let decided = entries.iter().position(|entry| {
+        entry["type"] == json!("custom")
+            && entry["customType"] == json!(APPROVAL_CUSTOM_TYPE)
+            && entry["data"]["kind"] == json!("decided")
+    });
+    let result = entries.iter().position(|entry| {
+        entry["type"] == json!("message") && entry["message"]["role"] == json!("toolResult")
+    });
+    if let (Some(decided), Some(result)) = (decided, result) {
+        assert!(
+            decided < result,
+            "the result was written before the decision"
+        );
+    }
+    (approvals, entries, result)
+}
+
+// Scope 13 and D24 through the binary: `confirmed: true` lets the one call
+// run, and the session file holds `asked` then `decided` with
+// `allowed-once`, written before the call's result.
+#[test]
+fn an_approved_write_runs_after_its_decision_is_recorded() {
+    let server = write_then_text();
+    let workspace = Workspace::with_model("approve", server.port);
+    let (mut client, id, notes, file) = ask_for_a_write(&workspace);
+    assert!(!notes.exists(), "the write ran before its answer");
+    client.send(json!({ "type": "extension_ui_response", "id": id, "confirmed": true }));
+    client.wait_for("the settled run", |record| {
+        record["type"] == json!("agent_settled")
+    });
+    assert_eq!(client.close(), 0);
+    assert_eq!(
+        std::fs::read_to_string(&notes).expect("the approved write"),
+        "approved"
+    );
+    let (approvals, entries, result) = decision(&file);
+    assert_eq!(approvals.len(), 2, "{approvals:?}");
+    assert_eq!(approvals[0]["kind"], json!("asked"));
+    assert_eq!(approvals[0]["toolName"], json!("write"));
+    assert_eq!(approvals[1]["outcome"], json!("allowed-once"));
+    assert_eq!(approvals[0]["id"], approvals[1]["id"]);
+    let result = &entries[result.expect("a tool result")]["message"];
+    assert_eq!(result["isError"], json!(false), "{result}");
+    assert_eq!(server.requests(), 2);
+}
+
+// Scope 13 and D24: `confirmed: false` refuses the call, which writes
+// nothing, and the refusal is recorded before the call's result.
+#[test]
+fn a_denied_write_is_refused_and_recorded() {
+    let server = write_then_text();
+    let workspace = Workspace::with_model("deny", server.port);
+    let (mut client, id, notes, file) = ask_for_a_write(&workspace);
+    client.send(json!({ "type": "extension_ui_response", "id": id, "confirmed": false }));
+    client.wait_for("the settled run", |record| {
+        record["type"] == json!("agent_settled")
+    });
+    assert_eq!(client.close(), 0);
+    assert!(!notes.exists(), "the denied write ran");
+    let (approvals, entries, result) = decision(&file);
+    assert_eq!(approvals.len(), 2, "{approvals:?}");
+    assert_eq!(approvals[1]["kind"], json!("decided"));
+    assert_eq!(approvals[1]["outcome"], json!("rejected"));
+    let result = &entries[result.expect("a tool result")]["message"];
+    assert_eq!(result["isError"], json!(true), "{result}");
+}
+
+// Scope 13 and D24: a client that disconnects without answering leaves the
+// call refused, never run, and the process exits 0 once the session has
+// recorded the cancellation.
+#[test]
+fn a_client_that_disconnects_unanswered_leaves_the_write_refused() {
+    let server = write_then_text();
+    let workspace = Workspace::with_model("disconnect", server.port);
+    let (mut client, _, notes, file) = ask_for_a_write(&workspace);
+    assert_eq!(client.close(), 0);
+    assert!(!notes.exists(), "the unanswered write ran");
+    let (approvals, _, _) = decision(&file);
+    assert_eq!(approvals.len(), 2, "{approvals:?}");
+    assert_eq!(approvals[0]["kind"], json!("asked"));
+    assert_eq!(approvals[1]["outcome"], json!("cancelled"));
+}
+
+// Scope 13 and Pi `rpc-mode.ts` `handleInputLine`: while a turn waits on a
+// model that never answers, `get_state`, `get_messages`, and
+// `get_session_stats` are answered, and `abort` ends the turn.
+#[test]
+fn abort_and_read_only_commands_are_answered_while_a_turn_runs() {
+    let server = ModelServer::start(vec![Reply::Hold]);
+    let workspace = Workspace::with_model("busy", server.port);
+    let mut client = workspace.rpc(&[]);
+    client.send(json!({ "id": "p", "type": "prompt", "message": "never answered" }));
+    assert_eq!(
+        client.response("p")["data"],
+        json!({ "disposition": "started" })
+    );
+    let deadline = Instant::now() + TIMEOUT;
+    while server.requests() == 0 {
+        assert!(Instant::now() < deadline, "no model request");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    client.send(json!({ "id": "s", "type": "get_state" }));
+    let state = client.response("s");
+    assert_eq!(state["data"]["isStreaming"], json!(true), "{state}");
+    client.send(json!({ "id": "m", "type": "get_messages" }));
+    assert_eq!(client.response("m")["success"], json!(true));
+    client.send(json!({ "id": "st", "type": "get_session_stats" }));
+    assert_eq!(client.response("st")["success"], json!(true));
+    assert!(client.of_kind("agent_settled").is_empty(), "the turn ended");
+    client.send(json!({ "id": "a", "type": "abort" }));
+    assert_eq!(client.response("a")["success"], json!(true));
+    client.wait_for("the settled run", |record| {
+        record["type"] == json!("agent_settled")
+    });
+    client.send(json!({ "id": "s2", "type": "get_state" }));
+    assert_eq!(client.response("s2")["data"]["isStreaming"], json!(false));
+    assert_eq!(client.close(), 0);
+}
+
+/// A process's start time, field 22 of `/proc/<pid>/stat`, which tells a
+/// process apart from a later one given the same id; `None` once it has
+/// ended or been reaped. A zombie has ended.
+#[cfg(target_os = "linux")]
+fn started_at(pid: u32) -> Option<String> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    // The command name, in parentheses, may hold spaces; fields follow it.
+    let fields: Vec<&str> = stat.rsplit_once(')')?.1.split_whitespace().collect();
+    (fields.first() != Some(&"Z")).then(|| fields.get(19).map(|field| (*field).to_owned()))?
+}
+
+/// The processes whose command line holds `marker`, and every process
+/// descended from them, each with its start time.
+#[cfg(target_os = "linux")]
+fn marked_tree(marker: &str) -> Vec<(u32, String)> {
+    let mut parents = Vec::new();
+    let mut tree = Vec::new();
+    for entry in std::fs::read_dir("/proc").into_iter().flatten().flatten() {
+        let Some(pid) = entry
+            .file_name()
+            .to_str()
+            .and_then(|name| name.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        let cmdline = std::fs::read(format!("/proc/{pid}/cmdline")).unwrap_or_default();
+        let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).unwrap_or_default();
+        let parent = stat
+            .rsplit_once(')')
+            .and_then(|(_, rest)| rest.split_whitespace().nth(1))
+            .and_then(|field| field.parse::<u32>().ok());
+        if String::from_utf8_lossy(&cmdline).contains(marker) {
+            tree.push(pid);
+        }
+        if let Some(parent) = parent {
+            parents.push((pid, parent));
+        }
+    }
+    let mut index = 0;
+    while index < tree.len() {
+        let parent = tree[index];
+        for (pid, of) in &parents {
+            if *of == parent && !tree.contains(pid) {
+                tree.push(*pid);
+            }
+        }
+        index += 1;
+    }
+    tree.into_iter()
+        .filter_map(|pid| started_at(pid).map(|start| (pid, start)))
+        .collect()
+}
+
+/// How a client ends RPC mode while the model's `bash` call runs, and the
+/// status that ending exits with: end of input exits 0, and each stop
+/// signal exits with Pi's status for it.
+#[cfg(target_os = "linux")]
+#[derive(Clone, Copy, Debug)]
+enum Ending {
+    EndOfInput,
+    Signal(i32),
+}
+
+/// Starts a turn whose `bash` call runs a long `sleep`, ends RPC mode the
+/// way `ending` says, and checks that no process of that call is left
+/// once `bake` has exited.
+#[cfg(target_os = "linux")]
+fn ends_with_no_process_left(ending: Ending, expected: i32) {
+    let tag = match ending {
+        Ending::EndOfInput => "eof".to_owned(),
+        Ending::Signal(signal) => format!("signal-{signal}"),
+    };
+    let marker = format!("bake-rpc-orphan-{}-{tag}", std::process::id());
+    let server = ModelServer::start(vec![
+        Reply::tool_call(
+            "bash",
+            &json!({ "command": format!("sleep 600; echo {marker}") }),
+        ),
+        Reply::text(),
+    ]);
+    let workspace = Workspace::with_model("orphan", server.port);
+    let mut client = workspace.rpc(&["--sandbox", "danger-full-access", "--approval", "never"]);
+    client.send(json!({ "id": "p", "type": "prompt", "message": "run it" }));
+    assert_eq!(
+        client.response("p")["data"],
+        json!({ "disposition": "started" })
+    );
+    let deadline = Instant::now() + TIMEOUT;
+    let tree = loop {
+        let tree = marked_tree(&marker);
+        // The shell and its `sleep`.
+        if tree.len() >= 2 {
+            break tree;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the bash call did not start; records: {:?}, stderr: {}",
+            client.records(),
+            client.stderr()
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    let status = match ending {
+        Ending::EndOfInput => client.close(),
+        Ending::Signal(signal) => {
+            assert_eq!(unsafe { libc::kill(client.child.id() as i32, signal) }, 0);
+            client.wait()
+        }
+    };
+    assert_eq!(status, expected, "{ending:?}: {}", client.stderr());
+    let left: Vec<u32> = tree
+        .iter()
+        .filter(|(pid, start)| started_at(*pid).as_ref() == Some(start))
+        .map(|(pid, _)| *pid)
+        .collect();
+    assert!(
+        left.is_empty(),
+        "{ending:?} left {left:?} of {tree:?} running"
+    );
+    assert!(marked_tree(&marker).is_empty(), "{ending:?}");
+}
+
+// Scope 13 and Pi `docs/rpc.md`, "Shutdown": end of input while a tool
+// runs shuts the session down, which stops the call, and exits 0.
+#[cfg(target_os = "linux")]
+#[test]
+fn end_of_input_during_a_bash_call_exits_with_no_process_left() {
+    ends_with_no_process_left(Ending::EndOfInput, 0);
+}
+
+// Scope 13 and Pi `rpc-mode.ts`'s signal handlers: `SIGTERM`, `SIGINT`,
+// and `SIGHUP` during a `bash` call shut the session down, which stops the
+// call, and exit with 143, 130, and 129.
+#[cfg(target_os = "linux")]
+#[test]
+fn stop_signals_during_a_bash_call_exit_with_no_process_left() {
+    for (signal, expected) in [
+        (libc::SIGTERM, 143),
+        (libc::SIGINT, 130),
+        (libc::SIGHUP, 129),
+    ] {
+        ends_with_no_process_left(Ending::Signal(signal), expected);
+    }
 }
