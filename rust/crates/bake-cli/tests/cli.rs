@@ -2,7 +2,8 @@
 //! for the interactive `--offline` case, on a pseudo-terminal. Scope 13's
 //! command-line proofs live here: `--export` never writes its input,
 //! `--offline` makes no startup connection, keys are printed only by the
-//! commands that print one, and excluded flags are unknown options. Every
+//! commands that print one, excluded flags are unknown options, and no
+//! built-in model catalog or provider route is reachable (D48). Every
 //! server a case uses binds 127.0.0.1 and belongs to that case.
 
 use std::process::{Command, Output, Stdio};
@@ -1150,5 +1151,55 @@ fn offline_stops_the_interactive_startup_refresh() {
         refreshed,
         "the offline launch refreshed the catalog: {:?}",
         proxy.seen()
+    );
+}
+
+/// D8 and D48: `bake` carries no built-in model catalog and no provider
+/// route of its own. With an empty home nothing is listed, a catalog
+/// provider's model does not resolve, and an auth check does not find the
+/// provider: only `models.json` and the CLIProxyAPI account add routes.
+#[test]
+fn no_built_in_model_catalog_or_provider_route_is_reachable() {
+    let root = TempDir::new("no-catalog");
+    for dir in ["home", "project", "user"] {
+        std::fs::create_dir_all(root.0.join(dir)).expect("dir");
+    }
+    let listed = home_command(&root, &["--list-models"])
+        .stdin(Stdio::null())
+        .output()
+        .expect("bake runs");
+    assert_eq!(listed.status.code(), Some(0));
+    assert!(
+        text(&listed.stdout).starts_with("No models available."),
+        "{}",
+        text(&listed.stdout)
+    );
+    let prompt = home_command(
+        &root,
+        &[
+            "--provider",
+            "anthropic",
+            "--model",
+            "claude-sonnet-4-5",
+            "-p",
+            "hi",
+        ],
+    )
+    .stdin(Stdio::null())
+    .output()
+    .expect("bake runs");
+    assert_eq!(prompt.status.code(), Some(1));
+    assert!(prompt.stdout.is_empty());
+    let check = home_command(
+        &root,
+        &["auth", "check", "--provider", "anthropic", "--json"],
+    )
+    .stdin(Stdio::null())
+    .output()
+    .expect("bake runs");
+    assert_eq!(check.status.code(), Some(1));
+    assert_eq!(
+        text(&check.stdout),
+        "{\"status\":\"not_ready\",\"provider\":\"anthropic\",\"reason\":\"provider_not_found\"}\n"
     );
 }
