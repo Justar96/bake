@@ -192,3 +192,214 @@ fn resuming_rejects_piped_prompts_and_replacement_limits() {
     assert!(text(&replacement.stderr).contains("restores the recorded budget"));
     assert_eq!(server.requests().len(), 1);
 }
+
+/// Make a FIFO at `path`, and hold it open for reading and writing, so a
+/// reader's `open` returns at once and its `read` blocks until the holder
+/// writes.
+#[cfg(unix)]
+fn held_fifo(path: &Path) -> std::fs::File {
+    use std::os::unix::ffi::OsStrExt;
+    let name = std::ffi::CString::new(path.as_os_str().as_bytes()).expect("path");
+    // SAFETY: `name` is a NUL-terminated string that outlives the call.
+    assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0, "mkfifo");
+    std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)
+        .expect("hold the FIFO")
+}
+
+/// The run-journal records of the session file at `path`, as their kinds,
+/// and the run's id.
+#[cfg(unix)]
+fn journal(path: &Path) -> (Vec<String>, Option<String>) {
+    let text = std::fs::read_to_string(path).unwrap_or_default();
+    let mut kinds = Vec::new();
+    let mut run = None;
+    for line in text.lines() {
+        let Ok(entry) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        if entry["customType"] == "bake.run.v1" {
+            kinds.push(
+                entry["data"]["event"]["kind"]
+                    .as_str()
+                    .unwrap_or("?")
+                    .to_owned(),
+            );
+            run = entry["data"]["runId"].as_str().map(str::to_owned);
+        }
+    }
+    (kinds, run)
+}
+
+/// A `bake -p --recoverable` started in `workspace`, killed with `SIGKILL`
+/// once its session file records the dispatch of the model's tool call and
+/// `ready` holds; killed and reaped on drop whatever fails first.
+#[cfg(unix)]
+struct KilledPrint {
+    child: std::process::Child,
+}
+
+#[cfg(unix)]
+impl KilledPrint {
+    fn run(workspace: &Workspace, args: &[&str], ready: impl Fn() -> bool) -> (PathBuf, String) {
+        let mut command = workspace.command(args, false);
+        command.stdout(Stdio::null()).stderr(Stdio::null());
+        let mut killed = Self {
+            child: command.spawn().expect("bake starts"),
+        };
+        let deadline = Instant::now() + RUN_TIMEOUT;
+        let found = loop {
+            if let Some(file) = workspace.session_files().first() {
+                let (kinds, run) = journal(file);
+                if kinds.iter().any(|kind| kind == "dispatch") && ready() {
+                    break (file.clone(), run.expect("the run's id"));
+                }
+            }
+            if let Some(status) = killed.child.try_wait().expect("bake status") {
+                panic!("bake exited ({status}) before its dispatch");
+            }
+            assert!(Instant::now() < deadline, "bake never dispatched the call");
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        killed.child.kill().expect("kill bake");
+        let status = killed.child.wait().expect("reap bake");
+        use std::os::unix::process::ExitStatusExt;
+        assert_eq!(status.signal(), Some(libc::SIGKILL), "{status}");
+        found
+    }
+}
+
+#[cfg(unix)]
+impl Drop for KilledPrint {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+/// `bake -p --recoverable` killed while its `read` of a FIFO blocks, after
+/// the call's dispatch is recorded: `--resume-run` reruns the `Safe` read
+/// once, now of a regular file, and finishes with one more request.
+#[cfg(unix)]
+#[test]
+fn a_killed_print_run_reruns_its_safe_read_once() {
+    let server = Server::start_sequence(vec![
+        Reply::tool_call("read", &json!({"path": "pipe"})),
+        Reply::sse(),
+    ]);
+    let workspace = Workspace::new("recover-killed-read", server.port);
+    let pipe = workspace.project().join("pipe");
+    let holder = held_fifo(&pipe);
+    let (file, run_id) = KilledPrint::run(
+        &workspace,
+        &["-p", "--recoverable", "Read the pipe"],
+        || true,
+    );
+    drop(holder);
+    let (kinds, _) = journal(&file);
+    assert_eq!(
+        kinds.last().map(String::as_str),
+        Some("dispatch"),
+        "{kinds:?}"
+    );
+    assert_eq!(server.requests().len(), 1);
+
+    std::fs::remove_file(&pipe).expect("remove the FIFO");
+    std::fs::write(&pipe, "piped text").expect("a regular file");
+    let resumed = workspace.run(
+        &[
+            "-p",
+            "--session",
+            file.to_str().unwrap(),
+            "--resume-run",
+            &run_id,
+        ],
+        None,
+    );
+    assert_eq!(resumed.status.code(), Some(0), "{}", text(&resumed.stderr));
+    assert_eq!(text(&resumed.stdout), "Hello from the loop.\n");
+    let requests = server.requests();
+    assert_eq!(requests.len(), 2);
+    let sent = requests[1].body.to_string();
+    assert_eq!(sent.matches("piped text").count(), 1, "{sent}");
+    let session = bake_coding_agent::session::SessionManager::open(&file, None, None).unwrap();
+    let results = session
+        .entries()
+        .iter()
+        .filter(|entry| entry.message_role() == Some("toolResult"))
+        .count();
+    assert_eq!(results, 1, "the read ran once more");
+}
+
+/// `bake -p --recoverable` killed while its `bash` call holds after its
+/// effect: `--resume-run` refuses to continue, needing reconciliation,
+/// with no request, and the effect stays counted once.
+#[cfg(unix)]
+#[test]
+fn a_killed_print_run_refuses_to_rerun_its_effect() {
+    let command = "echo $$ > shell.pid; echo effect >> effects.txt; \
+        read line < gate; echo exited > exited.txt";
+    let server = Server::start_sequence(vec![
+        Reply::tool_call("bash", &json!({ "command": command })),
+        Reply::sse(),
+    ]);
+    let workspace = Workspace::new("recover-killed-effect", server.port);
+    let project = workspace.project();
+    let mut gate = held_fifo(&project.join("gate"));
+    let effects = project.join("effects.txt");
+    let (file, run_id) = KilledPrint::run(
+        &workspace,
+        &[
+            "-p",
+            "--permission",
+            "danger-full-access",
+            "--recoverable",
+            "Run it",
+        ],
+        || std::fs::read_to_string(&effects).is_ok_and(|text| text == "effect\n"),
+    );
+    // The shell outlives the killed `bake` in its own session; release it
+    // and wait for it to end, or kill its group.
+    gate.write_all(b"\n").expect("release the shell");
+    let exited = project.join("exited.txt");
+    let deadline = Instant::now() + RUN_TIMEOUT;
+    while !exited.exists() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    if !exited.exists() {
+        if let Some(pid) = std::fs::read_to_string(project.join("shell.pid"))
+            .ok()
+            .and_then(|pid| pid.trim().parse::<libc::pid_t>().ok())
+        {
+            // SAFETY: `kill` takes plain values.
+            unsafe { libc::kill(-pid, libc::SIGKILL) };
+        }
+        panic!("the released shell did not end");
+    }
+    drop(gate);
+    assert_eq!(server.requests().len(), 1);
+
+    let resumed = workspace.run(
+        &[
+            "-p",
+            "--session",
+            file.to_str().unwrap(),
+            "--resume-run",
+            &run_id,
+        ],
+        None,
+    );
+    assert_eq!(resumed.status.code(), Some(1), "{}", text(&resumed.stderr));
+    let stderr = text(&resumed.stderr);
+    assert!(stderr.contains("external effect"), "{stderr}");
+    assert_eq!(server.requests().len(), 1, "no request after the refusal");
+    assert_eq!(std::fs::read_to_string(&effects).unwrap(), "effect\n");
+    let (kinds, _) = journal(&file);
+    assert_eq!(
+        kinds.last().map(String::as_str),
+        Some("dispatch"),
+        "{kinds:?}"
+    );
+}
