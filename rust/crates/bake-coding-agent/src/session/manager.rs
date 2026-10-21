@@ -560,6 +560,17 @@ impl SessionManager {
         self.faults.hold_rewrite(step, hold);
     }
 
+    /// Run `hold` when the next in-place rewrite reaches `step`
+    /// ([`durable::Faults::hold_in_place`]).
+    #[cfg(test)]
+    pub(crate) fn hold_in_place(
+        &mut self,
+        step: durable::InPlaceStep,
+        hold: Box<dyn FnOnce() + Send>,
+    ) {
+        self.faults.hold_in_place(step, hold);
+    }
+
     fn holds_writer(&self, path: &Path) -> bool {
         self.writer
             .as_ref()

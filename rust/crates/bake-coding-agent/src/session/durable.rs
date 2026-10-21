@@ -391,6 +391,8 @@ pub(crate) struct Faults {
     next: Option<Fault>,
     #[cfg(test)]
     rewrite: Option<RewriteHold>,
+    #[cfg(test)]
+    in_place: Option<InPlaceHold>,
 }
 
 /// A step of a rewrite through a temporary file ([`replace`]) at which a
@@ -423,6 +425,49 @@ impl RewriteStep {
         Self::Renamed,
         Self::DirSynced,
     ];
+}
+
+/// A step of an in-place rewrite ([`replace`] of a file locked in place,
+/// hard-linked, or behind a dangling link) at which a test can stop the
+/// process ([`Faults::hold_in_place`]).
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum InPlaceStep {
+    /// The file is opened, truncated to empty.
+    Truncated,
+    /// The first half of the new contents is written to it, unsynced.
+    PartlyWritten,
+    /// All of the new contents are written to it, unsynced.
+    Written,
+    /// It is synced: the rewrite is done.
+    Synced,
+}
+
+#[cfg(test)]
+impl InPlaceStep {
+    /// Every step, in the order an in-place rewrite reaches them.
+    pub(crate) const ALL: [Self; 4] = [
+        Self::Truncated,
+        Self::PartlyWritten,
+        Self::Written,
+        Self::Synced,
+    ];
+}
+
+/// A callback the next in-place rewrite runs at its step.
+#[cfg(test)]
+struct InPlaceHold {
+    step: InPlaceStep,
+    hold: Box<dyn FnOnce() + Send>,
+}
+
+#[cfg(test)]
+impl std::fmt::Debug for InPlaceHold {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("InPlaceHold")
+            .field("step", &self.step)
+            .finish()
+    }
 }
 
 /// A callback the next rewrite runs at its step.
@@ -511,6 +556,35 @@ impl Faults {
             (held.hold)();
         }
         Err(io::Error::other("injected: held rewrite"))
+    }
+
+    /// Run `hold` when the next in-place rewrite reaches `step`; a test uses
+    /// it to stop the process there. The rewrite fails if `hold` returns.
+    #[cfg(test)]
+    pub(crate) fn hold_in_place(&mut self, step: InPlaceStep, hold: Box<dyn FnOnce() + Send>) {
+        self.in_place = Some(InPlaceHold { step, hold });
+    }
+
+    /// The in-place rewrite has reached `step`: run the callback held for
+    /// it, and fail if that returns. With a hold at
+    /// [`InPlaceStep::PartlyWritten`], `half` is written first.
+    #[cfg(test)]
+    fn reach_in_place(
+        &mut self,
+        step: InPlaceStep,
+        file: &mut File,
+        half: Option<&[u8]>,
+    ) -> io::Result<()> {
+        if self.in_place.as_ref().is_none_or(|held| held.step != step) {
+            return Ok(());
+        }
+        if let Some(half) = half {
+            file.write_all(half)?;
+        }
+        if let Some(held) = self.in_place.take() {
+            (held.hold)();
+        }
+        Err(io::Error::other("injected: held in-place rewrite"))
     }
 
     /// With a hold at [`RewriteStep::PartlyWritten`], write the first half
@@ -760,8 +834,9 @@ impl Drop for Staged {
     }
 }
 
-/// Truncate `path` and write `bytes` in place, then sync it.
-fn overwrite(path: &Path, bytes: &[u8]) -> io::Result<()> {
+/// Truncate `path` and write `bytes` in place, then sync it. `faults` is
+/// consulted only by the crate's tests.
+fn overwrite(path: &Path, bytes: &[u8], faults: &mut Faults) -> io::Result<()> {
     #[cfg(test)]
     let created = !path.exists();
     let mut file = OpenOptions::new()
@@ -775,8 +850,21 @@ fn overwrite(path: &Path, bytes: &[u8]) -> io::Result<()> {
     } else {
         DiskOp::Truncate(path.to_path_buf())
     });
+    #[cfg(test)]
+    {
+        faults.reach_in_place(InPlaceStep::Truncated, &mut file, None)?;
+        let half = bytes.get(..bytes.len() / 2).unwrap_or_default();
+        faults.reach_in_place(InPlaceStep::PartlyWritten, &mut file, Some(half))?;
+    }
+    #[cfg(not(test))]
+    let _ = faults;
     write_file(&mut file, path, bytes)?;
-    sync_file(&file, path, false)
+    #[cfg(test)]
+    faults.reach_in_place(InPlaceStep::Written, &mut file, None)?;
+    sync_file(&file, path, false)?;
+    #[cfg(test)]
+    faults.reach_in_place(InPlaceStep::Synced, &mut file, None)?;
+    Ok(())
 }
 
 /// Whether other names link to the file.
@@ -797,8 +885,7 @@ fn has_other_links(metadata: &fs::Metadata) -> bool {
 /// over the real file, the file holds either its old contents or all of
 /// `bytes` whenever the process stops; with `in_place`, or for a file with
 /// other hard links or a dangling link, it is rewritten in place
-/// (module docs). `faults` is consulted only by the crate's tests, and
-/// only by a rewrite through a temporary file.
+/// (module docs). `faults` is consulted only by the crate's tests.
 pub(crate) fn replace(
     path: &Path,
     bytes: &[u8],
@@ -806,13 +893,13 @@ pub(crate) fn replace(
     faults: &mut Faults,
 ) -> io::Result<()> {
     if in_place {
-        return overwrite(path, bytes);
+        return overwrite(path, bytes, faults);
     }
     let is_link = fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_symlink());
     let target = if is_link {
         match fs::canonicalize(path) {
             Ok(target) => target,
-            Err(_) => return overwrite(path, bytes),
+            Err(_) => return overwrite(path, bytes, faults),
         }
     } else {
         path.to_path_buf()
@@ -823,7 +910,7 @@ pub(crate) fn replace(
         Err(error) => return Err(error),
     };
     if existing.as_ref().is_some_and(has_other_links) {
-        return overwrite(&target, bytes);
+        return overwrite(&target, bytes, faults);
     }
     let permissions = existing.map(|metadata| metadata.permissions());
     Staged::write(&target, bytes, permissions, faults)?.commit(faults)

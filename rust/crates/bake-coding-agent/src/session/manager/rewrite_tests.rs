@@ -3,8 +3,10 @@
 //! branched session written to a new file. After each kill the file holds
 //! all of its old bytes or all of its new ones, never a mix, and loads; a
 //! temporary file left behind is never listed as a session; and the next
-//! writer rewrites the file, or writes a branch, again. Each test owns its
-//! temporary directory and the child processes it starts.
+//! writer rewrites the file, or writes a branch, again. A migration of a
+//! hard-linked file, which rewrites it in place, is killed at each step
+//! too: it can leave the file truncated, which these tests pin. Each test
+//! owns its temporary directory and the child processes it starts.
 
 use std::io::Write;
 use std::path::Path;
@@ -12,7 +14,7 @@ use std::path::Path;
 use serde_json::{Value, json};
 
 use super::*;
-use crate::session::durable::RewriteStep;
+use crate::session::durable::{InPlaceStep, RewriteStep};
 use crate::session::manager::crash_support::{
     CHILD_RETURNED_EXIT, CHILD_WATCHDOG_EXIT, Conversation, PATIENCE, TestChild, conversation,
     file_session, is_temp_of, lines, listed, message, migrated, names, read, take_over, temps,
@@ -26,9 +28,10 @@ const CHILD_TEST: &str = "session::manager::rewrite_tests::rewrite_holder_child"
 const HOLDING: &str = "bake-test-holding-rewrite";
 
 /// Not a test of its own: the child of the tests below, which re-run this
-/// test binary with [`CHILD_ENV`] naming what to rewrite (`migrate` or
-/// `branch`), the index of the step in [`RewriteStep::ALL`] to stop at,
-/// and the session file.
+/// test binary with [`CHILD_ENV`] naming what to rewrite (`migrate`,
+/// `branch`, or `in-place`, a migration rewriting the file in place), the
+/// index of the step in [`RewriteStep::ALL`] or, in place,
+/// [`InPlaceStep::ALL`] to stop at, and the session file.
 #[test]
 fn rewrite_holder_child() {
     let Some(spec) = std::env::var_os(CHILD_ENV) else {
@@ -39,7 +42,7 @@ fn rewrite_holder_child() {
     let (Some(kind), Some(step), Some(file)) = (parts.next(), parts.next(), parts.next()) else {
         panic!("bad spec {spec}");
     };
-    let step = RewriteStep::ALL[step.parse::<usize>().expect("step")];
+    let step: usize = step.parse().expect("step");
     let file = Path::new(file);
     let hold: Box<dyn FnOnce() + Send> = Box::new(|| {
         println!("{HOLDING}");
@@ -58,13 +61,24 @@ fn rewrite_holder_child() {
                 NewSessionOptions::default(),
             )
             .expect("child session");
-            manager.hold_rewrite(step, hold);
+            manager.hold_rewrite(RewriteStep::ALL[step], hold);
+            let _ = manager.set_session_file(file);
+        }
+        "in-place" => {
+            let dir = file.parent().expect("session directory");
+            let mut manager = SessionManager::create(
+                &dir.to_string_lossy(),
+                Some(dir),
+                NewSessionOptions::default(),
+            )
+            .expect("child session");
+            manager.hold_in_place(InPlaceStep::ALL[step], hold);
             let _ = manager.set_session_file(file);
         }
         "branch" => {
             let mut manager = SessionManager::open(file, None, None).expect("child open");
             let leaf = Conversation::of(&manager).results[1].clone();
-            manager.hold_rewrite(step, hold);
+            manager.hold_rewrite(RewriteStep::ALL[step], hold);
             let _ = manager.create_branched_session(&leaf);
         }
         other => panic!("bad kind {other}"),
@@ -78,6 +92,12 @@ fn kill_at(kind: &str, step: RewriteStep, file: &Path) {
         .iter()
         .position(|candidate| *candidate == step)
         .expect("a step");
+    kill_at_index(kind, index, file);
+}
+
+/// Run [`rewrite_holder_child`] until it holds at the step at `index`,
+/// then kill it.
+fn kill_at_index(kind: &str, index: usize, file: &Path) {
     let spec = format!("{kind}|{index}|{}", file.display());
     let mut child = TestChild::spawn(CHILD_TEST, CHILD_ENV, &spec);
     child.wait_for(HOLDING);
@@ -300,5 +320,72 @@ fn a_branch_killed_at_each_rewrite_step_leaves_no_file_or_a_whole_one() {
         sessions_listed.sort();
         assert_eq!(listed(&cwd, &sessions), sessions_listed, "{step:?}");
         assert_eq!(temps(&sessions), left, "{step:?}");
+    }
+}
+
+/// A migration of a hard-linked session rewrites it in place, as Pi does:
+/// truncated, then written, then synced. Killed at each step, it leaves
+/// the file, under both names, empty once truncated, with the first half
+/// of the new contents part way, or whole once written. A truncated file
+/// loads as no session, and the next writer starts a new one in it,
+/// losing the conversation; a half-written one loads its whole lines.
+/// This pins the hazard the module docs of `durable` name; the behavior is
+/// unchanged.
+#[cfg(unix)]
+#[test]
+fn a_hard_linked_migration_killed_in_place_can_leave_a_truncated_file() {
+    use crate::session::manager::crash_support::{provider_problem, request};
+    for (index, step) in InPlaceStep::ALL.into_iter().enumerate() {
+        let dir = TempDir::new(&format!("rewrite-in-place-{step:?}"));
+        let sessions = dir.join("sessions");
+        let cwd = sessions.to_string_lossy().into_owned();
+        let (file, old) = v2_session(&sessions);
+        let (new, context) = migrated(&old);
+        let link = dir.join("link.jsonl");
+        std::fs::hard_link(&file, &link).expect("hard link");
+
+        kill_at_index("in-place", index, &file);
+
+        let left = read(&file);
+        let expected = match step {
+            InPlaceStep::Truncated => &new[..0],
+            InPlaceStep::PartlyWritten => &new[..new.len() / 2],
+            InPlaceStep::Written | InPlaceStep::Synced => &new[..],
+        };
+        assert_eq!(left, expected, "{step:?}");
+        assert_eq!(read(&link), left, "{step:?}: the link shares the file");
+        assert!(temps(&sessions).is_empty(), "{step:?}");
+        let whole = lines(&left)
+            .iter()
+            .filter(|line| line.ends_with(b"\n"))
+            .count();
+        let loaded = load_entries_from_file(&file).expect("load");
+        let mut taken = take_over(&file);
+        match step {
+            InPlaceStep::Truncated => {
+                assert!(loaded.is_empty(), "{step:?}");
+                assert!(listed(&cwd, &sessions).is_empty(), "{step:?}");
+                // The next writer starts a new session in the empty file.
+                assert!(taken.entries().is_empty(), "{step:?}");
+                assert_ne!(taken.session_id(), "crash-v2", "{step:?}");
+            }
+            InPlaceStep::PartlyWritten => {
+                assert!(whole < lines(&new).len(), "{step:?}");
+                assert_eq!(loaded.len(), whole, "{step:?}");
+                assert_eq!(taken.entries().len(), whole - 1, "{step:?}");
+                assert_ne!(taken.build_session_context(), context, "{step:?}");
+            }
+            InPlaceStep::Written | InPlaceStep::Synced => {
+                assert_eq!(taken.build_session_context(), context, "{step:?}");
+            }
+        }
+        let request_context = taken.build_session_context();
+        taken.append_session_info("after").expect("append");
+        drop(taken);
+        assert_eq!(
+            provider_problem(&request(&request_context)),
+            None,
+            "{step:?}"
+        );
     }
 }
