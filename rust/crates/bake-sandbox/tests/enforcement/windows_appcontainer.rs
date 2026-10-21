@@ -244,7 +244,7 @@ impl Fixture {
         let argv: Vec<OsString> = argv.iter().map(OsString::from).collect();
         let command = runtime()
             .block_on(bake_sandbox::SandboxProvider::confine(
-                provider, &argv, policy,
+                provider, &argv, policy, None,
             ))
             .expect("confine");
         let env = (!command.env.is_empty()).then(|| {
@@ -781,7 +781,7 @@ fn an_explicit_chain_selects_the_unqualified_runner() {
     let fixture = Fixture::new();
     let provider = fixture.provider(&[], &[]);
     assert_eq!(
-        runtime().block_on(provider.selected()),
+        runtime().block_on(provider.selected(None)),
         Some((Runner::WindowsAppContainer, Enforcement::Partial))
     );
     let workspace = user_scratch("ac-ws");
@@ -1377,6 +1377,7 @@ fn loopback_stays_closed_with_and_without_network_grants() {
             &fixture.provider(&[], &[NetworkGrant::Loopback]),
             &[OsString::from("cmd")],
             &ww(&workspace),
+            None,
         ))
         .expect_err("a loopback grant must be refused");
     assert!(

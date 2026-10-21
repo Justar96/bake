@@ -62,7 +62,7 @@ use bake_coding_agent::session::{NewSessionOptions, SessionManager};
 use bake_coding_agent::settings::Settings;
 use bake_coding_agent::system_prompt::SystemPromptOptions;
 use bake_sandbox::provider::{ConfineFuture, ConfinedCommand, Enforcement, UnavailableProvider};
-use bake_sandbox::{SandboxMode, SandboxPolicy, SandboxProvider};
+use bake_sandbox::{ProbeOwner, SandboxMode, SandboxPolicy, SandboxProvider};
 use serde_json::{Value, json};
 
 /// Each case's bound.
@@ -594,7 +594,12 @@ impl SandboxProvider for Wrapping {
         "wrapping"
     }
 
-    fn confine<'a>(&'a self, argv: &'a [OsString], policy: &'a SandboxPolicy) -> ConfineFuture<'a> {
+    fn confine<'a>(
+        &'a self,
+        argv: &'a [OsString],
+        policy: &'a SandboxPolicy,
+        _owner: Option<&'a dyn ProbeOwner>,
+    ) -> ConfineFuture<'a> {
         self.calls
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -1324,7 +1329,7 @@ async fn a_real_sandbox_confines_the_server(case: Arc<Case>) {
     let provider = bake_sandbox::default_provider();
     let probe = SandboxPolicy::new(SandboxMode::WorkspaceWrite, case.workspace());
     if provider
-        .confine(&[OsString::from("true")], &probe)
+        .confine(&[OsString::from("true")], &probe, None)
         .await
         .is_err()
     {

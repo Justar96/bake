@@ -274,6 +274,17 @@ impl fmt::Debug for WorkGate {
     }
 }
 
+/// A sandbox runner probe is admitted as a tool's process is
+/// ([`crate::child_process`]): under a permit of the gate, held until the
+/// probe's tree is settled, so the gate's close waits for a probe whose
+/// call was dropped. A closing gate refuses it.
+impl bake_sandbox::ProbeOwner for WorkGate {
+    fn admit(&self) -> Option<bake_process::Claim> {
+        self.enter()
+            .map(|permit| Box::new(permit) as bake_process::Claim)
+    }
+}
+
 impl WorkPermit {
     /// Another permit for the same claim: never refused, even while the
     /// gate closes, since this one already holds the close open.

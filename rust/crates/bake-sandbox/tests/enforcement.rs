@@ -315,7 +315,7 @@ fn required_backends_are_read_from_the_environment() {
     assert!(parse_required("seatbelt").is_err());
     for runner in platform_runners() {
         if required(runner) {
-            let selected = runtime().block_on(pinned(runner).selected());
+            let selected = runtime().block_on(pinned(runner).selected(None));
             assert_eq!(
                 selected.map(|(selected, _)| selected),
                 Some(runner),
@@ -361,7 +361,7 @@ fn pinned(runner: Runner) -> LocalProvider {
 
 fn with_backend(runner: Runner, scenario: Scenario) {
     let provider = pinned(runner);
-    match runtime().block_on(provider.selected()) {
+    match runtime().block_on(provider.selected(None)) {
         Some((selected, enforcement)) if selected == runner => scenario(&Backend {
             runner,
             provider,
@@ -481,7 +481,10 @@ fn run_argv_with_path(
 ) -> Run {
     let argv: Vec<OsString> = argv.iter().map(OsString::from).collect();
     runtime().block_on(async {
-        let command = provider.confine(&argv, policy).await.expect("confine");
+        let command = provider
+            .confine(&argv, policy, None)
+            .await
+            .expect("confine");
         let mut child = tokio::process::Command::new(&command.program);
         child
             .args(&command.args)
@@ -801,7 +804,7 @@ fn runner_failures_are_classified(backend: &Backend) {
         .block_on(
             backend
                 .provider
-                .confine(&[OsString::from("true")], &missing),
+                .confine(&[OsString::from("true")], &missing, None),
         )
         .expect_err("a missing root is refused");
     assert!(
@@ -844,7 +847,7 @@ fn workspace_swap_is_refused(backend: &Backend) {
         .iter()
         .map(OsString::from)
         .collect();
-    let refused = runtime().block_on(backend.provider.confine(&argv, &policy));
+    let refused = runtime().block_on(backend.provider.confine(&argv, &policy, None));
     let error = refused.expect_err("a swapped workspace must be refused");
     assert_eq!(error.code(), "SANDBOX_UNAVAILABLE");
     assert!(
@@ -937,7 +940,7 @@ fn confined_commands_get_their_own_session(backend: &Backend) {
     assert_eq!(run_on_a_terminal(&probe, false), "tty");
     let (_workspace, _outside, policy) = workspace_and_outside(SandboxMode::ReadOnly);
     let command = runtime()
-        .block_on(backend.provider.confine(&probe, &policy))
+        .block_on(backend.provider.confine(&probe, &policy, None))
         .expect("confine");
     let mut argv = vec![command.program.clone()];
     argv.extend(command.args.iter().cloned());
@@ -965,7 +968,7 @@ fn bwrap_path_hijack_is_blocked() {
     let provider = LocalProvider::with_chain(vec![Runner::Bwrap, Runner::Landlock])
         .with_landlock_helper(ABSENT, [])
         .with_search_path(&path);
-    let Some((Runner::Bwrap, enforcement)) = runtime().block_on(provider.selected()) else {
+    let Some((Runner::Bwrap, enforcement)) = runtime().block_on(provider.selected(None)) else {
         assert!(
             !required(Runner::Bwrap),
             "the bwrap sandbox backend is required, but it is not usable here"
@@ -1030,7 +1033,7 @@ fn bwrap_in_a_workspace_path_entry_is_refused() {
     for mode in [SandboxMode::ReadOnly, SandboxMode::WorkspaceWrite] {
         let policy = SandboxPolicy::new(mode, &workspace.0);
         let error = runtime()
-            .block_on(provider.confine(&argv, &policy))
+            .block_on(provider.confine(&argv, &policy, None))
             .expect_err("a runner in the workspace is refused");
         assert!(
             error
@@ -1058,7 +1061,7 @@ fn landlock_helper_inside_the_workspace_is_refused() {
     for mode in [SandboxMode::ReadOnly, SandboxMode::WorkspaceWrite] {
         let policy = SandboxPolicy::new(mode, &workspace.0);
         let error = runtime()
-            .block_on(provider.confine(&argv, &policy))
+            .block_on(provider.confine(&argv, &policy, None))
             .expect_err("a helper in the workspace is refused");
         assert!(
             error
@@ -1305,15 +1308,22 @@ fn namespace_init_of(leader: i32) -> Option<i32> {
 /// after every process of its namespace has been reaped.
 ///
 /// With Bake's profile, `--die-with-parent` also ends the init, usually
-/// before the owner returns anyway, so the second run takes that flag out
+/// before the owner returns anyway, so the later runs take that flag out
 /// (a wrapper drops it before it runs the same bubblewrap): only the
-/// owner's own kill and wait can then end the namespace in time.
+/// owner's own kill and wait can then end the namespace in time. The last
+/// run stops the command as `bake-mcp` stops a server, with `SIGTERM`
+/// first: the outer bubblewrap dies of it and its init is reparented, so
+/// only the pin the request took lets the kill still end the namespace.
 #[cfg(target_os = "linux")]
 fn bwrap_kill_leaves_nothing_of_its_namespace(backend: &Backend) {
     let (workspace, outside, policy) = workspace_and_outside(SandboxMode::ReadOnly);
-    assert_kill_leaves_nothing(&backend.provider, &policy, &workspace.0);
+    assert_kill_leaves_nothing(&backend.provider, &policy, &workspace.0, Stop::Kill);
     let bwrap = runtime()
-        .block_on(backend.provider.confine(&[OsString::from("true")], &policy))
+        .block_on(
+            backend
+                .provider
+                .confine(&[OsString::from("true")], &policy, None),
+        )
         .expect("confine")
         .program;
     let wrapper = outside.write(
@@ -1324,14 +1334,30 @@ fn bwrap_kill_leaves_nothing_of_its_namespace(backend: &Backend) {
     );
     let provider = LocalProvider::with_chain(vec![Runner::Bwrap])
         .with_bwrap("/bin/sh", [wrapper.into_os_string(), bwrap]);
-    assert_kill_leaves_nothing(&provider, &policy, &workspace.0);
+    assert_kill_leaves_nothing(&provider, &policy, &workspace.0, Stop::Kill);
+    assert_kill_leaves_nothing(&provider, &policy, &workspace.0, Stop::TerminateFirst);
+}
+
+/// How [`assert_kill_leaves_nothing`] stops the command.
+#[cfg(target_os = "linux")]
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Stop {
+    /// A kill alone.
+    Kill,
+    /// `SIGTERM` and a wait for the leader's exit, then a kill.
+    TerminateFirst,
 }
 
 /// Confines a payload of several processes through `provider`, spawns it
-/// through its owner, kills it, and checks that no process of its PID
-/// namespace still runs once the owner returns.
+/// through its owner, stops it as `stop` says, and checks that no process
+/// of its PID namespace still runs once the owner returns.
 #[cfg(target_os = "linux")]
-fn assert_kill_leaves_nothing(provider: &LocalProvider, policy: &SandboxPolicy, cwd: &Path) {
+fn assert_kill_leaves_nothing(
+    provider: &LocalProvider,
+    policy: &SandboxPolicy,
+    cwd: &Path,
+    stop: Stop,
+) {
     use std::time::Duration;
     use tokio::io::AsyncBufReadExt;
     let argv: Vec<OsString> = [
@@ -1344,7 +1370,10 @@ fn assert_kill_leaves_nothing(provider: &LocalProvider, policy: &SandboxPolicy, 
     .collect();
     let bound = Duration::from_secs(30);
     runtime().block_on(async {
-        let command = provider.confine(&argv, policy).await.expect("confine");
+        let command = provider
+            .confine(&argv, policy, None)
+            .await
+            .expect("confine");
         let spec = bake_process::ProcessSpec {
             program: command.program.clone(),
             args: command.args.clone(),
@@ -1367,6 +1396,13 @@ fn assert_kill_leaves_nothing(provider: &LocalProvider, policy: &SandboxPolicy, 
         let members = namespace_members(init);
         // The init, its payload shell, three sleeps, and a subshell.
         assert!(members.len() >= 6, "{members:?}");
+        if stop == Stop::TerminateFirst {
+            process.terminate();
+            tokio::time::timeout(bound, process.wait_exit())
+                .await
+                .expect("bubblewrap dies of the request")
+                .expect("exited");
+        }
         process.kill();
         let settled = tokio::time::timeout(bound, process.settle())
             .await
@@ -1488,7 +1524,7 @@ fn restricted_bwrap_falls_through_to_landlock() {
     );
     let provider = LocalProvider::with_chain(vec![Runner::Bwrap, Runner::Landlock])
         .with_bwrap("/bin/sh", [script.into_os_string()]);
-    match runtime().block_on(provider.selected()) {
+    match runtime().block_on(provider.selected(None)) {
         Some((Runner::Landlock, enforcement)) => {
             let backend = Backend {
                 runner: Runner::Landlock,
@@ -1518,7 +1554,7 @@ fn no_usable_backend_refuses() {
     let policy = SandboxPolicy::new(SandboxMode::WorkspaceWrite, std::env::temp_dir());
     let empty = LocalProvider::with_chain(Vec::new());
     let error = rt
-        .block_on(empty.confine(&argv, &policy))
+        .block_on(empty.confine(&argv, &policy, None))
         .expect_err("empty chain");
     assert_eq!(error.mode, SandboxMode::WorkspaceWrite);
     assert_eq!(error.code(), "SANDBOX_UNAVAILABLE");
@@ -1528,7 +1564,7 @@ fn no_usable_backend_refuses() {
             .with_landlock_helper(ABSENT, [])
             .with_seatbelt(ABSENT, []);
     let error = rt
-        .block_on(nothing.confine(&argv, &policy))
+        .block_on(nothing.confine(&argv, &policy, None))
         .expect_err("no backend");
     assert_eq!(error.detail, None);
     assert!(error.to_string().starts_with(
@@ -1546,7 +1582,7 @@ fn default_provider_confines_or_refuses() {
         &["sh", "-c", "echo hi > denied.txt"]
     };
     let argv: Vec<OsString> = script.iter().map(OsString::from).collect();
-    match runtime().block_on(provider.confine(&argv, &policy)) {
+    match runtime().block_on(provider.confine(&argv, &policy, None)) {
         // Windows has no default backend: its runner leaves deletion
         // unconfined.
         Ok(_) if cfg!(windows) => panic!("the Windows default provider must refuse"),
