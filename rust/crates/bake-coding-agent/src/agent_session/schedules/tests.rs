@@ -456,3 +456,6 @@ async fn the_setting_gates_the_tools_and_reserves_their_names() {
         "The schedule tool names are reserved when schedules is enabled."
     );
 }
+
+#[path = "race_tests.rs"]
+mod race;

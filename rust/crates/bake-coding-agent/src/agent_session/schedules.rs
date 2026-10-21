@@ -58,6 +58,10 @@ pub(crate) struct Schedules {
     changed: Notify,
     #[cfg(test)]
     clock: Mutex<Option<Clock>>,
+    /// Runs in a look that found a reminder due, before its dispatch is
+    /// written, so a test can hold one look while another decides.
+    #[cfg(test)]
+    before_dispatch: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
 }
 
 impl Schedules {
@@ -88,6 +92,15 @@ impl Schedules {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(clock);
         self.kick();
+    }
+
+    /// Sets the hook a look runs before it writes a dispatch, for tests.
+    #[cfg(test)]
+    pub(crate) fn set_before_dispatch(&self, hook: Arc<dyn Fn() + Send + Sync>) {
+        *self
+            .before_dispatch
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(hook);
     }
 }
 
@@ -532,26 +545,46 @@ async fn look(core: &Arc<Core>, jobs: &JobRegistry, schedules: &Arc<Schedules>) 
         });
         return Step::Wait(until);
     };
+    #[cfg(test)]
+    {
+        let hook = schedules
+            .before_dispatch
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        if let Some(hook) = hook {
+            hook();
+        }
+    }
     // The dispatch is durable before the reminder is posted: a crash
-    // between them loses the reminder rather than repeating it.
+    // between them loses the reminder rather than repeating it. The
+    // decision is made again under the write's lock, so a look that raced
+    // another to the same reminder writes nothing and looks again.
     let Ok(task) = core.owned_context_commit(move |core| {
         write_session(&core.session, &core.gap, |session| {
-            session.append_durable_group(
-                changes
-                    .iter()
-                    .map(|change| GroupEntry::Custom {
-                        custom_type: CHANGE_TYPE.into(),
-                        data: Some(change.to_json()),
-                    })
-                    .collect::<Vec<_>>(),
-            )
+            let current = schedules::fold(session).and_then(|folded| schedules::due(&folded, now));
+            if current.as_ref() != Ok(&due) {
+                return Ok(false);
+            }
+            session
+                .append_durable_group(
+                    changes
+                        .iter()
+                        .map(|change| GroupEntry::Custom {
+                            custom_type: CHANGE_TYPE.into(),
+                            data: Some(change.to_json()),
+                        })
+                        .collect::<Vec<_>>(),
+                )
+                .map(|_| true)
         })
-        .is_ok()
     }) else {
         return Step::Stop;
     };
-    if !matches!(task.await, Ok(true)) {
-        return Step::Stop;
+    match task.await {
+        Ok(Ok(true)) => {}
+        Ok(Ok(false)) => return Step::Again,
+        _ => return Step::Stop,
     }
     jobs.reset_wakes();
     if jobs.post(message).is_err() {

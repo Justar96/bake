@@ -1771,4 +1771,6 @@ async fn drive<F, Fut>(
 }
 
 #[cfg(test)]
+pub(crate) mod crash_fixture;
+#[cfg(test)]
 mod tests;
