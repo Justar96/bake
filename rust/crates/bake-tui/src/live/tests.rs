@@ -590,19 +590,28 @@ fn quitting_mid_turn_shuts_the_session_down_before_stop_returns() {
 }
 
 #[test]
-fn pi_commands_are_refused_and_the_draft_comes_back() {
+fn deferred_commands_are_refused_and_the_draft_comes_back() {
     let h = harness(Vec::new(), Vec::new());
     h.until(|update| matches!(update, RuntimeUpdate::Status(_)));
-    h.submit_id(4, Submission::FollowUp("/copy gpt".into()));
-    let updates = h.until(|update| matches!(update, RuntimeUpdate::Refused { .. }));
-    assert!(matches!(
-        updates.last(),
-        Some(RuntimeUpdate::Refused { id: 4, reason }) if reason.starts_with("/copy is not available")
-    ));
-    assert!(!updates.iter().any(|u| matches!(
-        u,
-        RuntimeUpdate::TurnStarted { .. } | RuntimeUpdate::Commit(_)
-    )));
+    for (id, word) in (1..).zip(DEFERRED_COMMANDS) {
+        h.submit_id(id, Submission::FollowUp(format!("/{word} gpt")));
+        let updates = h.until(|update| matches!(update, RuntimeUpdate::Refused { .. }));
+        let expected = format!(
+            "/{word} is not available in bake yet; it is planned for a later 0.4.x release, and your draft is kept."
+        );
+        assert!(
+            matches!(
+                updates.last(),
+                Some(RuntimeUpdate::Refused { id: refused, reason }) if *refused == id && *reason == expected
+            ),
+            "{updates:#?}"
+        );
+        assert!(!updates.iter().any(|u| matches!(
+            u,
+            RuntimeUpdate::TurnStarted { .. } | RuntimeUpdate::Commit(_)
+        )));
+    }
+    assert_eq!(h.faux.call_count(), 0);
     h.stop();
 }
 
@@ -800,10 +809,10 @@ fn a_driver_panic_still_shuts_the_session_down_and_is_reported() {
 #[test]
 fn commands_are_refused_but_skills_templates_and_paths_are_not() {
     let templates = ["review".to_owned()];
-    assert!(refused_command("/quit", &templates).is_some_and(|r| r.contains("not available")));
+    assert!(refused_command("/quit", &templates).is_some_and(|r| r.contains("0.4.x")));
     assert!(refused_command("  /copy x", &templates).is_some());
     assert!(
-        refused_command("/goal ship it", &templates).is_some_and(|r| r.contains("not a command"))
+        refused_command("/clear ship it", &templates).is_some_and(|r| r.contains("not a command"))
     );
     assert_eq!(refused_command("/review src", &templates), None);
     assert_eq!(refused_command("/skill:review src", &templates), None);
@@ -812,6 +821,52 @@ fn commands_are_refused_but_skills_templates_and_paths_are_not() {
         None
     );
     assert_eq!(refused_command("plain", &templates), None);
+}
+
+/// D48: every Pi v1.3.0 built-in and Bake 0.3 slash command that `bake`
+/// does not run is refused with the same deferral sentence, bare or with
+/// an argument, and none of them is one `bake` runs.
+#[test]
+fn each_deferred_command_refuses_with_a_deferral_sentence() {
+    let pi = [
+        "scoped-models",
+        "export",
+        "import",
+        "copy",
+        "hotkeys",
+        "trust",
+        "reload",
+        "quit",
+    ];
+    let bake_03 = [
+        "agents",
+        "attach",
+        "clear-attachments",
+        "remove-attachment",
+        "help",
+        "terminal-setup",
+        "update",
+        "goal",
+        "feedback",
+        "permission",
+    ];
+    let expected: Vec<&str> = pi.iter().chain(&bake_03).copied().collect();
+    assert_eq!(DEFERRED_COMMANDS, expected.as_slice());
+    for word in DEFERRED_COMMANDS {
+        assert!(!commands::COMMANDS.contains(word), "/{word} runs");
+        let sentence = format!(
+            "/{word} is not available in bake yet; it is planned for a later 0.4.x release, and your draft is kept."
+        );
+        assert_eq!(
+            refused_command(&format!("/{word}"), &[]),
+            Some(sentence.clone())
+        );
+        assert_eq!(
+            refused_command(&format!("  /{word} with an argument"), &[]),
+            Some(sentence)
+        );
+        assert_eq!(commands::parse(&format!("/{word}")), None);
+    }
 }
 
 // ---- Approvals (D24) ----

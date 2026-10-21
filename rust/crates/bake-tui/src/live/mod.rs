@@ -77,10 +77,15 @@ use bake_coding_agent::cli::SessionFactory;
 use mcp::McpNotices;
 use projection::Projector;
 
-/// Pi v1.2.0's built-in slash commands (`core/slash-commands.ts`) that
-/// `bake` does not run yet; [`commands::COMMANDS`] are the ones it
-/// runs. A prompt that names one is refused instead of reaching the model.
-const PI_COMMANDS: &[&str] = &[
+/// The slash commands `bake` does not run in 0.4.0, which D48 defers to a
+/// later 0.4.x release; [`commands::COMMANDS`] are the ones it runs. They
+/// are Pi v1.3.0's remaining built-ins (`core/slash-commands.ts`) and Bake
+/// 0.3's terminal and runtime commands
+/// (`apps/tui/packages/app/src/{controller,navigation}.ts` and the runtime's
+/// `/goal`, `/feedback`, and `/permission`). A prompt that names one is
+/// refused with its draft kept instead of reaching the model.
+const DEFERRED_COMMANDS: &[&str] = &[
+    // Pi v1.3.0.
     "scoped-models",
     "export",
     "import",
@@ -89,6 +94,18 @@ const PI_COMMANDS: &[&str] = &[
     "trust",
     "reload",
     "quit",
+    // Bake 0.3's terminal.
+    "agents",
+    "attach",
+    "clear-attachments",
+    "remove-attachment",
+    "help",
+    "terminal-setup",
+    "update",
+    // Bake 0.3's runtime.
+    "goal",
+    "feedback",
+    "permission",
 ];
 
 /// A session the command line set up for interactive mode.
@@ -1318,9 +1335,9 @@ fn work_outcome(outcome: &commands::Outcome) -> Outcome {
 /// Why a prompt a cancel stopped before the agent took it came back.
 const INTERRUPTED_PROMPT: &str = "Stopped before it was sent; your prompt is back in the draft.";
 
-/// Why a slash prompt is refused: it names one of Pi's built-in commands,
-/// which `bake` does not run yet, or another command-like word that is
-/// neither `/skill:name` nor one of `templates`. Text whose first word is
+/// Why a slash prompt is refused: it names one of [`DEFERRED_COMMANDS`],
+/// or another command-like word that is neither `/skill:name` nor one of
+/// `templates`. Text whose first word is
 /// not command-like, such as a path, goes to the model as Pi sends it.
 fn refused_command(text: &str, templates: &[String]) -> Option<String> {
     let word = text
@@ -1338,10 +1355,8 @@ fn refused_command(text: &str, templates: &[String]) -> Option<String> {
         && word
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
-    if PI_COMMANDS.contains(&word) {
-        Some(format!(
-            "/{word} is not available in bake yet; your draft is kept."
-        ))
+    if DEFERRED_COMMANDS.contains(&word) {
+        Some(deferred_command(word))
     } else if command_like {
         Some(format!(
             "/{word} is not a command or prompt template; your draft is kept."
@@ -1349,6 +1364,13 @@ fn refused_command(text: &str, templates: &[String]) -> Option<String> {
     } else {
         None
     }
+}
+
+/// The refusal of a command in [`DEFERRED_COMMANDS`].
+fn deferred_command(word: &str) -> String {
+    format!(
+        "/{word} is not available in bake yet; it is planned for a later 0.4.x release, and your draft is kept."
+    )
 }
 
 /// Shuts `session` down and closes `approvals`. The shutdown's first step,

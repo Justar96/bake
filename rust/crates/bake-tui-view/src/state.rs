@@ -3464,17 +3464,19 @@ mod tests {
     }
 
     #[test]
-    fn enter_on_the_menu_runs_a_command_or_fills_one_that_needs_input() {
+    fn enter_on_the_menu_runs_a_command_whose_argument_is_optional() {
         let mut state = State::default();
         type_str(&mut state, "/mo");
         press(&mut state, Key::Enter);
         assert_eq!(state.draft.text(), "/model");
         assert_eq!(state.notice, Some(Notice::NoCommands));
-        // A command that cannot run bare is filled in for its argument.
+        // An optional argument does not hold the command back for input.
         chord(&mut state, Key::Char('u'), Mods::CTRL);
-        type_str(&mut state, "/att");
+        type_str(&mut state, "/thi");
+        state.notice = None;
         press(&mut state, Key::Enter);
-        assert_eq!(state.draft.text(), "/attach ");
+        assert_eq!(state.draft.text(), "/thinking");
+        assert_eq!(state.notice, Some(Notice::NoCommands));
         // With nothing to choose, Enter submits what was typed; a bare `/`
         // does nothing.
         chord(&mut state, Key::Char('u'), Mods::CTRL);

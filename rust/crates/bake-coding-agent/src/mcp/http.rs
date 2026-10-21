@@ -233,7 +233,7 @@ fn classify(name: &str, end: End, failure: Option<HttpError>) -> Attempt {
     }
     match failure {
         Some(HttpError::AuthorizationRequired { status, .. }) => Attempt::Unauthorized(format!(
-            "MCP server \"{name}\" requires authorization (HTTP {status}); bake does not support OAuth sign-in yet, so give the server a credential in its \"headers\" in mcp.json"
+            "MCP server \"{name}\" requires authorization (HTTP {status}); OAuth sign-in for MCP servers is not available in bake yet and is planned for a later release, so give the server a credential in its \"headers\" in mcp.json"
         )),
         Some(HttpError::SessionExpired { .. }) => Attempt::Expired(format!(
             "MCP server \"{name}\" ended: the server expired its HTTP session"

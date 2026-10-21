@@ -2,9 +2,11 @@
 //! caret, and the drafts a choice makes.
 //!
 //! Ports the slash half of the TypeScript `completion.ts`. The preview has no
-//! command service, so its catalog is a fixed sample of the runtime's own
+//! command service, so its catalog is a fixed sample of the 0.3 runtime's
 //! commands, with their names, hints, and descriptions; none of them runs.
-//! A live session lists [`LIVE_CATALOG`], the commands it runs.
+//! It samples only commands a live session also runs, so it advertises
+//! none that D48 defers. A live session lists [`LIVE_CATALOG`], the
+//! commands it runs.
 
 /// One command in the sample catalog.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -27,18 +29,10 @@ const fn command(
     }
 }
 
-/// The runtime's commands as its command plugins describe them.
+/// The 0.3 runtime's commands as its command plugins describe them, for
+/// those a live session runs.
 pub const CATALOG: &[Command] = &[
-    command("agents", None, "List delegated agents"),
-    command("attach", Some("<path>"), "Stage a file for the next prompt"),
-    command("clear", None, "Clear the conversation"),
     command("compact", None, "Compact older conversation history"),
-    command(
-        "goal",
-        Some("[objective|clear]"),
-        "Set or view the goal for a long-running task",
-    ),
-    command("help", Some("[command]"), "List available commands"),
     command("login", Some("[target]"), "Sign in or set up CLIProxyAPI"),
     command(
         "logout",
@@ -202,7 +196,12 @@ mod tests {
     #[test]
     fn a_leading_slash_token_lists_its_prefix_matches_frequent_first() {
         let all = names(matches_preview("/", 1)).unwrap();
-        assert_eq!(&all[..4], ["model", "resume", "new", "clear"]);
+        assert_eq!(
+            all,
+            [
+                "model", "resume", "new", "compact", "login", "logout", "settings", "thinking"
+            ]
+        );
         assert_eq!(all.len(), CATALOG.len());
         assert_eq!(
             names(matches_preview("/lo", 3)),
@@ -220,24 +219,46 @@ mod tests {
         assert_eq!(matches_preview("", 0), None);
     }
 
+    /// D48: the preview advertises no deferred command, so each command it
+    /// samples is one a live session runs.
+    #[test]
+    fn the_preview_lists_only_commands_a_live_session_runs() {
+        for command in CATALOG {
+            assert!(
+                LIVE_CATALOG.iter().any(|live| live.name == command.name),
+                "/{} is not run",
+                command.name
+            );
+        }
+        for deferred in ["agents", "attach", "clear", "goal", "help"] {
+            assert!(!CATALOG.iter().any(|c| c.name == deferred), "/{deferred}");
+        }
+    }
+
     #[test]
     fn a_choice_fills_in_its_name_and_a_space() {
-        let goal = CATALOG.iter().find(|c| c.name == "goal").unwrap();
-        assert_eq!(complete("/go", goal), ("/goal ".into(), 6));
+        let thinking = CATALOG.iter().find(|c| c.name == "thinking").unwrap();
+        assert_eq!(complete("/th", thinking), ("/thinking ".into(), 10));
         // What followed the token stays, with no second space.
-        assert_eq!(complete("/go ship it", goal), ("/goal ship it".into(), 6));
-        assert!(requires_input(
-            CATALOG.iter().find(|c| c.name == "attach").unwrap()
-        ));
-        assert!(!requires_input(goal));
+        assert_eq!(
+            complete("/th high", thinking),
+            ("/thinking high".into(), 10)
+        );
+        assert!(!requires_input(thinking));
+        // No catalog command takes a required argument now; a `<…>` hint
+        // is one, and a leading space before it is ignored.
+        let required = command("stage", Some(" <path>"), "Stage a file");
+        assert!(requires_input(&required));
+        assert_eq!(complete("/st", &required), ("/stage ".into(), 7));
+        assert!(!requires_input(&command("bare", None, "Takes nothing")));
     }
 
     #[test]
     fn a_typed_command_with_a_hint_shows_its_usage() {
-        assert_eq!(usage_preview("/goal ").map(|c| c.name), Some("goal"));
-        assert_eq!(usage_preview("/goal ship").map(|c| c.name), Some("goal"));
+        assert_eq!(usage_preview("/model ").map(|c| c.name), Some("model"));
+        assert_eq!(usage_preview("/model x/y").map(|c| c.name), Some("model"));
         // Without a separator the menu is still open; `new` takes nothing.
-        assert_eq!(usage_preview("/goal"), None);
+        assert_eq!(usage_preview("/model"), None);
         assert_eq!(usage_preview("/new "), None);
         assert_eq!(usage_preview("/nope "), None);
     }

@@ -460,8 +460,8 @@ fn auth_commands_report_a_provider_and_print_its_key() {
     );
     assert!(stderr.contains("bake auth check --provider"), "{stderr}");
 
-    // No OAuth provider is ported, so there is no bearer token to print,
-    // and the key is not offered in its place.
+    // OAuth providers are deferred (D8 and D48), so there is no bearer
+    // token to print, and the key is not offered in its place.
     let bearer = auth(&[
         "auth",
         "print-bearer-token",
@@ -473,7 +473,9 @@ fn auth_commands_report_a_provider_and_print_its_key() {
     assert_eq!(bearer.status.code(), Some(1));
     assert!(bearer.stdout.is_empty());
     assert!(
-        text(&bearer.stderr).contains("not configured with an OAuth bearer token"),
+        text(&bearer.stderr).contains(
+            "auth print-bearer-token is not available in bake yet; OAuth providers, which hold bearer tokens, are planned for a later release"
+        ),
         "{}",
         text(&bearer.stderr)
     );

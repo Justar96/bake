@@ -13,9 +13,10 @@
 //! (`allowModelNetwork: false`, `refreshOnCreate: false`), and nothing is
 //! written, so `--no-refresh` is accepted and changes nothing: Pi's refresh
 //! renews an expired OAuth credential, and `bake` has no OAuth provider
-//! to renew. For the same reason `print-bearer-token` has no bearer token
-//! to print and fails with Pi's message, and `--min-expiry` is checked and
-//! then unused.
+//! to renew. OAuth providers are deferred beyond 0.4.0 (D8 and D48), so
+//! `print-bearer-token` checks its arguments as Pi does and then refuses
+//! with [`BEARER_TOKEN_DEFERRED`], and `print-api-key` for a provider
+//! `auth.json` records as OAuth refuses with the same deferral.
 //!
 //! Deviation from Pi: with only `--model` given, Pi searches every provider
 //! that has a stored credential with `resolveModelReference`, which is not
@@ -97,6 +98,10 @@ impl AuthCommandKind {
     }
 }
 
+/// Why `print-bearer-token` prints nothing: bearer tokens belong to OAuth
+/// providers, which D8 and D48 defer.
+pub const BEARER_TOKEN_DEFERRED: &str = "auth print-bearer-token is not available in bake yet; OAuth providers, which hold bearer tokens, are planned for a later release";
+
 /// Pi's `isAuthCommandHelp`.
 pub fn is_auth_command_help(args: &[String]) -> bool {
     args.first().is_some_and(|first| first == "auth")
@@ -116,7 +121,8 @@ Usage:
 Auth commands need at least one of --provider or --model. They read the Bake
 home's models.json, auth.json, and settings.json, reach no network, and write
 nothing, so --no-refresh changes nothing: bake has no OAuth provider to
-renew, which is also why print-bearer-token has no token to print.
+renew. print-bearer-token is not available in bake yet; OAuth providers are
+planned for a later release.
 --credentials prints the API key, or includes it in the JSON output.
 ";
 
@@ -348,9 +354,9 @@ fn stored_credential_type(credentials: &AuthStorage, provider: &str) -> Option<&
     }
 }
 
-/// Pi's `resolveCredentialForPrint`: the one credential of the kind asked
-/// for, or Pi's reason why there is none. The value is returned, never
-/// logged.
+/// Pi's `resolveCredentialForPrint`: the one API key asked for, or Pi's
+/// reason why there is none; a bearer token, once the arguments check, is
+/// refused as deferred. The value is returned, never logged.
 pub fn resolve_credential_for_print(
     args: &Args,
     registry: &ModelRegistry,
@@ -358,6 +364,9 @@ pub fn resolve_credential_for_print(
     kind: AuthCommandKind,
 ) -> Result<String, String> {
     let (cli_provider, cli_model) = validate_auth_command_args(args, kind)?;
+    if kind == AuthCommandKind::BearerToken {
+        return Err(BEARER_TOKEN_DEFERRED.to_owned());
+    }
     // Pi's `providers` list: the one `--provider` names, or every provider
     // with a stored credential whose models `--model` matches.
     let mut providers: Vec<String> = Vec::new();
@@ -407,12 +416,8 @@ pub fn resolve_credential_for_print(
     let mut found: Vec<(String, String)> = Vec::new();
     for provider in &providers {
         let stored = stored_credential_type(credentials, provider);
-        // Pi skips a provider whose stored credential is the other kind;
-        // `bake` has no OAuth provider, so a bearer token is never found.
-        if kind == AuthCommandKind::ApiKey && stored == Some("oauth") {
-            continue;
-        }
-        if kind == AuthCommandKind::BearerToken {
+        // Pi skips a provider whose stored credential is the other kind.
+        if stored == Some("oauth") {
             continue;
         }
         if let Some(key) = registry.provider_api_key(provider)? {
@@ -424,25 +429,12 @@ pub fn resolve_credential_for_print(
         Err(found) if found.is_empty() => {
             let first = providers.first().map(String::as_str).unwrap_or_default();
             let stored = stored_credential_type(credentials, first);
-            if cli_provider.is_some() && kind == AuthCommandKind::ApiKey && stored == Some("oauth")
-            {
+            if cli_provider.is_some() && stored == Some("oauth") {
                 return Err(format!(
-                    "Provider \"{first}\" is configured with OAuth, not an API key"
+                    "Provider \"{first}\" is configured with OAuth, not an API key; OAuth providers are not available in bake yet and are planned for a later release"
                 ));
             }
-            if cli_provider.is_some() && kind == AuthCommandKind::BearerToken {
-                return Err(format!(
-                    "Provider \"{first}\" is not configured with an OAuth bearer token"
-                ));
-            }
-            Err(format!(
-                "No usable {} is configured",
-                if kind == AuthCommandKind::ApiKey {
-                    "API key"
-                } else {
-                    "OAuth bearer token"
-                }
-            ))
+            Err("No usable API key is configured".to_owned())
         }
         Err(found) => Err(format!(
             "Multiple configured providers matched ({}). Specify --provider.",
@@ -776,7 +768,7 @@ mod tests {
     }
 
     // Pi `credential-print.test.ts`: one API key, the reason when there is
-    // none, and no bearer token, since no OAuth provider is ported.
+    // none, and no bearer token, since OAuth providers are deferred.
     #[test]
     fn printing_resolves_one_credential_or_says_why_not() {
         let (registry, credentials) = registry();
@@ -807,15 +799,24 @@ mod tests {
         );
         assert_eq!(
             resolve(&["--provider", "oauth"], AuthCommandKind::ApiKey),
-            Err("Provider \"oauth\" is configured with OAuth, not an API key".to_owned())
+            Err("Provider \"oauth\" is configured with OAuth, not an API key; OAuth providers are not available in bake yet and are planned for a later release".to_owned())
         );
+        // D48: a bearer token is deferred, whatever the provider holds,
+        // once the arguments check.
+        for args in [
+            &["--provider", "faux"][..],
+            &["--provider", "oauth"],
+            &["--provider", "nope"],
+            &["--model", "faux-1"],
+        ] {
+            assert_eq!(
+                resolve(args, AuthCommandKind::BearerToken),
+                Err(BEARER_TOKEN_DEFERRED.to_owned())
+            );
+        }
         assert_eq!(
-            resolve(&["--provider", "faux"], AuthCommandKind::BearerToken),
-            Err("Provider \"faux\" is not configured with an OAuth bearer token".to_owned())
-        );
-        assert_eq!(
-            resolve(&["--model", "faux-1"], AuthCommandKind::BearerToken),
-            Err("No usable OAuth bearer token is configured".to_owned())
+            resolve(&[], AuthCommandKind::BearerToken),
+            Err("Credential printing requires --provider <provider> or --model <model>".to_owned())
         );
         // `--model` alone searches the providers with a stored credential.
         assert_eq!(

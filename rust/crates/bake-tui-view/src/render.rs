@@ -3977,25 +3977,26 @@ mod tests {
 
     #[test]
     fn the_slash_menu_sits_above_the_bar_and_keeps_its_selection_in_view() {
-        let mut app = State::default();
+        // A live session's catalog, which is longer than the menu.
+        let mut app = State::live(FrameStyle::default(), Tones::None, Vec::new());
         key(&mut app, Key::Char('/'));
         let (rows, _) = draw(&mut app, 80, 30);
         let bar = row_index(&rows, "no model");
-        // Eight of thirteen commands, the frequent ones first, then a count.
+        // Eight of seventeen commands, the frequent ones first, then a count.
         let first = row_index(&rows, "/model");
         assert_eq!(first + 9, bar);
-        assert!(rows[first].starts_with("  ▸ /model     [provider/model [effort]]  Choose model"));
-        assert!(rows[first + 1].starts_with("    /resume    Browse sessions"));
+        assert!(rows[first].starts_with("  ▸ /model           [search]  Choose the model"));
+        assert!(rows[first + 1].starts_with("    /resume          Resume a saved session"));
         assert_eq!(
             rows[first + 8].trim_end(),
-            "    +5 more, keep typing to narrow"
+            "    +9 more, keep typing to narrow"
         );
         // The box's edge names the menu's key.
         assert!(rows.iter().any(|r| r.contains("Tab completes")));
         // Up from the first wraps to the last, which scrolls into view.
         key(&mut app, Key::Up);
         let (rows, _) = draw(&mut app, 80, 30);
-        assert!(rows[bar - 2].starts_with("  ▸ /thinking"));
+        assert!(rows[bar - 2].starts_with("  ▸ /bug"));
         assert!(!rows.iter().any(|r| r.contains("/model")));
         // Nothing matching says so in one row, past the rail.
         key(&mut app, Key::Char('z'));
@@ -4007,13 +4008,13 @@ mod tests {
             &mut app,
             Msg::Key(KeyInput::new(Key::Char('u'), Mods::CTRL)),
         );
-        for c in "/goal ".chars() {
+        for c in "/model ".chars() {
             key(&mut app, Key::Char(c));
         }
         let (rows, _) = draw(&mut app, 80, 30);
         assert_eq!(
             rows[bar - 1].trim_end(),
-            "  /goal [objective|clear]  Set or view the goal for a long-running task"
+            "  /model [search]  Choose the model"
         );
     }
 
