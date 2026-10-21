@@ -74,8 +74,10 @@
 //!   writer as its owner.
 //! - After a file is created or renamed, its directory is synced on Unix,
 //!   best effort as SQLite does: the data is already synced, and a
-//!   filesystem that cannot sync a directory does not fail the write.
-//!   Windows has no directory sync through `std`.
+//!   filesystem that cannot sync a directory does not fail the write. When
+//!   the writer creates a session directory ([`create_dir_all`]), the
+//!   parent of each directory it created is synced the same way. Windows
+//!   has no directory sync through `std`.
 //! - On macOS, `std` syncs with `F_FULLFSYNC`; where a filesystem refuses it
 //!   (`ENOTSUP` or `EINVAL`), a plain `fsync` is used.
 //!
@@ -84,23 +86,37 @@
 //! `Faults::hold_in_place`, test-only seams). On Linux they also stop a
 //! writer inside the `write` of an append, of each line of a group, and of
 //! a rewrite's temporary file with a file size limit, which either kills it
-//! there (`SIGXFSZ`) or fails the write with `EFBIG`; fail its writes and
-//! syncs with a real `EIO` from a seccomp filter; and fill a size-capped
-//! tmpfs, mounted in a user namespace of the test's own, until a write
-//! stops mid-line with `ENOSPC`. `/dev/full` fails appends with `ENOSPC`.
+//! there (`SIGXFSZ`) or fails the write with `EFBIG`; make the kernel
+//! return `EIO` from its `write`, `pwrite64`, `fsync`, or `fdatasync`
+//! through a seccomp filter; and fill a size-capped tmpfs, mounted in a
+//! user namespace of the test's own, until `ENOSPC` stops a write
+//! mid-line. `/dev/full` fails appends with `ENOSPC`. The seccomp filter
+//! shows how the writer handles `EIO` returned by those calls, not how a
+//! failing device behaves: one rarely fails a buffered `write`, and after
+//! a failed `fsync` the kernel may drop the dirty pages, which the filter
+//! leaves in the page cache.
 //! A killed in-place rewrite can leave the file empty or holding the first
 //! part of its new lines; the tests pin that outcome.
 //!
 //! Power loss is simulated, not physical: the durable writes log each
-//! write, sync, creation, truncation, rename, removal, and directory sync
-//! (`disk_log`, compiled only into the crate's tests), and a model replays
-//! every prefix of the log, dropping unsynced bytes or keeping them up to a
-//! line boundary, and keeping names as of the last directory sync or all of
-//! them. Every state an append, a group, a first write, a migration, or a
-//! branched session's write can leave loads, rebuilds a provider-valid
-//! request, and holds the old or the new file of a rewrite; an in-place
-//! rewrite can leave a truncated file. No test cuts a machine's power or
-//! drops a device's write cache.
+//! directory creation, write, sync, file creation, truncation, rename,
+//! removal, and directory sync (`disk_log`, compiled only into the
+//! crate's tests), and a model replays every prefix of the log. It drops
+//! unsynced bytes or keeps any prefix of them, torn lines included (every
+//! byte of a short run; line ends, 4096-byte boundaries, and dense samples
+//! inside the first and last line of a long one), with or without a
+//! zero-filled tail of the kept length; it keeps names as of their
+//! directory's last sync or all of them, and loses a created directory
+//! until its parent is synced. Every state an append, a group, a first
+//! write, a migration, or a branched session's write can leave loads,
+//! skipping torn and zero-filled lines, rebuilds a provider-valid
+//! request, and holds the old or the new file of a rewrite; a file whose
+//! header survived is taken over by a next writer whose entry starts on a
+//! line of its own. A first write or
+//! an in-place rewrite torn inside its header, or left as zeros, leaves a
+//! file the next writer refuses as not a session, unchanged; an in-place
+//! rewrite can also leave a truncated file. No test cuts a machine's power
+//! or drops a device's write cache.
 
 use std::ffi::OsString;
 use std::fs::{self, File, OpenOptions, TryLockError};
@@ -329,6 +345,32 @@ fn sync_parent_dir(path: &Path) {
     }
     #[cfg(not(unix))]
     let _ = path;
+}
+
+/// Create `dir` and its missing ancestors, as [`fs::create_dir_all`] does,
+/// then sync the parent of each directory created, top down, best effort
+/// as [`sync_parent_dir`] is: a new session directory's name then survives
+/// a crash once a file in it is synced. Nothing is synced on Windows. The
+/// crate's tests log each creation.
+pub(crate) fn create_dir_all(dir: &Path) -> io::Result<()> {
+    let mut missing = Vec::new();
+    if cfg!(unix) {
+        let mut at = Some(dir);
+        while let Some(path) = at
+            && !path.as_os_str().is_empty()
+            && matches!(fs::symlink_metadata(path), Err(error) if error.kind() == io::ErrorKind::NotFound)
+        {
+            missing.push(path);
+            at = path.parent();
+        }
+    }
+    fs::create_dir_all(dir)?;
+    for created in missing.into_iter().rev() {
+        #[cfg(test)]
+        disk_log::record(DiskOp::CreateDir(created.to_path_buf()));
+        sync_parent_dir(created);
+    }
+    Ok(())
 }
 
 /// Open `path` to append to it, creating it when missing; the crate's

@@ -12,6 +12,8 @@ use std::path::PathBuf;
 pub(crate) enum DiskOp {
     /// A name was created for a new, empty file.
     Create(PathBuf),
+    /// A directory was created; its parent is not yet synced.
+    CreateDir(PathBuf),
     /// The file at the name was truncated to empty.
     Truncate(PathBuf),
     /// Bytes were written at the file's end. Every durable write appends:

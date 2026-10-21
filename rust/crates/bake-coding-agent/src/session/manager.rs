@@ -339,7 +339,7 @@ impl SessionManager {
             faults: durable::Faults::default(),
         };
         if persist && !manager.session_dir.as_os_str().is_empty() && !manager.session_dir.exists() {
-            fs::create_dir_all(&manager.session_dir)
+            durable::create_dir_all(&manager.session_dir)
                 .map_err(|error| SessionError::io(&manager.session_dir, error))?;
         }
         if let Some(file) = session_file {
@@ -1527,7 +1527,7 @@ impl SessionManager {
                 })?
             }
         };
-        fs::create_dir_all(&dir).map_err(|error| SessionError::io(&dir, error))?;
+        durable::create_dir_all(&dir).map_err(|error| SessionError::io(&dir, error))?;
         if let Some(id) = &options.id {
             assert_valid_session_id(id)?;
         }
@@ -1697,7 +1697,7 @@ mod task_branch_tests;
 
 #[cfg(test)]
 #[path = "manager/crash_support.rs"]
-mod crash_support;
+pub(crate) mod crash_support;
 
 #[cfg(test)]
 #[path = "manager/rewrite_tests.rs"]
