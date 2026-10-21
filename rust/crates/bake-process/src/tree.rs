@@ -33,6 +33,20 @@
 //! escapes Pi. The tree is cleanup, not containment; D24's sandbox is the
 //! boundary.
 //!
+//! One Linux exception: a PID namespace a member of the tree started. Its
+//! init (`NSpid` ending in 1) is a child of a member, but may lead its own
+//! session, as bubblewrap's `--unshare-pid --new-session` init does, so the
+//! group's kill misses it. Each kill first looks for such inits, pins each
+//! with a pidfd, and kills it through the pidfd after the group, which ends
+//! every process in its namespace; a killed tree is gone only once each
+//! pinned init has exited, and an init exits only after the kernel has
+//! reaped every other process of its namespace. An init is found only while
+//! its parent is still alive in the group, so the kill looks before it
+//! signals the group and again on every poll of [`ProcessTree::gone`]; one
+//! created and moved out of the group between the last look and its
+//! parent's death is not awaited (bubblewrap's `--die-with-parent` still
+//! ends it). Without pidfds (kernels before 5.3) no init is pinned.
+//!
 //! The only `unsafe` code is the FFI calls below, each with its contract.
 
 use std::sync::{Arc, Mutex, PoisonError};
@@ -70,6 +84,33 @@ pub(crate) fn configure(command: &mut Command) {
     }
 }
 
+/// Has the kernel send the command's process `SIGKILL` when the thread
+/// that spawns it ends (`PR_SET_PDEATHSIG`), this process's death
+/// included. A spawn whose parent has already died by the time the
+/// request is made fails instead. Linux only; see
+/// [`crate::OwnedProcess::spawn_tied_to_thread`] for when it is safe.
+#[cfg(target_os = "linux")]
+pub(crate) fn tie_to_spawning_thread(command: &mut Command) {
+    // SAFETY: plain syscall in the parent, before the fork.
+    let parent = unsafe { libc::getpid() };
+    // SAFETY: the closure runs in the forked child before `exec` and calls
+    // only `prctl` and `getppid`, which are async-signal-safe, and reads
+    // errno.
+    unsafe {
+        command.pre_exec(move || {
+            if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL, 0, 0, 0) == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            // The parent died between the fork and the request, which
+            // then never fires.
+            if libc::getppid() != parent {
+                return Err(std::io::Error::from_raw_os_error(libc::ESRCH));
+            }
+            Ok(())
+        });
+    }
+}
+
 /// A spawned command's whole tree.
 #[derive(Debug)]
 pub(crate) struct ProcessTree {
@@ -85,6 +126,10 @@ pub(crate) struct ProcessTree {
     /// lives with the tree, so a cancelled settle loses nothing.
     #[cfg(windows)]
     job: crate::windows_job::Job,
+    /// The PID namespace inits found under the tree, pinned by pidfd (see
+    /// the module docs); emptied as each exits.
+    #[cfg(target_os = "linux")]
+    namespaces: Mutex<Vec<linux::NamespaceInit>>,
 }
 
 impl ProcessTree {
@@ -96,6 +141,8 @@ impl ProcessTree {
         Some(Self {
             pid,
             armed: Mutex::new(true),
+            #[cfg(target_os = "linux")]
+            namespaces: Mutex::new(Vec::new()),
         })
     }
 
@@ -123,8 +170,16 @@ impl ProcessTree {
         if !*armed {
             return;
         }
+        // Before the group: once a namespace's parent dies, the init is
+        // reparented and can no longer be told apart.
+        #[cfg(target_os = "linux")]
+        self.adopt_namespaces();
         #[cfg(unix)]
         self.signal_group(libc::SIGKILL);
+        #[cfg(target_os = "linux")]
+        for init in self.namespaces().iter() {
+            init.kill();
+        }
         // The result is not read; only the job's account says what ended.
         #[cfg(windows)]
         let _ = self.job.terminate();
@@ -207,7 +262,7 @@ impl ProcessTree {
     pub(crate) async fn gone(&self) {
         let mut pause = Duration::from_millis(1);
         loop {
-            if self.members() == Ok(0) {
+            if self.members() == Ok(0) && self.namespaces_gone() {
                 return;
             }
             // Only a killed tree is waited for, so each poll kills again: a
@@ -217,6 +272,48 @@ impl ProcessTree {
             self.kill();
             tokio::time::sleep(pause).await;
             pause = (pause * 2).min(Duration::from_millis(20));
+        }
+    }
+
+    /// The pinned namespace inits.
+    #[cfg(target_os = "linux")]
+    fn namespaces(&self) -> std::sync::MutexGuard<'_, Vec<linux::NamespaceInit>> {
+        self.namespaces
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Pins every PID namespace init whose parent is in the group and that
+    /// is not pinned yet. The caller holds the armed lock.
+    #[cfg(target_os = "linux")]
+    fn adopt_namespaces(&self) {
+        let Ok(pgid) = i32::try_from(self.pid) else {
+            return;
+        };
+        let found = linux::namespace_inits(std::path::Path::new("/proc"), pgid);
+        let mut namespaces = self.namespaces();
+        for pid in found {
+            if namespaces.iter().any(|init| init.pid() == pid) {
+                continue;
+            }
+            if let Some(init) = linux::NamespaceInit::pin(pid, pgid) {
+                namespaces.push(init);
+            }
+        }
+    }
+
+    /// Whether every pinned namespace init has exited; exited ones are
+    /// released. Always true off Linux.
+    fn namespaces_gone(&self) -> bool {
+        #[cfg(target_os = "linux")]
+        {
+            let mut namespaces = self.namespaces();
+            namespaces.retain(|init| !init.exited());
+            namespaces.is_empty()
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            true
         }
     }
 
@@ -266,15 +363,185 @@ impl ProcessTree {
     }
 }
 
+/// The parent pid in a `/proc/<pid>/stat` line, for the orphan drain.
+#[cfg(target_os = "linux")]
+pub(crate) fn parent_in_stat(stat: &[u8]) -> Option<i32> {
+    linux::parse_stat(stat).map(|stat| stat.ppid)
+}
+
 #[cfg(target_os = "linux")]
 mod linux {
     use std::io;
+    use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+    use std::path::Path;
 
     /// Members of group `pgid` other than its leader (`pgid` itself). As
-    /// pid 1, reaps the group's zombies that are this process's children.
+    /// pid 1, or as a child subreaper ([`crate::subreaper::enable`]), reaps
+    /// the group's zombies that are this process's children, as an init
+    /// would: they were reparented here and nothing else waits for them.
     pub(super) fn members(pgid: i32) -> io::Result<usize> {
         let me = libc::pid_t::try_from(std::process::id()).unwrap_or(0);
-        members_in(std::path::Path::new("/proc"), pgid, me, me == 1)
+        members_in(
+            std::path::Path::new("/proc"),
+            pgid,
+            me,
+            me == 1 || crate::subreaper::enabled(),
+        )
+    }
+
+    /// The pids under `root` that look like the init of a PID namespace a
+    /// member of group `pgid` started: a child of a member, outside the
+    /// group, whose `NSpid` has more than one level and ends in 1. Best
+    /// effort: an entry that cannot be read is skipped, since this only
+    /// adds processes to wait for.
+    pub(super) fn namespace_inits(root: &Path, pgid: i32) -> Vec<i32> {
+        let Ok(entries) = std::fs::read_dir(root) else {
+            return Vec::new();
+        };
+        let mut group = Vec::new();
+        let mut outside = Vec::new();
+        for entry in entries.flatten() {
+            let Some(pid) = entry
+                .file_name()
+                .to_str()
+                .and_then(|name| name.parse::<i32>().ok())
+            else {
+                continue;
+            };
+            let Some(stat) = std::fs::read(entry.path().join("stat"))
+                .ok()
+                .and_then(|stat| parse_stat(&stat))
+            else {
+                continue;
+            };
+            if stat.pgrp == pgid {
+                group.push(pid);
+            } else {
+                outside.push((pid, stat.ppid));
+            }
+        }
+        outside
+            .into_iter()
+            .filter(|(_, ppid)| group.contains(ppid))
+            .filter(|(pid, _)| is_namespace_init(root, *pid))
+            .map(|(pid, _)| pid)
+            .collect()
+    }
+
+    /// Whether `/proc/<pid>/status` under `root` says `pid` is the init of
+    /// a nested PID namespace.
+    fn is_namespace_init(root: &Path, pid: i32) -> bool {
+        std::fs::read(root.join(pid.to_string()).join("status"))
+            .is_ok_and(|status| nspid_is_nested_init(&status))
+    }
+
+    /// Whether a `status` file's `NSpid` line has more than one level and
+    /// ends in 1.
+    pub(super) fn nspid_is_nested_init(status: &[u8]) -> bool {
+        status
+            .split(|&byte| byte == b'\n')
+            .find_map(|line| line.strip_prefix(b"NSpid:"))
+            .is_some_and(|line| {
+                let levels: Vec<&[u8]> = line
+                    .split(u8::is_ascii_whitespace)
+                    .filter(|field| !field.is_empty())
+                    .collect();
+                levels.len() > 1 && levels.last() == Some(&b"1".as_slice())
+            })
+    }
+
+    /// A PID namespace init pinned by a pidfd, so that neither its kill nor
+    /// the wait for its exit can reach a process that later reuses its pid.
+    #[derive(Debug)]
+    pub(super) struct NamespaceInit {
+        pid: i32,
+        pidfd: OwnedFd,
+    }
+
+    impl NamespaceInit {
+        /// Opens a pidfd for `pid` and keeps it only if, read after the
+        /// open, `pid` is still a namespace init under group `pgid`. A
+        /// process that ended before the open either fails it or leaves a
+        /// pidfd whose process has exited, which kills nothing and is
+        /// already gone. `None` without pidfds.
+        pub(super) fn pin(pid: i32, pgid: i32) -> Option<Self> {
+            // SAFETY: plain syscall with integer arguments; it returns a
+            // new descriptor this function then owns, or -1.
+            let fd = unsafe { libc::syscall(libc::SYS_pidfd_open, pid, 0) };
+            let fd = libc::c_int::try_from(fd).ok().filter(|&fd| fd >= 0)?;
+            // SAFETY: `fd` was just returned by `pidfd_open` and is owned
+            // by nothing else.
+            let pidfd = unsafe { OwnedFd::from_raw_fd(fd) };
+            let root = Path::new("/proc");
+            let still = namespace_inits_of(root, pgid, pid);
+            still.then_some(Self { pid, pidfd })
+        }
+
+        pub(super) fn pid(&self) -> i32 {
+            self.pid
+        }
+
+        /// Sends `SIGKILL` to the pinned init, which ends its namespace.
+        pub(super) fn kill(&self) {
+            // SAFETY: plain syscall on a pidfd this value owns, with no
+            // `siginfo`; a process that has exited is not signalled.
+            unsafe {
+                libc::syscall(
+                    libc::SYS_pidfd_send_signal,
+                    self.pidfd.as_raw_fd(),
+                    libc::SIGKILL,
+                    std::ptr::null::<libc::siginfo_t>(),
+                    0,
+                );
+            }
+        }
+
+        /// Whether the pinned init has exited, which it does only once
+        /// every other process of its namespace has been reaped. A poll
+        /// that fails reads as still running. As a child subreaper this
+        /// process may be the init's parent by now, and reaps it.
+        pub(super) fn exited(&self) -> bool {
+            let mut poll = libc::pollfd {
+                fd: self.pidfd.as_raw_fd(),
+                events: libc::POLLIN,
+                revents: 0,
+            };
+            // SAFETY: one valid `pollfd`, no wait.
+            let ready = unsafe { libc::poll(&mut poll, 1, 0) };
+            let exited = ready > 0 && poll.revents & libc::POLLIN != 0;
+            if exited && crate::subreaper::enabled() {
+                // SAFETY: a zeroed `siginfo_t` is valid output space.
+                let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+                // SAFETY: plain syscall on an owned pidfd; it reaps the
+                // init only if it is this process's child (`ECHILD`
+                // otherwise, which is ignored), and nothing else in this
+                // process waits for it: Bake never spawns an init itself.
+                unsafe {
+                    libc::waitid(
+                        libc::P_PIDFD,
+                        libc::id_t::try_from(self.pidfd.as_raw_fd()).unwrap_or(0),
+                        &mut info,
+                        libc::WEXITED | libc::WNOHANG,
+                    );
+                }
+            }
+            exited
+        }
+    }
+
+    /// Whether `pid` is among [`namespace_inits`] of `pgid` under `root`.
+    fn namespace_inits_of(root: &Path, pgid: i32, pid: i32) -> bool {
+        let Some(stat) = std::fs::read(root.join(pid.to_string()).join("stat"))
+            .ok()
+            .and_then(|stat| parse_stat(&stat))
+        else {
+            return false;
+        };
+        let parent_in_group = std::fs::read(root.join(stat.ppid.to_string()).join("stat"))
+            .ok()
+            .and_then(|stat| parse_stat(&stat))
+            .is_some_and(|parent| parent.pgrp == pgid);
+        stat.pgrp != pgid && parent_in_group && is_namespace_init(root, pid)
     }
 
     /// The fields of a `/proc/<pid>/stat` line this module reads.
@@ -484,6 +751,58 @@ mod linux {
                     "{fields:?} read as known"
                 );
             }
+        }
+
+        // A namespace init is a child of a group member outside the group
+        // whose `NSpid` is nested and ends in 1; a member's own nested
+        // init, an escaped child that is not an init, and an init under
+        // another group are not.
+        #[test]
+        fn namespace_inits_are_children_of_members_outside_the_group() {
+            let root = table();
+            let write = |pid: &str, stat: &str, nspid: Option<&str>| {
+                std::fs::create_dir(root.join(pid)).expect("dir");
+                std::fs::write(root.join(pid).join("stat"), stat).expect("stat");
+                if let Some(nspid) = nspid {
+                    std::fs::write(
+                        root.join(pid).join("status"),
+                        format!("Name:\tx\nNSpid:\t{nspid}\nNSpgid:\t{nspid}\n"),
+                    )
+                    .expect("status");
+                }
+            };
+            // Bubblewrap's init: parent 101 (a member), its own session.
+            write("110", "110 (bwrap) S 101 110 110 0", Some("110\t1"));
+            // A payload inside it: not a child of a member.
+            write("111", "111 (sh) S 110 110 110 0", Some("111\t2"));
+            // A setsid daemon of a member: not an init.
+            write("112", "112 (daemon) S 101 112 112 0", Some("112"));
+            // A nested init still in the group is a member, not an init
+            // to adopt.
+            write("113", "113 (init) S 100 100 100 0", Some("113\t1"));
+            // An init under the other group.
+            write("114", "114 (bwrap) S 102 114 114 0", Some("114\t1"));
+            // An escaped child whose status cannot be read.
+            write("115", "115 (gone) S 101 115 115 0", None);
+            assert_eq!(namespace_inits(root.path(), 100), vec![110]);
+            assert!(namespace_inits_of(root.path(), 100, 110));
+            assert!(!namespace_inits_of(root.path(), 100, 112));
+            assert!(!namespace_inits_of(root.path(), 100, 113));
+            assert!(!namespace_inits_of(root.path(), 100, 999));
+            assert_eq!(namespace_inits(root.path(), 7), vec![114]);
+            assert!(namespace_inits(root.path(), 55).is_empty());
+            assert!(namespace_inits(&root.join("missing"), 100).is_empty());
+        }
+
+        #[test]
+        fn nspid_marks_only_nested_inits() {
+            assert!(nspid_is_nested_init(b"Name:\tbwrap\nNSpid:\t9\t1\n"));
+            assert!(nspid_is_nested_init(b"NSpid:\t9 4 1"));
+            assert!(!nspid_is_nested_init(b"NSpid:\t1\n"));
+            assert!(!nspid_is_nested_init(b"NSpid:\t9\t2\n"));
+            assert!(!nspid_is_nested_init(b"NSpid:\t9\t11\n"));
+            assert!(!nspid_is_nested_init(b"Name:\tsh\n"));
+            assert!(!nspid_is_nested_init(b""));
         }
 
         #[test]

@@ -15,8 +15,19 @@
 //! `--include-ignored`, and `--test-threads`.
 //!
 //! A backend that is not usable here is skipped with a printed note, except
-//! under `CI=true`, which requires Landlock on Linux and Seatbelt on macOS.
-//! The Windows scenarios ([`windows`]) are never skipped.
+//! under `CI=true`, which requires Landlock on Linux and Seatbelt on macOS,
+//! and except each backend named in `BAKE_REQUIRE_SANDBOX_BACKENDS`, a
+//! comma list of `bwrap` and `landlock`, which is required wherever it is
+//! set: a missing one fails instead of skipping. The Windows scenarios
+//! ([`windows`]) are never skipped.
+//!
+//! The Linux confinement contract is writes only: under `read-only` and
+//! `workspace-write` a confined command reads outside its roots and opens
+//! loopback connections, as 0.3's `sandbox-local` profiles allowed
+//! (`packages/sandbox/sandbox-local/src/profiles.ts`, which binds `/`
+//! read-only and shares the network), while every write, rename, and
+//! delete outside the writable roots is denied
+//! (`linux_contract_confines_writes_only`).
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -55,7 +66,35 @@ fn main() -> ExitCode {
     if args.first().is_some_and(|arg| arg == windows::PROBE_ARG) {
         windows::probe_main(args.into_iter().skip(1).collect());
     }
+    if args.first().is_some_and(|arg| arg == CONNECT_ARG) {
+        return connect_main(&args[1..]);
+    }
     harness::run(tests(), args)
+}
+
+/// Re-executed under a sandbox as `CONNECT_ARG <port> <token>`: connects
+/// to `127.0.0.1:<port>` and writes `<token>`; exits 0 once written.
+const CONNECT_ARG: &str = "__bake-enforcement-connect";
+
+fn connect_main(args: &[OsString]) -> ExitCode {
+    use std::io::Write;
+    let [port, token] = args else {
+        eprintln!("usage: {CONNECT_ARG} <port> <token>");
+        return ExitCode::from(2);
+    };
+    let Some(port) = port.to_str().and_then(|port| port.parse::<u16>().ok()) else {
+        eprintln!("bad port {port:?}");
+        return ExitCode::from(2);
+    };
+    match std::net::TcpStream::connect(("127.0.0.1", port))
+        .and_then(|mut stream| stream.write_all(token.as_encoded_bytes()))
+    {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("connect 127.0.0.1:{port}: {error}");
+            ExitCode::FAILURE
+        }
+    }
 }
 
 /// A scenario run against one backend.
@@ -106,6 +145,11 @@ fn tests() -> Vec<harness::Test> {
             "confined_commands_get_their_own_session",
             confined_commands_get_their_own_session,
         ),
+        #[cfg(target_os = "linux")]
+        (
+            "linux_contract_confines_writes_only",
+            linux_contract_confines_writes_only,
+        ),
     ];
     let mut tests = Vec::new();
     for runner in platform_runners() {
@@ -122,6 +166,10 @@ fn tests() -> Vec<harness::Test> {
         tests.push(harness::Test::new(
             "bwrap::private_pid_namespace_and_no_proc_root_escape".into(),
             || with_backend(Runner::Bwrap, bwrap_private_pid_namespace),
+        ));
+        tests.push(harness::Test::new(
+            "bwrap::a_killed_command_leaves_nothing_of_its_pid_namespace".into(),
+            || with_backend(Runner::Bwrap, bwrap_kill_leaves_nothing_of_its_namespace),
         ));
         tests.push(harness::Test::new(
             "landlock::helper_cli_contract".into(),
@@ -157,6 +205,10 @@ fn tests() -> Vec<harness::Test> {
     tests.push(harness::Test::new(
         "harness::ignored_discovery_is_empty".into(),
         ignored_discovery_is_empty,
+    ));
+    tests.push(harness::Test::new(
+        "harness::required_backends_are_read_from_the_environment".into(),
+        required_backends_are_read_from_the_environment,
     ));
     tests
 }
@@ -211,15 +263,67 @@ fn in_ci() -> bool {
     std::env::var_os("CI").is_some_and(|value| value == "true")
 }
 
-/// Whether CI must have this runner.
+/// The variable naming the backends a run must have.
+const REQUIRE_BACKENDS: &str = "BAKE_REQUIRE_SANDBOX_BACKENDS";
+
+/// The backends a `BAKE_REQUIRE_SANDBOX_BACKENDS` value names: a comma list
+/// of `bwrap` and `landlock`, blank entries ignored. Any other name is an
+/// error, so a misspelled requirement cannot pass as a skip.
+fn parse_required(list: &str) -> Result<Vec<Runner>, String> {
+    list.split(',')
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(|name| match name {
+            "bwrap" => Ok(Runner::Bwrap),
+            "landlock" => Ok(Runner::Landlock),
+            other => Err(format!(
+                "{REQUIRE_BACKENDS} names {other:?}; it takes a comma list of bwrap and landlock"
+            )),
+        })
+        .collect()
+}
+
+/// Whether this run must have this runner: CI requires Landlock on Linux
+/// and Seatbelt on macOS, and [`REQUIRE_BACKENDS`] requires each runner it
+/// names. A value that names anything else fails here.
 fn required(runner: Runner) -> bool {
-    in_ci()
-        && match runner {
-            Runner::Landlock => cfg!(target_os = "linux"),
-            Runner::Seatbelt => cfg!(target_os = "macos"),
-            // The Windows scenarios never skip.
-            Runner::Bwrap | Runner::WindowsAcl | Runner::WindowsAppContainer => false,
+    let listed = match std::env::var(REQUIRE_BACKENDS) {
+        Ok(list) => parse_required(&list).unwrap_or_else(|error| panic!("{error}")),
+        Err(std::env::VarError::NotPresent) => Vec::new(),
+        Err(error) => panic!("{REQUIRE_BACKENDS}: {error}"),
+    };
+    listed.contains(&runner)
+        || in_ci()
+            && match runner {
+                Runner::Landlock => cfg!(target_os = "linux"),
+                Runner::Seatbelt => cfg!(target_os = "macos"),
+                // The Windows scenarios never skip.
+                Runner::Bwrap | Runner::WindowsAcl | Runner::WindowsAppContainer => false,
+            }
+}
+
+/// The requirement list's grammar, and that this run's value is valid and
+/// is honored: every listed backend on this platform must be usable.
+fn required_backends_are_read_from_the_environment() {
+    assert_eq!(
+        parse_required("bwrap,landlock"),
+        Ok(vec![Runner::Bwrap, Runner::Landlock])
+    );
+    assert_eq!(parse_required(" landlock , "), Ok(vec![Runner::Landlock]));
+    assert_eq!(parse_required(""), Ok(Vec::new()));
+    assert!(parse_required("bwrap,bubblewrap").is_err());
+    assert!(parse_required("seatbelt").is_err());
+    for runner in platform_runners() {
+        if required(runner) {
+            let selected = runtime().block_on(pinned(runner).selected());
+            assert_eq!(
+                selected.map(|(selected, _)| selected),
+                Some(runner),
+                "{REQUIRE_BACKENDS} requires {}, which is not usable here",
+                runner.as_str()
+            );
         }
+    }
 }
 
 fn runtime() -> tokio::runtime::Runtime {
@@ -862,6 +966,10 @@ fn bwrap_path_hijack_is_blocked() {
         .with_landlock_helper(ABSENT, [])
         .with_search_path(&path);
     let Some((Runner::Bwrap, enforcement)) = runtime().block_on(provider.selected()) else {
+        assert!(
+            !required(Runner::Bwrap),
+            "the bwrap sandbox backend is required, but it is not usable here"
+        );
         eprintln!("note: skipping: bubblewrap is not usable on this host");
         return;
     };
@@ -1028,6 +1136,260 @@ fn bwrap_private_pid_namespace(backend: &Backend) {
         &policy,
         &workspace.0,
     );
+}
+
+/// The Linux contract, for both confined modes: a read outside the roots
+/// and a loopback connection succeed (no read or network confinement, as
+/// in 0.3), and every write, rename, and delete outside the writable roots
+/// is denied, leaving the files as they were.
+#[cfg(target_os = "linux")]
+fn linux_contract_confines_writes_only(backend: &Backend) {
+    for mode in [SandboxMode::WorkspaceWrite, SandboxMode::ReadOnly] {
+        let (workspace, outside, policy) = workspace_and_outside(mode);
+        let cwd = &workspace.0;
+        let secret = outside.write("secret.txt", "outside-data");
+        let victim = outside.write("victim.txt", "orig");
+        let run = assert_ok(backend, &format!("cat {}", quote(&secret)), &policy, cwd);
+        assert_eq!(run.stdout, "outside-data", "{mode:?}: a read outside");
+        assert_loopback_connects(backend, &policy, cwd);
+        let out = |name: &str| quote(&outside.join(name));
+        for script in [
+            format!("echo hi > {}", out("new.txt")),
+            format!("echo hacked > {}", out("victim.txt")),
+            format!("mv {} {}", out("victim.txt"), out("renamed.txt")),
+            format!("rm -f {}", out("victim.txt")),
+            format!("mkdir {}", out("sub")),
+        ] {
+            assert_denied(backend, &script, &policy, cwd);
+        }
+        assert_eq!(read(&victim).as_deref(), Some("orig"), "{mode:?}");
+        for absent in ["new.txt", "renamed.txt", "sub"] {
+            assert!(!outside.join(absent).exists(), "{mode:?}: {absent}");
+        }
+    }
+}
+
+/// A confined re-exec of this binary connects to a listener on
+/// `127.0.0.1` and delivers a token, which the listener must receive.
+#[cfg(target_os = "linux")]
+fn assert_loopback_connects(backend: &Backend, policy: &SandboxPolicy, cwd: &Path) {
+    use std::io::Read;
+    use std::time::{Duration, Instant};
+    let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("listen");
+    listener.set_nonblocking(true).expect("nonblocking");
+    let port = listener.local_addr().expect("address").port().to_string();
+    let token = format!("bake-loopback-{}", std::process::id());
+    let accepted = std::thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            match listener.accept() {
+                Ok((mut stream, _)) => {
+                    stream.set_nonblocking(false).expect("blocking");
+                    let mut received = String::new();
+                    stream.read_to_string(&mut received).expect("read token");
+                    return Some(received);
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    if Instant::now() >= deadline {
+                        return None;
+                    }
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                Err(error) => panic!("accept: {error}"),
+            }
+        }
+    });
+    let exe = std::env::current_exe().expect("test binary");
+    let exe = exe.to_str().expect("a UTF-8 test binary path");
+    let run = run_argv(
+        &backend.provider,
+        &[exe, CONNECT_ARG, &port, &token],
+        policy,
+        cwd,
+    );
+    assert_eq!(run.code, Some(0), "{:?}: {}", policy.mode, run.stderr);
+    assert_eq!(
+        accepted.join().expect("listener").as_deref(),
+        Some(token.as_str()),
+        "{:?}: the listener received no connection",
+        policy.mode
+    );
+}
+
+/// One process as `/proc` shows it: its pid, and its start time, so that a
+/// reused pid is not read as the same process.
+#[cfg(target_os = "linux")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Seen {
+    pid: i32,
+    start: u64,
+}
+
+/// The `ppid`, state, and start time of `pid`, read from `/proc`.
+#[cfg(target_os = "linux")]
+fn proc_stat(pid: i32) -> Option<(i32, u8, u64)> {
+    let stat = std::fs::read(format!("/proc/{pid}/stat")).ok()?;
+    let close = stat.iter().rposition(|&byte| byte == b')')?;
+    let fields: Vec<&[u8]> = stat[close + 1..]
+        .split(u8::is_ascii_whitespace)
+        .filter(|field| !field.is_empty())
+        .collect();
+    let number = |index: usize| -> Option<u64> {
+        std::str::from_utf8(fields.get(index)?).ok()?.parse().ok()
+    };
+    // After the name: state (0), ppid (1), ..., starttime (19).
+    let state = *fields.first()?.first()?;
+    Some((i32::try_from(number(1)?).ok()?, state, number(19)?))
+}
+
+/// Every process now in the PID namespace whose init is `init`: the init
+/// and its descendants.
+#[cfg(target_os = "linux")]
+fn namespace_members(init: i32) -> Vec<Seen> {
+    let table: Vec<(i32, i32, u64)> = std::fs::read_dir("/proc")
+        .expect("/proc")
+        .flatten()
+        .filter_map(|entry| entry.file_name().to_str()?.parse::<i32>().ok())
+        .filter_map(|pid| proc_stat(pid).map(|(ppid, _, start)| (pid, ppid, start)))
+        .collect();
+    let mut members: Vec<Seen> = table
+        .iter()
+        .filter(|(pid, _, _)| *pid == init)
+        .map(|&(pid, _, start)| Seen { pid, start })
+        .collect();
+    let mut index = 0;
+    while let Some(parent) = members.get(index).map(|seen| seen.pid) {
+        members.extend(
+            table
+                .iter()
+                .filter(|(_, ppid, _)| *ppid == parent)
+                .map(|&(pid, _, start)| Seen { pid, start }),
+        );
+        index += 1;
+    }
+    members
+}
+
+/// Whether `seen` still runs: listed with its start time and not a zombie.
+#[cfg(target_os = "linux")]
+fn still_runs(seen: Seen) -> bool {
+    proc_stat(seen.pid).is_some_and(|(_, state, start)| start == seen.start && state != b'Z')
+}
+
+/// The init of the PID namespace bubblewrap `leader` started: its child
+/// whose `NSpid` is nested and ends in 1.
+#[cfg(target_os = "linux")]
+fn namespace_init_of(leader: i32) -> Option<i32> {
+    std::fs::read_dir("/proc")
+        .ok()?
+        .flatten()
+        .filter_map(|entry| entry.file_name().to_str()?.parse::<i32>().ok())
+        .find(|&pid| {
+            proc_stat(pid).is_some_and(|(ppid, _, _)| ppid == leader)
+                && std::fs::read_to_string(format!("/proc/{pid}/status")).is_ok_and(|status| {
+                    status.lines().any(|line| {
+                        line.strip_prefix("NSpid:").is_some_and(|levels| {
+                            let levels: Vec<&str> = levels.split_whitespace().collect();
+                            levels.len() > 1 && levels.last() == Some(&"1")
+                        })
+                    })
+                })
+        })
+}
+
+/// A bubblewrap-confined command killed through its owner
+/// ([`bake_process::OwnedProcess`], as the tools spawn it) leaves nothing
+/// of its PID namespace once the owner returns. Bubblewrap's namespace init
+/// leads its own session (`--new-session`), outside the group the owner
+/// kills; the owner pins it, kills it, and waits for it, and it exits only
+/// after every process of its namespace has been reaped.
+///
+/// With Bake's profile, `--die-with-parent` also ends the init, usually
+/// before the owner returns anyway, so the second run takes that flag out
+/// (a wrapper drops it before it runs the same bubblewrap): only the
+/// owner's own kill and wait can then end the namespace in time.
+#[cfg(target_os = "linux")]
+fn bwrap_kill_leaves_nothing_of_its_namespace(backend: &Backend) {
+    let (workspace, outside, policy) = workspace_and_outside(SandboxMode::ReadOnly);
+    assert_kill_leaves_nothing(&backend.provider, &policy, &workspace.0);
+    let bwrap = runtime()
+        .block_on(backend.provider.confine(&[OsString::from("true")], &policy))
+        .expect("confine")
+        .program;
+    let wrapper = outside.write(
+        "bwrap-without-die-with-parent",
+        "bwrap=$1; shift\n\
+         for arg do shift; [ \"$arg\" = --die-with-parent ] || set -- \"$@\" \"$arg\"; done\n\
+         exec \"$bwrap\" \"$@\"\n",
+    );
+    let provider = LocalProvider::with_chain(vec![Runner::Bwrap])
+        .with_bwrap("/bin/sh", [wrapper.into_os_string(), bwrap]);
+    assert_kill_leaves_nothing(&provider, &policy, &workspace.0);
+}
+
+/// Confines a payload of several processes through `provider`, spawns it
+/// through its owner, kills it, and checks that no process of its PID
+/// namespace still runs once the owner returns.
+#[cfg(target_os = "linux")]
+fn assert_kill_leaves_nothing(provider: &LocalProvider, policy: &SandboxPolicy, cwd: &Path) {
+    use std::time::Duration;
+    use tokio::io::AsyncBufReadExt;
+    let argv: Vec<OsString> = [
+        "sh",
+        "-c",
+        "sleep 1000 & sleep 1000 & (sleep 1000; :) & echo ready; wait",
+    ]
+    .iter()
+    .map(OsString::from)
+    .collect();
+    let bound = Duration::from_secs(30);
+    runtime().block_on(async {
+        let command = provider.confine(&argv, policy).await.expect("confine");
+        let spec = bake_process::ProcessSpec {
+            program: command.program.clone(),
+            args: command.args.clone(),
+            cwd: Some(cwd.to_path_buf()),
+            env: None,
+            stdin: false,
+        };
+        let mut process = bake_process::OwnedProcess::spawn(&spec, None)
+            .await
+            .expect("spawn the confined command");
+        let leader = i32::try_from(process.pid()).expect("pid");
+        let mut stdout = tokio::io::BufReader::new(process.take_stdout().expect("stdout"));
+        let mut line = String::new();
+        tokio::time::timeout(bound, stdout.read_line(&mut line))
+            .await
+            .expect("the payload starts")
+            .expect("read");
+        assert_eq!(line, "ready\n");
+        let init = namespace_init_of(leader).expect("bubblewrap's namespace init");
+        let members = namespace_members(init);
+        // The init, its payload shell, three sleeps, and a subshell.
+        assert!(members.len() >= 6, "{members:?}");
+        process.kill();
+        let settled = tokio::time::timeout(bound, process.settle())
+            .await
+            .expect("the owner returns")
+            .expect("settled");
+        assert_eq!(settled.tree, bake_process::TreeState::Gone);
+        let survivors: Vec<Seen> = members
+            .into_iter()
+            .filter(|&seen| still_runs(seen))
+            .collect();
+        // Killed here, so that a failure leaves nothing behind either.
+        for seen in &survivors {
+            // SAFETY: plain syscall; the pid and start time were just
+            // checked, and these are this test's own processes.
+            unsafe {
+                libc::kill(seen.pid, libc::SIGKILL);
+            }
+        }
+        assert!(
+            survivors.is_empty(),
+            "processes of the killed command's PID namespace outlived its owner: {survivors:?}"
+        );
+    });
 }
 
 // ---------------------------------------------------------------------------

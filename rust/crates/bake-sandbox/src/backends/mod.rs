@@ -57,9 +57,10 @@ pub mod windows_appcontainer;
 
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
+
+use bake_process::{OwnedProcess, ProcessSpec};
 
 use tokio::io::AsyncReadExt;
 use tokio::sync::OnceCell;
@@ -212,8 +213,9 @@ pub const SEATBELT_EXEC: &str = "/usr/bin/sandbox-exec";
 /// Probing spawns runners through Tokio: the first confined call on a
 /// multi-candidate chain must be polled inside a Tokio runtime with its I/O
 /// and time drivers enabled. Outside any runtime the call refuses without
-/// caching. A probe is bounded by the probe timeout, and dropping the
-/// confine future kills it.
+/// caching. A probe is bounded by the probe timeout; it runs as an owned
+/// process tree, which is killed and settled when it ends, times out, or
+/// is dropped with the confine future (see `run_probe`).
 #[derive(Debug)]
 pub struct LocalProvider {
     chain: Vec<Runner>,
@@ -787,9 +789,15 @@ fn check_runner_location(
 }
 
 /// Runs one probe child, bounded by `timeout`: its exit code and, when
-/// `capture`, at most [`PROBE_OUTPUT_LIMIT`] bytes of stdout. `None` when it
-/// cannot start or times out. A timed-out child is killed and reaped before
-/// this returns; a dropped probe kills its child.
+/// `capture`, at most [`PROBE_OUTPUT_LIMIT`] bytes of stdout; its stderr is
+/// read and discarded. `None` when it cannot start or times out.
+///
+/// The probe is an owned process tree ([`bake_process::OwnedProcess`]) in a
+/// group of its own, and whether it exits, times out, or is dropped, its
+/// whole tree is killed and settled: an exited or timed-out probe before
+/// this returns, and a dropped one by a task on the runtime that polled it,
+/// which the probe's own claim hands it to. A probe leaves no process, and
+/// no zombie, behind.
 async fn run_probe(
     invocation: &Invocation,
     args: &[OsString],
@@ -799,39 +807,48 @@ async fn run_probe(
     if timeout.is_zero() {
         return None;
     }
-    let mut command = tokio::process::Command::new(&invocation.program);
-    command
-        .args(&invocation.args)
-        .args(args)
-        .stdin(Stdio::null())
-        .stderr(Stdio::null())
-        .stdout(if capture {
-            Stdio::piped()
-        } else {
-            Stdio::null()
-        })
-        .kill_on_drop(true);
-    let mut child = command.spawn().ok()?;
-    let stdout = child.stdout.take();
-    let outcome = tokio::time::timeout(timeout, async {
-        let mut output = Vec::new();
-        if let Some(stdout) = stdout {
-            let _ = stdout
-                .take(PROBE_OUTPUT_LIMIT)
-                .read_to_end(&mut output)
-                .await;
-        }
-        let status = child.wait().await.ok()?;
-        Some((status.code(), output))
+    let spec = ProcessSpec {
+        program: invocation.program.clone(),
+        args: invocation.args.iter().chain(args).cloned().collect(),
+        cwd: None,
+        env: None,
+        stdin: false,
+    };
+    // A claim of its own, so that a dropped probe is settled, not only
+    // killed (`OwnedProcess`'s drop).
+    let mut probe = OwnedProcess::spawn(&spec, Some(Box::new(()))).await.ok()?;
+    let stdout = probe.take_stdout();
+    let stderr = probe.take_stderr();
+    let ran = tokio::time::timeout(timeout, async {
+        let output = async {
+            let mut output = Vec::new();
+            if let Some(stdout) = stdout {
+                if capture {
+                    let _ = stdout
+                        .take(PROBE_OUTPUT_LIMIT)
+                        .read_to_end(&mut output)
+                        .await;
+                } else {
+                    let mut stdout = stdout;
+                    let _ = tokio::io::copy(&mut stdout, &mut tokio::io::sink()).await;
+                }
+            }
+            output
+        };
+        let discarded = async {
+            if let Some(mut stderr) = stderr {
+                let _ = tokio::io::copy(&mut stderr, &mut tokio::io::sink()).await;
+            }
+        };
+        let (output, ()) = tokio::join!(output, discarded);
+        probe.wait_exit().await.ok().map(|()| output)
     })
     .await;
-    match outcome {
-        Ok(result) => result,
-        Err(_) => {
-            let _ = child.kill().await;
-            None
-        }
-    }
+    // Exited or not, nothing the probe started may outlive it.
+    probe.kill();
+    let settled = probe.settle().await.ok()?;
+    let output = ran.ok().flatten()?;
+    Some((settled.status.code(), output))
 }
 
 #[cfg(test)]

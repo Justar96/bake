@@ -764,6 +764,70 @@ mod fake_runners {
             std::thread::sleep(Duration::from_millis(10));
         }
     }
+
+    /// Whether `/proc` still lists `pid`, as a running process or a zombie.
+    #[cfg(target_os = "linux")]
+    fn listed(pid: libc::pid_t) -> bool {
+        Path::new(&format!("/proc/{pid}")).exists()
+    }
+
+    /// A dropped probe is killed with its whole tree and settled: neither
+    /// the runner nor the child it started is left running or a zombie.
+    /// The runner leads its own group, starts a background child in it,
+    /// and reports both pids through a FIFO, which gates the drop.
+    #[cfg(target_os = "linux")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_dropped_probe_leaves_no_zombie_or_survivor() {
+        let scratch = Scratch::new();
+        let fifo = scratch.path("gate");
+        let fifo_c = std::ffi::CString::new(fifo.to_string_lossy().as_bytes()).expect("path");
+        // SAFETY: `fifo_c` is a valid path string.
+        assert_eq!(unsafe { libc::mkfifo(fifo_c.as_ptr(), 0o600) }, 0);
+        let gated = scratch.script(
+            "tree",
+            &format!(
+                "sleep 30 </dev/null >/dev/null 2>&1 &\necho \"$$ $!\" > {fifo}\nwait\n",
+                fifo = quote(&fifo)
+            ),
+        );
+        let provider = Arc::new(
+            LocalProvider::with_chain(vec![Runner::Bwrap, Runner::Landlock])
+                .with_bwrap("/bin/sh", [gated.into_os_string()]),
+        );
+        let mut task = {
+            let provider = Arc::clone(&provider);
+            tokio::spawn(async move { provider.confine(&os(&["true"]), &ro()).await.is_ok() })
+        };
+        let gate = fifo.clone();
+        let mut reader = tokio::task::spawn_blocking(move || std::fs::read_to_string(gate));
+        let pids = tokio::select! {
+            opened = &mut reader => opened.expect("join").expect("gate"),
+            finished = &mut task => {
+                drop(std::fs::OpenOptions::new().write(true).open(&fifo));
+                let _ = reader.await;
+                panic!("the confine finished without probing: {finished:?}");
+            }
+        };
+        let pids: Vec<libc::pid_t> = pids
+            .split_whitespace()
+            .map(|pid| pid.parse().expect("pid"))
+            .collect();
+        assert_eq!(pids.len(), 2, "{pids:?}");
+        task.abort();
+        assert!(task.await.is_err_and(|error| error.is_cancelled()));
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while pids.iter().any(|&pid| listed(pid)) {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "a dropped probe left {:?} in /proc",
+                pids.iter()
+                    .filter(|&&pid| listed(pid))
+                    .map(|pid| std::fs::read_to_string(format!("/proc/{pid}/stat")))
+                    .collect::<Vec<_>>()
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
 }
 
 /// The runner-location and root-integrity refusals, through `confine`.

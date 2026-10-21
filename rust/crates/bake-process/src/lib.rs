@@ -53,8 +53,18 @@
 //! inherited and overlapped named pipes connected before creation. A Unix
 //! descendant that leaves the tree (`setsid`) is outside this ownership:
 //! the tree is cleanup, not containment, and D24's sandbox is the
-//! boundary. A Windows descendant cannot leave: the job allows no
-//! breakaway, and one from a job nested in it stays in it.
+//! boundary. One Linux exception: the init of a PID namespace a member
+//! started, such as bubblewrap's, is pinned by a pidfd, killed with the
+//! tree, and awaited, which ends and awaits its whole namespace. A Windows
+//! descendant cannot leave: the job allows no breakaway, and one from a
+//! job nested in it stays in it.
+//!
+//! What no owner reaches on Linux, a normal exit's background descendants
+//! and a descendant that left its tree, is reparented to init, unless the
+//! host opts into [`subreaper`]: then it is reparented to the host, whose
+//! drain at exit kills and reaps it. A host killed with `SIGKILL` runs no
+//! drain and settles nothing; only a leader spawned with
+//! [`OwnedProcess::spawn_tied_to_thread`] is then killed by the kernel.
 //!
 //! On Windows the job and its account are `windows_job::Job`, public so
 //! that `bake-sandbox`'s synchronous Windows runner keeps its confined tree
@@ -85,6 +95,8 @@ pub mod environment;
 mod job_ledger;
 #[cfg(windows)]
 mod pump;
+#[cfg(target_os = "linux")]
+pub mod subreaper;
 mod tree;
 #[cfg(windows)]
 pub mod windows_job;
@@ -233,9 +245,35 @@ impl OwnedProcess {
     /// `exec`), and on Windows it is created inside a new job by
     /// `PROC_THREAD_ATTRIBUTE_JOB_LIST`, or not at all.
     pub async fn spawn(spec: &ProcessSpec, claim: Option<Claim>) -> io::Result<Self> {
+        Self::spawn_with(spec, claim, false).await
+    }
+
+    /// [`Self::spawn`], with the leader also killed (`SIGKILL`) by the
+    /// kernel when the thread that spawns it ends, which covers this
+    /// process being killed outright (`PR_SET_PDEATHSIG`). Only the leader
+    /// is tied: the rest of its tree survives a killed host as before.
+    ///
+    /// Safe only where the spawning thread outlives the process, such as a
+    /// dedicated thread that settles it before it returns. Tokio's blocking
+    /// threads end when idle, and a worker thread can hand its work to
+    /// another one, so a process spawned from either would be killed while
+    /// its owner still runs; never use it from a shared runtime.
+    #[cfg(target_os = "linux")]
+    pub async fn spawn_tied_to_thread(
+        spec: &ProcessSpec,
+        claim: Option<Claim>,
+    ) -> io::Result<Self> {
+        Self::spawn_with(spec, claim, true).await
+    }
+
+    async fn spawn_with(
+        spec: &ProcessSpec,
+        claim: Option<Claim>,
+        tied_to_thread: bool,
+    ) -> io::Result<Self> {
         let runtime = Handle::try_current()
             .map_err(|_| io::Error::other("an owned process needs a Tokio runtime"))?;
-        let spawned = spawn_leader(spec).await?;
+        let spawned = spawn_leader(spec, tied_to_thread).await?;
         // From here to the return nothing awaits: the owner, and on Windows
         // its pump, exist in the same poll as the process.
         let tree = TrackedTree::new(spawned.tree);
@@ -427,7 +465,7 @@ struct Spawned {
     clippy::unused_async,
     reason = "Windows connects its pipes asynchronously"
 )]
-async fn spawn_leader(spec: &ProcessSpec) -> io::Result<Spawned> {
+async fn spawn_leader(spec: &ProcessSpec, tied_to_thread: bool) -> io::Result<Spawned> {
     use std::process::Stdio;
     let mut command = Command::new(&spec.program);
     command.args(&spec.args);
@@ -450,6 +488,12 @@ async fn spawn_leader(spec: &ProcessSpec) -> io::Result<Spawned> {
     // No `kill_on_drop`: the owner kills explicitly, and must be able not
     // to once the leader's identity is lost.
     configure(&mut command);
+    #[cfg(target_os = "linux")]
+    if tied_to_thread {
+        crate::tree::tie_to_spawning_thread(&mut command);
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = tied_to_thread;
     let mut child = command.spawn()?;
     let Some(tree) = ProcessTree::adopt(&child) else {
         // No pid: Tokio has already reaped it, so its group cannot be
@@ -467,7 +511,7 @@ async fn spawn_leader(spec: &ProcessSpec) -> io::Result<Spawned> {
 }
 
 #[cfg(windows)]
-async fn spawn_leader(spec: &ProcessSpec) -> io::Result<Spawned> {
+async fn spawn_leader(spec: &ProcessSpec, _tied_to_thread: bool) -> io::Result<Spawned> {
     let spawned = windows::spawn(spec).await?;
     Ok(Spawned {
         pid: spawned.leader.pid(),
