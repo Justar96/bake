@@ -24,6 +24,9 @@
 //! real kernel errors are tested elsewhere (`kernel_write_tests`,
 //! `seccomp_write_tests`, `full_filesystem_tests`); this model cannot see
 //! a filesystem's own reordering beyond the two rules above.
+//!
+//! Unix only: Windows has no directory sync through `std`, so no name a
+//! write creates or renames there is durable in this model.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};

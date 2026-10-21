@@ -196,7 +196,7 @@ fn resuming_rejects_piped_prompts_and_replacement_limits() {
 /// Make a FIFO at `path`, and hold it open for reading and writing, so a
 /// reader's `open` returns at once and its `read` blocks until the holder
 /// writes.
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn held_fifo(path: &Path) -> std::fs::File {
     use std::os::unix::ffi::OsStrExt;
     let name = std::ffi::CString::new(path.as_os_str().as_bytes()).expect("path");
@@ -211,7 +211,7 @@ fn held_fifo(path: &Path) -> std::fs::File {
 
 /// The run-journal records of the session file at `path`, as their kinds,
 /// and the run's id.
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn journal(path: &Path) -> (Vec<String>, Option<String>) {
     let text = std::fs::read_to_string(path).unwrap_or_default();
     let mut kinds = Vec::new();
@@ -236,12 +236,12 @@ fn journal(path: &Path) -> (Vec<String>, Option<String>) {
 /// A `bake -p --recoverable` started in `workspace`, killed with `SIGKILL`
 /// once its session file records the dispatch of the model's tool call and
 /// `ready` holds; killed and reaped on drop whatever fails first.
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 struct KilledPrint {
     child: std::process::Child,
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 impl KilledPrint {
     fn run(workspace: &Workspace, args: &[&str], ready: impl Fn() -> bool) -> (PathBuf, String) {
         let mut command = workspace.command(args, false);
@@ -271,7 +271,7 @@ impl KilledPrint {
     }
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 impl Drop for KilledPrint {
     fn drop(&mut self) {
         let _ = self.child.kill();
@@ -282,7 +282,7 @@ impl Drop for KilledPrint {
 /// `bake -p --recoverable` killed while its `read` of a FIFO blocks, after
 /// the call's dispatch is recorded: `--resume-run` reruns the `Safe` read
 /// once, now of a regular file, and finishes with one more request.
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 #[test]
 fn a_killed_print_run_reruns_its_safe_read_once() {
     let server = Server::start_sequence(vec![
@@ -336,7 +336,7 @@ fn a_killed_print_run_reruns_its_safe_read_once() {
 /// `bake -p --recoverable` killed while its `bash` call holds after its
 /// effect: `--resume-run` refuses to continue, needing reconciliation,
 /// with no request, and the effect stays counted once.
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 #[test]
 fn a_killed_print_run_refuses_to_rerun_its_effect() {
     let command = "echo $$ > shell.pid; echo effect >> effects.txt; \

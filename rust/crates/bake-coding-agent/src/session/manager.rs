@@ -1707,7 +1707,7 @@ mod rewrite_tests;
 #[path = "manager/kernel_write_tests.rs"]
 mod kernel_write_tests;
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "manager/power_loss_tests.rs"]
 mod power_loss_tests;
 
