@@ -55,7 +55,7 @@ pub(super) fn confirmation() -> DialogKind {
 
 pub(super) async fn share(context: &mut Context) -> Outcome {
     let program = context.gh.clone();
-    if !gh::check_auth(&program, &context.signal).await? {
+    if !gh::check_auth(&program, &context.signal, &context.session).await? {
         return Err(CANCELLED.into());
     }
     let session = Arc::clone(&context.session);
@@ -90,6 +90,7 @@ pub(super) async fn share(context: &mut Context) -> Outcome {
             file.into_os_string(),
         ],
         &context.signal,
+        &context.session,
     )
     .await;
     // The directory goes once `gh` has read it, whatever it did.

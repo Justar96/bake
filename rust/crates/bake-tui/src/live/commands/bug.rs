@@ -226,7 +226,7 @@ enum Filed {
 /// create` with the body in a private temporary file.
 async fn file_issue(context: &mut Context, bundle: &BugReportBundle) -> Filed {
     let program = context.gh.clone();
-    match gh::check_auth(&program, &context.signal).await {
+    match gh::check_auth(&program, &context.signal, &context.session).await {
         Ok(true) => {}
         Ok(false) => return Filed::Done(Err(cancelled())),
         Err(failure) => return Filed::Failed(failure),
@@ -256,6 +256,7 @@ async fn file_issue(context: &mut Context, bundle: &BugReportBundle) -> Filed {
             dir.path().join("issue.md").into_os_string(),
         ],
         &context.signal,
+        &context.session,
     )
     .await;
     drop(dir);
