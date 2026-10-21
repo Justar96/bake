@@ -4,9 +4,10 @@
 //! kernel feature is unavailable.
 //!
 //! The filter is installed with `prctl(PR_SET_NO_NEW_PRIVS)` and
-//! `seccomp(SECCOMP_SET_MODE_FILTER)` on the calling thread alone, and is
-//! inherited by the threads it starts later; nothing in the writer under
-//! test changes. It returns `SECCOMP_RET_ERRNO | EIO` for `write` and
+//! `seccomp(SECCOMP_SET_MODE_FILTER)` on the calling thread, and is
+//! inherited by the threads it starts later, or with
+//! `SECCOMP_FILTER_FLAG_TSYNC` on every thread of the process; nothing in
+//! the writer under test changes. It returns `SECCOMP_RET_ERRNO | EIO` for `write` and
 //! `pwrite64`, or for `fsync` and `fdatasync`, whose descriptor (the first
 //! argument) is in a range and, optionally, whose byte count (the third
 //! argument of a write) is one value; every other call runs.
@@ -156,6 +157,16 @@ impl EioFilter {
 
     /// Install the filter on the calling thread, for good.
     pub(crate) fn install(&self) -> io::Result<()> {
+        self.install_with(0)
+    }
+
+    /// Install the filter on every thread of the process, for good, as a
+    /// session's runtime writes from its worker and blocking threads.
+    pub(crate) fn install_on_every_thread(&self) -> io::Result<()> {
+        self.install_with(libc::SECCOMP_FILTER_FLAG_TSYNC)
+    }
+
+    fn install_with(&self, flags: libc::c_ulong) -> io::Result<()> {
         let mut program = self.program();
         let fprog = libc::sock_fprog {
             len: u16::try_from(program.len()).expect("a short filter"),
@@ -176,14 +187,21 @@ impl EioFilter {
             {
                 return Err(io::Error::last_os_error());
             }
-            if libc::syscall(
+            let result = libc::syscall(
                 libc::SYS_seccomp,
                 libc::SECCOMP_SET_MODE_FILTER,
-                0 as libc::c_uint,
+                flags,
                 &raw const fprog,
-            ) != 0
-            {
+            );
+            if result < 0 {
                 return Err(io::Error::last_os_error());
+            }
+            // With `TSYNC`, a positive result names a thread that could not
+            // be synchronized, and nothing was installed.
+            if result > 0 {
+                return Err(io::Error::other(format!(
+                    "thread {result} could not take the filter"
+                )));
             }
         }
         Ok(())

@@ -365,3 +365,311 @@ async fn a_kill_at_each_later_request_keeps_its_input() {
         assert_eq!(effects(&killed, "effect"), ran, "{mode}");
     }
 }
+
+/// A loopback server answering one Chat Completions request with the
+/// headers and first event of a stream, then holding the connection open,
+/// sending nothing more, until it is dropped.
+struct HalfStream {
+    port: u16,
+    sent: Arc<std::sync::atomic::AtomicBool>,
+    stop: Arc<std::sync::atomic::AtomicBool>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl HalfStream {
+    fn start() -> Self {
+        use std::io::{Read, Write};
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let sent = Arc::new(AtomicBool::new(false));
+        let stop = Arc::new(AtomicBool::new(false));
+        let thread = {
+            let (sent, stop) = (Arc::clone(&sent), Arc::clone(&stop));
+            std::thread::spawn(move || {
+                let mut socket = loop {
+                    if stop.load(Ordering::SeqCst) {
+                        return;
+                    }
+                    match listener.accept() {
+                        Ok((socket, _)) => break socket,
+                        Err(_) => std::thread::sleep(Duration::from_millis(5)),
+                    }
+                };
+                socket.set_nonblocking(false).unwrap();
+                socket
+                    .set_read_timeout(Some(Duration::from_secs(10)))
+                    .unwrap();
+                // The request's head and its body, by its length.
+                let mut request = Vec::new();
+                let mut chunk = [0u8; 8192];
+                let complete = |request: &[u8]| {
+                    let text = String::from_utf8_lossy(request);
+                    let Some(end) = text.find("\r\n\r\n") else {
+                        return false;
+                    };
+                    let length = text[..end]
+                        .lines()
+                        .filter_map(|line| line.split_once(':'))
+                        .find(|(name, _)| name.eq_ignore_ascii_case("content-length"))
+                        .and_then(|(_, value)| value.trim().parse::<usize>().ok())
+                        .unwrap_or(0);
+                    request.len() >= end + 4 + length
+                };
+                while !complete(&request) {
+                    match socket.read(&mut chunk) {
+                        Ok(0) | Err(_) => return,
+                        Ok(read) => request.extend_from_slice(&chunk[..read]),
+                    }
+                }
+                let event = json!({"id": "chatcmpl-half", "object": "chat.completion.chunk",
+                    "created": 1_760_000_000, "model": "faux-1",
+                    "choices": [{"index": 0, "delta": {"role": "assistant",
+                        "content": "Half of an answer"}}]});
+                let head = "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\n\
+                    cache-control: no-cache\r\nconnection: close\r\n\r\n";
+                socket
+                    .write_all(format!("{head}data: {event}\n\n").as_bytes())
+                    .unwrap();
+                socket.flush().unwrap();
+                sent.store(true, Ordering::SeqCst);
+                while !stop.load(Ordering::SeqCst) {
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+            })
+        };
+        Self {
+            port,
+            sent,
+            stop,
+            thread: Some(thread),
+        }
+    }
+
+    fn sent(&self) -> bool {
+        self.sent.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+impl Drop for HalfStream {
+    fn drop(&mut self) {
+        self.stop.store(true, std::sync::atomic::Ordering::SeqCst);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+/// Every line of the file ends in a newline and parses: it ends at its
+/// last finished entry.
+fn ends_at_a_finished_entry(path: &Path) {
+    let text = std::fs::read_to_string(path).unwrap();
+    assert!(text.ends_with('\n'), "a torn last line");
+    for line in text.lines() {
+        serde_json::from_str::<Value>(line).unwrap();
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_kill_mid_stream_keeps_the_admission_and_no_partial_message() {
+    // A real provider streams the first text of an answer over loopback,
+    // then stalls; the fixture is killed once it has received that text.
+    let server = HalfStream::start();
+    let port = server.port.to_string();
+    let killed = kill_in(
+        TempDir::new("run-journal-kill-mid-stream"),
+        "mid-stream",
+        &[(CHILD_PORT, port.as_ref())],
+        |_| {},
+    )
+    .await;
+    assert!(server.sent(), "the stream's first event was sent");
+    drop(server);
+    // The file ends at the admission: no partial assistant was written.
+    assert_eq!(on_disk(&killed.path), INPUT);
+    ends_at_a_finished_entry(&killed.path);
+
+    let h = harness(200_000);
+    let seen = answering(&h);
+    let session = reopen(&h, &killed).await;
+    let run_id = killed.run_id.as_deref().unwrap();
+    let before = session.inspect_run(run_id).unwrap();
+    let resumed = session
+        .resume_run(run_id)
+        .await
+        .map(|result| result.outcome);
+    let after = session.inspect_run(run_id).unwrap();
+    session.shutdown().await;
+    // The admitted request stays spent: the resumed request is the second.
+    assert_eq!(
+        (before.model_calls, before.disposition),
+        (1, RunRecoveryDisposition::Resumable)
+    );
+    assert_eq!(resumed.unwrap(), RunOutcome::FinishedTurn);
+    assert_eq!(after.model_calls, 2);
+    assert_eq!(request(&seen), ["user: perform effect", NOTICE]);
+    assert_eq!(effects(&killed, "effect") + effects(&killed, "probe"), 0);
+}
+
+/// The admission kinds the file records, in order.
+fn admissions(path: &Path) -> Vec<String> {
+    std::fs::read_to_string(path)
+        .unwrap()
+        .lines()
+        .filter_map(|line| {
+            let entry: Value = serde_json::from_str(line).unwrap();
+            let event = &entry["data"]["event"];
+            (event["kind"] == "admitted").then(|| event["admission"]["kind"].to_string())
+        })
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_kill_inside_the_compaction_summary_request_leaves_no_compaction() {
+    // Killed inside the provider call that writes the summary, after its
+    // admission was synced: no compaction entry, half-applied or whole.
+    let tool_step = ["assistant", "message", "dispatch call", "toolResult call"];
+    let killed = kill_at("compaction-summary").await;
+    let expected = input_then(&[&tool_step[..], &["message", "admitted"]].concat());
+    assert_eq!(on_disk(&killed.path), expected);
+    assert_eq!(admissions(&killed.path), ["\"agent\"", "\"summary\""]);
+    ends_at_a_finished_entry(&killed.path);
+
+    let h = harness(200_000);
+    let seen = answering(&h);
+    let session = reopen(&h, &killed).await;
+    let run_id = killed.run_id.as_deref().unwrap();
+    let before = session.inspect_run(run_id).unwrap();
+    let resumed = session
+        .resume_run(run_id)
+        .await
+        .map(|result| result.outcome);
+    let after = session.inspect_run(run_id).unwrap();
+    session.shutdown().await;
+    // The summary's admission stays spent. Reopened under settings that
+    // do not compact, the run continues from the whole, uncompacted
+    // context, and the effect is not repeated.
+    assert_eq!(
+        (before.model_calls, before.disposition),
+        (2, RunRecoveryDisposition::Resumable)
+    );
+    assert_eq!(resumed.unwrap(), RunOutcome::FinishedTurn);
+    assert_eq!(after.model_calls, 3);
+    assert_eq!(
+        request(&seen),
+        [
+            "user: perform effect",
+            "assistant: call",
+            "result call: effect done",
+            NOTICE
+        ]
+    );
+    assert!(!on_disk(&killed.path).contains(&"compaction".to_owned()));
+    assert_eq!(effects(&killed, "effect"), 1);
+}
+
+/// Whether a thread of process `pid` is inside a `read` system call, by
+/// `/proc/<pid>/task/*/syscall`; `None` when `/proc` does not say.
+#[cfg(target_os = "linux")]
+fn in_read(pid: u32) -> Option<bool> {
+    let tasks = std::fs::read_dir(format!("/proc/{pid}/task")).ok()?;
+    let mut readable = false;
+    for task in tasks.flatten() {
+        let Ok(line) = std::fs::read_to_string(task.path().join("syscall")) else {
+            continue;
+        };
+        readable = true;
+        let number = line.split_whitespace().next().unwrap_or_default();
+        if number.parse::<libc::c_long>().ok() == Some(libc::SYS_read) {
+            return Some(true);
+        }
+    }
+    readable.then_some(false)
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_kill_inside_a_safe_tools_read_reruns_it_once() {
+    use std::os::unix::ffi::OsStrExt;
+    let dir = TempDir::new("run-journal-kill-fifo-read");
+    let fifo = dir.join("fifo");
+    let path = std::ffi::CString::new(fifo.as_os_str().as_bytes()).unwrap();
+    // SAFETY: `path` is a NUL-terminated string that outlives the call.
+    assert_eq!(unsafe { libc::mkfifo(path.as_ptr(), 0o600) }, 0);
+    // Held for writing, and never written, so the tool's read blocks.
+    let writer = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&fifo)
+        .unwrap();
+    let observed = std::cell::Cell::new(None);
+    let killed = kill_in(dir, "fifo-read", &[], |pid| {
+        let bound = std::time::Instant::now() + Duration::from_secs(10);
+        loop {
+            let state = in_read(pid);
+            if state != Some(false) || std::time::Instant::now() >= bound {
+                observed.set(state);
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    })
+    .await;
+    drop(writer);
+    match observed.get() {
+        Some(true) => {}
+        None => eprintln!("note: /proc did not show the fixture's system call"),
+        Some(false) => panic!("the fixture was not inside a read when killed"),
+    }
+    assert_eq!(
+        on_disk(&killed.path),
+        input_then(&["assistant", "message", "dispatch call safe"])
+    );
+    ends_at_a_finished_entry(&killed.path);
+    assert_eq!(effects(&killed, "probe"), 0);
+
+    // Ordinary recovery: the next prompt answers the call with Pi's
+    // synthetic result.
+    let text = std::fs::read_to_string(&killed.path).unwrap();
+    let entries: Vec<crate::session::SessionEntry> = crate::session::parse_session_entries(&text)
+        .into_iter()
+        .filter_map(|entry| entry.as_entry().cloned())
+        .collect();
+    let context =
+        crate::session::build_session_context(&entries, crate::session::LeafSelector::Last);
+    let live: Vec<_> = context.messages.iter().map(|m| m.to_agent()).collect();
+    let h = harness(200_000);
+    let sent = bake_ai::api::transform_messages::transform_messages(
+        &crate::session::messages::convert_to_llm(&live),
+        h.faux.model(),
+        None,
+    );
+    assert_eq!(
+        conversation(&sent),
+        [
+            "user: perform effect",
+            "assistant: call",
+            "result call (error): No result provided",
+        ]
+    );
+
+    // Selected recovery reruns the `Safe` call once, before the resumed
+    // request.
+    let seen = answering(&h);
+    let session = reopen(&h, &killed).await;
+    let (before, resumed) = resume(&session, &killed).await;
+    session.shutdown().await;
+    assert_eq!(before, RunRecoveryDisposition::Resumable);
+    assert_eq!(resumed.unwrap(), RunOutcome::FinishedTurn);
+    assert_eq!(
+        request(&seen),
+        [
+            "user: perform effect",
+            "assistant: call",
+            "result call: probe done",
+            NOTICE
+        ]
+    );
+    assert_eq!(effects(&killed, "probe"), 1);
+}
