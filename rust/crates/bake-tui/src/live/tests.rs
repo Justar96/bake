@@ -814,6 +814,13 @@ fn commands_are_refused_but_skills_templates_and_paths_are_not() {
     assert!(
         refused_command("/clear ship it", &templates).is_some_and(|r| r.contains("not a command"))
     );
+    // A word with `-` or `_` after its first letter is still command-like.
+    for word in ["/snake_case x", "/kebab-case x"] {
+        assert!(
+            refused_command(word, &templates).is_some_and(|r| r.contains("not a command")),
+            "{word}"
+        );
+    }
     assert_eq!(refused_command("/review src", &templates), None);
     assert_eq!(refused_command("/skill:review src", &templates), None);
     assert_eq!(
