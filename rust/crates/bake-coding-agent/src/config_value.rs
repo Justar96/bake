@@ -19,19 +19,29 @@
 //!   Git Bash shell, which Bake does not discover.
 //! - **Bounds.** Output beyond [`MAX_COMMAND_OUTPUT`] bytes fails the
 //!   command, where Node's `execSync` fails beyond its 1 MiB buffer too. The
-//!   10-second timeout covers the command and the closing of its output.
+//!   10-second timeout ([`COMMAND_TIMEOUT`]) bounds the command: the run
+//!   from the spawn until the shell has exited and its output has closed.
+//!   It does not bound the call. On Unix a timed-out or cancelled call kills
+//!   the shell's process group and returns once that killed group is gone,
+//!   with no time limit of its own, as a bash tool call does; a member that
+//!   cannot die, such as one in uninterruptible sleep on a hung network
+//!   mount, holds the call, and with it any teardown waiting for the call.
 //! - **Ownership.** On Unix the shell is an owned process tree
 //!   ([`bake_process::OwnedProcess`]): it leads its own process group, and
 //!   that group is killed, and awaited until no process is left in it, when
 //!   the shell exits, when the timeout passes, when the output overflows,
-//!   and on cancellation. A process the command put in the background is
-//!   therefore ended with it, where Node's `execSync` waits for it to close
-//!   the output: the output it wrote before the shell exited is kept, and
-//!   the command resolves at once instead of failing at the timeout. Only a
-//!   descendant that left the group (`setsid`) and keeps the output open
-//!   can hold the read, and only until the timeout. The tree runs on a
-//!   thread of its own, with a runtime of its own, which is joined before
-//!   the call returns; on Linux the shell is also tied to that thread
+//!   and on cancellation. A `!command` therefore never leaves a process
+//!   running in its group: a background process it started, with its
+//!   output redirected or not, is killed as soon as the shell exits. This
+//!   differs from the bash tool, whose command's background processes
+//!   outlive a normal exit as in Pi, and from Pi's `execSync`, which leaves
+//!   such a process running and waits only for the output to close. The
+//!   output written before the shell exited is kept, and the command
+//!   resolves at once instead of failing at the timeout. Only a descendant
+//!   that left the group (`setsid`) outlives the command, and it holds the
+//!   read, while it keeps the output open, only until the timeout. The tree
+//!   runs on a thread of its own, with a runtime of its own, which is joined
+//!   before the call returns; on Linux the shell is also tied to that thread
 //!   (`PR_SET_PDEATHSIG`), so a host killed outright takes the shell with
 //!   it. Windows keeps a plain child: the shell alone is killed and reaped
 //!   on timeout or cancellation, and its reader thread is not joined.
@@ -490,6 +500,8 @@ async fn run_owned(
     // Our ends close before the tree is awaited: a process that left the
     // group may hold the others.
     drop((stdout, stderr));
+    // Unbounded, as the bash tool's wait for a killed tree is: the timeout
+    // bounds the command, and the call returns once the group is gone.
     let settled = shell.settle().await;
     if cancelled {
         return CommandOutcome::Cancelled;
