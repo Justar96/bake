@@ -76,55 +76,33 @@ fn setup_with(
     prompts: Vec<(String, Vec<ImageContent>)>,
     key: Option<&str>,
 ) -> (tokio::runtime::Runtime, Arc<FauxProvider>, LiveSession) {
-    let runtime = tokio::runtime::Builder::new_multi_thread()
+    let runtime = test_runtime();
+    let faux = faux(key);
+    let live = live_session(&runtime, &faux, manager, tools, prompts);
+    (runtime, faux.provider, live)
+}
+
+fn test_runtime() -> tokio::runtime::Runtime {
+    tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
         .enable_all()
         .build()
-        .expect("runtime");
-    let faux = Arc::new(FauxProvider::new(FauxProviderOptions::default()));
-    let apis = Arc::new(ApiRegistry::new());
-    apis.register(faux.clone());
-    let mut registry = ModelRegistry::new(
-        ModelConfig::from_value(json!({}), "models.json"),
-        AuthStorage::empty(),
-    );
-    registry
-        .add_provider_config(
-            "faux",
-            json!({
-                "baseUrl": "http://127.0.0.1:9/unused",
-                "api": faux.model().api,
-                "models": [
-                    { "id": "faux-1", "contextWindow": 1000 },
-                    { "id": "faux-2", "contextWindow": 1000, "reasoning": true },
-                ],
-            }),
-            key.map(str::to_owned),
-        )
-        .expect("faux provider");
-    let registry = Arc::new(registry);
-    let active: Vec<String> = tools.iter().map(|tool| tool.name.clone()).collect();
+        .expect("runtime")
+}
+
+/// A live session on `faux` over `manager`, with `prompts` from the
+/// command line.
+fn live_session(
+    runtime: &tokio::runtime::Runtime,
+    faux: &Faux,
+    manager: SessionManager,
+    tools: Vec<Arc<AgentTool>>,
+    prompts: Vec<(String, Vec<ImageContent>)>,
+) -> LiveSession {
     let session = runtime
-        .block_on(AgentSession::create(AgentSessionOptions {
-            session: manager,
-            model: registry.model("faux", "faux-1"),
-            registry: registry.into(),
-            settings_store: None,
-            selection: None,
-            apis,
-            settings: Settings::default(),
-            thinking_level: None,
-            tools,
-            active_tool_names: active,
-            tool_prompts: Vec::new(),
-            system_prompt: SystemPromptOptions::new("/tmp"),
-            docs_command: "bake docs".into(),
-            plugins: bake_coding_agent::plugins::PluginRegistry::default(),
-            work: None,
-            jobs: None,
-        }))
+        .block_on(faux_session(faux, manager, tools))
         .expect("agent session");
-    let live = LiveSession {
+    LiveSession {
         session,
         runtime: runtime.handle().clone(),
         prompts,
@@ -136,8 +114,74 @@ fn setup_with(
         offline: false,
         commit_gate: None,
         gh: None,
-    };
-    (runtime, faux, live)
+    }
+}
+
+/// The faux provider and the registry that routes `faux/faux-1` and
+/// `faux/faux-2` to it, with `key` as the provider's API key.
+#[derive(Clone)]
+struct Faux {
+    provider: Arc<FauxProvider>,
+    apis: Arc<ApiRegistry>,
+    registry: Arc<ModelRegistry>,
+}
+
+fn faux(key: Option<&str>) -> Faux {
+    let provider = Arc::new(FauxProvider::new(FauxProviderOptions::default()));
+    let apis = Arc::new(ApiRegistry::new());
+    apis.register(provider.clone());
+    let mut registry = ModelRegistry::new(
+        ModelConfig::from_value(json!({}), "models.json"),
+        AuthStorage::empty(),
+    );
+    registry
+        .add_provider_config(
+            "faux",
+            json!({
+                "baseUrl": "http://127.0.0.1:9/unused",
+                "api": provider.model().api,
+                "models": [
+                    { "id": "faux-1", "contextWindow": 1000 },
+                    { "id": "faux-2", "contextWindow": 1000, "reasoning": true },
+                ],
+            }),
+            key.map(str::to_owned),
+        )
+        .expect("faux provider");
+    Faux {
+        provider,
+        apis,
+        registry: Arc::new(registry),
+    }
+}
+
+/// A session on `faux/faux-1` over `manager` with `tools` active.
+async fn faux_session(
+    faux: &Faux,
+    manager: SessionManager,
+    tools: Vec<Arc<AgentTool>>,
+) -> Result<AgentSession, String> {
+    let active: Vec<String> = tools.iter().map(|tool| tool.name.clone()).collect();
+    AgentSession::create(AgentSessionOptions {
+        session: manager,
+        model: faux.registry.model("faux", "faux-1"),
+        registry: Arc::clone(&faux.registry).into(),
+        settings_store: None,
+        selection: None,
+        apis: Arc::clone(&faux.apis),
+        settings: Settings::default(),
+        thinking_level: None,
+        tools,
+        active_tool_names: active,
+        tool_prompts: Vec::new(),
+        system_prompt: SystemPromptOptions::new("/tmp"),
+        docs_command: "bake docs".into(),
+        plugins: bake_coding_agent::plugins::PluginRegistry::default(),
+        work: None,
+        jobs: None,
+    })
+    .await
+    .map_err(|error| error.to_string())
 }
 
 impl Harness {
@@ -228,12 +272,16 @@ fn echo_tool() -> Arc<AgentTool> {
 fn a_prompt_streams_its_answer_commits_it_once_and_reports_the_status() {
     let h = harness(Vec::new(), Vec::new());
     let first = h.until(|update| matches!(update, RuntimeUpdate::Status(_)));
+    // An empty session uses none of the window, as Pi's footer reads.
     assert_eq!(
         first,
         [RuntimeUpdate::Status(SessionStatus {
             model: Some("faux/faux-1".into()),
             thinking: None,
-            context: None,
+            context: Some(ContextUsage {
+                used: Some(0),
+                window: 1000,
+            }),
         })]
     );
     h.faux
@@ -263,6 +311,50 @@ fn a_prompt_streams_its_answer_commits_it_once_and_reports_the_status() {
         committed(&updates),
         [Row::User("more".into()), Row::Answer("Again.".into())]
     );
+    h.stop();
+}
+
+/// The status line follows the context while a turn runs: the response
+/// that asks for a tool reports its usage before the tool returns.
+#[test]
+fn the_status_line_reads_the_context_again_while_a_turn_runs() {
+    let gate = Arc::new(Notify::new());
+    let h = harness(vec![gate_tool(&gate)], Vec::new());
+    h.until(|update| matches!(update, RuntimeUpdate::Status(_)));
+    h.faux.set_responses(vec![
+        faux_assistant_blocks(
+            vec![faux_tool_call("gate", json!({}), Some("call-1"))],
+            StopReason::ToolUse,
+        )
+        .into(),
+        faux_assistant_message("opened").into(),
+    ]);
+    h.submit(Submission::FollowUp("open it".into()));
+    let session = h.port().test_session.upgrade().expect("live session");
+    // Once the tool runs, the gate holds the turn and its context stays
+    // put; the refresh may come before or after the phase.
+    let mut seen = h.until(|update| update == &RuntimeUpdate::Phase("running gate".into()));
+    let usage = session.context_usage().expect("usage");
+    assert!(usage.tokens.is_some_and(|tokens| tokens > 0), "{usage:?}");
+    let measured = RuntimeUpdate::Status(SessionStatus {
+        model: Some("faux/faux-1".into()),
+        thinking: None,
+        context: Some(ContextUsage {
+            used: usage.tokens,
+            window: 1000,
+        }),
+    });
+    if !seen.contains(&measured) {
+        seen = h.until(|update| update == &measured);
+    }
+    assert!(
+        !seen
+            .iter()
+            .any(|update| matches!(update, RuntimeUpdate::TurnEnded(_)))
+    );
+    drop(session);
+    gate.notify_one();
+    h.until_turn_end();
     h.stop();
 }
 
@@ -1066,7 +1158,7 @@ fn stopping_with_a_prompt_waiting_cancels_it_and_shuts_down_without_its_effect()
 
 #[test]
 fn arguments_show_every_character_that_would_run() {
-    let text = super::arguments_text(&json!({
+    let text = super::approvals::arguments_text(&json!({
         "command": "printf 'a\\tb'\u{1b}[2J\u{202e}txt",
         "content": "one\r\ntwo",
         "sandbox_permissions": "danger-full-access",
@@ -1093,6 +1185,7 @@ fn only_the_commands_own_cancellation_interrupts_its_work() {
     assert_eq!(work_outcome(&Err(write_failed.into())), Outcome::Failed);
 }
 
+mod agents_live;
 mod commands_live;
 mod mcp_live;
 mod sessions_live;

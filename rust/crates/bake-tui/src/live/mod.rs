@@ -33,6 +33,15 @@
 //! withdraws a waiting request, and closes the broker, so any later request
 //! is `unavailable`.
 //!
+//! Background shells and subagents are read from the session's job
+//! registry and subagent host four times a second, since neither
+//! announces every change, and sent only when they changed. The status
+//! line's model, thinking level, and context use are sent at startup and
+//! after every prompt and command; while a prompt runs they are read again
+//! whenever the session reports something that can change them
+//! ([`projection::moves_status`]) and sent if they changed, so the context
+//! reading follows a long run step by step instead of waiting for its end.
+//!
 //! MCP registry changes are observed even while the session is idle.
 //! Startup, refresh, and connection failures publish diagnostic rows with
 //! the server's name; server error bodies and stderr stay out of the view.
@@ -45,10 +54,16 @@
 //! down, awaiting its run, its writes, and its model requests, before
 //! [`LivePort::stop`] returns. No update is sent after that.
 
+mod agents;
+mod approvals;
+mod command_runs;
 pub mod commands;
+mod driver;
 mod jobs;
 mod mcp;
 pub mod projection;
+mod publish;
+mod requests;
 pub mod tree;
 
 use std::collections::VecDeque;
@@ -57,13 +72,13 @@ use std::sync::mpsc as std_mpsc;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use bake_agent::{RunControl, RunOutcome};
-use bake_ai::{AbortController, ImageContent, StopReason};
+use bake_ai::{AbortController, ImageContent};
 use bake_coding_agent::agent_session::AgentSession;
-use bake_coding_agent::permissions::{self, ApprovalBroker, ApprovalPrompt};
+use bake_coding_agent::permissions::ApprovalBroker;
 use bake_tui_view::copy;
 use bake_tui_view::dialog::DialogAnswer;
 use bake_tui_view::paste::Image;
-use bake_tui_view::runtime::{Approval, ApprovalAnswer, RuntimeUpdate, SessionStatus};
+use bake_tui_view::runtime::{RuntimeUpdate, SessionStatus};
 use bake_tui_view::state::Outcome;
 use bake_tui_view::status::ContextUsage;
 use bake_tui_view::transcript::Row;
@@ -73,7 +88,9 @@ use tokio::sync::{Notify, mpsc, oneshot};
 use tokio::task::JoinHandle;
 
 use crate::port::Request;
+use approvals::{approval, broker_answer};
 use bake_coding_agent::cli::SessionFactory;
+use driver::{INTERRUPTED_PROMPT, refused_command, work_outcome};
 use mcp::McpNotices;
 use projection::Projector;
 
@@ -230,7 +247,8 @@ impl LivePort {
             }));
         }
         let projector = Arc::new(Mutex::new(Projector::with_history(&session.messages())));
-        let subscription = subscribe(&session, &projector, &send);
+        let status_due = Arc::new(Notify::new());
+        let subscription = subscribe(&session, &projector, &send, &status_due);
         let (requests, inbox) = mpsc::unbounded_channel();
         let (begin, begun) = oneshot::channel();
         let (finished, done) = std_mpsc::channel();
@@ -267,6 +285,9 @@ impl LivePort {
             startup: None,
             orphans: Arc::default(),
             shells: Vec::new(),
+            agents: Vec::new(),
+            status_due,
+            status: None,
         };
         let closing = approvals.clone();
         let orphans = Arc::clone(&driver.orphans);
@@ -377,14 +398,18 @@ impl Drop for LivePort {
     }
 }
 
-/// Subscribes the loop to `session`'s events, projected by `projector`.
+/// Subscribes the loop to `session`'s events, projected by `projector`,
+/// and wakes `status_due` when one can change the status line; the driver
+/// reads it then, outside the session's dispatch.
 fn subscribe(
     session: &AgentSession,
     projector: &Arc<Mutex<Projector>>,
     send: &Send,
+    status_due: &Arc<Notify>,
 ) -> bake_coding_agent::agent_session::SessionSubscription {
     let projector = Arc::clone(projector);
     let send = Arc::clone(send);
+    let status_due = Arc::clone(status_due);
     session.subscribe(move |event| {
         let updates = projector
             .lock()
@@ -392,6 +417,9 @@ fn subscribe(
             .apply(event);
         for update in updates {
             send(update);
+        }
+        if projection::moves_status(event) {
+            status_due.notify_one();
         }
     })
 }
@@ -459,8 +487,10 @@ enum Next {
     Commanded(Result<commands::Outcome, tokio::task::JoinError>),
     McpChanged,
     Request(Option<Request>),
-    /// Time to look at the background shells again.
-    Shells,
+    /// Time to look at the background shells and subagents again.
+    Background,
+    /// The session reported something the status line shows.
+    Status,
 }
 
 struct Driver {
@@ -506,850 +536,22 @@ struct Driver {
     gh: Option<std::ffi::OsString>,
     /// The background shells last sent to the view.
     shells: Vec<bake_tui_view::jobs::BackgroundJob>,
+    /// The subagents last sent to the view.
+    agents: Vec<bake_tui_view::agents::Agent>,
+    /// Woken by the session's listener when the status line may have
+    /// changed ([`projection::moves_status`]).
+    status_due: Arc<Notify>,
+    /// The status line last sent to the view.
+    status: Option<SessionStatus>,
 }
 
-/// How often the driver looks for changes in the background shells: their
-/// states and output, which the job registry does not announce.
-const SHELLS_EVERY: std::time::Duration = std::time::Duration::from_millis(250);
+/// How often the driver looks for changes in the background shells and
+/// subagents: their states and output, which the job registry and the
+/// subagent host do not announce.
+const BACKGROUND_EVERY: std::time::Duration = std::time::Duration::from_millis(250);
 
 /// The tasks a driver owned when it was dropped without its shutdown.
 type Orphans = Arc<Mutex<Vec<std::pin::Pin<Box<dyn Future<Output = ()> + std::marker::Send>>>>>;
-
-impl Drop for Driver {
-    /// A driver ends through its shutdown, which leaves nothing here; one
-    /// that panicked aborts its command and startup refresh, as that
-    /// shutdown does, and hands them to the port's handler to await, so a
-    /// commit already started still finishes and no fetch outlives the
-    /// port.
-    fn drop(&mut self) {
-        let mut orphans = self.orphans.lock().unwrap_or_else(PoisonError::into_inner);
-        if let Some(command) = self.command.take() {
-            command.abort.abort();
-            let task = command.task;
-            orphans.push(Box::pin(async move {
-                // A replacement the command built is never used.
-                if let Ok(Ok(done)) = task.await {
-                    done.discard().await;
-                }
-            }));
-        }
-        if let Some((task, abort)) = self.startup.take() {
-            abort.abort();
-            orphans.push(Box::pin(async move {
-                let _ = task.await;
-            }));
-        }
-    }
-}
-
-impl Driver {
-    async fn run(mut self, mut inbox: mpsc::UnboundedReceiver<Request>) {
-        let mut running: Option<Running> = None;
-        self.status();
-        self.publish_mcp();
-        // `--offline` stops the one startup network operation.
-        if let Some(home) = self.home.clone().filter(|_| !self.offline) {
-            let abort = AbortController::new();
-            let session = Arc::clone(&self.session);
-            let signal = abort.signal();
-            let send = Arc::clone(&self.send);
-            self.startup = Some((
-                tokio::spawn(commands::startup_refresh(
-                    session,
-                    home,
-                    signal,
-                    Arc::new(move |update| send(update)),
-                )),
-                abort,
-            ));
-        }
-        // `--resume` opens the session picker before the first prompt; the
-        // prompts wait in `held` until it ends, so the replacement it
-        // chooses is not refused for prompts that wait. Nobody typed it, so
-        // it carries no text: a cancelled picker gives nothing back to the
-        // composer ([`Self::refuse`]).
-        if self.resume {
-            self.resume = false;
-            self.command(None, String::new(), commands::RESUME, String::new());
-        } else {
-            self.waiting.append(&mut self.held);
-            if let Some(next) = self.waiting.pop_front() {
-                running = Some(self.begin(next));
-            }
-        }
-        self.publish_pending();
-        let mut shells = tokio::time::interval(SHELLS_EVERY);
-        shells.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        while !self.gone.is_set() {
-            // Subscribed before the check, so a job that settles after it
-            // still wakes the loop.
-            let mut jobs = self.session.jobs().subscribe();
-            if running.is_none() && self.command.is_none() && self.waiting.is_empty() {
-                running = self.deliver_notices().await;
-            }
-            let idle = running.is_none() && self.command.is_none();
-            let next = {
-                let settle = async {
-                    match running.as_mut() {
-                        Some(run) => (&mut run.task).await,
-                        None => std::future::pending().await,
-                    }
-                };
-                let commanded = async {
-                    match self.command.as_mut() {
-                        Some(command) => (&mut command.task).await,
-                        None => std::future::pending().await,
-                    }
-                };
-                let settled_job = async {
-                    if idle && jobs.changed().await {
-                        return;
-                    }
-                    std::future::pending::<()>().await;
-                };
-                let mcp_changed = async {
-                    match &mut self.mcp {
-                        Some(mcp) => mcp.changed().await,
-                        None => std::future::pending().await,
-                    }
-                };
-                tokio::select! {
-                    joined = settle => Next::Settled(joined),
-                    () = settled_job => Next::Jobs,
-                    done = commanded => Next::Commanded(done),
-                    () = mcp_changed => Next::McpChanged,
-                    _ = shells.tick() => Next::Shells,
-                    request = inbox.recv() => Next::Request(request),
-                    () = self.gone.notify.notified() => Next::Request(None),
-                }
-            };
-            match next {
-                Next::Settled(joined) => {
-                    if let Some(run) = running.take() {
-                        self.settled(run, joined).await;
-                    }
-                    if let Some(next) = self.waiting.pop_front() {
-                        running = Some(self.begin(next));
-                        self.publish_pending();
-                    }
-                }
-                // Checked at the top of the loop.
-                Next::Jobs => {}
-                Next::Commanded(done) => {
-                    self.commanded(done, running.as_ref()).await;
-                    // The startup picker ended: the command line's prompts
-                    // become ordinary waiting prompts, in order.
-                    if !self.held.is_empty() && self.command.is_none() {
-                        self.waiting.append(&mut self.held);
-                        if running.is_none()
-                            && let Some(next) = self.waiting.pop_front()
-                        {
-                            running = Some(self.begin(next));
-                        }
-                        self.publish_pending();
-                    }
-                }
-                Next::McpChanged => self.publish_mcp(),
-                Next::Shells => self.publish_shells(),
-                Next::Request(None) => break,
-                Next::Request(Some(request)) => self.request(request, &mut running).await,
-            }
-        }
-        // A command's dialog reads as cancelled and its fetch is aborted;
-        // a commit it has started runs on, and is awaited below.
-        let command = self.command.take().map(|command| {
-            command.abort.abort();
-            drop(command.answers);
-            command.task
-        });
-        let startup = self.startup.take().map(|(task, abort)| {
-            abort.abort();
-            task
-        });
-        // Pi's `dispose`, awaited: the run, its writes, and its requests end
-        // before the terminal is given back.
-        shut_down(&self.session, self.approvals.as_ref()).await;
-        if let Some(subscription) = self.subscription.take() {
-            subscription.unsubscribe();
-        }
-        if let Some(command) = command
-            && let Ok(Ok(done)) = command.await
-        {
-            // A replacement the command built is never used.
-            done.discard().await;
-        }
-        if let Some(startup) = startup {
-            let _ = startup.await;
-        }
-        if let Some(run) = running {
-            let _ = run.task.await;
-        }
-        for abort in self.aborts.drain(..) {
-            let _ = abort.await;
-        }
-    }
-
-    fn send(&self, update: RuntimeUpdate) {
-        (self.send)(update);
-    }
-
-    fn publish_mcp(&mut self) {
-        if let Some(mcp) = &mut self.mcp {
-            let rows = mcp.take_rows();
-            if !rows.is_empty() {
-                self.send(RuntimeUpdate::Commit(rows));
-            }
-        }
-    }
-
-    fn refuse(&self, id: Option<u64>, text: String, reason: String) {
-        match id {
-            Some(id) => {
-                self.send(RuntimeUpdate::Refused { id, reason });
-            }
-            // A command-line prompt has no draft; its text comes back. The
-            // startup picker has no text, so nothing comes back and no
-            // notice shows.
-            None if !text.trim().is_empty() => {
-                self.send(RuntimeUpdate::Returned(vec![text]));
-            }
-            None => {}
-        }
-    }
-
-    fn begin(&mut self, prompt: Queued) -> Running {
-        self.projector
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .begin(prompt.id);
-        self.turns += 1;
-        self.send(RuntimeUpdate::TurnStarted {
-            seed: format!("{}-{}", self.session.session_id(), self.turns),
-        });
-        let session = Arc::clone(&self.session);
-        let Queued { id, text, images } = prompt;
-        let sent = text.clone();
-        let task = tokio::spawn(async move {
-            session
-                .prompt_with_control(&sent, images, RunControl::default())
-                .await
-        });
-        Running {
-            task,
-            id,
-            text,
-            cancelled: false,
-            notice: false,
-        }
-    }
-
-    /// Opens a turn for the notices of background jobs that settled, and
-    /// the messages and notices of subagents that arrived, while the
-    /// session was idle, `tool-jobs`' `wakeup` delivery, while the
-    /// wake budget lasts; past it the session keeps them for the next
-    /// prompt ([`AgentSession::deliver_job_notices`]).
-    async fn deliver_notices(&mut self) -> Option<Running> {
-        let jobs = self.session.jobs();
-        // A settled job not yet reported, or a subagent's message or
-        // settlement notice.
-        if !jobs.has_undelivered() {
-            return None;
-        }
-        if !jobs.notice_would_wake() {
-            // Kept for the next prompt; no turn opens.
-            let _ = self.session.deliver_job_notices().await;
-            return None;
-        }
-        self.projector
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .begin(None);
-        self.turns += 1;
-        self.send(RuntimeUpdate::TurnStarted {
-            seed: format!("{}-{}", self.session.session_id(), self.turns),
-        });
-        let session = Arc::clone(&self.session);
-        let task = tokio::spawn(async move {
-            session
-                .deliver_job_notices_with_control(RunControl::default())
-                .await
-        });
-        Some(Running {
-            task,
-            id: None,
-            text: String::new(),
-            cancelled: false,
-            notice: true,
-        })
-    }
-
-    async fn request(&mut self, request: Request, running: &mut Option<Running>) {
-        match request {
-            Request::Submit(prompt) => {
-                let id = Some(prompt.id);
-                let text = prompt.submission.text().to_owned();
-                let templates: Vec<String> = self
-                    .session
-                    .prompt_templates()
-                    .iter()
-                    .map(|template| template.name.clone())
-                    .collect();
-                if let Some((name, argument)) = commands::parse(&text) {
-                    if self.command.is_some() {
-                        return self.refuse(
-                            id,
-                            text,
-                            "Another command is running; your draft is kept.".into(),
-                        );
-                    }
-                    if !prompt.images.is_empty() {
-                        return self.refuse(
-                            id,
-                            text,
-                            format!("/{name} takes no images; your draft is kept."),
-                        );
-                    }
-                    if let Some(reason) = commands::refuse_argument(name, &argument) {
-                        return self.refuse(id, text, reason);
-                    }
-                    if (commands::TRANSITIONS.contains(&name) || commands::IDLE.contains(&name))
-                        && let Some(reason) = self.busy(running.as_ref())
-                    {
-                        return self.refuse(id, text, reason);
-                    }
-                    return self.command(id, text, name, argument);
-                }
-                if let Some(reason) = refused_command(&text, &templates) {
-                    return self.refuse(id, text, reason);
-                }
-                // While a session is being replaced or compacted, nothing
-                // reaches it.
-                if let Some(command) = self.command.as_ref().filter(|command| command.transition) {
-                    let reason = if command.name == commands::COMPACT {
-                        "The session is being compacted; your draft is kept."
-                    } else if command.name == "tree" {
-                        bake_tui_view::runtime::TREE_BEING_NAVIGATED
-                    } else {
-                        "The session is being replaced; your draft is kept."
-                    };
-                    return self.refuse(id, text, reason.into());
-                }
-                // `/share` and `/bug` read the session they upload until
-                // they end, so no turn starts under them.
-                if let Some(command) = self
-                    .command
-                    .as_ref()
-                    .filter(|command| commands::IDLE.contains(&command.name))
-                {
-                    let reason = copy::SESSION_BEING_READ.replace("{command}", command.name);
-                    return self.refuse(id, text, reason);
-                }
-                let images: Vec<ImageContent> = prompt.images.iter().map(image_content).collect();
-                match running {
-                    // Pi's `onSubmit` while streaming: a steer. One with
-                    // images waits for the next turn instead, so they stay
-                    // with their prompt, and so does one sent after a
-                    // cancel, which must not join the run it stops.
-                    Some(run) if images.is_empty() && !run.cancelled => {
-                        match self.session.steer(&text, Vec::new()).await {
-                            Ok(()) => self.send(RuntimeUpdate::Admitted(prompt.id)),
-                            Err(reason) => self.refuse(id, text, reason),
-                        }
-                    }
-                    Some(_) => {
-                        self.waiting.push_back(Queued { id, text, images });
-                        self.publish_pending();
-                    }
-                    None => *running = Some(self.begin(Queued { id, text, images })),
-                }
-            }
-            // Pi's `onEscape` while streaming.
-            Request::Cancel => {
-                // `/compact` runs as the session's work: Esc cancels it, as
-                // Pi's `abortCompaction` does.
-                if let Some(command) = self
-                    .command
-                    .as_ref()
-                    .filter(|command| command.name == commands::COMPACT)
-                {
-                    command.abort.abort();
-                    return;
-                }
-                // `/tree`'s branch summary runs as the session's work: Esc
-                // cancels it, as Pi's `abortBranchSummary` does.
-                if let Some(work) = self.command.as_ref().and_then(|command| {
-                    command
-                        .work
-                        .lock()
-                        .unwrap_or_else(PoisonError::into_inner)
-                        .clone()
-                }) {
-                    work.abort();
-                    return;
-                }
-                let Some(run) = running.as_mut().filter(|run| !run.cancelled) else {
-                    return;
-                };
-                run.cancelled = true;
-                let queued = self.session.clear_queue();
-                let returned: Vec<String> = queued
-                    .steering
-                    .into_iter()
-                    .chain(queued.follow_up)
-                    .collect();
-                if !returned.is_empty() {
-                    self.send(RuntimeUpdate::Returned(returned));
-                }
-                for waiting in std::mem::take(&mut self.waiting) {
-                    self.refuse(waiting.id, waiting.text, INTERRUPTED_PROMPT.into());
-                }
-                self.publish_pending();
-                let session = Arc::clone(&self.session);
-                self.aborts
-                    .push(tokio::spawn(async move { session.abort().await }));
-            }
-            // Waiting prompts join the running turn at its next step; one
-            // with images keeps waiting for its own turn.
-            // The port answers approvals itself.
-            Request::Answer { .. } => {}
-            Request::StopJob(id) => {
-                jobs::stop(self.session.jobs(), &id);
-                self.publish_shells();
-            }
-            // To the running command, which drops an answer for a dialog
-            // it no longer shows.
-            Request::Dialog { id, answer } => {
-                if let Some(command) = &self.command {
-                    // Esc on the dialog shown now also aborts the work on
-                    // its answer, such as a held check of the proxy; a
-                    // commit already started runs on to its result.
-                    let shown = command.shown.load(std::sync::atomic::Ordering::SeqCst);
-                    if answer == DialogAnswer::Cancel && shown != 0 && id == shown {
-                        command.abort.abort();
-                    }
-                    let _ = command.answers.send((id, answer));
-                }
-            }
-            Request::SendPending => {
-                if running.as_ref().is_none_or(|run| run.cancelled) {
-                    return;
-                }
-                let mut kept = VecDeque::new();
-                while let Some(queued) = self.waiting.pop_front() {
-                    if !queued.images.is_empty() {
-                        kept.push_back(queued);
-                        continue;
-                    }
-                    match self.session.steer(&queued.text, Vec::new()).await {
-                        Ok(()) => {
-                            if let Some(id) = queued.id {
-                                self.send(RuntimeUpdate::Admitted(id));
-                            }
-                        }
-                        Err(reason) => self.refuse(queued.id, queued.text, reason),
-                    }
-                }
-                self.waiting = kept;
-                self.publish_pending();
-            }
-        }
-    }
-
-    async fn settled(
-        &mut self,
-        run: Running,
-        joined: Result<Result<RunOutcome, String>, tokio::task::JoinError>,
-    ) {
-        // The run's abort ends before anything else starts.
-        for abort in self.aborts.drain(..) {
-            let _ = abort.await;
-        }
-        let (admitted, displayed_error, mut updates) = {
-            let mut projector = self
-                .projector
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner);
-            (
-                projector.admitted(),
-                projector.last_error().map(str::to_owned),
-                projector.finish(),
-            )
-        };
-        let (outcome, failure) = match joined {
-            Ok(Ok(RunOutcome::FinishedTurn)) => (Outcome::Completed, None),
-            Ok(Ok(RunOutcome::Cancelled)) => (Outcome::Interrupted, None),
-            Ok(Ok(outcome @ RunOutcome::BudgetExhausted { .. })) => {
-                (Outcome::Failed, Some(outcome.to_string()))
-            }
-            Ok(Ok(RunOutcome::Failed { message })) | Ok(Err(message)) => {
-                (Outcome::Failed, Some(message))
-            }
-            Err(error) => (
-                Outcome::Failed,
-                Some(format!("The agent task failed: {error}")),
-            ),
-        };
-        for update in updates.drain(..) {
-            self.send(update);
-        }
-        if admitted {
-            if let Some(message) =
-                failure.filter(|message| Some(message) != displayed_error.as_ref())
-            {
-                self.send(RuntimeUpdate::Commit(vec![Row::Error(message)]));
-            }
-        } else if run.notice {
-            // A notice turn has no draft to give back.
-            if let Some(message) = failure {
-                self.send(RuntimeUpdate::Commit(vec![Row::Error(message)]));
-            }
-        } else {
-            // The agent never took the prompt: refused, such as without an
-            // API key, or cancelled first. Its draft goes back.
-            let reason = failure.unwrap_or_else(|| INTERRUPTED_PROMPT.into());
-            self.refuse(run.id, run.text, reason);
-        }
-        self.send(RuntimeUpdate::TurnEnded(outcome));
-        self.status();
-        if run.cancelled {
-            return;
-        }
-        // A steer that arrived as the run was ending stays queued with no
-        // run to take it; it runs next, ahead of the other waiting prompts.
-        if !self.session.queued_messages().is_empty() {
-            let queued = self.session.clear_queue();
-            for text in queued.steering.into_iter().chain(queued.follow_up).rev() {
-                self.waiting.push_front(Queued {
-                    id: None,
-                    text,
-                    images: Vec::new(),
-                });
-            }
-            self.publish_pending();
-        }
-    }
-
-    /// Starts the command `name` names as an owned task.
-    fn command(&mut self, id: Option<u64>, text: String, name: &'static str, argument: String) {
-        let (answers, inbox) = mpsc::unbounded_channel();
-        let abort = AbortController::new();
-        let send = Arc::clone(&self.send);
-        let shown = Arc::new(std::sync::atomic::AtomicU64::new(0));
-        let context = commands::Context::new(
-            Arc::clone(&self.session),
-            self.home.clone(),
-            Arc::new(move |update| send(update)),
-            inbox,
-            abort.signal(),
-            Arc::clone(&self.dialog_ids),
-            Arc::clone(&shown),
-        );
-        let context = context.with_factory(self.factory.clone());
-        let work = Arc::clone(&context.work);
-        #[cfg(test)]
-        let context = context.with_commit_gate(self.commit_gate.clone());
-        #[cfg(test)]
-        let context = context.with_gh(self.gh.clone());
-        // The bar shows `/compact` as the running work, so Esc reaches it
-        // as a cancel and Enter as a prompt the barrier refuses.
-        if name == commands::COMPACT {
-            self.projector
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .begin(None);
-            self.turns += 1;
-            self.send(RuntimeUpdate::TurnStarted {
-                seed: format!("{}-{}", self.session.session_id(), self.turns),
-            });
-        }
-        let task = tokio::spawn(commands::run(name, argument, context));
-        self.command = Some(CommandRun {
-            task,
-            shown,
-            work,
-            answers,
-            abort,
-            id,
-            text,
-            name,
-            transition: commands::TRANSITIONS.contains(&name),
-        });
-    }
-
-    /// Why the session cannot be replaced now, as the TypeScript
-    /// navigation's `unavailable`: a turn runs, prompts wait, or the
-    /// session compacts or retries. `None` when it can.
-    fn busy(&self, running: Option<&Running>) -> Option<String> {
-        if running.is_some() || self.session.is_streaming() {
-            return Some(
-                "A turn is running; stop it with Esc or wait, and your draft is kept.".into(),
-            );
-        }
-        if !self.waiting.is_empty() || !self.session.queued_messages().is_empty() {
-            return Some("Prompts are waiting to be sent; your draft is kept.".into());
-        }
-        if self.session.is_compacting() || self.session.is_retrying() {
-            return Some(
-                "The session is busy; try again when it is idle. Your draft is kept.".into(),
-            );
-        }
-        None
-    }
-
-    /// A command ended: its note goes to the transcript and its prompt is
-    /// admitted, or its draft comes back with why. A replacement session is
-    /// committed here ([`Self::replace`]).
-    async fn commanded(
-        &mut self,
-        done: Result<commands::Outcome, tokio::task::JoinError>,
-        running: Option<&Running>,
-    ) {
-        let Some(command) = self.command.take() else {
-            return;
-        };
-        let outcome = done.unwrap_or_else(|error| Err(format!("The command failed: {error}")));
-        if command.name == commands::COMPACT {
-            // It opens no dialog, so no keyboard handoff starts and the
-            // draft typed while it ran keeps taking keys.
-            self.send(RuntimeUpdate::TurnEnded(work_outcome(&outcome)));
-        } else if !commands::NO_DIALOG.contains(&command.name) {
-            // The command closed its dialog; a panicked one could not have.
-            self.send(RuntimeUpdate::Dialog(None));
-        }
-        match outcome {
-            Ok(commands::Done::Replace {
-                replacement,
-                note,
-                draft,
-            }) => {
-                // Prompts were refused while it ran, so the session is
-                // idle; anything else keeps it, and its draft comes back,
-                // as does an Esc that arrived after the replacement was
-                // built: the commit is here, and nothing has changed yet.
-                let busy = if command.abort.signal().aborted() {
-                    Some(commands::CANCELLED.to_owned())
-                } else {
-                    self.busy(running)
-                };
-                if let Some(reason) = busy {
-                    replacement.session.shutdown().await;
-                    self.refuse(command.id, command.text, reason);
-                } else {
-                    self.replace(*replacement, note).await;
-                    if let Some(id) = command.id {
-                        self.send(RuntimeUpdate::Admitted(id));
-                    }
-                    if let Some(draft) = draft {
-                        self.send(RuntimeUpdate::Restored(draft));
-                    }
-                }
-            }
-            // The leaf already moved inside the session, which claimed it
-            // idle; the transcript starts over with the new path.
-            Ok(commands::Done::Navigated { note, draft }) => {
-                if let Some(id) = command.id {
-                    self.send(RuntimeUpdate::Admitted(id));
-                }
-                *self
-                    .projector
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner) =
-                    Projector::with_history(&self.session.messages());
-                self.send(RuntimeUpdate::Replaced(opening_rows(
-                    &[note],
-                    &self.session,
-                )));
-                if let Some(draft) = draft {
-                    self.send(RuntimeUpdate::Restored(draft));
-                }
-                self.publish_pending();
-            }
-            // The compaction is written and the agent's transcript is the
-            // compacted context: the transcript starts over with it, as
-            // Pi's `compaction_end` handler renders it.
-            Ok(commands::Done::Compacted { note }) => {
-                if let Some(id) = command.id {
-                    self.send(RuntimeUpdate::Admitted(id));
-                }
-                *self
-                    .projector
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner) =
-                    Projector::with_history(&self.session.messages());
-                let mut rows = projection::replay_compacted(&self.session.messages());
-                rows.push(Row::Info(note));
-                self.send(RuntimeUpdate::Replaced(rows));
-                self.publish_pending();
-            }
-            Ok(done) => {
-                if let Some(id) = command.id {
-                    self.send(RuntimeUpdate::Admitted(id));
-                }
-                match done {
-                    commands::Done::Note(note) => {
-                        self.send(RuntimeUpdate::Commit(vec![Row::Info(note)]));
-                    }
-                    commands::Done::Rows(rows) => self.send(RuntimeUpdate::Commit(rows)),
-                    _ => {}
-                }
-            }
-            Err(reason) => self.refuse(command.id, command.text, reason),
-        }
-        self.status();
-    }
-
-    /// Replaces the idle session with `replacement`, as Pi's
-    /// `AgentSessionRuntime` does after `teardownCurrent`: the startup
-    /// refresh, which works for the old session, is aborted and awaited; the
-    /// old session is shut down, awaiting its writes and releasing its file;
-    /// then the new one takes its place, its events reach the loop through
-    /// a fresh projector, and the transcript starts over with its replay.
-    /// The old session's listeners are closed by its shutdown, so none of
-    /// its events reach the new transcript, and its MCP servers have
-    /// stopped before the new session starts its own
-    /// ([`bake_coding_agent::cli::Replacement::start_servers`]).
-    async fn replace(&mut self, replacement: bake_coding_agent::cli::Replacement, note: String) {
-        if let Some((task, abort)) = self.startup.take() {
-            abort.abort();
-            let _ = task.await;
-        }
-        for abort in self.aborts.drain(..) {
-            let _ = abort.await;
-        }
-        let mut replacement = replacement;
-        // The approval broker stays connected: the new session's tools ask
-        // the same broker, which the old session's shutdown leaves open.
-        // The old session's MCP servers are gone when this returns; only
-        // then do the new session's start, as Pi tears the current session
-        // down before it creates the next.
-        self.session.shutdown().await;
-        let started = replacement.start_servers();
-        let bake_coding_agent::cli::Replacement {
-            session,
-            mut warnings,
-            ..
-        } = replacement;
-        if let Err(message) = started {
-            warnings.push(message);
-        }
-        let session = Arc::new(session);
-        if let Some(subscription) = self.subscription.take() {
-            subscription.unsubscribe();
-        }
-        *self
-            .projector
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner) = Projector::with_history(&session.messages());
-        self.session = Arc::clone(&session);
-        self.mcp = session.mcp_servers().map(McpNotices::new);
-        *self.current.lock().unwrap_or_else(PoisonError::into_inner) = Arc::clone(&session);
-        self.subscription = Some(subscribe(&session, &self.projector, &self.send));
-        self.turns = 0;
-        let notes = replacement_notes(note, &session, warnings);
-        self.send(RuntimeUpdate::Replaced(opening_rows(&notes, &session)));
-        self.publish_mcp();
-        self.publish_pending();
-    }
-
-    /// Sends the pending panel: the session's queues and the driver's own.
-    /// Sends the background shells when more than their clocks changed;
-    /// a replaced session's empty list closes what the view showed.
-    fn publish_shells(&mut self) {
-        let now = jobs::shells(self.session.jobs(), bake_ai::now_ms());
-        if jobs::changed(&self.shells, &now) {
-            self.shells = now.clone();
-            self.send(RuntimeUpdate::Jobs(now));
-        }
-    }
-
-    fn publish_pending(&self) {
-        let queued = self.session.queued_messages();
-        let waiting: Vec<String> = self.waiting.iter().map(|q| q.text.clone()).collect();
-        let update = self
-            .projector
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .set_waiting(waiting, &queued.steering, &queued.follow_up);
-        self.send(update);
-    }
-
-    /// Sends the status line's model, thinking level, and context use.
-    fn status(&self) {
-        let model = self.session.model();
-        let context = model.as_ref().and_then(|model| {
-            let used = self.session.messages().iter().rev().find_map(|message| {
-                let assistant = message.as_assistant()?;
-                if matches!(
-                    assistant.stop_reason,
-                    StopReason::Aborted | StopReason::Error
-                ) {
-                    return None;
-                }
-                let tokens = bake_ai::utils::estimate::calculate_context_tokens(&assistant.usage);
-                (tokens > 0).then_some(tokens)
-            })?;
-            (model.context_window > 0).then_some(ContextUsage {
-                used,
-                window: model.context_window,
-            })
-        });
-        self.send(RuntimeUpdate::Status(SessionStatus {
-            thinking: model
-                .as_ref()
-                .filter(|model| model.reasoning)
-                .map(|_| self.session.thinking_level().as_str().to_owned()),
-            model: model.map(|model| format!("{}/{}", model.provider, model.id)),
-            context,
-        }));
-    }
-}
-
-/// How a command that ran as the session's work ended, for the bar. Only
-/// the command's own cancellation is an interruption: a failure, such as a
-/// compaction whose write failed before a late Esc, stays a failure.
-fn work_outcome(outcome: &commands::Outcome) -> Outcome {
-    match outcome {
-        Ok(_) => Outcome::Completed,
-        Err(reason) if reason == commands::CANCELLED => Outcome::Interrupted,
-        Err(_) => Outcome::Failed,
-    }
-}
-
-/// Why a prompt a cancel stopped before the agent took it came back.
-const INTERRUPTED_PROMPT: &str = "Stopped before it was sent; your prompt is back in the draft.";
-
-/// Why a slash prompt is refused: it names one of Pi's built-in commands,
-/// which `bake` does not run yet, or another command-like word that is
-/// neither `/skill:name` nor one of `templates`. Text whose first word is
-/// not command-like, such as a path, goes to the model as Pi sends it.
-fn refused_command(text: &str, templates: &[String]) -> Option<String> {
-    let word = text
-        .trim_start()
-        .strip_prefix('/')?
-        .split_whitespace()
-        .next()?;
-    if word.starts_with("skill:") || templates.iter().any(|name| name == word) {
-        return None;
-    }
-    let command_like = word
-        .chars()
-        .next()
-        .is_some_and(|first| first.is_ascii_alphabetic())
-        && word
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
-    if PI_COMMANDS.contains(&word) {
-        Some(format!(
-            "/{word} is not available in bake yet; your draft is kept."
-        ))
-    } else if command_like {
-        Some(format!(
-            "/{word} is not a command or prompt template; your draft is kept."
-        ))
-    } else {
-        None
-    }
-}
 
 /// Shuts `session` down and closes `approvals`. The shutdown's first step,
 /// taken before it first waits, aborts the run, so a request it holds is
@@ -1362,49 +564,6 @@ async fn shut_down(session: &AgentSession, approvals: Option<&ApprovalBroker>) {
             broker.close();
         }
     });
-}
-
-/// A queued approval request as the view shows it.
-fn approval(prompt: ApprovalPrompt) -> Approval {
-    Approval {
-        generation: prompt.generation,
-        tool: prompt.tool_name,
-        call_id: prompt.call_id,
-        parent_call_id: prompt.parent_tool_call_id,
-        reason: prompt.reason,
-        arguments: arguments_text(&prompt.arguments),
-    }
-}
-
-/// The escalation arguments, which the reason already states.
-const ESCALATION_ARGUMENTS: [&str; 2] = ["sandbox_permissions", "justification"];
-
-/// A call's arguments for review, one argument per line as `name: value`,
-/// apart from the escalation pair. A string shows as written, a string of
-/// several lines on the lines under its name, each indented; any other
-/// value as compact JSON. Control characters other than tab show as
-/// `\u{…}` escapes, so nothing a call would run is hidden and nothing
-/// reaches the terminal as an escape sequence.
-fn arguments_text(arguments: &serde_json::Value) -> String {
-    let Some(object) = arguments.as_object() else {
-        return visible(&arguments.to_string());
-    };
-    let mut lines = Vec::new();
-    for (name, value) in object {
-        if ESCALATION_ARGUMENTS.contains(&name.as_str()) {
-            continue;
-        }
-        let name = visible(name);
-        match value.as_str() {
-            Some(text) if text.contains('\n') => {
-                lines.push(format!("{name}:"));
-                lines.extend(text.split('\n').map(|line| format!("  {}", visible(line))));
-            }
-            Some(text) => lines.push(format!("{name}: {}", visible(text))),
-            None => lines.push(format!("{name}: {}", visible(&value.to_string()))),
-        }
-    }
-    lines.join("\n")
 }
 
 /// `text` with every control character but tab, and every invisible
@@ -1422,15 +581,6 @@ fn visible(text: &str) -> String {
         }
     }
     out
-}
-
-/// The view's answer as the broker takes it.
-fn broker_answer(answer: ApprovalAnswer) -> permissions::ApprovalAnswer {
-    match answer {
-        ApprovalAnswer::AllowOnce => permissions::ApprovalAnswer::AllowOnce,
-        ApprovalAnswer::Reject => permissions::ApprovalAnswer::Reject,
-        ApprovalAnswer::Cancel => permissions::ApprovalAnswer::Cancel,
-    }
 }
 
 /// A staged image as the session takes it.

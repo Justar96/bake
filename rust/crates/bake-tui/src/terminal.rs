@@ -736,6 +736,7 @@ fn drive(
                                 (owners.runtime)(Request::Dialog { id, answer });
                             }
                             Effect::StopJob(id) => (owners.runtime)(Request::StopJob(id)),
+                            Effect::StopAgent(id) => (owners.runtime)(Request::StopAgent(id)),
                         }
                     }
                 }

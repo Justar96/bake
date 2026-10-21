@@ -193,8 +193,11 @@ pub const NO_IMAGES: &str = "Images are not sent in this preview. Your draft is 
 /// Enter with staged images while a live turn runs.
 pub const IMAGES_WHILE_RUNNING: &str =
     "Wait for the turn to end before sending images. Your draft is kept.";
-/// Ctrl+T or Ctrl+G in a live session: they open the preview's samples.
-pub const PREVIEW_ONLY: &str = "Sample activity and sample agents are only in `bake preview`.";
+/// Ctrl+T in a live session: it starts the preview's sample activity.
+pub const PREVIEW_ONLY: &str = "Sample activity is only in `bake preview`.";
+/// Ctrl+G in a live session that has started no subagents.
+pub const NO_AGENTS: &str =
+    "No subagents yet. With the `subagents` setting on, the model starts them.";
 /// The runtime gave prompts back to the draft.
 pub const RETURNED: &str = "Unsent prompts are back in your draft.";
 /// `/tree` or `/fork` put the chosen message into the draft.
@@ -232,6 +235,21 @@ pub const JOB_NO_OUTPUT: &str = "No output yet.";
 pub const QUIT: &str = "Press Ctrl-C again to quit";
 pub const AGENTS_SUMMARY: &str = "samples · none running";
 pub const LIST_SUBTITLE: &str = "Fixed examples · nothing is running";
+/// A live session's agent list: its subtitle and the bar's keys, with the
+/// key that stops a working subagent's run.
+pub const LIVE_LIST_SUBTITLE: &str = "Subagents this session started, oldest first";
+pub const LIVE_LIST_HINT: &str = "↑↓ select · Enter inspect · x stop · Esc back";
+/// A subagent's state words and the counts of the agents row, after the
+/// 0.3 terminal's subagent sheet: how its last run ended, then whether it is
+/// resident.
+pub const AGENT_STARTING: &str = "starting";
+pub const AGENT_WORKING: &str = "working";
+pub const AGENT_IDLE: &str = "idle";
+pub const AGENT_SAVED: &str = "saved";
+pub const AGENT_UNREADABLE: &str = "unreadable";
+pub const AGENT_DONE: &str = "done";
+pub const AGENT_FAILED: &str = "failed";
+pub const AGENT_STOPPED: &str = "stopped";
 pub const INSPECT_READ_ONLY: &str = "Read only · typing never reaches an agent or your draft";
 pub const INSPECT_PARENT: &str = "Kept unchanged while you inspect";
 /// The inspection ledger's labels, and the sample agents' state.
@@ -240,6 +258,9 @@ pub const LEDGER_ROLE: &str = "Role";
 pub const LEDGER_STATE: &str = "State";
 pub const LEDGER_INPUT: &str = "Input";
 pub const LEDGER_DRAFT: &str = "Draft";
+pub const LEDGER_MODEL: &str = "Model";
+pub const LEDGER_FILE: &str = "File";
+pub const LEDGER_LAST: &str = "Last";
 pub const LEDGER_STATE_VALUE: &str = "Sample · not running";
 pub const INSPECT_KEYS: &str = "Tab agents · Esc draft";
 /// The status line's model field while no model is selected, and the dim

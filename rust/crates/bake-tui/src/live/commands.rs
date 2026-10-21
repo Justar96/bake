@@ -1368,6 +1368,11 @@ async fn navigate(
     (context.send)(RuntimeUpdate::Dialog(None));
     context.shown.store(0, std::sync::atomic::Ordering::SeqCst);
     let work = AbortController::new();
+    // The navigation runs as its own task, which can pass its commit
+    // boundary before the select below sees a cancel taken already.
+    if context.signal.aborted() {
+        work.abort();
+    }
     *lock_work(&context.work) = Some(work.clone());
     (context.send)(RuntimeUpdate::TurnStarted {
         seed: format!("{}-tree-{id}", context.session.session_id()),
