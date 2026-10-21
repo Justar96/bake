@@ -16,10 +16,13 @@ concurrency:
 # demand. Work reaches develop as direct pushes checked locally: Linux and
 # macOS over SSH before every push, Windows when a Windows host is available.
 # This run is the one CI check of everything a release carries, so it runs
-# every job: TypeScript checks on Linux, the native job on Linux, Windows, and
-# Apple Silicon macOS, and the Windows release check. Developers check an
-# Intel Mac over SSH before pushing; this run is the Apple Silicon check. The
-# release tag after it builds and checks every platform again.
+# every job: TypeScript checks on Linux, the native job on x64 and arm64 Linux,
+# Windows, and Apple Silicon macOS, and the Windows release check. Bake 0.4.0
+# releases Linux alone (D47), so the arm64 Linux job is that platform's only
+# CI evidence; Windows and macOS keep compiling and passing their tests.
+# Developers check an Intel Mac over SSH before pushing; this run is the Apple
+# Silicon check. The release tag after it builds and checks every platform
+# again.
 jobs:
   # TypeScript gates share the local preflight table; Rust has its own matrix.
   preflight:
@@ -87,12 +90,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, ubuntu-24.04-arm, windows-latest, macos-latest]
     name: rust (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     # Cold Windows Wasmtime checks took 21.5 minutes; setup and the archive
-    # check's existing nine-minute bound also need time within this job.
-    timeout-minutes: ${{ matrix.os == 'ubuntu-latest' && 30 || 60 }}
+    # check's existing nine-minute bound also need time within this job. The
+    # arm64 Linux runner has no timing record yet, so it gets more than x64.
+    timeout-minutes: ${{ matrix.os == 'ubuntu-latest' && 30 || matrix.os == 'ubuntu-24.04-arm' && 45 || 60 }}
     steps:
       - uses: actions/checkout@v4
       # Defender scans every file Cargo creates, which makes small-file I/O
@@ -116,12 +120,21 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       # The native eval smoke's masking fixture calls the grep tool, which
-      # runs ripgrep from PATH; Ubuntu runners do not ship it.
-      - name: Install ripgrep
+      # runs ripgrep from PATH; Ubuntu runners do not ship it. The bash tool's
+      # Linux sandbox runs in bubblewrap, which they do not ship either.
+      - name: Install ripgrep and bubblewrap
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq ripgrep
+          sudo apt-get install -y -qq ripgrep bubblewrap
+          bwrap --version
+      # On Linux, the platform 0.4.0 releases, a sandbox backend or kernel
+      # fault check that cannot run fails the job instead of skipping itself.
+      - name: Require the Linux sandbox backends and kernel fault checks
+        if: runner.os == 'Linux'
+        run: |
+          echo 'BAKE_REQUIRE_SANDBOX_BACKENDS=bwrap,landlock' >> "$GITHUB_ENV"
+          echo 'BAKE_REQUIRE_KERNEL_FAULTS=1' >> "$GITHUB_ENV"
       - name: Install ripgrep and fd
         if: runner.os == 'macOS'
         run: brew install ripgrep fd
@@ -188,15 +201,23 @@ jobs:
           bun test --timeout=120000 ./scripts/release/native-install-windows.test.ts
       # install.sh verifies with the host's openssl where one passes its probe,
       # and otherwise with the verifier it embeds; record which openssl the
-      # runner has and which path the install took. On macOS the suite also
-      # installs with BAKE_OPENSSL naming no openssl, which forces the
-      # embedded verifier through real osascript, as a stock Mac does.
+      # runner has and which path the install took. The shipped script refuses
+      # macOS until 0.4.x, so on macOS the suite proves that refusal and runs
+      # the install path through a copy without it, including an install with
+      # BAKE_OPENSSL naming no openssl, which forces the embedded verifier
+      # through real osascript, as a stock Mac does.
       - name: Check the POSIX installer and its Ed25519 verifier
         if: runner.os != 'Windows'
         run: |
           openssl version || true
           bun test --timeout=180000 ./scripts/release/native-install.test.ts ./scripts/release/native-install-ed25519.test.ts
       - run: bun run preflight --only native
+      # The oldest glibc the built bake starts on, from its version needs; the
+      # preflight's workspace build left the debug binary, whose needs match
+      # the release build's.
+      - name: Check the glibc floor
+        if: runner.os == 'Linux'
+        run: bun scripts/release/glibc-floor.ts rust/target/debug/bake
       # Step durations and the slowest nextest cases, including after a failure.
       - name: Summarize timings
         if: always()
