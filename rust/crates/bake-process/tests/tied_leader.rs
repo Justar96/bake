@@ -6,7 +6,7 @@
 //! no other test may see those trees.
 #![cfg(target_os = "linux")]
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use bake_process::{OwnedProcess, ProcessSpec};
 
@@ -16,6 +16,9 @@ fn parent_of(pid: i32) -> Option<i32> {
     let rest = &stat[stat.rfind(')')? + 1..];
     rest.split_whitespace().nth(1)?.parse().ok()
 }
+
+/// Bounds the wait for a leader the kernel must kill.
+const BOUND: Duration = Duration::from_secs(10);
 
 fn me() -> i32 {
     i32::try_from(std::process::id()).expect("pid")
@@ -53,14 +56,26 @@ fn spawn_and_end_the_thread(tied: bool) -> i32 {
     .expect("the spawning thread")
 }
 
-/// Reaps the child `pid`, returning the signal that ended it, if any.
-fn reap(pid: i32) -> Option<i32> {
-    let mut status = 0;
-    // SAFETY: plain syscall on a child of this process; `status` is a
-    // valid out pointer.
-    let reaped = unsafe { libc::waitpid(pid, &mut status, 0) };
-    assert_eq!(reaped, pid, "waitpid");
-    libc::WIFSIGNALED(status).then(|| libc::WTERMSIG(status))
+/// Reaps the child `pid` once it has ended, returning the signal that
+/// ended it, if any; `None` from the outer option when it is still running
+/// after a bounded wait, so a leader nothing kills fails the test instead
+/// of hanging it.
+fn reap(pid: i32) -> Option<Option<i32>> {
+    let deadline = Instant::now() + BOUND;
+    loop {
+        let mut status = 0;
+        // SAFETY: plain syscall on a child of this process; `status` is a
+        // valid out pointer.
+        let reaped = unsafe { libc::waitpid(pid, &mut status, libc::WNOHANG) };
+        if reaped == pid {
+            return Some(libc::WIFSIGNALED(status).then(|| libc::WTERMSIG(status)));
+        }
+        assert_eq!(reaped, 0, "waitpid");
+        if Instant::now() >= deadline {
+            return None;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
 }
 
 // A leader tied to its spawning thread is killed by the kernel when that
@@ -69,7 +84,19 @@ fn reap(pid: i32) -> Option<i32> {
 #[test]
 fn a_tied_leader_dies_with_its_spawning_thread() {
     let tied = spawn_and_end_the_thread(true);
-    assert_eq!(reap(tied), Some(libc::SIGKILL));
+    let tied_end = reap(tied);
+    if tied_end.is_none() {
+        // SAFETY: plain syscall on an unreaped child of this process.
+        unsafe {
+            libc::kill(tied, libc::SIGKILL);
+        }
+        let _ = reap(tied);
+    }
+    assert_eq!(
+        tied_end,
+        Some(Some(libc::SIGKILL)),
+        "the tied leader outlived its spawning thread"
+    );
     let untied = spawn_and_end_the_thread(false);
     std::thread::sleep(Duration::from_millis(200));
     assert_eq!(parent_of(untied), Some(me()), "the control must still run");
@@ -77,5 +104,5 @@ fn a_tied_leader_dies_with_its_spawning_thread() {
     unsafe {
         libc::kill(untied, libc::SIGKILL);
     }
-    assert_eq!(reap(untied), Some(libc::SIGKILL));
+    assert_eq!(reap(untied), Some(Some(libc::SIGKILL)));
 }
