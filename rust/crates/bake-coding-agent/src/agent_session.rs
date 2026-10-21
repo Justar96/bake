@@ -405,6 +405,16 @@ impl SessionStats {
     }
 }
 
+/// How full the model's context window is, Pi's `ContextUsage`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ContextUsage {
+    /// The tokens the next request would carry, estimated; `None` after a
+    /// compaction until a response after it records usage.
+    pub tokens: Option<u64>,
+    /// The model's context window.
+    pub context_window: u64,
+}
+
 /// An event of the session, Pi's `AgentSessionEvent` without the deferred
 /// features' events.
 #[derive(Debug)]
@@ -801,6 +811,9 @@ pub struct AgentSession {
     hooks: hooks::SharedHooks,
     /// The agent's tool-call hooks, for a resumed run's reruns.
     tool_hooks: run_journal::ToolHooks,
+    /// The subagents this session starts, when `subagents` is on
+    /// ([`Self::set_subagents`]).
+    subagents: Option<crate::subagents::SubagentHost>,
     /// The reminder timer's handle, when `schedules` is on.
     #[cfg(test)]
     schedules: Option<Arc<schedules::Schedules>>,
@@ -1802,6 +1815,7 @@ impl AgentSession {
             plugins,
             hooks: shared_hooks,
             tool_hooks,
+            subagents: None,
             #[cfg(test)]
             schedules,
         };
@@ -2096,6 +2110,23 @@ impl AgentSession {
         stats
     }
 
+    /// Pi's `getContextUsage`: the current model's context window and the
+    /// projected tokens of the session's branch
+    /// ([`crate::compaction::projected_context_tokens`]). `None` without a
+    /// model, or for a model with no window.
+    pub fn context_usage(&self) -> Option<ContextUsage> {
+        let model = self.model().filter(|model| model.context_window > 0)?;
+        let session = lock(&self.session);
+        let branch: Vec<_> = session.branch_entries(None).into_iter().cloned().collect();
+        Some(ContextUsage {
+            tokens: crate::compaction::projected_context_tokens(
+                &session.build_session_projection(),
+                &branch,
+            ),
+            context_window: model.context_window,
+        })
+    }
+
     /// The session id.
     pub fn session_id(&self) -> String {
         lock(&self.session).session_id().to_owned()
@@ -2120,6 +2151,21 @@ impl AgentSession {
     /// Sets the prompt templates expanded by [`Self::prompt`].
     pub fn set_prompt_templates(&mut self, prompt_templates: Vec<PromptTemplate>) {
         self.prompt_templates = prompt_templates;
+    }
+
+    /// Records the host of the subagents this session's tools start, so a
+    /// frontend can list and stop them ([`Self::subagents`]). The host is
+    /// built over this session's work gate and jobs, which own its
+    /// children: [`Self::shutdown`] stops them.
+    pub fn set_subagents(&mut self, host: crate::subagents::SubagentHost) {
+        self.subagents = Some(host);
+    }
+
+    /// The subagents this session starts; `None` when `subagents` is off,
+    /// for a subagent itself, and for a session built without the parent
+    /// tools.
+    pub fn subagents(&self) -> Option<&crate::subagents::SubagentHost> {
+        self.subagents.as_ref()
     }
 
     /// The provider APIs the session's requests stream through.

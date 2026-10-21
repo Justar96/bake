@@ -1083,6 +1083,103 @@ async fn a_session_name_is_normalized_recorded_and_announced() {
     assert_eq!(session.session_name().as_deref(), Some("hello world"));
 }
 
+// Pi v1.3.0 `test/agent-session-stats.test.ts`: `getContextUsage` reads
+// the last measured response, is unknown immediately after a compaction,
+// reads a response after it rather than the stale usage it kept, and ignores
+// a zero-usage response, estimating it and what followed instead.
+#[tokio::test]
+async fn context_usage_reads_only_usage_measured_after_the_latest_compaction() {
+    let h = harness();
+    let window = h.model("faux-1").context_window;
+    let message = |value: Value| {
+        crate::session::AgentMessage::from_json(value.as_object().expect("object").clone())
+    };
+    let user = |text: &str, timestamp: u64| {
+        message(json!({"role": "user", "content": text, "timestamp": timestamp}))
+    };
+    let assistant = |text: &str, total: u64, timestamp: u64| {
+        message(json!({"role": "assistant",
+            "content": [{"type": "text", "text": text}],
+            "api": "faux", "provider": "faux", "model": "faux-1",
+            "usage": {"input": total, "output": 0, "cacheRead": 0, "cacheWrite": 0,
+                "totalTokens": total},
+            "stopReason": "stop", "timestamp": timestamp}))
+    };
+    let usage = async |manager: SessionManager| {
+        let session = h
+            .session(manager, Settings::default(), None, Vec::new())
+            .await;
+        let usage = session.context_usage();
+        session.shutdown().await;
+        usage
+    };
+    let mut measured = in_memory();
+    measured.append_message(user("go", 1)).expect("user");
+    measured
+        .append_message(assistant("ok", 200, 2))
+        .expect("assistant");
+    assert_eq!(
+        usage(measured).await,
+        Some(ContextUsage {
+            tokens: Some(200),
+            context_window: window,
+        })
+    );
+    let compacted = |after: &[crate::session::AgentMessage]| {
+        let mut manager = in_memory();
+        manager.append_message(user("first", 1)).expect("first");
+        manager
+            .append_message(assistant("response1", 180_000, 2))
+            .expect("response1");
+        let kept = manager.append_message(user("second", 3)).expect("second");
+        manager
+            .append_message(assistant("response2", 195_000, 4))
+            .expect("response2");
+        manager
+            .append_compaction("summary", Some(&kept), 195_000, None, None, None)
+            .expect("compaction");
+        manager.append_message(user("third", 5)).expect("third");
+        for message in after {
+            manager.append_message(message.clone()).expect("after");
+        }
+        manager
+    };
+    assert_eq!(
+        usage(compacted(&[])).await,
+        Some(ContextUsage {
+            tokens: None,
+            context_window: window,
+        })
+    );
+    let response = assistant("response3", 25_000, 6);
+    assert_eq!(
+        usage(compacted(std::slice::from_ref(&response)))
+            .await
+            .and_then(|usage| usage.tokens),
+        Some(25_000)
+    );
+    let partial = [response, user("continue", 7), assistant("partial", 0, 8)];
+    let tokens = usage(compacted(&partial))
+        .await
+        .and_then(|usage| usage.tokens);
+    assert!(tokens.is_some_and(|tokens| tokens > 25_000), "{tokens:?}");
+}
+
+// Pi `getContextUsage` reads nothing for a model without a context window.
+#[tokio::test]
+async fn context_usage_is_absent_for_a_model_without_a_window() {
+    let h = harness();
+    let session = h
+        .session(in_memory(), Settings::default(), None, Vec::new())
+        .await;
+    assert!(session.context_usage().is_some());
+    let mut windowless = h.model("plain");
+    windowless.context_window = 0;
+    session.set_model(windowless, false).await.expect("model");
+    assert_eq!(session.context_usage(), None);
+    session.shutdown().await;
+}
+
 // Pi `getSessionStats`: counts by role and tool calls, and token and cost
 // totals from every recorded usage, read from the log; a malformed usage
 // counts as absent rather than failing.

@@ -12,6 +12,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
 use crate::activity::{self, Hue, Tones};
+use crate::agents;
 use crate::completion;
 use crate::composer::{self, Edge};
 use crate::copy;
@@ -25,11 +26,10 @@ use crate::mode::{self, HINT_MIN_COLUMNS};
 use crate::runtime::Target;
 use crate::selection::line_columns;
 use crate::state::{
-    ActivityKind, Area, DraftSpot, FileMenu, Focus, Notice, Outcome, SAMPLE_AGENTS, SampleAgent,
-    ScrollTrack, Spot, State, agent,
+    ActivityKind, Area, DraftSpot, FileMenu, Focus, Notice, Outcome, ScrollTrack, Spot, State,
 };
 use crate::status::{self, Tone};
-use crate::transcript::{self, Look, TagTone};
+use crate::transcript::{self, Look};
 
 /// Cells between the terminal's edges and rows drawn outside the box, so
 /// they align with the box's contents.
@@ -62,9 +62,15 @@ fn needs(app: &State, width: u16, height: u16) -> Needs {
     let draft = editor::layout(app.draft.text(), app.draft.caret(), geometry.wrap_width);
     Needs {
         draft_rows: u16::try_from(draft.rows.len()).unwrap_or(u16::MAX),
-        // The sample agents' row belongs to the preview; a live session's
-        // shows its background shells while any runs, or one is open.
-        standing: !app.live || app.jobs_row() || matches!(app.focus, Focus::Jobs | Focus::Shell),
+        // The row shows the agents once there are any, as the preview's
+        // samples always are, and a live session's background shells while
+        // any runs, or while their list or one of them is open.
+        standing: app.jobs_row()
+            || app.agents_row()
+            || matches!(
+                app.focus,
+                Focus::Jobs | Focus::Shell | Focus::AgentList | Focus::Inspect
+            ),
         notice: u16::from(app.notice.is_some() || app.quitting()),
         pending: panel_rows(app.pending.len()),
         panel: panel_rows(app.attachments.len()),
@@ -1038,6 +1044,7 @@ fn render_region(
             Notice::NoPending => copy::NO_PENDING,
             Notice::ImagesWhileRunning => copy::IMAGES_WHILE_RUNNING,
             Notice::PreviewOnly => copy::PREVIEW_ONLY,
+            Notice::NoAgents => copy::NO_AGENTS,
             Notice::Returned => copy::RETURNED,
             Notice::Restored => copy::RESTORED,
             Notice::ApprovalKeys => copy::APPROVAL_KEYS_ONLY,
@@ -1056,11 +1063,7 @@ fn render_region(
     render_dialog(app, inset(approval_area), buf);
     let columns = area.width;
     render_bar(app, inset(bar), buf);
-    if app.live {
-        render_jobs_row(app, columns, inset(agents), buf);
-    } else {
-        render_agents_row(columns, inset(agents), buf);
-    }
+    render_standing(app, columns, inset(agents), buf);
 
     let visible = usize::from(band.height);
     let total = draft.rows.len();
@@ -1316,7 +1319,17 @@ fn bar_left(app: &State) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
                 copy::AGENTS,
                 Style::new().add_modifier(Modifier::BOLD),
             )],
-            vec![Span::styled(format!("  {}", copy::HEADER_LIST_HINT), dim())],
+            vec![Span::styled(
+                format!(
+                    "  {}",
+                    if app.live {
+                        copy::LIVE_LIST_HINT
+                    } else {
+                        copy::HEADER_LIST_HINT
+                    }
+                ),
+                dim(),
+            )],
         ),
         Focus::Jobs => (
             vec![Span::styled(
@@ -1341,12 +1354,13 @@ fn bar_left(app: &State) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
             vec![Span::styled(format!("  {}", copy::JOBS_SHELL_KEYS), dim())],
         ),
         // A breadcrumb, as a catalogue's: where it came from, then where it is.
-        Focus::Inspect(id) => (
+        Focus::Inspect => (
             vec![
                 Span::styled(copy::AGENTS, accent().add_modifier(Modifier::UNDERLINED)),
                 Span::styled(" / ", dim()),
                 Span::styled(
-                    agent(id).map_or(id, |a| a.name),
+                    app.selected_agent()
+                        .map_or_else(String::new, |agent| agent.name.clone()),
                     Style::new().add_modifier(Modifier::BOLD),
                 ),
             ],
@@ -1738,43 +1752,50 @@ fn render_panel(
     }
 }
 
-/// A live session's standing row: its running background shells, with
-/// the key that opens their list while the composer has focus and the
-/// terminal is wide enough for keys.
-fn render_jobs_row(app: &State, columns: u16, area: Rect, buf: &mut Buffer) {
-    let (left, right) = jobs::standing(
-        &app.jobs,
-        app.jobs_at,
-        app.now,
-        usize::from(area.width),
-        Look {
-            tones: app.tones,
-            classic: app.frame == FrameStyle::Classic,
-            lit: true,
-        },
-        // The key draws where any row's key does, so the command takes its
-        // cells elsewhere.
-        app.focus == Focus::Composer && columns >= HINT_MIN_COLUMNS,
-    );
-    split_row(buf, columns, area, left, right);
-}
+/// Fewest cells of the newest shell's command a shared standing row keeps;
+/// with less, the agents' summary gives way to it.
+const COMMAND_MIN: usize = 12;
 
-/// The agents' standing row: `Agents  2 samples · none running`, with the
-/// key that opens them at the right.
-fn render_agents_row(columns: u16, area: Rect, buf: &mut Buffer) {
-    split_row(
-        buf,
-        columns,
-        area,
-        Line::from(vec![
-            Span::styled(copy::AGENTS, Style::new().add_modifier(Modifier::BOLD)),
-            Span::styled(
-                format!("  {} {}", SAMPLE_AGENTS.len(), copy::AGENTS_SUMMARY),
-                dim(),
-            ),
-        ]),
-        Line::styled(copy::AGENTS_KEY, dim()),
-    );
+/// The row under the composer. Background shells take it while any runs or
+/// their list is open, with the key that opens that list while the
+/// composer has focus and the terminal is wide enough for keys; agents
+/// share it, their summary first, where the shells keep [`SHELLS_MIN`]
+/// cells. Otherwise it is the agents' row: the preview's samples, or a live
+/// session's subagents, with the key that opens their list.
+fn render_standing(app: &State, columns: u16, area: Rect, buf: &mut Buffer) {
+    let width = usize::from(area.width);
+    let look = Look {
+        tones: app.tones,
+        classic: app.frame == FrameStyle::Classic,
+        lit: true,
+    };
+    let with_key = app.focus == Focus::Composer && columns >= HINT_MIN_COLUMNS;
+    let shells = app.live && (app.jobs_row() || matches!(app.focus, Focus::Jobs | Focus::Shell));
+    if !shells {
+        let (left, right) = agents::standing(&app.agents, app.tones, with_key, width);
+        split_row(buf, columns, area, left, right);
+        return;
+    }
+    // The key draws where any row's key does, so the command takes its
+    // cells elsewhere. The agents' summary takes only what the shells
+    // leave with their mark, count, id, time, and key whole and some of the
+    // command, giving up its counts first and its place last.
+    let fixed = jobs::standing_fixed(&app.jobs, app.jobs_at, app.now, look, with_key);
+    let spare = width.saturating_sub(fixed + COMMAND_MIN + 2);
+    let lead = (!app.agents.is_empty())
+        .then(|| agents::summary(&app.agents, app.tones, spare))
+        .filter(|lead| lead.width() <= spare);
+    let room = lead.as_ref().map_or(width, |lead| width - lead.width() - 2);
+    let (shells, right) = jobs::standing(&app.jobs, app.jobs_at, app.now, room, look, with_key);
+    let left = match lead {
+        Some(mut lead) => {
+            lead.spans.push(Span::raw("  "));
+            lead.spans.extend(shells.spans);
+            lead
+        }
+        None => shells,
+    };
+    split_row(buf, columns, area, left, right);
 }
 
 /// A status tone in the palette's colour on a truecolor terminal, the nearest
@@ -2058,9 +2079,9 @@ fn render_body(app: &mut State, area: Rect, gap: Rect, buf: &mut Buffer, publish
     let classic = app.frame == FrameStyle::Classic;
     let lines = match app.focus {
         Focus::Composer => return render_transcript(app, area, gap, buf, published),
-        Focus::AgentList => agent_list(app.selected, width, classic, app.tones),
-        Focus::Inspect(id) => inspection(
-            agent(id).unwrap_or(&SAMPLE_AGENTS[0]),
+        Focus::AgentList => agents::list(
+            &app.agents,
+            Some(&app.selected),
             width,
             Look {
                 tones: app.tones,
@@ -2068,6 +2089,17 @@ fn render_body(app: &mut State, area: Rect, gap: Rect, buf: &mut Buffer, publish
                 lit: true,
             },
         ),
+        Focus::Inspect => app.selected_agent().map_or_else(Vec::new, |agent| {
+            agents::ledger(
+                agent,
+                width,
+                Look {
+                    tones: app.tones,
+                    classic,
+                    lit: true,
+                },
+            )
+        }),
         Focus::Jobs => jobs::list(
             &app.jobs,
             app.job_selected.as_deref(),
@@ -2112,125 +2144,6 @@ fn render_body(app: &mut State, area: Rect, gap: Rect, buf: &mut Buffer, publish
             content,
         );
     }
-}
-
-/// `text` wrapped at `width` less `indent`, every row indented.
-fn indented(text: &str, width: usize, indent: usize, style: Style) -> Vec<Line<'static>> {
-    transcript::wrap(text, width.saturating_sub(indent))
-        .into_iter()
-        .map(|row| {
-            Line::from(vec![
-                Span::raw(" ".repeat(indent)),
-                Span::styled(row, style),
-            ])
-        })
-        .collect()
-}
-
-/// `lead`, then an id as a blue tag two cells after it, when it fits.
-fn titled(lead: Vec<Span<'static>>, id: &str, width: usize, tones: Tones) -> Line<'static> {
-    let mut line = Line::from(lead);
-    let tag = transcript::tag(id, TagTone::Blue, tones);
-    if line.width() + 2 + tag.width() <= width {
-        line.spans.push(Span::raw("  "));
-        line.spans.push(tag);
-    }
-    line
-}
-
-/// The agents as cards: a marker on the selected one, its name and id tag,
-/// and the first line of what it does under it.
-fn agent_list(selected: &str, width: usize, classic: bool, tones: Tones) -> Vec<Line<'static>> {
-    let marker = if classic { ">" } else { "▸" };
-    let mut lines = indented(copy::LIST_SUBTITLE, width, INSET.into(), dim());
-    for agent in SAMPLE_AGENTS {
-        let chosen = agent.id == selected;
-        let (mark, name) = if chosen {
-            (
-                Span::styled(format!("{marker} "), accent()),
-                Span::styled(agent.name, accent().add_modifier(Modifier::BOLD)),
-            )
-        } else {
-            (Span::raw("  "), Span::styled(agent.name, Style::new()))
-        };
-        lines.push(Line::default());
-        lines.push(titled(
-            vec![Span::raw("  "), mark, name],
-            agent.id,
-            width,
-            tones,
-        ));
-        let about = agent.detail.first().copied().unwrap_or_default();
-        lines.extend(indented(
-            about,
-            width,
-            4,
-            if chosen { Style::new() } else { dim() },
-        ));
-    }
-    lines
-}
-
-/// Cells an inspection ledger's label column takes, its gap included.
-const LEDGER_LABEL: usize = 8;
-
-/// One agent, read only, as a ledger: its name, a dashed rule, then a label
-/// and a value per row, the value wrapped under itself.
-fn inspection(agent: &SampleAgent, width: usize, look: Look) -> Vec<Line<'static>> {
-    let mut lines = vec![
-        Line::from(vec![
-            Span::raw("  "),
-            Span::styled(agent.name, accent().add_modifier(Modifier::BOLD)),
-        ]),
-        transcript::rule(width, transcript::RAIL, look),
-    ];
-    let indent = usize::from(INSET) + LEDGER_LABEL;
-    let labelled = |label: &str, cells: usize, value: Vec<Span<'static>>| {
-        let mut spans = vec![
-            Span::raw("  "),
-            Span::styled(format!("{label:<cells$}"), dim()),
-        ];
-        spans.extend(value);
-        Line::from(spans)
-    };
-    let row = |label: &str, value| labelled(label, LEDGER_LABEL, value);
-    // A tag's padding takes the cell before its column, so its text lines
-    // up with the other values.
-    lines.push(labelled(
-        copy::LEDGER_ID,
-        LEDGER_LABEL - 1,
-        vec![transcript::tag(agent.id, TagTone::Blue, look.tones)],
-    ));
-    let text = |label: &str, value: &str, style: Style| -> Vec<Line<'static>> {
-        transcript::wrap(value, width.saturating_sub(indent))
-            .into_iter()
-            .enumerate()
-            .map(|(i, part)| {
-                let value = vec![Span::styled(part, style)];
-                if i == 0 {
-                    row(label, value)
-                } else {
-                    let mut spans = vec![Span::raw(" ".repeat(indent))];
-                    spans.extend(value);
-                    Line::from(spans)
-                }
-            })
-            .collect()
-    };
-    let about = agent.detail.first().copied().unwrap_or_default();
-    lines.extend(text(copy::LEDGER_ROLE, about, Style::new()));
-    lines.extend(text(
-        copy::LEDGER_STATE,
-        copy::LEDGER_STATE_VALUE,
-        Style::new(),
-    ));
-    lines.extend(text(
-        copy::LEDGER_INPUT,
-        copy::INSPECT_READ_ONLY,
-        Style::new().fg(Color::Yellow),
-    ));
-    lines.extend(text(copy::LEDGER_DRAFT, copy::INSPECT_PARENT, dim()));
-    lines
 }
 
 #[cfg(test)]
@@ -3364,7 +3277,7 @@ mod tests {
             model: Some("deepseek-official/deepseek-v4-flash".into()),
             thinking: Some("high".into()),
             context: Some(status::ContextUsage {
-                used: 15_200,
+                used: Some(15_200),
                 window: 128_000,
             }),
             branch: Some(status::Branch {
@@ -4404,5 +4317,162 @@ mod tests {
                 .any(|row| row.contains("Background shells / bash-1")),
             "{rows:#?}"
         );
+    }
+
+    // A live session's subagents take the row under the box once it has
+    // any; running shells share it, the agents' summary first, and keep it
+    // whole on a row too narrow for both. Ctrl+G lists them, and Enter
+    // shows one's ledger.
+    #[test]
+    fn live_subagents_share_the_row_under_the_box_and_open_as_a_ledger() {
+        use crate::agents::{Agent, AgentState, Ended};
+        use crate::jobs::{BackgroundJob, JobState};
+        use crate::runtime::RuntimeUpdate;
+        use crate::state::{Msg, update};
+        let mut app = State::live(FrameStyle::Round, Tones::None, Vec::new());
+        let (rows, _) = draw(&mut app, 80, 14);
+        assert!(!rows.iter().any(|row| row.contains("Agents")), "{rows:#?}");
+        let child = |id: &str, state| Agent {
+            id: id.into(),
+            name: format!("Child {id}"),
+            state,
+            route: Some("faux/faux-2".into()),
+            detail: Some("Counted 12 files.".into()),
+            file: Some(format!("/s/subagents/{id}.jsonl")),
+        };
+        update(
+            &mut app,
+            Msg::Runtime(RuntimeUpdate::Agents(vec![
+                child("c1", AgentState::Working),
+                child("c2", AgentState::Idle(Some(Ended::Completed))),
+            ])),
+        );
+        let (rows, _) = draw(&mut app, 80, 14);
+        let last = rows.last().unwrap();
+        assert!(last.contains("Agents  2 · 1 working · 1 done"), "{last}");
+        assert!(last.trim_end().ends_with("Ctrl+G"), "{last}");
+        update(
+            &mut app,
+            Msg::Runtime(RuntimeUpdate::Jobs(vec![BackgroundJob {
+                id: "bash-1".into(),
+                command: "bun run build".into(),
+                state: JobState::Running,
+                elapsed: Duration::from_secs(72),
+                output: String::new(),
+                omitted_bytes: 0,
+            }])),
+        );
+        let (rows, _) = draw(&mut app, 80, 14);
+        let last = rows.last().unwrap();
+        assert!(
+            last.contains("Agents  2 · 1 working · 1 done  ● bash-1  bun run build  1m 12s"),
+            "{last}"
+        );
+        assert!(last.trim_end().ends_with("↓ manage"), "{last}");
+        // A command too long for the shells' room is cut to it.
+        update(
+            &mut app,
+            Msg::Runtime(RuntimeUpdate::Jobs(vec![BackgroundJob {
+                id: "bash-1".into(),
+                command: "bun run build --release --workspace".into(),
+                state: JobState::Running,
+                elapsed: Duration::from_secs(72),
+                output: String::new(),
+                omitted_bytes: 0,
+            }])),
+        );
+        let (rows, _) = draw(&mut app, 80, 14);
+        assert_eq!(
+            rows.last().unwrap(),
+            "  Agents  2 · 1 working · 1 done  ● bash-1  bun run build -…  1m 12s  ↓ manage  "
+        );
+        // Narrower, the summary gives up its counts before the shells
+        // lose their time, key, or the start of their command, then gives
+        // way to them.
+        let mut seen = Vec::new();
+        for columns in [64, 60, 59, 55, 47, 46] {
+            let (rows, _) = draw(&mut app, columns, 14);
+            seen.push((columns, rows.last().unwrap().clone()));
+        }
+        let more = BackgroundJob {
+            id: "bash-2".into(),
+            command: "sleep 120".into(),
+            state: JobState::Running,
+            elapsed: Duration::from_secs(23),
+            output: String::new(),
+            omitted_bytes: 0,
+        };
+        let mut jobs = app.jobs.clone();
+        jobs.push(more);
+        update(&mut app, Msg::Runtime(RuntimeUpdate::Jobs(jobs)));
+        for columns in [80, 64] {
+            let (rows, _) = draw(&mut app, columns, 14);
+            seen.push((columns, rows.last().unwrap().clone()));
+        }
+        let expected = [
+            (
+                64,
+                "  Agents  2  ● bash-1  bun run build --rele…  1m 12s  ↓ manage  ",
+            ),
+            (
+                60,
+                "  Agents  2  ● bash-1  bun run build --…  1m 12s  ↓ manage  ",
+            ),
+            // Without the key, which needs 60 columns, a count fits again.
+            (
+                59,
+                "  Agents  2 · 1 working  ● bash-1  bun run bui…  1m 12s    ",
+            ),
+            (
+                55,
+                "  Agents  2  ● bash-1  bun run build --rel…  1m 12s    ",
+            ),
+            (47, "  Agents  2  ● bash-1  bun run bui…  1m 12s    "),
+            (46, "  ● bash-1  bun run build --relea…  1m 12s    "),
+            // Two shells' count takes more of the row.
+            (
+                80,
+                "  Agents  2  ● 2 shells running · bash-2  sleep 120  23s              ↓ manage  ",
+            ),
+            (
+                64,
+                "  ● 2 shells running · bash-2  sleep 120  23s         ↓ manage  ",
+            ),
+        ]
+        .map(|(columns, row)| (columns, row.to_owned()));
+        assert_eq!(seen, expected);
+        update(
+            &mut app,
+            Msg::Key(KeyInput::new(Key::Char('g'), crate::keys::Mods::CTRL)),
+        );
+        let (rows, _) = draw(&mut app, 80, 14);
+        assert!(
+            rows.iter().any(|row| row.contains(copy::LIVE_LIST_HINT)),
+            "{rows:#?}"
+        );
+        assert!(
+            rows.iter().any(|row| row.contains("▸ ● Child c1")),
+            "{rows:#?}"
+        );
+        assert!(
+            rows.iter()
+                .any(|row| row.contains("done · idle · faux/faux-2")),
+            "{rows:#?}"
+        );
+        update(&mut app, Msg::Key(KeyInput::plain(Key::Down)));
+        update(&mut app, Msg::Key(KeyInput::plain(Key::Enter)));
+        let (rows, _) = draw(&mut app, 80, 14);
+        for expected in [
+            "Agents / Child c2",
+            "Model   faux/faux-2",
+            "State   done · idle",
+            "File    /s/subagents/c2.jsonl",
+            "Last    Counted 12 files.",
+        ] {
+            assert!(
+                rows.iter().any(|row| row.contains(expected)),
+                "{expected}: {rows:#?}"
+            );
+        }
     }
 }

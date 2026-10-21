@@ -153,14 +153,52 @@ pub fn standing(
     with_key: bool,
 ) -> (Line<'static>, Line<'static>) {
     let live: Vec<&BackgroundJob> = shown(jobs).filter(|job| job.state.is_live()).collect();
-    let key = if with_key {
+    let key = key(with_key);
+    let Some((mut spans, time)) = head(&live, at, now, look) else {
+        return (Line::default(), key);
+    };
+    let used = fixed(&spans, &time, &key);
+    spans.push(Span::raw("  "));
+    spans.push(Span::raw(fit(
+        &live[0].command,
+        width.saturating_sub(used).max(1),
+    )));
+    spans.push(Span::styled(time, dim()));
+    (Line::from(spans), key)
+}
+
+/// The cells [`standing`] takes besides the newest shell's command, which
+/// gives way to fit: its mark, the count running, its id and time, and the
+/// key with the gaps between them. None while no shell runs.
+pub fn standing_fixed(
+    jobs: &[BackgroundJob],
+    at: Duration,
+    now: Duration,
+    look: Look,
+    with_key: bool,
+) -> usize {
+    let live: Vec<&BackgroundJob> = shown(jobs).filter(|job| job.state.is_live()).collect();
+    head(&live, at, now, look).map_or(0, |(spans, time)| fixed(&spans, &time, &key(with_key)))
+}
+
+/// The key that opens the list, or nothing.
+fn key(with_key: bool) -> Line<'static> {
+    if with_key {
         Line::styled(copy::JOBS_KEY, dim())
     } else {
         Line::default()
-    };
-    let Some(newest) = live.first() else {
-        return (Line::default(), key);
-    };
+    }
+}
+
+/// The standing row's spans before the command, and the newest running
+/// shell's time.
+fn head(
+    live: &[&BackgroundJob],
+    at: Duration,
+    now: Duration,
+    look: Look,
+) -> Option<(Vec<Span<'static>>, String)> {
+    let newest = live.first()?;
     let mut spans = vec![
         mark(&newest.state, look.classic, look.tones),
         Span::raw(" "),
@@ -174,14 +212,11 @@ pub fn standing(
     }
     let time = format!("  {}", activity::format_elapsed(elapsed(newest, at, now)));
     spans.push(Span::styled(newest.id.clone(), accent()));
-    let used: usize = Line::from(spans.clone()).width() + time.len() + 2 + key.width() + 2;
-    spans.push(Span::raw("  "));
-    spans.push(Span::raw(fit(
-        &newest.command,
-        width.saturating_sub(used).max(1),
-    )));
-    spans.push(Span::styled(time, dim()));
-    (Line::from(spans), key)
+    Some((spans, time))
+}
+
+fn fixed(spans: &[Span<'static>], time: &str, key: &Line<'_>) -> usize {
+    Line::from(spans.to_vec()).width() + time.len() + 2 + key.width() + 2
 }
 
 /// The list of background shells, newest first, the selected one marked.

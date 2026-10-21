@@ -340,8 +340,9 @@ pub fn home_relative(cwd: &str, home: Option<&str>) -> String {
 /// How full the context window is, in tokens.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ContextUsage {
-    /// Estimated tokens in the next request.
-    pub used: u64,
+    /// Estimated tokens in the next request; `None` while unknown, as after
+    /// a compaction until the next response measures the context.
+    pub used: Option<u64>,
     /// The model's context capacity.
     pub window: u64,
 }
@@ -376,10 +377,11 @@ pub fn compact_model(route: &str) -> &str {
 }
 
 /// Whole-percent occupancy, rounded down so a context close to full never
-/// reads as 100%.
+/// reads as 100%; 0 while the tokens are unknown.
 pub fn context_percent(usage: ContextUsage) -> u64 {
     usage
         .used
+        .unwrap_or(0)
         .saturating_mul(100)
         .checked_div(usage.window)
         .unwrap_or(0)
@@ -480,14 +482,28 @@ fn model_field(input: &StatusInput) -> Field {
 }
 
 /// `ctx ~11% (15.2k/128k)`. The absolute count goes first, except near the
-/// limit, where it is among the last; the percentage never yields.
+/// limit, where it is among the last; the percentage never yields. Unknown
+/// tokens read `ctx ?/128k`, as Pi's footer has them, and then `ctx ?`.
 fn context_field(usage: ContextUsage) -> Field {
+    let label = Part::new(format!("{} ", copy::CONTEXT), Tone::Dim);
+    let Some(used) = usage.used else {
+        return Field {
+            forms: vec![
+                vec![
+                    label.clone(),
+                    Part::new(format!("?/{}", format_tokens(usage.window)), Tone::Plain),
+                ],
+                vec![label, Part::new("?", Tone::Plain)],
+            ],
+            yields: vec![rank::CONTEXT_ABSOLUTE],
+            shrink: None,
+        };
+    };
     let percent = context_percent(usage);
     let tone = context_tone(percent);
-    let label = Part::new(format!("{} ", copy::CONTEXT), Tone::Dim);
     let absolute = format!(
         "~{percent}% ({}/{})",
-        format_tokens(usage.used),
+        format_tokens(used),
         format_tokens(usage.window)
     );
     let absolute_rank = if percent >= CONTEXT_FULL {
@@ -727,7 +743,7 @@ mod tests {
             model: Some("deepseek-official/deepseek-v4-flash".into()),
             thinking: Some("high".into()),
             context: Some(ContextUsage {
-                used: 15_200,
+                used: Some(15_200),
                 window: 128_000,
             }),
             branch: Some(Branch {
@@ -821,7 +837,7 @@ mod tests {
     fn a_nearly_full_context_keeps_its_count_longest_and_turns_red() {
         let mut input = full();
         input.context = Some(ContextUsage {
-            used: 120_000,
+            used: Some(120_000),
             window: 128_000,
         });
         let fields = fields(&input);
@@ -831,6 +847,26 @@ mod tests {
             "deepseek-v4-flash high  ctx ~93% (120k/128k)"
         );
         assert_eq!(row(&fields, 43), "deepseek-v4-flash  ctx ~93% (120k/128k)");
+    }
+
+    // After a compaction the next response has not measured the context:
+    // the window stays, the count reads `?`, and it yields as the count does.
+    #[test]
+    fn an_unknown_context_reads_as_a_question_against_the_window() {
+        let mut input = full();
+        input.context = Some(ContextUsage {
+            used: None,
+            window: 128_000,
+        });
+        let fields = fields(&input);
+        assert_eq!(fields[1].forms[0][1].tone, Tone::Plain);
+        assert!(row(&fields, 80).contains("  ctx ?/128k  "));
+        // The location goes elsewhere, so the count yields at its own rank.
+        input.branch = None;
+        input.cwd = String::new();
+        let fields = super::fields(&input);
+        assert_eq!(row(&fields, 34), "deepseek-v4-flash high  ctx ?/128k");
+        assert_eq!(row(&fields, 33), "deepseek-v4-flash high  ctx ?");
     }
 
     #[test]
@@ -877,12 +913,18 @@ mod tests {
         }
         assert_eq!(
             context_percent(ContextUsage {
-                used: 127_999,
+                used: Some(127_999),
                 window: 128_000
             }),
             99
         );
-        assert_eq!(context_percent(ContextUsage { used: 5, window: 0 }), 0);
+        assert_eq!(
+            context_percent(ContextUsage {
+                used: Some(5),
+                window: 0
+            }),
+            0
+        );
         assert_eq!(compact_model("a/b/model-x"), "model-x");
     }
 }
