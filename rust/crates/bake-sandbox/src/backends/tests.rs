@@ -44,14 +44,14 @@ fn an_empty_chain_refuses_without_a_runtime_or_a_probe() {
     let provider = LocalProvider::with_chain(Vec::new());
     for policy in [ro(), ww()] {
         assert_eq!(
-            poll_once(provider.confine(&os(&["true"]), &policy)),
+            poll_once(provider.confine(&os(&["true"]), &policy, None)),
             Some(Err(SandboxUnavailable::new(policy.mode, None)))
         );
     }
     // danger-full-access never reaches the provider.
     let open = SandboxPolicy::new(SandboxMode::DangerFullAccess, "/ws");
     assert_eq!(
-        poll_once(confine(&provider, &os(&["true"]), &open)),
+        poll_once(confine(&provider, &os(&["true"]), &open, None)),
         Some(Ok(None))
     );
 }
@@ -59,7 +59,8 @@ fn an_empty_chain_refuses_without_a_runtime_or_a_probe() {
 #[test]
 fn a_sole_landlock_rung_wraps_with_the_current_executable_unprobed() {
     let provider = LocalProvider::with_chain(vec![Runner::Landlock]);
-    let Some(Ok(command)) = poll_once(provider.confine(&os(&["bash", "-c", "x"]), &ww())) else {
+    let Some(Ok(command)) = poll_once(provider.confine(&os(&["bash", "-c", "x"]), &ww(), None))
+    else {
         panic!("a sole candidate needs no probe");
     };
     let exe = std::env::current_exe().map(OsString::from).ok();
@@ -85,7 +86,7 @@ fn a_sole_landlock_rung_wraps_with_the_current_executable_unprobed() {
 #[test]
 fn a_multi_rung_chain_outside_a_runtime_refuses_without_caching() {
     let provider = LocalProvider::with_chain(vec![Runner::Bwrap, Runner::Landlock]);
-    let Some(Err(error)) = poll_once(provider.confine(&os(&["true"]), &ro())) else {
+    let Some(Err(error)) = poll_once(provider.confine(&os(&["true"]), &ro(), None)) else {
         panic!("probing outside a runtime must refuse");
     };
     assert_eq!(error.mode, SandboxMode::ReadOnly);
@@ -137,7 +138,8 @@ fn bwrap_lookup_skips_relative_and_temporary_entries() {
 #[test]
 fn platforms_without_a_backend_refuse_with_a_detail() {
     let provider = default_provider();
-    let Some(Err(error)) = poll_once(provider.confine(&os(&["cmd", "/c", "exit", "0"]), &ww()))
+    let Some(Err(error)) =
+        poll_once(provider.confine(&os(&["cmd", "/c", "exit", "0"]), &ww(), None))
     else {
         panic!("no backend must refuse");
     };
@@ -182,7 +184,8 @@ fn a_sole_windows_acl_rung_wraps_with_the_current_executable_unprobed() {
     let temp = crate::paths::canonical_path(&std::env::temp_dir());
     for mode in [SandboxMode::ReadOnly, SandboxMode::WorkspaceWrite] {
         let policy = SandboxPolicy::new(mode, &workspace.0);
-        let Some(Ok(command)) = poll_once(provider.confine(&os(&["cmd", "/c", "x"]), &policy))
+        let Some(Ok(command)) =
+            poll_once(provider.confine(&os(&["cmd", "/c", "x"]), &policy, None))
         else {
             panic!("a sole candidate needs no probe");
         };
@@ -228,7 +231,7 @@ fn the_windows_acl_rung_refuses_what_it_cannot_grant_distinctly() {
     let provider = LocalProvider::with_chain(vec![Runner::WindowsAcl]);
     // A workspace holding the temporary directory would pass its standing
     // capability to every private temp directory.
-    let Some(Err(error)) = poll_once(provider.confine(&os(&["x"]), &ww())) else {
+    let Some(Err(error)) = poll_once(provider.confine(&os(&["x"]), &ww(), None)) else {
         panic!("a workspace containing the temp root must be refused");
     };
     assert!(
@@ -239,7 +242,7 @@ fn the_windows_acl_rung_refuses_what_it_cannot_grant_distinctly() {
     );
     // Read-only grants nothing, so the same workspace is fine there.
     assert!(matches!(
-        poll_once(provider.confine(&os(&["x"]), &ro())),
+        poll_once(provider.confine(&os(&["x"]), &ro(), None)),
         Some(Ok(_))
     ));
     // Extra roots have no capability of their own.
@@ -247,7 +250,7 @@ fn the_windows_acl_rung_refuses_what_it_cannot_grant_distinctly() {
     let extra = BesideExe::new("extra-root");
     let policy = SandboxPolicy::new(SandboxMode::WorkspaceWrite, &workspace.0)
         .with_extra_writable_roots([extra.0.clone()]);
-    let Some(Err(error)) = poll_once(provider.confine(&os(&["x"]), &policy)) else {
+    let Some(Err(error)) = poll_once(provider.confine(&os(&["x"]), &policy, None)) else {
         panic!("extra roots must be refused");
     };
     assert!(
@@ -261,7 +264,7 @@ fn the_windows_acl_rung_refuses_what_it_cannot_grant_distinctly() {
     let exe = std::env::current_exe().expect("exe");
     let around_exe = crate::paths::canonical_path(exe.parent().expect("deps dir"));
     let policy = SandboxPolicy::new(SandboxMode::WorkspaceWrite, &around_exe);
-    let Some(Err(error)) = poll_once(provider.confine(&os(&["x"]), &policy)) else {
+    let Some(Err(error)) = poll_once(provider.confine(&os(&["x"]), &policy, None)) else {
         panic!("a runner under the workspace must be refused");
     };
     assert!(
@@ -284,7 +287,8 @@ fn a_sole_appcontainer_rung_wraps_its_grants_unprobed() {
     let workspace = BesideExe::new("ac-sole");
     for mode in [SandboxMode::ReadOnly, SandboxMode::WorkspaceWrite] {
         let policy = SandboxPolicy::new(mode, &workspace.0);
-        let Some(Ok(command)) = poll_once(provider.confine(&os(&["cmd", "/c", "x"]), &policy))
+        let Some(Ok(command)) =
+            poll_once(provider.confine(&os(&["cmd", "/c", "x"]), &policy, None))
         else {
             panic!("a sole candidate needs no probe");
         };
@@ -325,7 +329,7 @@ fn a_sole_appcontainer_rung_wraps_its_grants_unprobed() {
 #[test]
 fn the_appcontainer_rung_refuses_unsafe_policies_and_grants() {
     let refused = |provider: &LocalProvider, policy: &SandboxPolicy, expected: &str| {
-        let Some(Err(error)) = poll_once(provider.confine(&os(&["x"]), policy)) else {
+        let Some(Err(error)) = poll_once(provider.confine(&os(&["x"]), policy, None)) else {
             panic!("{expected}: must be refused");
         };
         assert!(
@@ -341,7 +345,10 @@ fn the_appcontainer_rung_refuses_unsafe_policies_and_grants() {
     // directory wraps under both modes.
     for policy in [ro(), ww()] {
         assert!(
-            matches!(poll_once(plain.confine(&os(&["x"]), &policy)), Some(Ok(_))),
+            matches!(
+                poll_once(plain.confine(&os(&["x"]), &policy, None)),
+                Some(Ok(_))
+            ),
             "{}",
             policy.workspace_root.display()
         );
@@ -387,7 +394,7 @@ fn a_multi_candidate_chain_never_probes_the_appcontainer_rung() {
         Runner::WindowsAppContainer,
         Runner::WindowsAppContainer,
     ]);
-    assert_eq!(runtime.block_on(provider.selected()), None);
+    assert_eq!(runtime.block_on(provider.selected(None)), None);
 }
 
 #[cfg(unix)]
@@ -477,7 +484,7 @@ mod fake_runners {
         let scratch = Scratch::new();
         let (provider, bwrap_count, helper_count, _) = linux(&scratch, 0, FULL, 0);
         let command = provider
-            .confine(&os(&["true"]), &ro())
+            .confine(&os(&["true"]), &ro(), None)
             .await
             .expect("bwrap");
         let mut expected = vec![scratch.path("bwrap").into_os_string()];
@@ -504,7 +511,7 @@ mod fake_runners {
         let scratch = Scratch::new();
         let (provider, bwrap_count, helper_count, helper) = linux(&scratch, 1, FULL, 0);
         let command = provider
-            .confine(&os(&["bash", "-c", "echo hi"]), &ww())
+            .confine(&os(&["bash", "-c", "echo hi"]), &ww(), None)
             .await
             .expect("landlock");
         let mut expected = vec![helper.into_os_string()];
@@ -526,7 +533,7 @@ mod fake_runners {
         let (provider, _, _, _) = linux(&scratch, 0, PARTIAL, 0);
         let provider = provider.with_bwrap(scratch.path("absent-bwrap"), []);
         assert_eq!(
-            provider.selected().await,
+            provider.selected(None).await,
             Some((Runner::Landlock, Enforcement::Partial))
         );
     }
@@ -536,7 +543,7 @@ mod fake_runners {
         let scratch = Scratch::new();
         let (provider, _, _, _) = linux(&scratch, 1, PARTIAL, 0);
         let command = provider
-            .confine(&os(&["true"]), &ro())
+            .confine(&os(&["true"]), &ro(), None)
             .await
             .expect("landlock");
         assert_eq!(command.enforcement, Enforcement::Partial);
@@ -554,7 +561,7 @@ mod fake_runners {
             let scratch = Scratch::new();
             let (provider, _, _, _) = linux(&scratch, 1, report, status);
             assert_eq!(
-                provider.confine(&os(&["true"]), &ro()).await,
+                provider.confine(&os(&["true"]), &ro(), None).await,
                 Err(SandboxUnavailable::new(SandboxMode::ReadOnly, None)),
                 "{report:?} {status}"
             );
@@ -566,11 +573,11 @@ mod fake_runners {
         let scratch = Scratch::new();
         let (provider, bwrap_count, _, _) = linux(&scratch, 0, FULL, 0);
         provider
-            .confine(&os(&["true"]), &ro())
+            .confine(&os(&["true"]), &ro(), None)
             .await
             .expect("first");
         provider
-            .confine(&os(&["true"]), &ww())
+            .confine(&os(&["true"]), &ww(), None)
             .await
             .expect("second");
         assert_eq!(calls(&bwrap_count), 1);
@@ -582,7 +589,7 @@ mod fake_runners {
         let (provider, bwrap_count, helper_count, _) = linux(&scratch, 1, "", 125);
         for _ in 0..2 {
             let error = provider
-                .confine(&os(&["true"]), &ro())
+                .confine(&os(&["true"]), &ro(), None)
                 .await
                 .expect_err("refused");
             assert_eq!(error, SandboxUnavailable::new(SandboxMode::ReadOnly, None));
@@ -602,7 +609,7 @@ mod fake_runners {
                 tokio::spawn(async move {
                     let policy = if index % 2 == 0 { ro() } else { ww() };
                     provider
-                        .confine(&os(&["true"]), &policy)
+                        .confine(&os(&["true"]), &policy, None)
                         .await
                         .map(|c| c.enforcement)
                 })
@@ -621,7 +628,7 @@ mod fake_runners {
         let provider = LocalProvider::with_chain(vec![Runner::Seatbelt])
             .with_seatbelt("/bin/sh", [exec.clone().into_os_string()]);
         let command = provider
-            .confine(&os(&["bash", "-c", "echo hi"]), &ro())
+            .confine(&os(&["bash", "-c", "echo hi"]), &ro(), None)
             .await
             .expect("seatbelt");
         let mut expected = vec![exec.into_os_string()];
@@ -641,7 +648,7 @@ mod fake_runners {
         // The product's macOS rung runs the system sandbox-exec.
         let product = LocalProvider::with_chain(vec![Runner::Seatbelt]);
         let command = product
-            .confine(&os(&["true"]), &ro())
+            .confine(&os(&["true"]), &ro(), None)
             .await
             .expect("seatbelt");
         assert_eq!(command.program, SEATBELT_EXEC);
@@ -656,7 +663,7 @@ mod fake_runners {
             let provider = LocalProvider::with_chain(vec![Runner::Bwrap, Runner::Seatbelt])
                 .with_bwrap("/bin/sh", [bwrap.into_os_string()])
                 .with_seatbelt("/bin/sh", [exec.into_os_string()]);
-            assert_eq!(provider.selected().await, expected);
+            assert_eq!(provider.selected(None).await, expected);
             assert_eq!(calls(&count), 1);
         }
     }
@@ -674,7 +681,7 @@ mod fake_runners {
             .with_landlock_helper("/bin/sh", [slow.into_os_string()])
             .with_probe_timeout(Duration::from_secs(1));
         let started = std::time::Instant::now();
-        assert!(provider.confine(&os(&["true"]), &ro()).await.is_err());
+        assert!(provider.confine(&os(&["true"]), &ro(), None).await.is_err());
         assert!(started.elapsed() < Duration::from_secs(20));
         // The killed probe was awaited: its pid no longer names a process.
         if let Some(pid) = std::fs::read_to_string(&pid_file)
@@ -692,7 +699,7 @@ mod fake_runners {
         let scratch = Scratch::new();
         let (provider, _, _, _) = linux(&scratch, 0, FULL, 0);
         let provider = provider.with_probe_timeout(Duration::ZERO);
-        assert!(provider.confine(&os(&["true"]), &ro()).await.is_err());
+        assert!(provider.confine(&os(&["true"]), &ro(), None).await.is_err());
     }
 
     /// Dropping a confine future mid-probe kills the probe. A FIFO gates the
@@ -720,7 +727,7 @@ mod fake_runners {
         );
         let mut task = {
             let provider = Arc::clone(&provider);
-            tokio::spawn(async move { provider.confine(&os(&["true"]), &ro()).await.is_ok() })
+            tokio::spawn(async move { provider.confine(&os(&["true"]), &ro(), None).await.is_ok() })
         };
         let gate = fifo.clone();
         let mut reader = tokio::task::spawn_blocking(move || std::fs::read_to_string(gate));
@@ -764,6 +771,162 @@ mod fake_runners {
             std::thread::sleep(Duration::from_millis(10));
         }
     }
+
+    /// Whether `/proc` still lists `pid`, as a running process or a zombie.
+    #[cfg(target_os = "linux")]
+    fn listed(pid: libc::pid_t) -> bool {
+        Path::new(&format!("/proc/{pid}")).exists()
+    }
+
+    /// A probe owner whose claims, when released, record whether any of
+    /// the probe's processes in `pids` was still listed then.
+    #[cfg(target_os = "linux")]
+    #[derive(Default)]
+    struct Recorder {
+        pids: std::sync::Mutex<Vec<libc::pid_t>>,
+        admitted: AtomicUsize,
+        /// One entry per released claim: the pids still listed then.
+        released: std::sync::Mutex<Vec<Vec<libc::pid_t>>>,
+        closing: std::sync::atomic::AtomicBool,
+    }
+
+    #[cfg(target_os = "linux")]
+    struct Recorded(Arc<Recorder>);
+
+    #[cfg(target_os = "linux")]
+    impl Drop for Recorded {
+        fn drop(&mut self) {
+            let pids = self.0.pids.lock().expect("pids").clone();
+            let listed: Vec<libc::pid_t> = pids.into_iter().filter(|&pid| listed(pid)).collect();
+            self.0.released.lock().expect("released").push(listed);
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    /// Hands out claims that report on the recorder.
+    struct Owner(Arc<Recorder>);
+
+    #[cfg(target_os = "linux")]
+    impl ProbeOwner for Owner {
+        fn admit(&self) -> Option<bake_process::Claim> {
+            if self.0.closing.load(Ordering::SeqCst) {
+                return None;
+            }
+            self.0.admitted.fetch_add(1, Ordering::SeqCst);
+            Some(Box::new(Recorded(Arc::clone(&self.0))))
+        }
+    }
+
+    /// A dropped probe is settled under its owner's claim: the claim is
+    /// released only once neither the runner nor the child it started is
+    /// left running or a zombie, so an owner that waits for its claims
+    /// (a session's gate) waits for the probe's tree. A probe that is
+    /// only killed releases the claim, or never takes one, while its
+    /// processes are still listed. The runner leads its own group, starts
+    /// a background child in it, and reports both pids through a FIFO,
+    /// which gates the drop.
+    #[cfg(target_os = "linux")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_dropped_probe_is_settled_under_its_owners_claim() {
+        let scratch = Scratch::new();
+        let fifo = scratch.path("gate");
+        let fifo_c = std::ffi::CString::new(fifo.to_string_lossy().as_bytes()).expect("path");
+        // SAFETY: `fifo_c` is a valid path string.
+        assert_eq!(unsafe { libc::mkfifo(fifo_c.as_ptr(), 0o600) }, 0);
+        let gated = scratch.script(
+            "tree",
+            &format!(
+                "sleep 30 </dev/null >/dev/null 2>&1 &\necho \"$$ $!\" > {fifo}\nwait\n",
+                fifo = quote(&fifo)
+            ),
+        );
+        let provider = Arc::new(
+            LocalProvider::with_chain(vec![Runner::Bwrap, Runner::Landlock])
+                .with_bwrap("/bin/sh", [gated.into_os_string()]),
+        );
+        let recorder = Arc::new(Recorder::default());
+        let mut task = {
+            let provider = Arc::clone(&provider);
+            let owner = Owner(Arc::clone(&recorder));
+            tokio::spawn(async move {
+                provider
+                    .confine(&os(&["true"]), &ro(), Some(&owner))
+                    .await
+                    .is_ok()
+            })
+        };
+        let gate = fifo.clone();
+        let mut reader = tokio::task::spawn_blocking(move || std::fs::read_to_string(gate));
+        let pids = tokio::select! {
+            opened = &mut reader => opened.expect("join").expect("gate"),
+            finished = &mut task => {
+                drop(std::fs::OpenOptions::new().write(true).open(&fifo));
+                let _ = reader.await;
+                panic!("the confine finished without probing: {finished:?}");
+            }
+        };
+        let pids: Vec<libc::pid_t> = pids
+            .split_whitespace()
+            .map(|pid| pid.parse().expect("pid"))
+            .collect();
+        assert_eq!(pids.len(), 2, "{pids:?}");
+        *recorder.pids.lock().expect("pids") = pids.clone();
+        task.abort();
+        assert!(task.await.is_err_and(|error| error.is_cancelled()));
+        assert!(
+            provider.verdict.get().is_none(),
+            "a dropped walk caches nothing"
+        );
+        assert_eq!(
+            recorder.admitted.load(Ordering::SeqCst),
+            1,
+            "the probe ran under its owner's claim"
+        );
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while recorder.released.lock().expect("released").is_empty() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the dropped probe's claim was never released"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let released = recorder.released.lock().expect("released").clone();
+        assert_eq!(
+            released,
+            [Vec::<libc::pid_t>::new()],
+            "the claim was released while the probe's processes were listed"
+        );
+        assert!(pids.iter().all(|&pid| !listed(pid)), "{pids:?}");
+    }
+
+    /// An owner that is closing refuses the walk before any probe starts,
+    /// and nothing is cached: the next call, under an open owner, probes.
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn a_closing_owner_refuses_the_walk_and_caches_nothing() {
+        let scratch = Scratch::new();
+        let (provider, bwrap, _, _) = linux(&scratch, 0, FULL, 0);
+        let recorder = Arc::new(Recorder::default());
+        recorder.closing.store(true, Ordering::SeqCst);
+        let owner = Owner(Arc::clone(&recorder));
+        let refused = provider
+            .confine(&os(&["true"]), &ro(), Some(&owner))
+            .await
+            .expect_err("refused");
+        assert_eq!(refused.detail.as_deref(), Some(OWNER_CLOSING));
+        assert_eq!(calls(&bwrap), 0, "no probe ran");
+        assert!(provider.verdict.get().is_none(), "nothing is cached");
+        recorder.closing.store(false, Ordering::SeqCst);
+        assert!(
+            provider
+                .confine(&os(&["true"]), &ro(), Some(&owner))
+                .await
+                .is_ok()
+        );
+        assert_eq!(calls(&bwrap), 1);
+        assert_eq!(recorder.admitted.load(Ordering::SeqCst), 1);
+        assert_eq!(recorder.released.lock().expect("released").len(), 1);
+    }
 }
 
 /// The runner-location and root-integrity refusals, through `confine`.
@@ -796,7 +959,7 @@ mod integrity {
     }
 
     fn refusal(provider: &LocalProvider, policy: &SandboxPolicy) -> String {
-        match poll_once(provider.confine(&os(&["true"]), policy)) {
+        match poll_once(provider.confine(&os(&["true"]), policy, None)) {
             Some(Err(error)) => {
                 assert_eq!(error.mode, policy.mode);
                 error.detail.unwrap_or_default()
@@ -893,12 +1056,12 @@ mod integrity {
         // A read-only call has no writable roots to check.
         let read_only = SandboxPolicy::new(SandboxMode::ReadOnly, dir.0.join("link"));
         assert!(matches!(
-            poll_once(provider.confine(&os(&["true"]), &read_only)),
+            poll_once(provider.confine(&os(&["true"]), &read_only, None)),
             Some(Ok(_))
         ));
         let intact = SandboxPolicy::new(SandboxMode::WorkspaceWrite, &real);
         assert!(matches!(
-            poll_once(provider.confine(&os(&["true"]), &intact)),
+            poll_once(provider.confine(&os(&["true"]), &intact, None)),
             Some(Ok(_))
         ));
     }

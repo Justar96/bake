@@ -42,6 +42,13 @@ fn parameters() -> Value {
 
 /// Pi's `createWriteToolDefinition`. Its blocking work has no owner: a
 /// dropped call's write runs to its end unawaited.
+///
+/// For embedders only; `bake` builds its tools under the session's
+/// [`WorkGate`](crate::owned_work::WorkGate)
+/// ([`crate::tools::index::ToolsOptions::owner`]). An embedder that shuts
+/// down while a call may be running must await each call's future to its
+/// end before it treats the file as settled or ends the runtime: dropping
+/// the future does not stop the write, and nothing waits for it.
 pub fn create_write_tool_definition(cwd: &Path) -> ToolDefinition {
     owned_write_tool_definition(cwd, None)
 }
@@ -93,7 +100,9 @@ pub fn create_write_tool(cwd: &Path) -> AgentTool {
 /// Runs a `write` call, first passing the target to `guard` inside its
 /// mutation queue, after the first abort check and before any effect; the
 /// directories and the file are then made through the target the guard
-/// returns. The blocking work has no owner.
+/// returns. The blocking work has no owner: as for
+/// [`create_write_tool_definition`], the embedder must await the future to
+/// its end, since a dropped one still writes.
 pub async fn execute_guarded(
     cwd: PathBuf,
     args: Value,

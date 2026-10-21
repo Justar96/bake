@@ -339,7 +339,7 @@ impl SessionManager {
             faults: durable::Faults::default(),
         };
         if persist && !manager.session_dir.as_os_str().is_empty() && !manager.session_dir.exists() {
-            fs::create_dir_all(&manager.session_dir)
+            durable::create_dir_all(&manager.session_dir)
                 .map_err(|error| SessionError::io(&manager.session_dir, error))?;
         }
         if let Some(file) = session_file {
@@ -558,6 +558,17 @@ impl SessionManager {
         hold: Box<dyn FnOnce() + Send>,
     ) {
         self.faults.hold_rewrite(step, hold);
+    }
+
+    /// Run `hold` when the next in-place rewrite reaches `step`
+    /// ([`durable::Faults::hold_in_place`]).
+    #[cfg(test)]
+    pub(crate) fn hold_in_place(
+        &mut self,
+        step: durable::InPlaceStep,
+        hold: Box<dyn FnOnce() + Send>,
+    ) {
+        self.faults.hold_in_place(step, hold);
     }
 
     fn holds_writer(&self, path: &Path) -> bool {
@@ -1516,7 +1527,7 @@ impl SessionManager {
                 })?
             }
         };
-        fs::create_dir_all(&dir).map_err(|error| SessionError::io(&dir, error))?;
+        durable::create_dir_all(&dir).map_err(|error| SessionError::io(&dir, error))?;
         if let Some(id) = &options.id {
             assert_valid_session_id(id)?;
         }
@@ -1686,7 +1697,7 @@ mod task_branch_tests;
 
 #[cfg(test)]
 #[path = "manager/crash_support.rs"]
-mod crash_support;
+pub(crate) mod crash_support;
 
 #[cfg(test)]
 #[path = "manager/rewrite_tests.rs"]
@@ -1695,6 +1706,34 @@ mod rewrite_tests;
 #[cfg(all(test, target_os = "linux"))]
 #[path = "manager/kernel_write_tests.rs"]
 mod kernel_write_tests;
+
+#[cfg(all(test, unix))]
+#[path = "manager/power_loss_tests.rs"]
+mod power_loss_tests;
+
+#[cfg(all(
+    test,
+    target_os = "linux",
+    any(target_arch = "x86_64", target_arch = "aarch64")
+))]
+#[path = "manager/kernel_faults.rs"]
+pub(crate) mod kernel_faults;
+
+#[cfg(all(
+    test,
+    target_os = "linux",
+    any(target_arch = "x86_64", target_arch = "aarch64")
+))]
+#[path = "manager/seccomp_write_tests.rs"]
+mod seccomp_write_tests;
+
+#[cfg(all(
+    test,
+    target_os = "linux",
+    any(target_arch = "x86_64", target_arch = "aarch64")
+))]
+#[path = "manager/full_filesystem_tests.rs"]
+mod full_filesystem_tests;
 
 #[cfg(test)]
 mod tests {

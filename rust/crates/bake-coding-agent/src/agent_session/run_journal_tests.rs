@@ -9,6 +9,8 @@ use bake_agent::RunLimits;
 
 const CHILD_MODE: &str = "BAKE_TEST_RUN_JOURNAL_MODE";
 const CHILD_DIR: &str = "BAKE_TEST_RUN_JOURNAL_DIR";
+/// The loopback port of a real provider stream (`mid-stream` mode).
+const CHILD_PORT: &str = "BAKE_TEST_RUN_JOURNAL_PORT";
 
 #[path = "run_journal_parked_tests.rs"]
 mod parked;
@@ -24,6 +26,13 @@ mod kill;
 
 #[path = "run_journal_nested_tests.rs"]
 mod nested;
+
+#[cfg(all(
+    target_os = "linux",
+    any(target_arch = "x86_64", target_arch = "aarch64")
+))]
+#[path = "run_journal_eio_tests.rs"]
+mod eio;
 
 fn append_fact(session: &mut SessionManager, run_id: &str, mut event: Value) -> String {
     if event["kind"] == "started" && event.get("session_id").is_none() {
@@ -788,9 +797,67 @@ fn fixture_tool(
     Arc::new(tool)
 }
 
+/// A harness whose model `faux/faux-1` is served over Chat Completions by a
+/// real provider at `127.0.0.1:port`, so a reopened session resolves the
+/// same model in [`harness`].
+fn streaming_harness(port: &str) -> Harness {
+    let faux = Arc::new(bake_ai::providers::faux::FauxProvider::new(
+        bake_ai::providers::faux::FauxProviderOptions::default(),
+    ));
+    let mut registry = ModelRegistry::new(
+        crate::model_registry::config::ModelConfig::from_value(json!({}), "models.json"),
+        crate::auth_storage::AuthStorage::empty(),
+    );
+    registry
+        .add_provider_config(
+            "faux",
+            json!({
+                "baseUrl": format!("http://127.0.0.1:{port}/v1"),
+                "api": "openai-completions",
+                "models": [{ "id": "faux-1", "contextWindow": 200_000, "maxTokens": 4096 }],
+            }),
+            Some("test-key".into()),
+        )
+        .expect("streaming provider");
+    Harness {
+        faux,
+        registry: Arc::new(registry),
+        apis: Arc::new(bake_ai::ApiRegistry::with_builtins()),
+    }
+}
+
+/// A `Safe` tool named `probe` that opens `directory/fifo`, which the
+/// parent holds open for writing and never writes, reports its kill point,
+/// and blocks inside the `read` system call until the parent's `SIGKILL`.
+#[cfg(unix)]
+fn fifo_probe(directory: &Path) -> Arc<AgentTool> {
+    let directory = directory.to_owned();
+    let mut tool = AgentTool::new(
+        "probe",
+        "probe",
+        "Read the fixture FIFO",
+        json!({"type":"object"}),
+        move |_, _, _, _, _ctx| {
+            let directory = directory.clone();
+            Box::pin(async move {
+                let mut fifo = std::fs::File::open(directory.join("fifo")).unwrap();
+                std::fs::write(directory.join("ready"), b"").unwrap();
+                let mut byte = [0u8; 1];
+                let read = std::io::Read::read(&mut fifo, &mut byte);
+                panic!("the FIFO read returned ({read:?}) before the parent's kill");
+            })
+        },
+    );
+    tool.replay = Some(bake_agent::ToolReplay::Safe);
+    Arc::new(tool)
+}
+
 /// Runs one prompt to the kill point its mode names and halts there; see
 /// [`kill_at`]. `first-prompt` and `plain-assistant` are ordinary prompts,
-/// every other mode a recoverable run.
+/// every other mode a recoverable run. `mid-stream` halts on the first
+/// streamed text of a real provider at [`CHILD_PORT`];
+/// `compaction-summary` halts inside the compaction's summary request;
+/// `fifo-read` halts inside a `Safe` tool's `read` of a FIFO.
 #[test]
 fn recoverable_run_crash_fixture() {
     let Ok(mode) = std::env::var(CHILD_MODE) else {
@@ -804,7 +871,10 @@ fn recoverable_run_crash_fixture() {
         .unwrap();
     runtime.block_on(async move {
         let mode = mode.as_str();
-        let h = harness(200_000);
+        let h = match std::env::var(CHILD_PORT) {
+            Ok(port) => streaming_harness(&port),
+            Err(_) => harness(200_000),
+        };
         let manager = SessionManager::create(
             &directory.to_string_lossy(),
             Some(&directory.join("sessions")),
@@ -823,6 +893,19 @@ fn recoverable_run_crash_fixture() {
             _ => Hold::Never,
         };
         let slot = Arc::new(OnceLock::new());
+        let probe = fixture_tool(
+            "probe",
+            bake_agent::ToolReplay::Safe,
+            &directory,
+            hold("probe"),
+            None,
+        );
+        #[cfg(unix)]
+        let probe = if mode == "fifo-read" {
+            fifo_probe(&directory)
+        } else {
+            probe
+        };
         let tools = vec![
             fixture_tool(
                 "effect",
@@ -831,13 +914,7 @@ fn recoverable_run_crash_fixture() {
                 hold("effect"),
                 (mode == "steer").then(|| Arc::clone(&slot)),
             ),
-            fixture_tool(
-                "probe",
-                bake_agent::ToolReplay::Safe,
-                &directory,
-                hold("probe"),
-                None,
-            ),
+            probe,
         ];
         let tool_use = |name: &str| -> FauxResponseStep {
             faux_assistant_blocks(
@@ -880,7 +957,7 @@ fn recoverable_run_crash_fixture() {
             "assistant" | "plain-assistant" | "pre-effect" | "dispatch" | "result" => {
                 vec![tool_use("effect")]
             }
-            "pre-read" | "read" => vec![tool_use("probe")],
+            "pre-read" | "read" | "fifo-read" => vec![tool_use("probe")],
             "retry" => vec![failure("overloaded_error"), halting],
             "follow-up" => vec![faux_assistant_message("complete").into(), halting],
             "job-notice" => vec![settle_then_answer, halting],
@@ -890,12 +967,13 @@ fn recoverable_run_crash_fixture() {
                 faux_assistant_message("## Goal\nCompacted").into(),
                 halting,
             ],
+            "compaction-summary" => vec![tool_use("effect"), halting],
             _ => vec![faux_assistant_message("complete").into()],
         });
         let settings = match mode {
             "retry" => retry_settings(3, 60_000),
             // A context over 10 tokens crosses the threshold.
-            "compaction" => settings(json!({
+            "compaction" | "compaction-summary" => settings(json!({
                 "compaction": { "reserveTokens": 199_990, "keepRecentTokens": 1 },
             })),
             _ => Settings::default(),
@@ -935,6 +1013,12 @@ fn recoverable_run_crash_fixture() {
                 if observe_mode == "start" {
                     halt(&directory);
                 }
+            }
+            if observe_mode == "mid-stream"
+                && let SessionEvent::Agent(AgentEvent::MessageUpdate { message, .. }) = event
+                && message.as_assistant().is_some()
+            {
+                halt(&directory);
             }
             if let SessionEvent::Agent(AgentEvent::MessageEnd { message }) = event {
                 let calls = message
@@ -984,13 +1068,28 @@ struct Killed {
 /// kills it at its kill point; see [`kill_fixture`].
 async fn kill_at(mode: &str) -> Killed {
     let dir = TempDir::new(&format!("run-journal-kill-{mode}"));
-    kill_fixture(
+    kill_in(dir, mode, &[], |_| {}).await
+}
+
+/// [`kill_at`] in `dir`, with `extra` environment for the fixture, and
+/// `settle` run with the fixture's process id once it reports its kill
+/// point, before the kill.
+async fn kill_in(
+    dir: TempDir,
+    mode: &str,
+    extra: &[(&str, &std::ffi::OsStr)],
+    settle: impl FnOnce(u32),
+) -> Killed {
+    let mut env = vec![
+        (CHILD_MODE, std::ffi::OsStr::new(mode)),
+        (CHILD_DIR, dir.path().as_os_str()),
+    ];
+    env.extend_from_slice(extra);
+    kill_fixture_after(
         "agent_session::recovery_tests::run_journal_tests::recoverable_run_crash_fixture",
-        &[
-            (CHILD_MODE, mode.as_ref()),
-            (CHILD_DIR, dir.path().as_os_str()),
-        ],
+        &env,
         dir.path(),
+        settle,
     )
     .await;
     let path = PathBuf::from(std::fs::read_to_string(dir.join("session-path")).unwrap());
@@ -1002,6 +1101,17 @@ async fn kill_at(mode: &str) -> Killed {
 /// it reports its kill point in `directory` ([`halt`]), and kills it with
 /// `SIGKILL`.
 async fn kill_fixture(name: &str, env: &[(&str, &std::ffi::OsStr)], directory: &Path) {
+    kill_fixture_after(name, env, directory, |_| {}).await;
+}
+
+/// [`kill_fixture`], running `settle` with the fixture's process id once
+/// it reports its kill point, before the kill.
+async fn kill_fixture_after(
+    name: &str,
+    env: &[(&str, &std::ffi::OsStr)],
+    directory: &Path,
+    settle: impl FnOnce(u32),
+) {
     let mut child = tokio::process::Command::new(std::env::current_exe().unwrap())
         .args(["--exact", name, "--nocapture"])
         .envs(env.iter().copied())
@@ -1020,6 +1130,7 @@ async fn kill_fixture(name: &str, env: &[(&str, &std::ffi::OsStr)], directory: &
         );
         tokio::time::sleep(Duration::from_millis(5)).await;
     }
+    settle(child.id().expect("the fixture's process id"));
     child.kill().await.unwrap();
     let status = child.wait().await.unwrap();
     #[cfg(unix)]

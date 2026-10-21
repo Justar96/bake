@@ -825,7 +825,7 @@ fn the_default_provider_refuses() {
             std::sync::Arc::new(LocalProvider::new()),
         ] {
             let error = runtime()
-                .block_on(provider.confine(&argv, &policy))
+                .block_on(provider.confine(&argv, &policy, None))
                 .expect_err("the default provider must refuse on Windows");
             assert_eq!(
                 error.detail.as_deref(),
@@ -839,7 +839,7 @@ fn the_default_provider_refuses() {
 fn an_explicit_chain_selects_the_partial_runner() {
     let provider = provider();
     assert_eq!(
-        runtime().block_on(provider.selected()),
+        runtime().block_on(provider.selected(None)),
         Some((Runner::WindowsAcl, Enforcement::Partial))
     );
     let (workspace, _outside) = workspace_and_outside();
@@ -988,7 +988,7 @@ fn each_run_gets_a_private_temp_directory() {
         .map(OsString::from)
         .collect();
     let command = runtime()
-        .block_on(provider().confine(&argv, &policy))
+        .block_on(provider().confine(&argv, &policy, None))
         .expect("confine");
     let mut a = Owned::spawn(
         std::process::Command::new(&command.program)

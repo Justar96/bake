@@ -33,8 +33,8 @@ use bake_coding_agent::tools::bash::shell::get_shell_config;
 use bake_coding_agent::tools::index::{ToolsOptions, create_all_tool_definitions};
 use bake_sandbox::testing::RecordingProvider;
 use bake_sandbox::{
-    ConfineFuture, ConfinedCommand, Enforcement, EscalationOutcome, RunnerFailureRule, SandboxMode,
-    SandboxPolicy, SandboxProvider, UnavailableProvider,
+    ConfineFuture, ConfinedCommand, Enforcement, EscalationOutcome, ProbeOwner, RunnerFailureRule,
+    SandboxMode, SandboxPolicy, SandboxProvider, UnavailableProvider,
 };
 use serde_json::{Value, json};
 use tokio::sync::Notify;
@@ -723,6 +723,7 @@ impl SandboxProvider for Dialect {
         &'a self,
         argv: &'a [OsString],
         _policy: &'a SandboxPolicy,
+        _owner: Option<&'a dyn ProbeOwner>,
     ) -> ConfineFuture<'a> {
         let mut parts = argv.iter().cloned();
         let program = parts.next().unwrap_or_default();
@@ -745,6 +746,7 @@ impl SandboxProvider for MissingRunner {
         &'a self,
         argv: &'a [OsString],
         _policy: &'a SandboxPolicy,
+        _owner: Option<&'a dyn ProbeOwner>,
     ) -> ConfineFuture<'a> {
         let command = ConfinedCommand::new(missing_runner(), argv.to_vec(), Enforcement::Full);
         Box::pin(async move { Ok(command) })
@@ -780,6 +782,7 @@ impl SandboxProvider for PendingProvider {
         &'a self,
         _argv: &'a [OsString],
         _policy: &'a SandboxPolicy,
+        _owner: Option<&'a dyn ProbeOwner>,
     ) -> ConfineFuture<'a> {
         let flag = DropFlag(Arc::clone(&self.dropped));
         let entered = Arc::clone(&self.entered);
@@ -1271,4 +1274,45 @@ async fn bash_escalation_arguments_follow_tool_bash() {
         );
     }
     assert_eq!(provider.modes(), [WW, WW]);
+}
+
+// Bake: a sandboxed bash call whose owner is closing is refused before any
+// runner probe starts, and reports Pi's abort, with no sandbox text: the
+// session is shutting down, so nothing new reaches the model.
+#[tokio::test]
+async fn a_bash_call_whose_owner_is_closing_is_aborted() {
+    if !have_bash("a_bash_call_whose_owner_is_closing_is_aborted") {
+        return;
+    }
+    let root = temp_root("closing");
+    let _cleanup = Cleanup(root.clone());
+    let marker = root.join("probed");
+    let runner = root.join("bwrap.sh");
+    std::fs::write(&runner, format!("touch '{}'\n", marker.display())).expect("runner");
+    let provider = Arc::new(
+        bake_sandbox::LocalProvider::with_chain(vec![
+            bake_sandbox::backends::Runner::Bwrap,
+            bake_sandbox::backends::Runner::Landlock,
+        ])
+        .with_bwrap("/bin/sh", [runner.into_os_string()]),
+    );
+    let permissions = bash_permissions(&root, WW, provider);
+    let owner = bake_coding_agent::owned_work::WorkGate::default();
+    drop(owner.close());
+    let bash = sandboxed_bash_tool(
+        &root,
+        BashToolOptions {
+            spill_directory: Some(root.clone()),
+            owner: Some(owner),
+            ..BashToolOptions::default()
+        },
+        &permissions,
+    )
+    .expect("bash")
+    .tool;
+    let error = within_a_minute(call(&bash, json!({ "command": "true" }), None))
+        .await
+        .expect_err("aborted");
+    assert_eq!(error, "Command aborted");
+    assert!(!marker.exists(), "a runner probe ran under a closing owner");
 }

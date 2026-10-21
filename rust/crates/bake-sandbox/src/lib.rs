@@ -87,6 +87,6 @@ pub use mode::{SandboxMode, UnknownSandboxMode};
 pub use paths::{canonical_path, is_path_under};
 pub use policy::SandboxPolicy;
 pub use provider::{
-    ConfineFuture, ConfinedCommand, Enforcement, SandboxProvider, SandboxUnavailable,
+    ConfineFuture, ConfinedCommand, Enforcement, ProbeOwner, SandboxProvider, SandboxUnavailable,
     UnavailableProvider,
 };

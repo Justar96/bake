@@ -3054,10 +3054,12 @@ impl AgentSession {
     /// session is dropped.
     ///
     /// The drain also covers the processes of tools given this session's
-    /// gate ([`AgentSessionOptions::work`]): each holds a permit from its
-    /// spawn until its tree is settled, and the run's task, stopped first,
-    /// drops a running call, which kills the call's tree and moves the
-    /// process to a task that settles it under the same permit. Shutdown
+    /// gate ([`AgentSessionOptions::work`]), a sandbox runner probe their
+    /// call starts included ([`bake_sandbox::ProbeOwner`]): each holds a
+    /// permit from its spawn until its tree is settled, and the run's
+    /// task, stopped first, drops a running call, which kills the call's
+    /// tree and moves the process to a task that settles it under the same
+    /// permit. Shutdown
     /// therefore returns only once every such tree is gone, with no time
     /// limit; a process that cannot die (uninterruptible sleep) holds it.
     /// Processes of other sessions, or of tools given no owner, are not

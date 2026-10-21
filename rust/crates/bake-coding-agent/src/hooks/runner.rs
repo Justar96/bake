@@ -137,8 +137,20 @@ pub async fn run_hook(
     argv.extend(shell.args.into_iter().map(OsString::from));
     argv.push(hook.command.clone().into());
     let policy = processes.standing.policy();
-    let confined = match confine(processes.sandbox.as_ref(), &argv, &policy).await {
+    let confined = match confine(
+        processes.sandbox.as_ref(),
+        &argv,
+        &policy,
+        Some(&processes.owner),
+    )
+    .await
+    {
         Ok(confined) => confined,
+        // A closing owner refuses the probe: the session is shutting down,
+        // so the hook is cancelled rather than refused.
+        Err(_) if processes.owner.is_closing() => {
+            return not_run(started, "the hook was cancelled".to_owned(), false);
+        }
         Err(unavailable) => {
             return not_run(
                 started,

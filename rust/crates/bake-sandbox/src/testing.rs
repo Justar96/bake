@@ -6,7 +6,7 @@ use std::sync::Mutex;
 
 use crate::mode::SandboxMode;
 use crate::policy::SandboxPolicy;
-use crate::provider::{ConfineFuture, ConfinedCommand, Enforcement, SandboxProvider};
+use crate::provider::{ConfineFuture, ConfinedCommand, Enforcement, ProbeOwner, SandboxProvider};
 
 /// Runs the caller's argv unchanged (no confinement) and records each call's
 /// argv and policy. Use it to test tools and policy layers; real enforcement
@@ -48,7 +48,12 @@ impl SandboxProvider for RecordingProvider {
         "recording"
     }
 
-    fn confine<'a>(&'a self, argv: &'a [OsString], policy: &'a SandboxPolicy) -> ConfineFuture<'a> {
+    fn confine<'a>(
+        &'a self,
+        argv: &'a [OsString],
+        policy: &'a SandboxPolicy,
+        _owner: Option<&'a dyn ProbeOwner>,
+    ) -> ConfineFuture<'a> {
         self.calls
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)

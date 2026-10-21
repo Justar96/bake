@@ -57,9 +57,10 @@ pub mod windows_appcontainer;
 
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
+
+use bake_process::{OwnedProcess, ProcessSpec};
 
 use tokio::io::AsyncReadExt;
 use tokio::sync::OnceCell;
@@ -69,7 +70,7 @@ use crate::mode::SandboxMode;
 use crate::paths::{canonical_path, is_path_under};
 use crate::policy::SandboxPolicy;
 use crate::provider::{
-    ConfineFuture, ConfinedCommand, Enforcement, SandboxProvider, SandboxUnavailable,
+    ConfineFuture, ConfinedCommand, Enforcement, ProbeOwner, SandboxProvider, SandboxUnavailable,
 };
 
 /// One rung of a platform chain (`SelectedRunner['runner']`).
@@ -212,8 +213,12 @@ pub const SEATBELT_EXEC: &str = "/usr/bin/sandbox-exec";
 /// Probing spawns runners through Tokio: the first confined call on a
 /// multi-candidate chain must be polled inside a Tokio runtime with its I/O
 /// and time drivers enabled. Outside any runtime the call refuses without
-/// caching. A probe is bounded by the probe timeout, and dropping the
-/// confine future kills it.
+/// caching. A probe is bounded by the probe timeout; it runs as an owned
+/// process tree under a claim of the call's [`ProbeOwner`], and is killed
+/// and settled when it ends, times out, or is dropped with the confine
+/// future, a dropped one by a task holding that claim, so the owner's
+/// teardown waits for it (see `run_probe`). A walk whose owner is closing
+/// refuses the call and caches nothing.
 #[derive(Debug)]
 pub struct LocalProvider {
     chain: Vec<Runner>,
@@ -381,15 +386,16 @@ impl LocalProvider {
     }
 
     /// The selected runner and its enforcement, walking the chain if no call
-    /// has yet; `None` when nothing is usable.
-    pub async fn selected(&self) -> Option<(Runner, Enforcement)> {
-        match self.verdict().await {
+    /// has yet, with its probes under `owner`; `None` when nothing is
+    /// usable, or when the walk was refused because `owner` is closing.
+    pub async fn selected(&self, owner: Option<&dyn ProbeOwner>) -> Option<(Runner, Enforcement)> {
+        match self.verdict(owner).await {
             Ok(Verdict::Selected(runner, enforcement)) => Some((runner, enforcement)),
             _ => None,
         }
     }
 
-    async fn verdict(&self) -> Result<Verdict, Option<String>> {
+    async fn verdict(&self, owner: Option<&dyn ProbeOwner>) -> Result<Verdict, Option<String>> {
         if let Some(verdict) = self.verdict.get() {
             return Ok(*verdict);
         }
@@ -398,66 +404,90 @@ impl LocalProvider {
                 "probing a sandbox runner needs a Tokio runtime".to_owned(),
             ));
         }
-        Ok(*self.verdict.get_or_init(|| self.chain_verdict()).await)
+        // A refused walk caches nothing: the next call, under an owner of
+        // its own, walks again.
+        self.verdict
+            .get_or_try_init(|| self.chain_verdict(owner))
+            .await
+            .copied()
+            .map_err(|OwnerClosing| Some(OWNER_CLOSING.to_owned()))
     }
 
     /// Walks the chain (`chainVerdict`): a sole candidate unprobed, several
     /// probed in order, none usable is unavailable.
-    async fn chain_verdict(&self) -> Verdict {
+    async fn chain_verdict(&self, owner: Option<&dyn ProbeOwner>) -> Result<Verdict, OwnerClosing> {
         match self.chain.as_slice() {
-            [] => Verdict::Unavailable,
-            [sole] => Verdict::Selected(*sole, sole.static_enforcement()),
+            [] => Ok(Verdict::Unavailable),
+            [sole] => Ok(Verdict::Selected(*sole, sole.static_enforcement())),
             chain => {
                 for runner in chain {
-                    if let Some(enforcement) = self.probe(*runner).await {
-                        return Verdict::Selected(*runner, enforcement);
+                    if let Some(enforcement) = self.probe(*runner, owner).await? {
+                        return Ok(Verdict::Selected(*runner, enforcement));
                     }
                 }
-                Verdict::Unavailable
+                Ok(Verdict::Unavailable)
             }
         }
     }
 
     /// One rung's functional probe (`probeRunner`): `None` when unusable.
-    async fn probe(&self, runner: Runner) -> Option<Enforcement> {
+    async fn probe(
+        &self,
+        runner: Runner,
+        owner: Option<&dyn ProbeOwner>,
+    ) -> Result<Option<Enforcement>, OwnerClosing> {
+        let probe = Probe {
+            timeout: self.probe_timeout,
+            owner,
+        };
         let probe_policy = SandboxPolicy::new(SandboxMode::ReadOnly, "/");
         match runner {
             Runner::Bwrap => {
-                let bwrap = self.bwrap.as_ref()?;
+                let Some(bwrap) = self.bwrap.as_ref() else {
+                    return Ok(None);
+                };
                 let mut args = profiles::bwrap_profile_args(&probe_policy);
                 args.extend(["--".into(), "true".into()]);
-                let (code, _) = run_probe(bwrap, &args, self.probe_timeout, false).await?;
-                (code == Some(0)).then_some(Enforcement::Full)
+                let ran = probe.run(bwrap, &args, false).await?;
+                Ok(ran.and_then(|(code, _)| (code == Some(0)).then_some(Enforcement::Full)))
             }
             Runner::Landlock => {
-                let helper = self.landlock.as_ref()?;
+                let Some(helper) = self.landlock.as_ref() else {
+                    return Ok(None);
+                };
                 let args = [OsString::from("--probe")];
-                let (code, stdout) = run_probe(helper, &args, self.probe_timeout, true).await?;
-                if code != Some(0) {
-                    return None;
-                }
-                // Only the contract's exact report line counts: a program
-                // that merely exits 0 is not a Landlock helper.
-                match stdout.as_slice() {
-                    out if out == format!("{}\n", landlock::PROBE_FULL_LINE).as_bytes() => {
-                        Some(Enforcement::Full)
+                let ran = probe.run(helper, &args, true).await?;
+                Ok(ran.and_then(|(code, stdout)| {
+                    if code != Some(0) {
+                        return None;
                     }
-                    out if out == format!("{}\n", landlock::PROBE_PARTIAL_LINE).as_bytes() => {
-                        Some(Enforcement::Partial)
+                    // Only the contract's exact report line counts: a
+                    // program that merely exits 0 is not a Landlock helper.
+                    match stdout.as_slice() {
+                        out if out == format!("{}\n", landlock::PROBE_FULL_LINE).as_bytes() => {
+                            Some(Enforcement::Full)
+                        }
+                        out if out == format!("{}\n", landlock::PROBE_PARTIAL_LINE).as_bytes() => {
+                            Some(Enforcement::Partial)
+                        }
+                        _ => None,
                     }
-                    _ => None,
-                }
+                }))
             }
             Runner::Seatbelt => {
-                let mut args = profiles::seatbelt_profile_args(&probe_policy).ok()?;
+                let Ok(mut args) = profiles::seatbelt_profile_args(&probe_policy) else {
+                    return Ok(None);
+                };
                 args.extend(["--".into(), "true".into()]);
-                let (code, _) = run_probe(&self.seatbelt, &args, self.probe_timeout, false).await?;
-                (code == Some(0)).then_some(Enforcement::Full)
+                let ran = probe.run(&self.seatbelt, &args, false).await?;
+                Ok(ran.and_then(|(code, _)| (code == Some(0)).then_some(Enforcement::Full)))
             }
             Runner::WindowsAcl => {
                 // TypeScript's probe: a read-only run, which grants nothing,
                 // around `cmd /c exit 0`. Only an override chain probes it.
-                let runner = self.windows_acl.as_ref()?;
+                let Some(runner) = self.windows_acl.as_ref() else {
+                    return Ok(None);
+                };
                 let temp = canonical_path(&std::env::temp_dir());
                 let mut args = windows_acl::runner_profile_args(
                     windows_acl::RunnerMode::ReadOnly,
@@ -465,14 +495,14 @@ impl LocalProvider {
                     &temp,
                 );
                 args.extend(["--", "cmd", "/c", "exit", "0"].map(OsString::from));
-                let (code, _) = run_probe(runner, &args, self.probe_timeout, false).await?;
-                (code == Some(0)).then_some(Enforcement::Partial)
+                let ran = probe.run(runner, &args, false).await?;
+                Ok(ran.and_then(|(code, _)| (code == Some(0)).then_some(Enforcement::Partial)))
             }
             // Never probed: a real launch would leave standing workspace
             // ACEs on the probe's own directory. The rung is
             // selectable only as a sole candidate, whose launch failure is
             // the fail-closed end.
-            Runner::WindowsAppContainer => None,
+            Runner::WindowsAppContainer => Ok(None),
         }
     }
 
@@ -481,9 +511,10 @@ impl LocalProvider {
         &self,
         argv: &[OsString],
         policy: &SandboxPolicy,
+        owner: Option<&dyn ProbeOwner>,
     ) -> Result<ConfinedCommand, SandboxUnavailable> {
         let refuse = |detail: Option<String>| SandboxUnavailable::new(policy.mode, detail);
-        let (runner, enforcement) = match self.verdict().await.map_err(refuse)? {
+        let (runner, enforcement) = match self.verdict(owner).await.map_err(refuse)? {
             Verdict::Selected(runner, enforcement) => (runner, enforcement),
             Verdict::Unavailable => return Err(refuse(self.no_backend_detail.clone())),
         };
@@ -567,8 +598,13 @@ impl SandboxProvider for LocalProvider {
         "local"
     }
 
-    fn confine<'a>(&'a self, argv: &'a [OsString], policy: &'a SandboxPolicy) -> ConfineFuture<'a> {
-        Box::pin(self.wrap(argv, policy))
+    fn confine<'a>(
+        &'a self,
+        argv: &'a [OsString],
+        policy: &'a SandboxPolicy,
+        owner: Option<&'a dyn ProbeOwner>,
+    ) -> ConfineFuture<'a> {
+        Box::pin(self.wrap(argv, policy, owner))
     }
 }
 
@@ -786,51 +822,95 @@ fn check_runner_location(
     Ok(())
 }
 
-/// Runs one probe child, bounded by `timeout`: its exit code and, when
-/// `capture`, at most [`PROBE_OUTPUT_LIMIT`] bytes of stdout. `None` when it
-/// cannot start or times out. A timed-out child is killed and reaped before
-/// this returns; a dropped probe kills its child.
-async fn run_probe(
-    invocation: &Invocation,
-    args: &[OsString],
+/// Why a walk was refused: its owner is closing, so no probe may start.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct OwnerClosing;
+
+/// The refusal detail of a walk whose owner is closing: diagnostic only.
+/// A caller that passes an owner sees the owner closing and reports its own
+/// cancellation instead, so this never reaches a model.
+const OWNER_CLOSING: &str = "the call's owner is closing, so no sandbox runner was probed";
+
+/// One walk's probe settings: the bound on each probe and its owner.
+struct Probe<'a> {
     timeout: Duration,
-    capture: bool,
-) -> Option<(Option<i32>, Vec<u8>)> {
-    if timeout.is_zero() {
-        return None;
-    }
-    let mut command = tokio::process::Command::new(&invocation.program);
-    command
-        .args(&invocation.args)
-        .args(args)
-        .stdin(Stdio::null())
-        .stderr(Stdio::null())
-        .stdout(if capture {
-            Stdio::piped()
-        } else {
-            Stdio::null()
+    owner: Option<&'a dyn ProbeOwner>,
+}
+
+impl Probe<'_> {
+    /// Runs one probe child, bounded by the timeout: its exit code and,
+    /// when `capture`, at most [`PROBE_OUTPUT_LIMIT`] bytes of stdout; its
+    /// stderr is read and discarded. `Ok(None)` when it cannot start or
+    /// times out; [`OwnerClosing`] when the owner refuses it, before
+    /// anything is spawned.
+    ///
+    /// The probe is an owned process tree ([`bake_process::OwnedProcess`])
+    /// in a group of its own, spawned under the owner's claim, and whether
+    /// it exits, times out, or is dropped, its whole tree is killed and
+    /// settled: an exited or timed-out probe before this returns, and a
+    /// dropped one by a task on the runtime that polled it, which holds
+    /// the claim until the tree is gone, so the owner's teardown waits for
+    /// it. A probe leaves no process, and no zombie, behind. With no owner
+    /// a dropped probe is killed and not awaited.
+    async fn run(
+        &self,
+        invocation: &Invocation,
+        args: &[OsString],
+        capture: bool,
+    ) -> Result<Option<(Option<i32>, Vec<u8>)>, OwnerClosing> {
+        if self.timeout.is_zero() {
+            return Ok(None);
+        }
+        let claim = match self.owner {
+            Some(owner) => Some(owner.admit().ok_or(OwnerClosing)?),
+            None => None,
+        };
+        let spec = ProcessSpec {
+            program: invocation.program.clone(),
+            args: invocation.args.iter().chain(args).cloned().collect(),
+            cwd: None,
+            env: None,
+            stdin: false,
+        };
+        let Ok(mut probe) = OwnedProcess::spawn(&spec, claim).await else {
+            return Ok(None);
+        };
+        let stdout = probe.take_stdout();
+        let stderr = probe.take_stderr();
+        let ran = tokio::time::timeout(self.timeout, async {
+            let output = async {
+                let mut output = Vec::new();
+                if let Some(stdout) = stdout {
+                    if capture {
+                        let _ = stdout
+                            .take(PROBE_OUTPUT_LIMIT)
+                            .read_to_end(&mut output)
+                            .await;
+                    } else {
+                        let mut stdout = stdout;
+                        let _ = tokio::io::copy(&mut stdout, &mut tokio::io::sink()).await;
+                    }
+                }
+                output
+            };
+            let discarded = async {
+                if let Some(mut stderr) = stderr {
+                    let _ = tokio::io::copy(&mut stderr, &mut tokio::io::sink()).await;
+                }
+            };
+            let (output, ()) = tokio::join!(output, discarded);
+            probe.wait_exit().await.ok().map(|()| output)
         })
-        .kill_on_drop(true);
-    let mut child = command.spawn().ok()?;
-    let stdout = child.stdout.take();
-    let outcome = tokio::time::timeout(timeout, async {
-        let mut output = Vec::new();
-        if let Some(stdout) = stdout {
-            let _ = stdout
-                .take(PROBE_OUTPUT_LIMIT)
-                .read_to_end(&mut output)
-                .await;
-        }
-        let status = child.wait().await.ok()?;
-        Some((status.code(), output))
-    })
-    .await;
-    match outcome {
-        Ok(result) => result,
-        Err(_) => {
-            let _ = child.kill().await;
-            None
-        }
+        .await;
+        // Exited or not, nothing the probe started may outlive it.
+        probe.kill();
+        let Ok(settled) = probe.settle().await else {
+            return Ok(None);
+        };
+        Ok(ran
+            .ok()
+            .flatten()
+            .map(|output| (settled.status.code(), output)))
     }
 }
 

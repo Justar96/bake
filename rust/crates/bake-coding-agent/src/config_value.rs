@@ -19,10 +19,32 @@
 //!   Git Bash shell, which Bake does not discover.
 //! - **Bounds.** Output beyond [`MAX_COMMAND_OUTPUT`] bytes fails the
 //!   command, where Node's `execSync` fails beyond its 1 MiB buffer too. The
-//!   10-second timeout covers the command and the closing of its output; on
-//!   timeout the shell is killed and reaped. A background process the
-//!   command started and left holding its output is not killed: the reader
-//!   thread ends when that process closes the pipe.
+//!   10-second timeout ([`COMMAND_TIMEOUT`]) bounds the command: the run
+//!   from the spawn until the shell has exited and its output has closed.
+//!   It does not bound the call. On Unix a timed-out or cancelled call kills
+//!   the shell's process group and returns once that killed group is gone,
+//!   with no time limit of its own, as a bash tool call does; a member that
+//!   cannot die, such as one in uninterruptible sleep on a hung network
+//!   mount, holds the call, and with it any teardown waiting for the call.
+//! - **Ownership.** On Unix the shell is an owned process tree
+//!   ([`bake_process::OwnedProcess`]): it leads its own process group, and
+//!   that group is killed, and awaited until no process is left in it, when
+//!   the shell exits, when the timeout passes, when the output overflows,
+//!   and on cancellation. A `!command` therefore never leaves a process
+//!   running in its group: a background process it started, with its
+//!   output redirected or not, is killed as soon as the shell exits. This
+//!   differs from the bash tool, whose command's background processes
+//!   outlive a normal exit as in Pi, and from Pi's `execSync`, which leaves
+//!   such a process running and waits only for the output to close. The
+//!   output written before the shell exited is kept, and the command
+//!   resolves at once instead of failing at the timeout. Only a descendant
+//!   that left the group (`setsid`) outlives the command, and it holds the
+//!   read, while it keeps the output open, only until the timeout. The tree
+//!   runs on a thread of its own, with a runtime of its own, which is joined
+//!   before the call returns; on Linux the shell is also tied to that thread
+//!   (`PR_SET_PDEATHSIG`), so a host killed outright takes the shell with
+//!   it. Windows keeps a plain child: the shell alone is killed and reaped
+//!   on timeout or cancellation, and its reader thread is not joined.
 //! - **Blocking.** Resolution blocks for as long as a command runs; async
 //!   callers run it on a blocking thread, inside [`with_command_cancel`] so
 //!   that their cancellation kills the command. A cancelled command
@@ -30,11 +52,9 @@
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
-use std::io::Read;
-use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, OnceLock, PoisonError, mpsc};
-use std::time::{Duration, Instant};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
+use std::time::Duration;
 
 /// Pi's command timeout.
 pub const COMMAND_TIMEOUT: Duration = Duration::from_secs(10);
@@ -223,11 +243,12 @@ pub fn with_command_cancel<R>(cancel: Arc<AtomicBool>, work: impl FnOnce() -> R)
 }
 
 fn command_cancelled() -> bool {
-    COMMAND_CANCEL.with(|slot| {
-        slot.borrow()
-            .as_ref()
-            .is_some_and(|flag| flag.load(Ordering::SeqCst))
-    })
+    command_cancel().is_some_and(|flag| flag.load(Ordering::SeqCst))
+}
+
+/// This thread's [`with_command_cancel`] flag, if any.
+fn command_cancel() -> Option<Arc<AtomicBool>> {
+    COMMAND_CANCEL.with(|slot| slot.borrow().clone())
 }
 
 /// How a command ended.
@@ -345,30 +366,6 @@ pub fn clear_config_value_cache() {
         .clear();
 }
 
-fn shell_command(command: &str) -> Command {
-    #[cfg(windows)]
-    {
-        let shell = std::env::var_os("ComSpec").unwrap_or_else(|| "cmd.exe".into());
-        use std::os::windows::process::CommandExt;
-
-        // Node's `execSync` passes `/d /s /c "<command>"` verbatim
-        // (`windowsVerbatimArguments`): `cmd /s` strips the outer quotes and
-        // runs the rest as typed. `arg` would escape inner quotes by MSVC
-        // rules, which `cmd` does not undo.
-        let mut process = Command::new(shell);
-        process
-            .args(["/d", "/s", "/c"])
-            .raw_arg(format!("\"{command}\""));
-        process
-    }
-    #[cfg(not(windows))]
-    {
-        let mut process = Command::new("/bin/sh");
-        process.arg("-c").arg(command);
-        process
-    }
-}
-
 /// Runs `command` in the shell with Pi's timeout and returns its trimmed
 /// output, or `None` when it fails, times out, prints nothing, or prints
 /// more than [`MAX_COMMAND_OUTPUT`] bytes. A cancellation kills and reaps
@@ -377,10 +374,172 @@ fn execute_command(command: &str) -> CommandOutcome {
     if command_cancelled() {
         return CommandOutcome::Cancelled;
     }
-    run_command(command)
+    run_command(command, COMMAND_TIMEOUT, command_cancel())
 }
 
-fn run_command(command: &str) -> CommandOutcome {
+/// The outcome of an exit `status` with `output`: Pi's trimmed value, or
+/// `None` for a failure, an overflow, or nothing printed.
+fn ran(success: bool, output: &[u8]) -> CommandOutcome {
+    if !success || output.len() > MAX_COMMAND_OUTPUT {
+        return CommandOutcome::Ran(None);
+    }
+    let text = String::from_utf8_lossy(output);
+    let trimmed = text.trim();
+    CommandOutcome::Ran((!trimmed.is_empty()).then(|| trimmed.to_owned()))
+}
+
+/// Runs `command` under `/bin/sh -c` as an owned process tree, on a thread
+/// with a runtime of its own, and joins that thread (see the module docs).
+#[cfg(unix)]
+fn run_command(
+    command: &str,
+    timeout: Duration,
+    cancel: Option<Arc<AtomicBool>>,
+) -> CommandOutcome {
+    let spec = bake_process::ProcessSpec {
+        program: "/bin/sh".into(),
+        args: vec!["-c".into(), command.into()],
+        cwd: None,
+        env: None,
+        stdin: false,
+    };
+    // Its own thread keeps the call synchronous wherever it is made, a
+    // Tokio worker included, and outlives the shell it is tied to.
+    let worker = std::thread::Builder::new()
+        .name("bake-config-command".into())
+        .spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .ok()?;
+            Some(runtime.block_on(run_owned(spec, timeout, cancel)))
+        });
+    match worker.map(std::thread::JoinHandle::join) {
+        Ok(Ok(Some(outcome))) => outcome,
+        _ => CommandOutcome::Ran(None),
+    }
+}
+
+/// How often a running command checks its cancellation flag.
+#[cfg(unix)]
+const CANCEL_POLL: Duration = Duration::from_millis(5);
+
+/// [`run_command`]'s body: spawns the shell in its own group, reads its
+/// output (and discards its standard error) until it has exited and the
+/// output has closed, killing the group as soon as the shell exits, and
+/// settles the tree before it returns, whatever ended the run.
+#[cfg(unix)]
+async fn run_owned(
+    spec: bake_process::ProcessSpec,
+    timeout: Duration,
+    cancel: Option<Arc<AtomicBool>>,
+) -> CommandOutcome {
+    use tokio::io::AsyncReadExt;
+
+    let deadline = tokio::time::Instant::now() + timeout;
+    #[cfg(target_os = "linux")]
+    let spawned = bake_process::OwnedProcess::spawn_tied_to_thread(&spec, None).await;
+    #[cfg(not(target_os = "linux"))]
+    let spawned = bake_process::OwnedProcess::spawn(&spec, None).await;
+    let Ok(mut shell) = spawned else {
+        return CommandOutcome::Ran(None);
+    };
+    let mut stdout = shell.take_stdout();
+    let mut stderr = shell.take_stderr();
+    let mut output = Vec::new();
+    let mut chunk = vec![0; 64 * 1024];
+    let mut discard = vec![0; 64 * 1024];
+    let mut exited = false;
+    let mut cancelled = false;
+    let mut finished = false;
+    loop {
+        if exited && stdout.is_none() {
+            finished = true;
+            break;
+        }
+        tokio::select! {
+            read = async { stdout.as_mut()?.read(&mut chunk).await.ok() },
+                if stdout.is_some() =>
+            {
+                match read {
+                    Some(count) if count > 0 => {
+                        output.extend_from_slice(&chunk[..count]);
+                        if output.len() > MAX_COMMAND_OUTPUT {
+                            break;
+                        }
+                    }
+                    _ => stdout = None,
+                }
+            }
+            read = async { stderr.as_mut()?.read(&mut discard).await.ok() },
+                if stderr.is_some() =>
+            {
+                if !matches!(read, Some(count) if count > 0) {
+                    stderr = None;
+                }
+            }
+            waited = shell.wait_exit(), if !exited => {
+                if waited.is_err() {
+                    break;
+                }
+                exited = true;
+                // The shell is done: whatever it left in its group goes now,
+                // so the output closes once what was written is read.
+                shell.kill();
+            }
+            () = tokio::time::sleep_until(deadline) => break,
+            () = tokio::time::sleep(CANCEL_POLL), if cancel.is_some() => {
+                if cancel.as_ref().is_some_and(|flag| flag.load(Ordering::SeqCst)) {
+                    cancelled = true;
+                    break;
+                }
+            }
+        }
+    }
+    shell.kill();
+    // Our ends close before the tree is awaited: a process that left the
+    // group may hold the others.
+    drop((stdout, stderr));
+    // Unbounded, as the bash tool's wait for a killed tree is: the timeout
+    // bounds the command, and the call returns once the group is gone.
+    let settled = shell.settle().await;
+    if cancelled {
+        return CommandOutcome::Cancelled;
+    }
+    match settled {
+        Ok(settled) if finished => ran(settled.status.success(), &output),
+        _ => CommandOutcome::Ran(None),
+    }
+}
+
+#[cfg(windows)]
+fn shell_command(command: &str) -> std::process::Command {
+    let shell = std::env::var_os("ComSpec").unwrap_or_else(|| "cmd.exe".into());
+    use std::os::windows::process::CommandExt;
+
+    // Node's `execSync` passes `/d /s /c "<command>"` verbatim
+    // (`windowsVerbatimArguments`): `cmd /s` strips the outer quotes and
+    // runs the rest as typed. `arg` would escape inner quotes by MSVC
+    // rules, which `cmd` does not undo.
+    let mut process = std::process::Command::new(shell);
+    process
+        .args(["/d", "/s", "/c"])
+        .raw_arg(format!("\"{command}\""));
+    process
+}
+
+/// The Windows runner: a plain child whose reader thread is not joined
+/// (see the module docs).
+#[cfg(windows)]
+fn run_command(
+    command: &str,
+    timeout: Duration,
+    cancel: Option<Arc<AtomicBool>>,
+) -> CommandOutcome {
+    use std::io::Read;
+    use std::process::Stdio;
+    use std::time::Instant;
+
     let Ok(mut child) = shell_command(command)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -389,8 +548,8 @@ fn run_command(command: &str) -> CommandOutcome {
     else {
         return CommandOutcome::Ran(None);
     };
-    let deadline = Instant::now() + COMMAND_TIMEOUT;
-    let (sender, receiver) = mpsc::channel();
+    let deadline = Instant::now() + timeout;
+    let (sender, receiver) = std::sync::mpsc::channel();
     if let Some(mut stdout) = child.stdout.take() {
         std::thread::spawn(move || {
             let mut output = Vec::new();
@@ -402,11 +561,16 @@ fn run_command(command: &str) -> CommandOutcome {
     } else {
         drop(sender);
     }
+    let is_cancelled = || {
+        cancel
+            .as_ref()
+            .is_some_and(|flag| flag.load(Ordering::SeqCst))
+    };
     let mut cancelled = false;
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break Some(status),
-            Ok(None) if command_cancelled() => {
+            Ok(None) if is_cancelled() => {
                 cancelled = true;
                 break None;
             }
@@ -427,17 +591,14 @@ fn run_command(command: &str) -> CommandOutcome {
     let Some(output) = receiver.recv_timeout(remaining).ok().flatten() else {
         return CommandOutcome::Ran(None);
     };
-    if !status.success() || output.len() > MAX_COMMAND_OUTPUT {
-        return CommandOutcome::Ran(None);
-    }
-    let text = String::from_utf8_lossy(&output);
-    let trimmed = text.trim();
-    CommandOutcome::Ran((!trimmed.is_empty()).then(|| trimmed.to_owned()))
+    ran(status.success(), &output)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
+    use std::time::Instant;
 
     fn scoped(pairs: &[(&str, &str)]) -> ScopedEnv {
         pairs
@@ -655,6 +816,171 @@ mod tests {
             Some("value")
         );
         assert_eq!(read(), "5");
+    }
+
+    /// Whether `/proc` still lists `pid`, running or a zombie.
+    #[cfg(target_os = "linux")]
+    fn listed(pid: &str) -> bool {
+        std::path::Path::new(&format!("/proc/{}", pid.trim())).exists()
+    }
+
+    /// Reads the pid a command wrote to `path`.
+    #[cfg(target_os = "linux")]
+    fn written_pid(path: &std::path::Path) -> String {
+        std::fs::read_to_string(path).expect("the command wrote its pid")
+    }
+
+    // Bake: a background process that holds the output is killed and
+    // reaped once the shell exits; the value the shell printed resolves at
+    // once instead of failing at the timeout.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_background_holder_of_the_output_is_killed_at_completion() {
+        let dir = crate::test_support::TempDir::new("config-value-holder");
+        let pid = dir.join("pid");
+        let command = format!("!sleep 1000 & echo $! > '{}'; echo held-key", pid.display());
+        let started = Instant::now();
+        assert_eq!(
+            resolve_config_value_uncached(&command, None).as_deref(),
+            Some("held-key")
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "resolved at once"
+        );
+        let pid = written_pid(&pid);
+        assert!(
+            !listed(&pid),
+            "the background sleep {pid} outlived the call"
+        );
+    }
+
+    // Bake: at the timeout the shell and everything in its group, a
+    // process holding the output included, are killed and reaped before
+    // the call returns, and nothing resolves.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_timed_out_command_and_its_holder_are_killed_and_reaped() {
+        let dir = crate::test_support::TempDir::new("config-value-timeout");
+        let pids = dir.join("pids");
+        let script = format!(
+            "sleep 1000 & echo \"$$ $!\" > '{}'; echo partial; exec sleep 1000",
+            pids.display()
+        );
+        let started = Instant::now();
+        let outcome = run_command(&script, Duration::from_millis(500), None);
+        assert!(matches!(outcome, CommandOutcome::Ran(None)));
+        assert!(started.elapsed() < Duration::from_secs(5));
+        for pid in written_pid(&pids).split_whitespace() {
+            assert!(!listed(pid), "{pid} outlived the timed-out call");
+        }
+    }
+
+    // Bake: a cancellation kills and reaps the whole group, not only the
+    // shell.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_cancelled_command_and_its_descendants_are_killed_and_reaped() {
+        let dir = crate::test_support::TempDir::new("config-value-cancel");
+        let pids = dir.join("pids");
+        let script = format!(
+            "sleep 1000 </dev/null >/dev/null 2>&1 & echo \"$$ $!\" > '{0}.tmp'; mv '{0}.tmp' '{0}'; wait",
+            pids.display()
+        );
+        let cancel = Arc::new(AtomicBool::new(false));
+        let setter = {
+            let cancel = Arc::clone(&cancel);
+            let pids = pids.clone();
+            std::thread::spawn(move || {
+                let deadline = Instant::now() + Duration::from_secs(10);
+                while !pids.exists() && Instant::now() < deadline {
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                cancel.store(true, Ordering::SeqCst);
+            })
+        };
+        let outcome = run_command(&script, COMMAND_TIMEOUT, Some(cancel));
+        let _ = setter.join();
+        assert!(matches!(outcome, CommandOutcome::Cancelled));
+        for pid in written_pid(&pids).split_whitespace() {
+            assert!(!listed(pid), "{pid} outlived the cancelled call");
+        }
+    }
+
+    // Bake: a command already cancelled never starts: its side effect
+    // does not happen, and nothing is cached.
+    #[cfg(unix)]
+    #[test]
+    fn an_already_cancelled_command_never_starts() {
+        let dir = crate::test_support::TempDir::new("config-value-precancel");
+        let marker = dir.join("ran");
+        let command = format!("!touch '{}'; echo started-key", marker.display());
+        let cancel = Arc::new(AtomicBool::new(true));
+        assert_eq!(
+            with_command_cancel(cancel, || resolve_config_value(&command, None)),
+            None
+        );
+        assert!(!marker.exists(), "a cancelled command ran");
+        assert!(
+            !command_cache()
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .contains_key(&command)
+        );
+    }
+
+    // Bake: a descendant that left the shell's group (`setsid`) and keeps
+    // the output open holds the read until the timeout, and then nothing
+    // resolves, though the shell exited with a value.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn an_escaped_holder_of_the_output_fails_the_command_at_the_timeout() {
+        let dir = crate::test_support::TempDir::new("config-value-escaped");
+        let pid = dir.join("pid");
+        let script = format!(
+            "setsid sh -c 'echo $$ > \"$0\"; exec sleep 1000' '{}' & echo escaped-key",
+            pid.display()
+        );
+        let outcome = run_command(&script, Duration::from_millis(500), None);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !pid.exists() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let escaped: Option<libc::pid_t> = std::fs::read_to_string(&pid)
+            .ok()
+            .and_then(|text| text.trim().parse().ok());
+        if let Some(escaped) = escaped {
+            // SAFETY: plain syscall on the process this test's command
+            // started; it left the group and nothing else kills it.
+            unsafe {
+                libc::kill(escaped, libc::SIGKILL);
+            }
+        }
+        assert!(escaped.is_some(), "the escaped holder never started");
+        assert!(matches!(outcome, CommandOutcome::Ran(None)));
+    }
+
+    // Bake: standard error is read and discarded, so a command that
+    // writes more to it than a pipe holds still resolves.
+    #[cfg(unix)]
+    #[test]
+    fn a_command_writing_much_to_stderr_resolves() {
+        assert_eq!(
+            resolve_config_value_uncached("!head -c 300000 /dev/zero >&2; echo noisy-key", None)
+                .as_deref(),
+            Some("noisy-key")
+        );
+    }
+
+    // Bake: a resolution made on a Tokio worker thread runs on a thread of
+    // its own, so it neither panics nor needs the caller's runtime.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_command_resolves_from_inside_a_runtime() {
+        assert_eq!(
+            resolve_config_value_uncached("!echo runtime-key", None).as_deref(),
+            Some("runtime-key")
+        );
     }
 
     #[cfg(unix)]

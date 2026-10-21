@@ -74,19 +74,49 @@
 //!   writer as its owner.
 //! - After a file is created or renamed, its directory is synced on Unix,
 //!   best effort as SQLite does: the data is already synced, and a
-//!   filesystem that cannot sync a directory does not fail the write.
-//!   Windows has no directory sync through `std`.
+//!   filesystem that cannot sync a directory does not fail the write. When
+//!   the writer creates a session directory ([`create_dir_all`]), the
+//!   parent of each directory it created is synced the same way. Windows
+//!   has no directory sync through `std`.
 //! - On macOS, `std` syncs with `F_FULLFSYNC`; where a filesystem refuses it
 //!   (`ENOTSUP` or `EINVAL`), a plain `fsync` is used.
 //!
 //! The crate's tests kill a writer process at each step of a rewrite through
-//! a temporary file (`Faults::hold_rewrite`, a test-only seam) and, on
-//! Linux, stop one inside the `write` of an append, of each line of a group,
-//! and of a rewrite's temporary file with a file size limit, which either
-//! kills it there (`SIGXFSZ`) or fails the write with `EFBIG`; `/dev/full`
-//! fails appends with `ENOSPC`. They kill processes, not the machine, so
-//! they do not test what a power loss leaves unsynced. The in-place rewrite
-//! is not tested.
+//! a temporary file and of an in-place rewrite (`Faults::hold_rewrite` and
+//! `Faults::hold_in_place`, test-only seams). On Linux they also stop a
+//! writer inside the `write` of an append, of each line of a group, and of
+//! a rewrite's temporary file with a file size limit, which either kills it
+//! there (`SIGXFSZ`) or fails the write with `EFBIG`; make the kernel
+//! return `EIO` from its `write`, `pwrite64`, `fsync`, or `fdatasync`
+//! through a seccomp filter; and fill a size-capped tmpfs, mounted in a
+//! user namespace of the test's own, until `ENOSPC` stops a write
+//! mid-line. `/dev/full` fails appends with `ENOSPC`. The seccomp filter
+//! shows how the writer handles `EIO` returned by those calls, not how a
+//! failing device behaves: one rarely fails a buffered `write`, and after
+//! a failed `fsync` the kernel may drop the dirty pages, which the filter
+//! leaves in the page cache.
+//! A killed in-place rewrite can leave the file empty or holding the first
+//! part of its new lines; the tests pin that outcome.
+//!
+//! Power loss is simulated, not physical: the durable writes log each
+//! directory creation, write, sync, file creation, truncation, rename,
+//! removal, and directory sync (`disk_log`, compiled only into the
+//! crate's tests), and a model replays every prefix of the log. It drops
+//! unsynced bytes or keeps any prefix of them, torn lines included (every
+//! byte of a short run; line ends, 4096-byte boundaries, and dense samples
+//! inside the first and last line of a long one), with or without a
+//! zero-filled tail of the kept length; it keeps names as of their
+//! directory's last sync or all of them, and loses a created directory
+//! until its parent is synced. Every state an append, a group, a first
+//! write, a migration, or a branched session's write can leave loads,
+//! skipping torn and zero-filled lines, rebuilds a provider-valid
+//! request, and holds the old or the new file of a rewrite; a file whose
+//! header survived is taken over by a next writer whose entry starts on a
+//! line of its own. A first write or
+//! an in-place rewrite torn inside its header, or left as zeros, leaves a
+//! file the next writer refuses as not a session, unchanged; an in-place
+//! rewrite can also leave a truncated file. No test cuts a machine's power
+//! or drops a device's write cache.
 
 use std::ffi::OsString;
 use std::fs::{self, File, OpenOptions, TryLockError};
@@ -96,6 +126,11 @@ use std::time::{Duration, Instant};
 
 use crate::session::SessionError;
 use crate::session::id::uuid_v4;
+
+#[cfg(test)]
+pub(crate) mod disk_log;
+#[cfg(test)]
+use disk_log::DiskOp;
 
 /// The sidecar lock file of `session_file`: its name with `.lock` appended.
 pub(crate) fn lock_path(session_file: &Path) -> PathBuf {
@@ -271,6 +306,27 @@ fn sync(file: &File, all: bool) -> io::Result<()> {
     result
 }
 
+/// [`sync`] `file`, which is at `path`; the crate's tests log it.
+fn sync_file(file: &File, path: &Path, all: bool) -> io::Result<()> {
+    sync(file, all)?;
+    #[cfg(test)]
+    disk_log::record(DiskOp::Fsync(path.to_path_buf()));
+    #[cfg(not(test))]
+    let _ = path;
+    Ok(())
+}
+
+/// Write all of `bytes` to `file`, which is at `path`; the crate's tests
+/// log the write.
+fn write_file(file: &mut File, path: &Path, bytes: &[u8]) -> io::Result<()> {
+    file.write_all(bytes)?;
+    #[cfg(test)]
+    disk_log::record(DiskOp::Write(path.to_path_buf(), bytes.to_vec()));
+    #[cfg(not(test))]
+    let _ = path;
+    Ok(())
+}
+
 /// Sync `path`'s directory so a name created or renamed there survives a
 /// crash; best effort, and nothing on Windows.
 fn sync_parent_dir(path: &Path) {
@@ -280,22 +336,64 @@ fn sync_parent_dir(path: &Path) {
             Some(dir) if !dir.as_os_str().is_empty() => dir,
             _ => Path::new("."),
         };
-        if let Ok(dir) = File::open(dir) {
-            let _ = sync(&dir, true);
+        if let Ok(file) = File::open(dir)
+            && sync(&file, true).is_ok()
+        {
+            #[cfg(test)]
+            disk_log::record(DiskOp::DirSync(dir.to_path_buf()));
         }
     }
     #[cfg(not(unix))]
     let _ = path;
 }
 
-/// Append `bytes`, which end in a newline, on a line of their own, and sync
-/// them. The file is created when missing, as Pi's `appendFileSync` does.
-pub(crate) fn append(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    let mut file = OpenOptions::new()
+/// Create `dir` and its missing ancestors, as [`fs::create_dir_all`] does,
+/// then sync the parent of each directory created, top down, best effort
+/// as [`sync_parent_dir`] is: a new session directory's name then survives
+/// a crash once a file in it is synced. Nothing is synced on Windows. The
+/// crate's tests log each creation.
+pub(crate) fn create_dir_all(dir: &Path) -> io::Result<()> {
+    let mut missing = Vec::new();
+    if cfg!(unix) {
+        let mut at = Some(dir);
+        while let Some(path) = at
+            && !path.as_os_str().is_empty()
+            && matches!(fs::symlink_metadata(path), Err(error) if error.kind() == io::ErrorKind::NotFound)
+        {
+            missing.push(path);
+            at = path.parent();
+        }
+    }
+    fs::create_dir_all(dir)?;
+    for created in missing.into_iter().rev() {
+        #[cfg(test)]
+        disk_log::record(DiskOp::CreateDir(created.to_path_buf()));
+        sync_parent_dir(created);
+    }
+    Ok(())
+}
+
+/// Open `path` to append to it, creating it when missing; the crate's
+/// tests log a creation.
+fn open_append(path: &Path) -> io::Result<File> {
+    #[cfg(test)]
+    let created = !path.exists();
+    let file = OpenOptions::new()
         .read(true)
         .append(true)
         .create(true)
         .open(path)?;
+    #[cfg(test)]
+    if created {
+        disk_log::record(DiskOp::Create(path.to_path_buf()));
+    }
+    Ok(file)
+}
+
+/// Append `bytes`, which end in a newline, on a line of their own, and sync
+/// them. The file is created when missing, as Pi's `appendFileSync` does.
+pub(crate) fn append(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let mut file = open_append(path)?;
     let len = file.metadata()?.len();
     let mut out = Vec::with_capacity(bytes.len() + 1);
     if len > 0 {
@@ -307,8 +405,8 @@ pub(crate) fn append(path: &Path, bytes: &[u8]) -> io::Result<()> {
         }
     }
     out.extend_from_slice(bytes);
-    file.write_all(&out)?;
-    sync(&file, false)?;
+    write_file(&mut file, path, &out)?;
+    sync_file(&file, path, false)?;
     if len == 0 {
         sync_parent_dir(path);
     }
@@ -349,6 +447,8 @@ pub(crate) struct Faults {
     next: Option<Fault>,
     #[cfg(test)]
     rewrite: Option<RewriteHold>,
+    #[cfg(test)]
+    in_place: Option<InPlaceHold>,
 }
 
 /// A step of a rewrite through a temporary file ([`replace`]) at which a
@@ -381,6 +481,49 @@ impl RewriteStep {
         Self::Renamed,
         Self::DirSynced,
     ];
+}
+
+/// A step of an in-place rewrite ([`replace`] of a file locked in place,
+/// hard-linked, or behind a dangling link) at which a test can stop the
+/// process ([`Faults::hold_in_place`]).
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum InPlaceStep {
+    /// The file is opened, truncated to empty.
+    Truncated,
+    /// The first half of the new contents is written to it, unsynced.
+    PartlyWritten,
+    /// All of the new contents are written to it, unsynced.
+    Written,
+    /// It is synced: the rewrite is done.
+    Synced,
+}
+
+#[cfg(test)]
+impl InPlaceStep {
+    /// Every step, in the order an in-place rewrite reaches them.
+    pub(crate) const ALL: [Self; 4] = [
+        Self::Truncated,
+        Self::PartlyWritten,
+        Self::Written,
+        Self::Synced,
+    ];
+}
+
+/// A callback the next in-place rewrite runs at its step.
+#[cfg(test)]
+struct InPlaceHold {
+    step: InPlaceStep,
+    hold: Box<dyn FnOnce() + Send>,
+}
+
+#[cfg(test)]
+impl std::fmt::Debug for InPlaceHold {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("InPlaceHold")
+            .field("step", &self.step)
+            .finish()
+    }
 }
 
 /// A callback the next rewrite runs at its step.
@@ -471,6 +614,35 @@ impl Faults {
         Err(io::Error::other("injected: held rewrite"))
     }
 
+    /// Run `hold` when the next in-place rewrite reaches `step`; a test uses
+    /// it to stop the process there. The rewrite fails if `hold` returns.
+    #[cfg(test)]
+    pub(crate) fn hold_in_place(&mut self, step: InPlaceStep, hold: Box<dyn FnOnce() + Send>) {
+        self.in_place = Some(InPlaceHold { step, hold });
+    }
+
+    /// The in-place rewrite has reached `step`: run the callback held for
+    /// it, and fail if that returns. With a hold at
+    /// [`InPlaceStep::PartlyWritten`], `half` is written first.
+    #[cfg(test)]
+    fn reach_in_place(
+        &mut self,
+        step: InPlaceStep,
+        file: &mut File,
+        half: Option<&[u8]>,
+    ) -> io::Result<()> {
+        if self.in_place.as_ref().is_none_or(|held| held.step != step) {
+            return Ok(());
+        }
+        if let Some(half) = half {
+            file.write_all(half)?;
+        }
+        if let Some(held) = self.in_place.take() {
+            (held.hold)();
+        }
+        Err(io::Error::other("injected: held in-place rewrite"))
+    }
+
     /// With a hold at [`RewriteStep::PartlyWritten`], write the first half
     /// of `bytes` to the temporary file and hold there.
     #[cfg(test)]
@@ -483,19 +655,29 @@ impl Faults {
     }
 }
 
-/// Writes `bytes` to `file` as far as it can, returning how many it wrote
-/// before an error.
-fn write_counted(file: &mut File, bytes: &[u8]) -> Result<(), (usize, io::Error)> {
+/// Writes `bytes` to `file`, which is at `path`, as far as it can,
+/// returning how many it wrote before an error; the crate's tests log what
+/// it wrote.
+fn write_counted(file: &mut File, path: &Path, bytes: &[u8]) -> Result<(), (usize, io::Error)> {
     let mut written = 0;
-    while written < bytes.len() {
+    let result = loop {
+        if written == bytes.len() {
+            break Ok(());
+        }
         match file.write(&bytes[written..]) {
-            Ok(0) => return Err((written, io::ErrorKind::WriteZero.into())),
+            Ok(0) => break Err((written, io::ErrorKind::WriteZero.into())),
             Ok(n) => written += n,
             Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
-            Err(error) => return Err((written, error)),
+            Err(error) => break Err((written, error)),
         }
+    };
+    #[cfg(test)]
+    if written > 0 {
+        disk_log::record(DiskOp::Write(path.to_path_buf(), bytes[..written].to_vec()));
     }
-    Ok(())
+    #[cfg(not(test))]
+    let _ = path;
+    result
 }
 
 /// Append `lines`, each ending in a newline, in order, the first on a line
@@ -514,12 +696,7 @@ pub(crate) fn append_lines(
         error,
     };
     let not_written = |error| failure(0, FailedLine::NotWritten, error);
-    let mut file = OpenOptions::new()
-        .read(true)
-        .append(true)
-        .create(true)
-        .open(path)
-        .map_err(not_written)?;
+    let mut file = open_append(path).map_err(not_written)?;
     let len = file.metadata().map_err(not_written)?.len();
     let mut separator = false;
     if len > 0 {
@@ -529,7 +706,7 @@ pub(crate) fn append_lines(
         separator = last[0] != b'\n';
     }
     if separator {
-        write_counted(&mut file, b"\n").map_err(|(_, error)| not_written(error))?;
+        write_counted(&mut file, path, b"\n").map_err(|(_, error)| not_written(error))?;
     }
     #[cfg(not(test))]
     let _ = faults;
@@ -538,7 +715,7 @@ pub(crate) fn append_lines(
         // one panics the test rather than pass for the injected stage.
         #[cfg(test)]
         let real_write = |file: &mut File, bytes: &[u8]| {
-            if let Err((written, error)) = write_counted(file, bytes) {
+            if let Err((written, error)) = write_counted(file, path, bytes) {
                 panic!("test seam: real write failed after {written} bytes: {error}");
             }
         };
@@ -596,7 +773,7 @@ pub(crate) fn append_lines(
                 ));
             }
         }
-        write_counted(&mut file, line).map_err(|(written, error)| {
+        write_counted(&mut file, path, line).map_err(|(written, error)| {
             let state = if written == 0 {
                 FailedLine::NotWritten
             } else {
@@ -604,7 +781,8 @@ pub(crate) fn append_lines(
             };
             failure(index, state, error)
         })?;
-        sync(&file, false).map_err(|error| failure(index, FailedLine::Unsynced, error))?;
+        sync_file(&file, path, false)
+            .map_err(|error| failure(index, FailedLine::Unsynced, error))?;
         if len == 0 && index == 0 {
             sync_parent_dir(path);
         }
@@ -616,8 +794,10 @@ pub(crate) fn append_lines(
 /// its directory entry.
 pub(crate) fn create_new(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let mut file = OpenOptions::new().write(true).create_new(true).open(path)?;
-    file.write_all(bytes)?;
-    sync(&file, false)?;
+    #[cfg(test)]
+    disk_log::record(DiskOp::Create(path.to_path_buf()));
+    write_file(&mut file, path, bytes)?;
+    sync_file(&file, path, false)?;
     drop(file);
     sync_parent_dir(path);
     Ok(())
@@ -659,18 +839,19 @@ impl Staged {
             .open(&staged.temp)?;
         #[cfg(test)]
         {
+            disk_log::record(DiskOp::Create(staged.temp.clone()));
             faults.reach(RewriteStep::Created)?;
             faults.partly_write(&mut file, bytes)?;
         }
         #[cfg(not(test))]
         let _ = faults;
-        file.write_all(bytes)?;
+        write_file(&mut file, &staged.temp, bytes)?;
         #[cfg(test)]
         faults.reach(RewriteStep::Written)?;
         if let Some(permissions) = permissions {
             file.set_permissions(permissions)?;
         }
-        sync(&file, true)?;
+        sync_file(&file, &staged.temp, true)?;
         #[cfg(test)]
         faults.reach(RewriteStep::Synced)?;
         Ok(staged)
@@ -688,6 +869,8 @@ impl Staged {
         fs::rename(&self.temp, &self.target)?;
         self.committed = true;
         #[cfg(test)]
+        disk_log::record(DiskOp::Rename(self.temp.clone(), self.target.clone()));
+        #[cfg(test)]
         faults.reach(RewriteStep::Renamed)?;
         #[cfg(not(test))]
         let _ = faults;
@@ -700,21 +883,44 @@ impl Staged {
 
 impl Drop for Staged {
     fn drop(&mut self) {
-        if !self.committed {
-            let _ = fs::remove_file(&self.temp);
+        if !self.committed && fs::remove_file(&self.temp).is_ok() {
+            #[cfg(test)]
+            disk_log::record(DiskOp::Remove(self.temp.clone()));
         }
     }
 }
 
-/// Truncate `path` and write `bytes` in place, then sync it.
-fn overwrite(path: &Path, bytes: &[u8]) -> io::Result<()> {
+/// Truncate `path` and write `bytes` in place, then sync it. `faults` is
+/// consulted only by the crate's tests.
+fn overwrite(path: &Path, bytes: &[u8], faults: &mut Faults) -> io::Result<()> {
+    #[cfg(test)]
+    let created = !path.exists();
     let mut file = OpenOptions::new()
         .write(true)
         .create(true)
         .truncate(true)
         .open(path)?;
-    file.write_all(bytes)?;
-    sync(&file, false)
+    #[cfg(test)]
+    disk_log::record(if created {
+        DiskOp::Create(path.to_path_buf())
+    } else {
+        DiskOp::Truncate(path.to_path_buf())
+    });
+    #[cfg(test)]
+    {
+        faults.reach_in_place(InPlaceStep::Truncated, &mut file, None)?;
+        let half = bytes.get(..bytes.len() / 2).unwrap_or_default();
+        faults.reach_in_place(InPlaceStep::PartlyWritten, &mut file, Some(half))?;
+    }
+    #[cfg(not(test))]
+    let _ = faults;
+    write_file(&mut file, path, bytes)?;
+    #[cfg(test)]
+    faults.reach_in_place(InPlaceStep::Written, &mut file, None)?;
+    sync_file(&file, path, false)?;
+    #[cfg(test)]
+    faults.reach_in_place(InPlaceStep::Synced, &mut file, None)?;
+    Ok(())
 }
 
 /// Whether other names link to the file.
@@ -735,8 +941,7 @@ fn has_other_links(metadata: &fs::Metadata) -> bool {
 /// over the real file, the file holds either its old contents or all of
 /// `bytes` whenever the process stops; with `in_place`, or for a file with
 /// other hard links or a dangling link, it is rewritten in place
-/// (module docs). `faults` is consulted only by the crate's tests, and
-/// only by a rewrite through a temporary file.
+/// (module docs). `faults` is consulted only by the crate's tests.
 pub(crate) fn replace(
     path: &Path,
     bytes: &[u8],
@@ -744,13 +949,13 @@ pub(crate) fn replace(
     faults: &mut Faults,
 ) -> io::Result<()> {
     if in_place {
-        return overwrite(path, bytes);
+        return overwrite(path, bytes, faults);
     }
     let is_link = fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_symlink());
     let target = if is_link {
         match fs::canonicalize(path) {
             Ok(target) => target,
-            Err(_) => return overwrite(path, bytes),
+            Err(_) => return overwrite(path, bytes, faults),
         }
     } else {
         path.to_path_buf()
@@ -761,7 +966,7 @@ pub(crate) fn replace(
         Err(error) => return Err(error),
     };
     if existing.as_ref().is_some_and(has_other_links) {
-        return overwrite(&target, bytes);
+        return overwrite(&target, bytes, faults);
     }
     let permissions = existing.map(|metadata| metadata.permissions());
     Staged::write(&target, bytes, permissions, faults)?.commit(faults)
