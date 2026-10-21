@@ -22,7 +22,7 @@ use crate::session::{
 use crate::test_support::TempDir;
 
 /// The longest a test waits on a child before it fails instead of hanging.
-pub(super) const PATIENCE: Duration = Duration::from_secs(30);
+pub(crate) const PATIENCE: Duration = Duration::from_secs(30);
 
 /// Exit codes a child ends with on its own, which an expected kill must
 /// not be mistaken for: its watchdog, and a write that returned.
@@ -284,7 +284,7 @@ pub(super) fn take_over(file: &Path) -> SessionManager {
 /// forwarding its stdout and stderr lines. Drop kills and reaps the child,
 /// then joins the readers, which end at their pipes' end once the child is
 /// gone, so none outlives the fixture, whichever assertion fails first.
-pub(super) struct TestChild {
+pub(crate) struct TestChild {
     child: Child,
     output: mpsc::Receiver<String>,
     /// Every line received so far, for failure messages.
@@ -330,7 +330,7 @@ impl TestChild {
 
     /// [`Self::spawn`], with `configure` adjusting the command first, such
     /// as to run a `pre_exec` hook; fails with the error starting it.
-    pub(super) fn try_spawn(
+    pub(crate) fn try_spawn(
         test: &str,
         env: &str,
         spec: &str,
@@ -407,7 +407,7 @@ impl TestChild {
     /// Wait for the child to end on its own, killing it and failing after
     /// [`PATIENCE`]; returns its status and every line it printed.
     #[cfg(target_os = "linux")]
-    pub(super) fn wait(&mut self) -> (ExitStatus, Vec<String>) {
+    pub(crate) fn wait(&mut self) -> (ExitStatus, Vec<String>) {
         let status = self.reap();
         for reader in self.readers.drain(..) {
             assert!(reader.join().is_ok(), "an output reader panicked");

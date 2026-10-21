@@ -4,17 +4,20 @@
 //! (`session::manager::kernel_faults`) that fails `write` and `pwrite64`,
 //! or `fsync` and `fdatasync`, with `EIO` on the descriptor the session
 //! file's next append opens: the lowest free one. The next prompt's write
-//! fails as on a failing disk, with no Rust seam: the session stops before
-//! another request and takes no more prompts, without a panic. The parent
-//! then checks the file loads, rebuilds a provider-valid request, and is
-//! taken over. Where seccomp is unavailable the test skips with a note,
-//! unless `BAKE_REQUIRE_KERNEL_FAULTS=1`.
-
-use std::io::{BufRead, BufReader};
-use std::process::{Command, Stdio};
+//! gets `EIO` back from the real system call, with no Rust seam: the
+//! session stops before another request and takes no more prompts,
+//! without a panic. The parent then checks the file loads, rebuilds a
+//! provider-valid request, and is taken over. This shows how the session
+//! handles `EIO` from those calls, with the page cache intact; a failing
+//! device rarely fails a buffered `write`, and after its `fsync` fails the
+//! kernel may drop the dirty pages. The parent bounds the child with a
+//! watchdog and kills and reaps it on every path. Where seccomp is
+//! unavailable the test skips with a note, unless
+//! `BAKE_REQUIRE_KERNEL_FAULTS=1`.
 
 use super::rerun::conversation;
 use super::*;
+use crate::session::manager::crash_support::TestChild;
 use crate::session::manager::kernel_faults::{Calls, EioFilter, lowest_free_fd, skip_unavailable};
 
 const CHILD_DIR: &str = "BAKE_TEST_EIO_SESSION_DIR";
@@ -125,20 +128,19 @@ fn request_of(manager: &SessionManager) -> Vec<Message> {
 fn a_session_write_failing_with_eio_stops_the_session() {
     for calls in ["write", "sync"] {
         let dir = TempDir::new(&format!("run-journal-eio-{calls}"));
-        let mut child = Command::new(std::env::current_exe().unwrap())
-            .args(["--exact", CHILD_TEST, "--nocapture", "--test-threads", "1"])
-            .env(CHILD_DIR, dir.path())
-            .env(CHILD_CALLS, calls)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
-            .spawn()
-            .unwrap();
-        let output: Vec<String> = BufReader::new(child.stdout.take().unwrap())
-            .lines()
-            .map_while(Result::ok)
-            .collect();
-        let status = child.wait().unwrap();
+        // Waits at most `PATIENCE` for the child to end, then kills it;
+        // dropped on any failure, it kills and reaps the child.
+        let mut child = TestChild::try_spawn(
+            CHILD_TEST,
+            CHILD_DIR,
+            &dir.path().to_string_lossy(),
+            |command| {
+                command.env(CHILD_CALLS, calls);
+            },
+        )
+        .unwrap();
+        let (status, output) = child.wait();
+        drop(child);
         if let Some(line) = output.iter().find(|line| line.contains(UNAVAILABLE)) {
             skip_unavailable("a seccomp filter", line);
             return;

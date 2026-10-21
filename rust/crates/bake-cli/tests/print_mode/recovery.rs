@@ -193,15 +193,21 @@ fn resuming_rejects_piped_prompts_and_replacement_limits() {
     assert_eq!(server.requests().len(), 1);
 }
 
+/// Make a FIFO at `path`.
+#[cfg(target_os = "linux")]
+fn make_fifo(path: &Path) {
+    use std::os::unix::ffi::OsStrExt;
+    let name = std::ffi::CString::new(path.as_os_str().as_bytes()).expect("path");
+    // SAFETY: `name` is a NUL-terminated string that outlives the call.
+    assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0, "mkfifo");
+}
+
 /// Make a FIFO at `path`, and hold it open for reading and writing, so a
 /// reader's `open` returns at once and its `read` blocks until the holder
 /// writes.
 #[cfg(target_os = "linux")]
 fn held_fifo(path: &Path) -> std::fs::File {
-    use std::os::unix::ffi::OsStrExt;
-    let name = std::ffi::CString::new(path.as_os_str().as_bytes()).expect("path");
-    // SAFETY: `name` is a NUL-terminated string that outlives the call.
-    assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0, "mkfifo");
+    make_fifo(path);
     std::fs::OpenOptions::new()
         .read(true)
         .write(true)
@@ -258,9 +264,12 @@ impl KilledPrint {
                 }
             }
             if let Some(status) = killed.child.try_wait().expect("bake status") {
-                panic!("bake exited ({status}) before its dispatch");
+                panic!("bake exited ({status}) before its kill point");
             }
-            assert!(Instant::now() < deadline, "bake never dispatched the call");
+            assert!(
+                Instant::now() < deadline,
+                "bake never reached its kill point"
+            );
             std::thread::sleep(Duration::from_millis(10));
         };
         killed.child.kill().expect("kill bake");
@@ -279,9 +288,30 @@ impl Drop for KilledPrint {
     }
 }
 
-/// `bake -p --recoverable` killed while its `read` of a FIFO blocks, after
-/// the call's dispatch is recorded: `--resume-run` reruns the `Safe` read
-/// once, now of a regular file, and finishes with one more request.
+/// Open the FIFO at `path` for writing without blocking: `None` while no
+/// process holds it open for reading (`ENXIO`). The write end, once open,
+/// lets a reader blocked in its `open` return, and its `read` then blocks
+/// until the write end writes or closes.
+#[cfg(target_os = "linux")]
+fn fifo_writer(path: &Path) -> Option<std::fs::File> {
+    use std::os::unix::fs::OpenOptionsExt;
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .custom_flags(libc::O_NONBLOCK)
+        .open(path)
+    {
+        Ok(file) => Some(file),
+        Err(error) if error.raw_os_error() == Some(libc::ENXIO) => None,
+        Err(error) => panic!("open the FIFO for writing: {error}"),
+    }
+}
+
+/// `bake -p --recoverable` killed while its `read` tool has a FIFO open
+/// for reading, after the call's dispatch is recorded: the kill comes once
+/// a non-blocking open of the FIFO for writing succeeds, which only a
+/// reader's open allows, and before any byte is written to it or the write
+/// end closes, so the tool is still blocked in that open or in its read. `--resume-run` reruns the `Safe` read once, now of a
+/// regular file, and finishes with one more request.
 #[cfg(target_os = "linux")]
 #[test]
 fn a_killed_print_run_reruns_its_safe_read_once() {
@@ -291,13 +321,20 @@ fn a_killed_print_run_reruns_its_safe_read_once() {
     ]);
     let workspace = Workspace::new("recover-killed-read", server.port);
     let pipe = workspace.project().join("pipe");
-    let holder = held_fifo(&pipe);
+    make_fifo(&pipe);
+    // Held, never written, until after the kill.
+    let writer = std::cell::RefCell::new(None);
     let (file, run_id) = KilledPrint::run(
         &workspace,
         &["-p", "--recoverable", "Read the pipe"],
-        || true,
+        || {
+            if writer.borrow().is_none() {
+                *writer.borrow_mut() = fifo_writer(&pipe);
+            }
+            writer.borrow().is_some()
+        },
     );
-    drop(holder);
+    drop(writer);
     let (kinds, _) = journal(&file);
     assert_eq!(
         kinds.last().map(String::as_str),

@@ -1,12 +1,17 @@
-//! Real `EIO` from the kernel on the session writer's write and sync
-//! system calls. A child process re-running this test binary opens the
-//! session, then installs a seccomp filter (`kernel_faults`) that fails
-//! `write` and `pwrite64`, or `fsync` and `fdatasync`, with `EIO` on every
-//! descriptor from the lowest free one up: the session file the next append
-//! opens, or a migration's temporary file. A group's line is chosen by its
+//! `EIO` returned by the kernel, through a seccomp filter, from the
+//! session writer's write and sync system calls. A child process
+//! re-running this test binary opens the session, then installs a seccomp
+//! filter (`kernel_faults`) that fails `write` and `pwrite64`, or `fsync`
+//! and `fdatasync`, with `EIO` on every descriptor from the lowest free
+//! one up: the session file the next append opens, or a migration's
+//! temporary file. A group's line is chosen by its
 //! length, which the filter matches against the write's byte count. No
-//! Rust seam is involved; the writer meets the error as it would meet a
-//! failing disk.
+//! Rust seam is involved: the writer gets `EIO` back from the real system
+//! call. This shows how the writer handles that error, not how a failing
+//! device behaves. A device rarely fails a buffered `write`, which only
+//! copies into the page cache; and after a real `fsync` failure the
+//! kernel may drop the dirty pages, so a reader may no longer see bytes
+//! the write put there, while the filter leaves the page cache intact.
 //!
 //! The child checks the error the writer returns (`SessionError::Io` or
 //! `GroupWriteError`, naming `EIO`) and that the manager keeps what Pi
@@ -304,9 +309,10 @@ fn an_append_whose_write_fails_with_eio_leaves_the_file_as_it_was() {
     session.check_left(0, "single write");
 }
 
-/// An append whose `fdatasync` the kernel fails with `EIO` returns the
-/// error after the whole line reached the file: a reader sees the entry,
-/// though a power loss may still drop it.
+/// An append whose `fdatasync` the filter fails with `EIO` returns the
+/// error after the whole line reached the page cache, which the filter
+/// leaves intact: a reader sees the entry, though a power loss may still
+/// drop it.
 #[test]
 fn an_append_whose_sync_fails_with_eio_reports_the_unsynced_line() {
     let session = Session::single();
@@ -335,8 +341,9 @@ fn a_group_whose_line_write_fails_with_eio_keeps_the_lines_before_it() {
     }
 }
 
-/// A group whose first `fdatasync` the kernel fails with `EIO` stops after
-/// that line, reported unsynced; the line is in the file and loads.
+/// A group whose first `fdatasync` the filter fails with `EIO` stops after
+/// that line, reported unsynced; with the page cache intact, the line is
+/// in the file and loads.
 #[test]
 fn a_group_whose_sync_fails_with_eio_stops_at_the_unsynced_line() {
     let session = Session::group();

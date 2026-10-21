@@ -4,14 +4,17 @@
 //! with uid and gid maps, between `fork` and `exec`), where a tmpfs a few
 //! pages large is mounted over a directory. The child fills it with a
 //! filler file and a growing session until the kernel refuses a write
-//! with `ENOSPC`, part way through a line, and checks what follows: later
+//! with `ENOSPC`, part way through a line (the turns are sized so that no
+//! line ends on a page boundary), and checks what follows: later
 //! writes are refused, the file loads to its whole lines and rebuilds a
 //! provider-valid request, and once space returns the next writer takes
 //! it over. It copies the file out for the parent to check again.
 //!
 //! The mount lives in the child's namespace and vanishes with it. Where
-//! unprivileged user namespaces are unavailable the test skips with a
-//! note, unless `BAKE_REQUIRE_KERNEL_FAULTS=1`, which CI sets.
+//! the kernel refuses unprivileged user or mount namespaces or a tmpfs
+//! mount in one, the test skips with a note, unless
+//! `BAKE_REQUIRE_KERNEL_FAULTS=1`, which CI sets; any other error starting
+//! the child fails it.
 
 use std::ffi::CString;
 use std::io::Write;
@@ -48,16 +51,52 @@ fn assert_enospc(error: &SessionError, case: &str) {
     assert_eq!(source.raw_os_error(), Some(libc::ENOSPC), "{case}: {error}");
 }
 
-/// A user message, then an assistant answer, each about 1 KiB.
-fn turn(manager: &mut SessionManager, index: usize) -> Result<(), SessionError> {
-    let text = format!("{index:04} {}", "x".repeat(1000));
-    manager.append_message(message(
-        json!({"role": "user", "content": text, "timestamp": 1}),
-    ))?;
-    manager.append_message(message(json!({"role": "assistant",
-        "content": [{"type": "text", "text": text}], "api": "faux", "provider": "faux",
-        "model": "faux-1", "usage": usage(), "stopReason": "stop", "timestamp": 2})))?;
-    Ok(())
+/// The size of a tmpfs page, which it allocates whole.
+const PAGE: u64 = 4096;
+
+/// Grows a session by turns whose lines never end on a page boundary, so
+/// the write that finds the tmpfs full always stops inside a line: the
+/// kernel fills the last free page, then refuses the rest with `ENOSPC`.
+#[derive(Default)]
+struct Grower {
+    /// The bytes a line adds around its text, per role, as last measured.
+    overhead: [Option<u64>; 2],
+}
+
+impl Grower {
+    /// A user message, then an assistant answer, each about 1 KiB.
+    fn turn(&mut self, manager: &mut SessionManager, index: usize) -> Result<(), SessionError> {
+        for role in [0, 1] {
+            let file = manager.session_file().expect("file").to_path_buf();
+            let len = std::fs::metadata(&file).map_or(0, |metadata| metadata.len());
+            let mut text = format!("{index:04} {}", "x".repeat(1000));
+            let predicted = self.overhead[role].map(|overhead| {
+                if (len + text.len() as u64 + overhead).is_multiple_of(PAGE) {
+                    text.push('x');
+                }
+                text.len() as u64 + overhead
+            });
+            manager.append_message(message(if role == 0 {
+                json!({"role": "user", "content": text, "timestamp": 1})
+            } else {
+                json!({"role": "assistant", "content": [{"type": "text", "text": text}],
+                    "api": "faux", "provider": "faux", "model": "faux-1", "usage": usage(),
+                    "stopReason": "stop", "timestamp": 2})
+            }))?;
+            let line = std::fs::metadata(&file).expect("file").len() - len;
+            // The first prompt also writes the header, and its line has no
+            // parent; every later line is as long as predicted.
+            if index >= 2 {
+                assert_eq!(
+                    Some(line),
+                    predicted,
+                    "turn {index}: a line of unexpected length"
+                );
+            }
+            self.overhead[role] = Some(line - text.len() as u64);
+        }
+        Ok(())
+    }
 }
 
 /// Not a test of its own: the child of the test below, which re-runs this
@@ -87,24 +126,21 @@ fn full_filesystem_child() {
     )
     .expect("session");
     // Grow the session until the kernel refuses a write.
+    let mut grower = Grower::default();
     let mut index = 0;
     let error = loop {
-        if let Err(error) = turn(&mut manager, index) {
+        if let Err(error) = grower.turn(&mut manager, index) {
             break error;
         }
         index += 1;
         assert!(index < 100, "the tmpfs never filled");
     };
-    assert!(index > 0, "not one turn fit");
+    assert!(index > 2, "the tmpfs filled before line lengths were known");
     assert_enospc(&error, "the write that filled the tmpfs");
     let file = manager.session_file().expect("file").to_path_buf();
     let full = read(&file);
-    let torn = full.last() != Some(&b'\n');
-    println!(
-        "filled at {} bytes after {index} turns, {}",
-        full.len(),
-        if torn { "mid-line" } else { "at a line's end" }
-    );
+    println!("filled at {} bytes after {index} turns", full.len());
+    assert_ne!(full.last(), Some(&b'\n'), "ENOSPC tore no line");
 
     // Later writes are refused: a single append keeps its entry in memory
     // as in Pi, a group keeps nothing, and neither changes the file.
@@ -141,16 +177,11 @@ fn full_filesystem_child() {
     assert_eq!(provider_problem(&request(&context_of(&file))), None);
     std::fs::write(copy, &full).expect("copy out");
 
-    // A torn tail needs a newline the full tmpfs refuses, so the next
+    // The torn tail needs a newline the full tmpfs refuses, so the next
     // writer cannot open the file until space returns.
     match SessionManager::open(&file, None, None) {
-        Err(error) if torn => assert_enospc(&error, "the next writer on a full tmpfs"),
-        Err(error) => panic!("the next writer failed: {error}"),
-        Ok(mut taken) => {
-            assert!(!torn, "a torn file opened on a full tmpfs");
-            let error = taken.append_session_info("full").expect_err("full");
-            assert_enospc(&error, "an append by the next writer");
-        }
+        Err(error) => assert_enospc(&error, "the next writer on a full tmpfs"),
+        Ok(_) => panic!("a torn file opened on a full tmpfs"),
     }
     std::fs::remove_file(&filler).expect("give space back");
     let mut taken = take_over(&file);
@@ -249,13 +280,31 @@ fn a_session_on_a_full_tmpfs_keeps_a_loadable_prefix_and_refuses_later_writes() 
     });
     let mut child = match spawned {
         Ok(child) => child,
-        Err(error) => {
+        // The errors that mean the kernel or its policy refuses
+        // unprivileged user or mount namespaces, or a tmpfs mount in one:
+        // EPERM and EACCES from policy, EINVAL and ENOSYS from a kernel
+        // without them, ENOSPC and EUSERS at the namespace limit. Any
+        // other error starting the child fails the test.
+        Err(error)
+            if matches!(
+                error.raw_os_error(),
+                Some(
+                    libc::EPERM
+                        | libc::EACCES
+                        | libc::EINVAL
+                        | libc::ENOSYS
+                        | libc::ENOSPC
+                        | libc::EUSERS
+                )
+            ) =>
+        {
             skip_unavailable(
                 "an unprivileged user and mount namespace with a tmpfs",
                 &error.to_string(),
             );
             return;
         }
+        Err(error) => panic!("the child did not start: {error}"),
     };
     let (status, output) = child.wait();
     assert!(status.success(), "{status}: {output:?}");
@@ -284,12 +333,12 @@ fn a_session_on_a_full_tmpfs_keeps_a_loadable_prefix_and_refuses_later_writes() 
     drop(taken);
     let after = read(&copy);
     assert!(after.starts_with(&full));
+    // The torn line is set apart by a newline before the next entry.
     let appended = lines(&after[full.len()..]);
-    let info = match appended.as_slice() {
-        [newline, info] if *newline == b"\n" => info,
-        [info] => info,
-        other => panic!("{} lines appended", other.len()),
+    let [newline, info] = appended.as_slice() else {
+        panic!("{} lines appended", appended.len());
     };
+    assert_eq!(*newline, b"\n");
     let info: Value = serde_json::from_slice(info).expect("the next writer's line");
     assert_eq!(info["type"], "session_info");
 }
