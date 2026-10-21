@@ -8,7 +8,7 @@ bun scripts/rust-perf.ts --arm ts:/path/to/bake-v0.3.8 --arm native:rust/target/
 bun scripts/rust-perf.ts budgets --baseline .preflight/perf/<report>.json --arm ts:/path/to/bake-v0.3.8
 ```
 
-The `ts` arm is a clean v0.3.8 checkout built with `bun install --frozen-lockfile`, `bun run build`, and `bun run build:native-system`; the harness runs `node <checkout>/apps/cli/lib/bin.js --profile tui --patch <file>` in it. `--workload` (repeatable) selects workloads, `--samples` the measured samples per arm, workload, and cache mode (20 by default), and `--mode cold`, `warm`, or `both` (the default) the cache conditions. Reports go to `.preflight/perf/` unless `--out` names another file; the harness refuses any path under `docs/`. The comment at the top of `scripts/rust-perf.ts` lists every option.
+The `ts` arm is a clean v0.3.8 checkout (`git worktree add --detach <dir> v0.3.8`, so the report records the tag's revision) built with `bun install --frozen-lockfile`, `bun run build`, and `bun run build:native-system`; the harness runs `node <checkout>/apps/cli/lib/bin.js --profile tui --patch <file>` in it. `--workload` (repeatable) selects workloads, `--samples` the measured samples per arm, workload, and cache mode (20 by default), and `--mode cold`, `warm`, or `both` (the default) the cache conditions. Reports go to `.preflight/perf/` unless `--out` names another file; the harness refuses any path under `docs/`. The comment at the top of `scripts/rust-perf.ts` lists every option.
 
 ## Workloads
 
