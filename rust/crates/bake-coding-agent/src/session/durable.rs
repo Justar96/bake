@@ -80,13 +80,27 @@
 //!   (`ENOTSUP` or `EINVAL`), a plain `fsync` is used.
 //!
 //! The crate's tests kill a writer process at each step of a rewrite through
-//! a temporary file (`Faults::hold_rewrite`, a test-only seam) and, on
-//! Linux, stop one inside the `write` of an append, of each line of a group,
-//! and of a rewrite's temporary file with a file size limit, which either
-//! kills it there (`SIGXFSZ`) or fails the write with `EFBIG`; `/dev/full`
-//! fails appends with `ENOSPC`. They kill processes, not the machine, so
-//! they do not test what a power loss leaves unsynced. The in-place rewrite
-//! is not tested.
+//! a temporary file and of an in-place rewrite (`Faults::hold_rewrite` and
+//! `Faults::hold_in_place`, test-only seams). On Linux they also stop a
+//! writer inside the `write` of an append, of each line of a group, and of
+//! a rewrite's temporary file with a file size limit, which either kills it
+//! there (`SIGXFSZ`) or fails the write with `EFBIG`; fail its writes and
+//! syncs with a real `EIO` from a seccomp filter; and fill a size-capped
+//! tmpfs, mounted in a user namespace of the test's own, until a write
+//! stops mid-line with `ENOSPC`. `/dev/full` fails appends with `ENOSPC`.
+//! A killed in-place rewrite can leave the file empty or holding the first
+//! part of its new lines; the tests pin that outcome.
+//!
+//! Power loss is simulated, not physical: the durable writes log each
+//! write, sync, creation, truncation, rename, removal, and directory sync
+//! (`disk_log`, compiled only into the crate's tests), and a model replays
+//! every prefix of the log, dropping unsynced bytes or keeping them up to a
+//! line boundary, and keeping names as of the last directory sync or all of
+//! them. Every state an append, a group, a first write, a migration, or a
+//! branched session's write can leave loads, rebuilds a provider-valid
+//! request, and holds the old or the new file of a rewrite; an in-place
+//! rewrite can leave a truncated file. No test cuts a machine's power or
+//! drops a device's write cache.
 
 use std::ffi::OsString;
 use std::fs::{self, File, OpenOptions, TryLockError};
