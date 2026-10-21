@@ -96,6 +96,11 @@ impl LocalShellOperations {
         self.owner = owner;
         self
     }
+
+    /// The owner given to [`Self::with_owner`], if any.
+    pub(crate) fn owner(&self) -> Option<&WorkGate> {
+        self.owner.as_ref()
+    }
 }
 
 /// Pi's `createLocalBashOperations({ shellPath })`.

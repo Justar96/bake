@@ -32,7 +32,7 @@ use bake_agent::BoxFuture;
 use bake_ai::AbortSignal;
 use bake_sandbox::escalation::{escalation_hint_marker, sandbox_denial_marker};
 use bake_sandbox::{
-    ConfinedCommand, SandboxMode, SandboxPolicy, SandboxProvider, SandboxUnavailable,
+    ConfinedCommand, ProbeOwner, SandboxMode, SandboxPolicy, SandboxProvider, SandboxUnavailable,
     classify_runner_failure, matches_signature,
 };
 use serde_json::Value;
@@ -40,6 +40,7 @@ use serde_json::Value;
 use super::ToolPermissions;
 use super::engine::{BlankJustification, ToolCall};
 use super::with_escalation_parameters;
+use crate::owned_work::WorkGate;
 use crate::tools::bash::{
     BashDataCallback, BashExecError, BashExecOptions, BashOperations, BashToolOptions,
     LocalShellOperations, PreparedExecError, PreparedSpawn, bash_tool_description_for,
@@ -218,6 +219,9 @@ impl SandboxedBashOperations {
         };
         let provider = Arc::clone(&self.provider);
         let policy = self.policy.clone();
+        // A runner probe this call starts runs under the shell's owner, so
+        // a call dropped mid-probe is settled before the owner closes.
+        let owner = self.local.owner().cloned();
         let recorded = Arc::clone(&facts);
         let outcome = self
             .local
@@ -230,10 +234,17 @@ impl SandboxedBashOperations {
                 },
                 move |invocation| async move {
                     let argv: Vec<OsString> = invocation.argv;
-                    let confined = provider
-                        .confine(&argv, &policy)
-                        .await
-                        .map_err(|error| BashExecError::Failed(error.to_string()))?;
+                    let probe_owner = owner.as_ref().map(|owner| owner as &dyn ProbeOwner);
+                    let confined = match provider.confine(&argv, &policy, probe_owner).await {
+                        Ok(confined) => confined,
+                        // A closing owner refuses the probe, and the gate
+                        // stays closing: the call is being shut down, which
+                        // is reported as Pi's abort, not as a refusal.
+                        Err(_) if owner.as_ref().is_some_and(WorkGate::is_closing) => {
+                            return Err(BashExecError::Aborted);
+                        }
+                        Err(error) => return Err(BashExecError::Failed(error.to_string())),
+                    };
                     *recorded.lock().unwrap_or_else(PoisonError::into_inner) =
                         Some(confined.clone());
                     Ok(PreparedSpawn {

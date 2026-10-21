@@ -3,7 +3,8 @@
 //! dropped call's tree is settled under its owner (a `WorkGate`), whose
 //! close waits for it and only for it; session shutdown waits for the
 //! trees of the calls it cancels; a normal exit leaves its background
-//! descendants running and never signals them later; the leader stays
+//! descendants running and never signals them later, and a normal session
+//! shutdown leaves them running too (no exit drain in 0.4.0); the leader stays
 //! unreaped while its tree can be signalled; and, as pid 1, the owner reaps
 //! the group's orphaned zombies itself.
 //!
@@ -497,15 +498,9 @@ async fn an_armed_tree_keeps_its_leader_unreaped() {
     assert!(reaped_after, "the leader is reaped once the call settles");
 }
 
-// Shutdown cancels a running bash call by dropping it, and returns only
-// once the call's process group is gone: the tool and the session share
-// one owner.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn shutdown_waits_for_a_cancelled_bash_call_group() {
-    let _serial = SERIAL.lock().await;
-    become_subreaper();
-    let dir = TempDir::new();
-    let (fifo, mut reader) = dir.fifo();
+/// A session whose model calls `bash` once with `command`, owned by one
+/// gate shared by the session and its tool, and then answers "done".
+async fn bash_session(dir: &Path, command: String) -> Arc<AgentSession> {
     let faux = Arc::new(FauxProvider::new(FauxProviderOptions::default()));
     let apis = Arc::new(ApiRegistry::new());
     apis.register(faux.clone());
@@ -524,10 +519,6 @@ async fn shutdown_waits_for_a_cancelled_bash_call_group() {
             Some("test-key".into()),
         )
         .expect("faux provider");
-    let command = format!(
-        "sleep 1000 & echo $! > '{}'; exec sleep 1000",
-        fifo.display()
-    );
     faux.set_responses(vec![
         FauxResponseStep::Message(faux_assistant_blocks(
             vec![faux_tool_call(
@@ -537,22 +528,22 @@ async fn shutdown_waits_for_a_cancelled_bash_call_group() {
             )],
             StopReason::ToolUse,
         )),
-        FauxResponseStep::Message(faux_assistant_message("never reached")),
+        FauxResponseStep::Message(faux_assistant_message("done")),
     ]);
     let registry = Arc::new(registry);
-    let cwd = dir.0.to_string_lossy().into_owned();
+    let cwd = dir.to_string_lossy().into_owned();
     let work = WorkGate::default();
     let tool = create_bash_tool(
-        &dir.0,
+        dir,
         BashToolOptions {
-            spill_directory: Some(dir.0.clone()),
+            spill_directory: Some(dir.to_path_buf()),
             owner: Some(work.clone()),
             ..BashToolOptions::default()
         },
     );
     let session = SessionManager::in_memory(Some(&cwd), NewSessionOptions::default(), Vec::new())
         .expect("session");
-    let session = Arc::new(
+    Arc::new(
         AgentSession::create(AgentSessionOptions {
             session,
             registry: Arc::clone(&registry).into(),
@@ -573,7 +564,23 @@ async fn shutdown_waits_for_a_cancelled_bash_call_group() {
         })
         .await
         .expect("session"),
+    )
+}
+
+// Shutdown cancels a running bash call by dropping it, and returns only
+// once the call's process group is gone: the tool and the session share
+// one owner.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn shutdown_waits_for_a_cancelled_bash_call_group() {
+    let _serial = SERIAL.lock().await;
+    become_subreaper();
+    let dir = TempDir::new();
+    let (fifo, mut reader) = dir.fifo();
+    let command = format!(
+        "sleep 1000 & echo $! > '{}'; exec sleep 1000",
+        fifo.display()
     );
+    let session = bash_session(&dir.0, command).await;
     let prompt = {
         let session = Arc::clone(&session);
         tokio::spawn(async move { session.prompt("run it", Vec::new()).await })
@@ -589,6 +596,48 @@ async fn shutdown_waits_for_a_cancelled_bash_call_group() {
     let _ = tokio::time::timeout(BOUND, prompt).await;
     assert!(!early, "shutdown returned while the call's group was alive");
     assert!(finished, "shutdown finishes once the group is gone");
+}
+
+// A process a bash command puts in the background on purpose outlives the
+// command's normal exit and the session's normal shutdown, as in Pi: for
+// 0.4.0 no exit drain kills it. The shutdown does not wait for it, and
+// nothing signals it; the test kills and reaps it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_normal_shutdown_leaves_an_intentionally_backgrounded_process_running() {
+    let _serial = SERIAL.lock().await;
+    become_subreaper();
+    let dir = TempDir::new();
+    let (fifo, mut reader) = dir.fifo();
+    let command = format!(
+        "sleep 1000 </dev/null >/dev/null 2>&1 & echo $! > '{}'; echo started",
+        fifo.display()
+    );
+    let session = bash_session(&dir.0, command).await;
+    let prompt = {
+        let session = Arc::clone(&session);
+        tokio::spawn(async move { session.prompt("run it", Vec::new()).await })
+    };
+    let mut descendant = Descendant::read(&mut reader).await;
+    let prompted = tokio::time::timeout(BOUND, prompt).await;
+    let shut_down = tokio::time::timeout(BOUND, session.shutdown())
+        .await
+        .is_ok();
+    let running_after_shutdown = !signalled_or_gone(descendant.pid);
+    // SAFETY: plain syscall on a pid this test owns: an orphan of this
+    // subreaper, unreaped.
+    unsafe {
+        libc::kill(descendant.pid, libc::SIGKILL);
+    }
+    descendant.reap_killed().await;
+    assert!(
+        matches!(prompted, Ok(Ok(Ok(())))),
+        "the turn ends normally: {prompted:?}"
+    );
+    assert!(shut_down, "the shutdown does not wait for the background");
+    assert!(
+        running_after_shutdown,
+        "a normal shutdown killed an intentionally backgrounded process"
+    );
 }
 
 // A call that fails to spawn leaves nothing running, and its owner closes

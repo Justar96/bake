@@ -16,7 +16,13 @@
 //! Every tool is a [`bake_agent::AgentTool`] whose names, descriptions,
 //! schemas, results, and errors are Pi's. Blocking file work runs on
 //! Tokio's blocking pool and is awaited, aborted or not; `write` and `edit`
-//! run inside the file's mutation queue. `grep` and `find` spawn `rg` and
+//! run inside the file's mutation queue. Tools built through
+//! [`index::ToolsOptions::owner`] put that work under the session's
+//! [`WorkGate`](crate::owned_work::WorkGate), whose close waits for it;
+//! the public per-tool constructors, such as
+//! [`write::create_write_tool_definition`] and
+//! [`edit::create_edit_tool_definition`], leave it unowned, and an
+//! embedder that uses them must await every call to its end itself. `grep` and `find` spawn `rg` and
 //! `fd` from `PATH` ([`process`]) and kill and reap them on abort. Pi's `bash`
 //! tool joins through [`index::ToolsOptions::bash`].
 

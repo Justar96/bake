@@ -424,11 +424,24 @@ async fn admit(
     let argv: Vec<OsString> = std::iter::once(program.clone())
         .chain(args.iter().cloned())
         .collect();
-    let confined = confine(context.sandbox.as_ref(), &argv, &policy)
-        .await
-        .map_err(|unavailable| McpServerState::Refused {
-            reason: format!("MCP server \"{name}\" was not started: {unavailable}"),
-        })?;
+    let confined = confine(
+        context.sandbox.as_ref(),
+        &argv,
+        &policy,
+        Some(&context.work),
+    )
+    .await
+    .map_err(|unavailable| {
+        // A closing owner refuses the probe: the session is shutting down,
+        // so the server ends closed, as an interrupted admission does.
+        if context.work.is_closing() {
+            McpServerState::Closed
+        } else {
+            McpServerState::Refused {
+                reason: format!("MCP server \"{name}\" was not started: {unavailable}"),
+            }
+        }
+    })?;
     let command = match confined {
         // `danger-full-access`: the server's own argv.
         None => StdioCommand::new(program).args(args).envs(environment),

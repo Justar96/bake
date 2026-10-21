@@ -8,8 +8,12 @@ publish.workspace = true
 description = "Bake's process-confinement contract: sandbox modes, per-call policies, escalation vocabulary, and the provider seam its backends implement"
 
 [dependencies]
-# The local backends' functional probes: bounded, cancellable subprocesses and
-# the once-only cached verdict.
+# The local backends' functional probes, each an owned process tree that a
+# timeout or a drop kills and settles; on Windows also the runners' Job and
+# the account its end is settled on (`bake_process::windows_job`), shared
+# with the process owner.
+bake-process.workspace = true
+# The probes' bounded, cancellable waits and the once-only cached verdict.
 tokio = { workspace = true, features = ["process", "time", "sync", "io-util"] }
 # The Windows runner's capability SIDs (SHA-256) and private temp names.
 ring.workspace = true
@@ -19,9 +23,6 @@ ring.workspace = true
 libc.workspace = true
 
 [target.'cfg(windows)'.dependencies]
-# The Windows runners' Job and the account its end is settled on
-# (`bake_process::windows_job`), shared with the process owner.
-bake-process.workspace = true
 # The Windows runners' restricted token, each run's AppContainer profile
 # (create, folder lookup freed with `CoTaskMemFree`, delete), capability
 # SIDs, DACL grants and denials, and process creation; `Win32_Storage_FileSystem`

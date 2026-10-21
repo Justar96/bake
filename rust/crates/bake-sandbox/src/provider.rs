@@ -147,9 +147,28 @@ danger-full-access.",
 impl std::error::Error for SandboxUnavailable {}
 
 /// The future [`SandboxProvider::confine`] returns. Dropping it cancels the
-/// provider's work (probing a runner, for example).
+/// provider's work (probing a runner, for example); a process that work
+/// started is then settled under the call's [`ProbeOwner`].
 pub type ConfineFuture<'a> =
     Pin<Box<dyn Future<Output = Result<ConfinedCommand, SandboxUnavailable>> + Send + 'a>>;
+
+/// The owner of the processes a provider starts while it confines one call,
+/// such as a runner probe: the caller's own owner of its work (a session's,
+/// for one), so that its teardown also waits for them.
+///
+/// Each process is spawned under a claim from [`Self::admit`], held until
+/// that process has been settled (it and its whole tree are gone): by the
+/// call itself, or, when the call's future is dropped mid-probe, by a task
+/// that settles the dropped probe while it holds the claim
+/// ([`bake_process::OwnedProcess`]). A call with no owner owns its probes
+/// only while it runs: dropped, a probe is killed and not awaited.
+pub trait ProbeOwner: Send + Sync {
+    /// A claim for one process, or `None` once the owner is closing, which
+    /// refuses the process: the call is refused, and nothing is cached. The
+    /// refusal's detail is diagnostic; a caller should see its owner closing
+    /// and report its own cancellation rather than the refusal.
+    fn admit(&self) -> Option<bake_process::Claim>;
+}
 
 /// A process-confinement backend. Implementations must return an enforcing
 /// command or refuse: returning the caller's argv unconfined is forbidden.
@@ -161,23 +180,30 @@ pub trait SandboxProvider: Send + Sync {
 
     /// Wraps `argv`, the exact program and arguments the caller is about to
     /// spawn (a shell consumer passes `["bash", "-c", command]`), to run
-    /// confined under `policy`, whose mode is confining. Use [`confine`] to
-    /// let `danger-full-access` through unwrapped.
-    fn confine<'a>(&'a self, argv: &'a [OsString], policy: &'a SandboxPolicy) -> ConfineFuture<'a>;
+    /// confined under `policy`, whose mode is confining. Any process the
+    /// provider starts for the call runs under `owner` ([`ProbeOwner`]).
+    /// Use [`confine`] to let `danger-full-access` through unwrapped.
+    fn confine<'a>(
+        &'a self,
+        argv: &'a [OsString],
+        policy: &'a SandboxPolicy,
+        owner: Option<&'a dyn ProbeOwner>,
+    ) -> ConfineFuture<'a>;
 }
 
 /// What to spawn for `argv` under `policy`: `None` for `danger-full-access`,
 /// which runs the caller's argv as it is, else the provider's wrapped
-/// command or its refusal.
+/// command or its refusal. Processes the provider starts run under `owner`.
 pub async fn confine(
     provider: &dyn SandboxProvider,
     argv: &[OsString],
     policy: &SandboxPolicy,
+    owner: Option<&dyn ProbeOwner>,
 ) -> Result<Option<ConfinedCommand>, SandboxUnavailable> {
     if !policy.mode.is_confined() {
         return Ok(None);
     }
-    provider.confine(argv, policy).await.map(Some)
+    provider.confine(argv, policy, owner).await.map(Some)
 }
 
 /// A provider for hosts with no usable backend: every confined call fails
@@ -203,6 +229,7 @@ impl SandboxProvider for UnavailableProvider {
         &'a self,
         _argv: &'a [OsString],
         policy: &'a SandboxPolicy,
+        _owner: Option<&'a dyn ProbeOwner>,
     ) -> ConfineFuture<'a> {
         let error = SandboxUnavailable::new(policy.mode, self.detail.clone());
         Box::pin(async move { Err(error) })
@@ -241,10 +268,10 @@ mod tests {
         let argv = vec![OsString::from("true")];
         let root = std::env::temp_dir();
         let open = SandboxPolicy::new(SandboxMode::DangerFullAccess, &root);
-        assert_eq!(block_on(confine(&provider, &argv, &open)), Ok(None));
+        assert_eq!(block_on(confine(&provider, &argv, &open, None)), Ok(None));
         let confined = SandboxPolicy::new(SandboxMode::ReadOnly, &root);
         assert_eq!(
-            block_on(confine(&provider, &argv, &confined)),
+            block_on(confine(&provider, &argv, &confined, None)),
             Err(SandboxUnavailable::new(SandboxMode::ReadOnly, None))
         );
     }

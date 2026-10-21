@@ -165,6 +165,10 @@ async fn pre_abort_and_invalid_timeout_do_not_spawn() {
         .await;
     assert_eq!(result.code, 1);
     assert_eq!(result.error, Some(io::ErrorKind::InvalidInput));
+    assert_eq!(
+        result.error_message.as_deref(),
+        Some("the timeout is too long")
+    );
     assert!(!Path::new(marker).exists());
 }
 
@@ -180,6 +184,15 @@ async fn spawn_errors_are_distinct_from_exit_one() {
     .await;
     assert_eq!(result.code, 1);
     assert_eq!(result.error, Some(io::ErrorKind::NotFound));
+    // The OS message, as the spawn's `io::Error` displays it.
+    assert!(
+        result
+            .error_message
+            .as_deref()
+            .is_some_and(|message| message.contains("(os error ")),
+        "{:?}",
+        result.error_message
+    );
     assert!(result.stdout.is_empty() && result.stderr.is_empty());
     let result = exec_command(
         OsStr::new("invalid\0program"),
@@ -195,6 +208,7 @@ async fn spawn_errors_are_distinct_from_exit_one() {
         .await;
     assert_eq!(result.code, 1);
     assert!(result.error.is_none());
+    assert!(result.error_message.is_none());
 }
 
 struct Running {
@@ -218,6 +232,7 @@ impl Running {
                     signal: Some(signal),
                     timeout,
                     owner: None,
+                    env: ExecEnv::Scrubbed,
                 },
             )
             .await
@@ -372,6 +387,7 @@ fn child_environment_drops_credentials_and_keeps_ordinary_variables() {
         .env("BAKE_EXEC_FIXTURE_EXE", &fixture.exe)
         .env("BAKE_EXEC_FIXTURE_DIR", &fixture.dir)
         .env("BAKE_EXEC_PROBE_TOKEN", "synthetic-credential")
+        .env("GH_TOKEN", "synthetic-gh-credential")
         .env("BAKE_EXEC_PROBE_NORMAL", "ordinary")
         .output()
         .unwrap();
@@ -381,6 +397,32 @@ fn child_environment_drops_credentials_and_keeps_ordinary_variables() {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+// `ExecEnv::InheritAll` is for a person's own commands only: no tool,
+// bash, MCP, hook, job, or plugin source names it. The one production use
+// is `bake`'s `gh` runner, in another crate.
+#[test]
+fn only_the_exec_module_names_inherit_all() {
+    fn visit(dir: &std::path::Path, found: &mut Vec<PathBuf>) {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                visit(&path, found);
+            } else if path.extension().is_some_and(|ext| ext == "rs")
+                && std::fs::read_to_string(&path)
+                    .unwrap()
+                    .contains(concat!("Inherit", "All"))
+            {
+                found.push(path);
+            }
+        }
+    }
+    let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut found = Vec::new();
+    visit(&src, &mut found);
+    found.sort();
+    assert_eq!(found, [src.join("exec/mod.rs"), src.join("exec/tests.rs")]);
 }
 
 // A separate process owns the seeded environment, avoiding global mutations
@@ -398,6 +440,7 @@ fn environment_host() {
         .block_on(async {
             for (name, expected) in [
                 ("BAKE_EXEC_PROBE_TOKEN", ""),
+                ("GH_TOKEN", ""),
                 ("BAKE_EXEC_PROBE_NORMAL", "ordinary"),
             ] {
                 let result = exec_command(
@@ -408,7 +451,26 @@ fn environment_host() {
                 )
                 .await;
                 assert_eq!(result.code, 0);
-                assert_eq!(result.stdout, expected);
+                assert_eq!(result.stdout, expected, "{name}, scrubbed");
+            }
+            // A person's own command sees every variable.
+            for (name, expected) in [
+                ("BAKE_EXEC_PROBE_TOKEN", "synthetic-credential"),
+                ("GH_TOKEN", "synthetic-gh-credential"),
+                ("BAKE_EXEC_PROBE_NORMAL", "ordinary"),
+            ] {
+                let result = exec_command(
+                    &exe,
+                    &["env".into(), name.into()],
+                    &dir,
+                    ExecOptions {
+                        env: ExecEnv::InheritAll,
+                        ..ExecOptions::default()
+                    },
+                )
+                .await;
+                assert_eq!(result.code, 0);
+                assert_eq!(result.stdout, expected, "{name}, inherited");
             }
         });
 }

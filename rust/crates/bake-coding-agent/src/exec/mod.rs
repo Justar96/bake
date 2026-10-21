@@ -3,7 +3,9 @@
 //!
 //! This low-level utility performs no authorization or sandbox selection.
 //! A caller must authorize and, when required, confine its argv before
-//! calling it. No tool or extension calls this module yet.
+//! calling it. Its one caller is `bake`'s `gh` runner for `/share` and
+//! `/bug` (`bake-tui`'s `live/commands/gh.rs`), under the session's
+//! [`WorkGate`]; no tool or extension calls it.
 
 use std::ffi::{OsStr, OsString};
 use std::io;
@@ -34,6 +36,26 @@ pub struct ExecOptions {
     /// dropped call left. `None` leaves a dropped call's tree killed but
     /// not awaited.
     pub owner: Option<WorkGate>,
+    /// The child's environment; credential-shaped names are removed unless
+    /// the caller is a person's own command ([`ExecEnv`]).
+    pub env: ExecEnv,
+}
+
+/// The environment an [`exec_command`] child inherits from this process.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ExecEnv {
+    /// Everything but credential-shaped names (`KEY`, `PASSWORD`,
+    /// `SECRET`, `TOKEN`; [`scrub_environment`]). The default, and the
+    /// only choice for any command a model, a tool, or an extension can
+    /// start.
+    #[default]
+    Scrubbed,
+    /// Everything, credentials included. Only for a program the person
+    /// runs through one of `bake`'s own commands, which must see their
+    /// environment as their shell would: `gh` for `/share` and `/bug`,
+    /// which reads `GH_TOKEN` and `GITHUB_TOKEN`. Never select it on a
+    /// model-reachable or tool path.
+    InheritAll,
 }
 
 /// Pi's exec result, with independent termination facts for Bake callers.
@@ -57,13 +79,16 @@ pub struct ExecResult {
     pub signal: Option<i32>,
     /// An OS or invalid-timeout failure, separate from an exit code of 1.
     pub error: Option<io::ErrorKind>,
+    /// That failure as its [`io::Error`] displays it, OS message included.
+    pub error_message: Option<String>,
 }
 
-/// Execute an argv without a shell, with closed stdin. The child inherits
-/// the parent's environment except credential-shaped names (`KEY`,
-/// `PASSWORD`, `SECRET`, `TOKEN`, case-insensitive), per Bake's defensive
-/// rule and `packages/subprocess/subprocess/src/index.ts`'s
-/// `SENSITIVE_ENV_PATTERN`. This heuristic cannot identify every secret.
+/// Execute an argv without a shell, with closed stdin. By default
+/// ([`ExecEnv::Scrubbed`]) the child inherits the parent's environment
+/// except credential-shaped names (`KEY`, `PASSWORD`, `SECRET`, `TOKEN`,
+/// case-insensitive), per Bake's defensive rule and
+/// `packages/subprocess/subprocess/src/index.ts`'s `SENSITIVE_ENV_PATTERN`.
+/// This heuristic cannot identify every secret.
 ///
 /// Like Pi, output has no memory limit. After exit, pipes close at EOF or
 /// after 100 ms without output; each chunk restarts that grace. Normally
@@ -94,6 +119,7 @@ pub async fn exec_command(
         aborted: false,
         signal: None,
         error: None,
+        error_message: None,
     };
     if options.signal.as_ref().is_some_and(AbortSignal::aborted) {
         result.killed = true;
@@ -104,8 +130,10 @@ pub async fn exec_command(
         Some(duration) => match Instant::now().checked_add(duration) {
             Some(deadline) => Some(deadline),
             None => {
+                let error = io::Error::new(io::ErrorKind::InvalidInput, "the timeout is too long");
                 result.code = 1;
-                result.error = Some(io::ErrorKind::InvalidInput);
+                result.error = Some(error.kind());
+                result.error_message = Some(error.to_string());
                 return result;
             }
         },
@@ -115,7 +143,10 @@ pub async fn exec_command(
         program: command.to_os_string(),
         args: args.to_vec(),
         cwd: Some(cwd.to_path_buf()),
-        env: Some(scrub_environment(std::env::vars_os()).collect()),
+        env: Some(match options.env {
+            ExecEnv::Scrubbed => scrub_environment(std::env::vars_os()).collect(),
+            ExecEnv::InheritAll => std::env::vars_os().collect(),
+        }),
         stdin: false,
     };
     let exit = match child_process::spawn(&spec, options.owner.as_ref()).await {
@@ -147,6 +178,7 @@ pub async fn exec_command(
         Err(error) => {
             result.code = 1;
             result.error = Some(error.kind());
+            result.error_message = Some(error.to_string());
         }
     }
     result
