@@ -32,5 +32,5 @@ pub mod update;
 pub mod version;
 
 pub use error::UpdateError;
-pub use manifest::{Artifact, Manifest, TARGETS, host_target};
+pub use manifest::{Artifact, Manifest, RELEASE_TARGETS, TARGETS, host_target, release_target};
 pub use update::{Effects, HostEffects, Outcome, Updater};

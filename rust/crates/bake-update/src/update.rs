@@ -33,7 +33,7 @@ use crate::check::{CandidateCheck, SelfCheck};
 use crate::error::UpdateError;
 use crate::layout::{Name, Root};
 use crate::lock::{LockKind, acquire};
-use crate::manifest::{Manifest, host_target};
+use crate::manifest::{Manifest, host_target, release_target};
 use crate::source::Source;
 use crate::version::compare_versions;
 
@@ -106,16 +106,10 @@ impl Updater {
     ///
     /// # Errors
     ///
-    /// [`UpdateError::NotInstalled`] on a platform Bake publishes no
-    /// archive for.
+    /// [`UpdateError::Platform`] on a platform Bake publishes no native
+    /// update for, which in 0.4.0 is every platform but Linux.
     pub fn new(root: Root, source: Source, running: &str) -> Result<Self, UpdateError> {
-        let target = host_target().ok_or_else(|| {
-            UpdateError::NotInstalled(format!(
-                "Bake publishes no native release for {}-{}",
-                std::env::consts::OS,
-                std::env::consts::ARCH
-            ))
-        })?;
+        let target = release_target(host_target())?;
         Ok(Self {
             root,
             source,
