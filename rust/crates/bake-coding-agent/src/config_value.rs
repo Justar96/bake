@@ -895,6 +895,59 @@ mod tests {
         }
     }
 
+    // Bake: a command already cancelled never starts: its side effect
+    // does not happen, and nothing is cached.
+    #[cfg(unix)]
+    #[test]
+    fn an_already_cancelled_command_never_starts() {
+        let dir = crate::test_support::TempDir::new("config-value-precancel");
+        let marker = dir.join("ran");
+        let command = format!("!touch '{}'; echo started-key", marker.display());
+        let cancel = Arc::new(AtomicBool::new(true));
+        assert_eq!(
+            with_command_cancel(cancel, || resolve_config_value(&command, None)),
+            None
+        );
+        assert!(!marker.exists(), "a cancelled command ran");
+        assert!(
+            !command_cache()
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .contains_key(&command)
+        );
+    }
+
+    // Bake: a descendant that left the shell's group (`setsid`) and keeps
+    // the output open holds the read until the timeout, and then nothing
+    // resolves, though the shell exited with a value.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn an_escaped_holder_of_the_output_fails_the_command_at_the_timeout() {
+        let dir = crate::test_support::TempDir::new("config-value-escaped");
+        let pid = dir.join("pid");
+        let script = format!(
+            "setsid sh -c 'echo $$ > \"$0\"; exec sleep 1000' '{}' & echo escaped-key",
+            pid.display()
+        );
+        let outcome = run_command(&script, Duration::from_millis(500), None);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !pid.exists() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let escaped: Option<libc::pid_t> = std::fs::read_to_string(&pid)
+            .ok()
+            .and_then(|text| text.trim().parse().ok());
+        if let Some(escaped) = escaped {
+            // SAFETY: plain syscall on the process this test's command
+            // started; it left the group and nothing else kills it.
+            unsafe {
+                libc::kill(escaped, libc::SIGKILL);
+            }
+        }
+        assert!(escaped.is_some(), "the escaped holder never started");
+        assert!(matches!(outcome, CommandOutcome::Ran(None)));
+    }
+
     // Bake: standard error is read and discarded, so a command that
     // writes more to it than a pipe holds still resolves.
     #[cfg(unix)]

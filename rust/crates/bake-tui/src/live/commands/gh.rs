@@ -307,6 +307,7 @@ mod tests {
         let call = run_in_background(&session, &gh, abort.signal());
         let pids = gh.started().await;
         assert_eq!(pids.len(), 2, "{pids:?}");
+        assert!(pids.iter().all(|&pid| listed(pid)), "{pids:?} not running");
         abort.abort();
         let ran = tokio::time::timeout(BOUND, call)
             .await
@@ -349,7 +350,8 @@ mod tests {
     }
 
     // A dropped run (its command task dropped) is cancelled: the tree is
-    // killed, and the session's shutdown still waits for it.
+    // killed without waiting for the session's shutdown, which still
+    // waits for it.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn a_dropped_run_is_killed_and_awaited_by_shutdown() {
         let session = session().await;
@@ -359,6 +361,14 @@ mod tests {
         let pids = gh.started().await;
         call.abort();
         let _ = call.await;
+        let deadline = Instant::now() + BOUND;
+        while pids.iter().any(|&pid| listed(pid)) {
+            assert!(
+                Instant::now() < deadline,
+                "{pids:?} outlived a dropped run before shutdown"
+            );
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
         tokio::time::timeout(BOUND, session.shutdown())
             .await
             .expect("the shutdown ends");
