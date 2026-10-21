@@ -1727,6 +1727,14 @@ pub(crate) mod kernel_faults;
 #[path = "manager/seccomp_write_tests.rs"]
 mod seccomp_write_tests;
 
+#[cfg(all(
+    test,
+    target_os = "linux",
+    any(target_arch = "x86_64", target_arch = "aarch64")
+))]
+#[path = "manager/full_filesystem_tests.rs"]
+mod full_filesystem_tests;
+
 #[cfg(test)]
 mod tests {
     use super::*;

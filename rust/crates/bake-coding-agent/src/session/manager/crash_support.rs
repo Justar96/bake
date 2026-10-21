@@ -325,14 +325,26 @@ impl TestChild {
     /// test's name, so markers are matched within lines; a name that
     /// matches no test still exits 0, so a parent always waits for one.
     pub(super) fn spawn(test: &str, env: &str, spec: &str) -> Self {
-        let mut child = Command::new(std::env::current_exe().expect("test binary"))
+        Self::try_spawn(test, env, spec, |_| {}).expect("spawn child")
+    }
+
+    /// [`Self::spawn`], with `configure` adjusting the command first, such
+    /// as to run a `pre_exec` hook; fails with the error starting it.
+    pub(super) fn try_spawn(
+        test: &str,
+        env: &str,
+        spec: &str,
+        configure: impl FnOnce(&mut Command),
+    ) -> std::io::Result<Self> {
+        let mut command = Command::new(std::env::current_exe().expect("test binary"));
+        command
             .args(["--exact", test, "--nocapture", "--test-threads", "1"])
             .env(env, spec)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .expect("spawn child");
+            .stderr(Stdio::piped());
+        configure(&mut command);
+        let mut child = command.spawn()?;
         let pipes = (child.stdout.take(), child.stderr.take());
         let (lines, output) = mpsc::channel();
         // Owned before anything can fail, so Drop disposes of the child.
@@ -349,7 +361,7 @@ impl TestChild {
             .readers
             .push(forward("child-stdout", stdout, lines.clone()));
         fixture.readers.push(forward("child-stderr", stderr, lines));
-        fixture
+        Ok(fixture)
     }
 
     /// Wait for a line of output containing `mark`; fail when the child
