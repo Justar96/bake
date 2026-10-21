@@ -59,12 +59,11 @@
 //! descendant cannot leave: the job allows no breakaway, and one from a
 //! job nested in it stays in it.
 //!
-//! What no owner reaches on Linux, a normal exit's background descendants
-//! and a descendant that left its tree, is reparented to init, unless the
-//! host opts into [`subreaper`]: then it is reparented to the host, whose
-//! drain at exit kills and reaps it. A host killed with `SIGKILL` runs no
-//! drain and settles nothing; only a leader spawned with
-//! [`OwnedProcess::spawn_tied_to_thread`] is then killed by the kernel.
+//! A normal exit's background descendants and a descendant that left its
+//! tree outlive their owner by design, as in Pi. A host killed with
+//! `SIGKILL` settles nothing; on Linux only a leader spawned with
+//! [`OwnedProcess::spawn_tied_to_thread`] is then killed by the kernel,
+//! and the rest of every tree is left running.
 //!
 //! On Windows the job and its account are `windows_job::Job`, public so
 //! that `bake-sandbox`'s synchronous Windows runner keeps its confined tree
@@ -95,8 +94,6 @@ pub mod environment;
 mod job_ledger;
 #[cfg(windows)]
 mod pump;
-#[cfg(target_os = "linux")]
-pub mod subreaper;
 mod tree;
 #[cfg(windows)]
 pub mod windows_job;

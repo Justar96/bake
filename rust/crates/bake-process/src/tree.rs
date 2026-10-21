@@ -363,12 +363,6 @@ impl ProcessTree {
     }
 }
 
-/// The parent pid in a `/proc/<pid>/stat` line, for the orphan drain.
-#[cfg(target_os = "linux")]
-pub(crate) fn parent_in_stat(stat: &[u8]) -> Option<i32> {
-    linux::parse_stat(stat).map(|stat| stat.ppid)
-}
-
 #[cfg(target_os = "linux")]
 mod linux {
     use std::io;
@@ -376,17 +370,10 @@ mod linux {
     use std::path::Path;
 
     /// Members of group `pgid` other than its leader (`pgid` itself). As
-    /// pid 1, or as a child subreaper ([`crate::subreaper::enable`]), reaps
-    /// the group's zombies that are this process's children, as an init
-    /// would: they were reparented here and nothing else waits for them.
+    /// pid 1, reaps the group's zombies that are this process's children.
     pub(super) fn members(pgid: i32) -> io::Result<usize> {
         let me = libc::pid_t::try_from(std::process::id()).unwrap_or(0);
-        members_in(
-            std::path::Path::new("/proc"),
-            pgid,
-            me,
-            me == 1 || crate::subreaper::enabled(),
-        )
+        members_in(std::path::Path::new("/proc"), pgid, me, me == 1)
     }
 
     /// The pids under `root` that look like the init of a PID namespace a
@@ -498,8 +485,9 @@ mod linux {
 
         /// Whether the pinned init has exited, which it does only once
         /// every other process of its namespace has been reaped. A poll
-        /// that fails reads as still running. As a child subreaper this
-        /// process may be the init's parent by now, and reaps it.
+        /// that fails reads as still running. As pid 1 this process is the
+        /// init's parent by now, and reaps it, as it reaps the group's
+        /// zombies.
         pub(super) fn exited(&self) -> bool {
             let mut poll = libc::pollfd {
                 fd: self.pidfd.as_raw_fd(),
@@ -509,7 +497,7 @@ mod linux {
             // SAFETY: one valid `pollfd`, no wait.
             let ready = unsafe { libc::poll(&mut poll, 1, 0) };
             let exited = ready > 0 && poll.revents & libc::POLLIN != 0;
-            if exited && crate::subreaper::enabled() {
+            if exited && std::process::id() == 1 {
                 // SAFETY: a zeroed `siginfo_t` is valid output space.
                 let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
                 // SAFETY: plain syscall on an owned pidfd; it reaps the
