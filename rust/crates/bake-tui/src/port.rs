@@ -33,6 +33,8 @@ pub enum Request {
     },
     /// Stop the background shell with this id, for the user.
     StopJob(String),
+    /// Stop the current run of the subagent with this id, for the user.
+    StopAgent(String),
 }
 
 /// Runs the fixture on a thread. Requests go in over a channel; updates
@@ -82,9 +84,13 @@ impl FixturePort {
                         }
                         Some(Request::Cancel) => updates.extend(fixture.cancel(now)),
                         Some(Request::SendPending) => updates.extend(fixture.send_pending(now)),
-                        // The fixture asks for no approval and opens no dialog.
+                        // The fixture asks for no approval, opens no dialog,
+                        // and runs no shell or subagent.
                         Some(
-                            Request::Answer { .. } | Request::Dialog { .. } | Request::StopJob(_),
+                            Request::Answer { .. }
+                            | Request::Dialog { .. }
+                            | Request::StopJob(_)
+                            | Request::StopAgent(_),
                         )
                         | None => {}
                     }

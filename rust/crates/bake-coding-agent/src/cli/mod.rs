@@ -1486,6 +1486,7 @@ async fn build_session(args: &Args, build: Build) -> Result<Built, String> {
     );
     // With `subagents` on, a top-level session starts subagents built as it
     // is; a subagent messages its parent and starts none (depth 1).
+    let mut subagent_host = None;
     let subagent_tools: &[&str] = match role {
         Role::Root(Some(factory)) if settings.subagents => {
             let parent_file = session
@@ -1516,6 +1517,7 @@ async fn build_session(args: &Args, build: Build) -> Result<Built, String> {
             });
             let model_choice = registry.snapshot().available().len() > 1;
             definitions.extend(crate::subagents::parent_tools(&host, model_choice));
+            subagent_host = Some(host);
             // The job tools say a subagent's id is not a job id.
             let job_tools =
                 crate::tools::job_tools::create_job_tool_definitions_with_subagents(&jobs);
@@ -1673,6 +1675,9 @@ async fn build_session(args: &Args, build: Build) -> Result<Built, String> {
         return Err(message);
     }
     session.set_prompt_templates(prompt_templates);
+    if let Some(host) = subagent_host {
+        session.set_subagents(host);
+    }
     if let Err(message) = session.set_hooks(crate::hooks::HooksOptions {
         files: hooks,
         scope: hook_scope,

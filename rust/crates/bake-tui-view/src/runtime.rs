@@ -172,6 +172,10 @@ pub enum RuntimeUpdate {
     /// newest output ([`crate::jobs`]). Sent whenever the list or an output
     /// changes; an empty list hides the row under the composer.
     Jobs(Vec<BackgroundJob>),
+    /// Every subagent the session started, in start order
+    /// ([`crate::agents`]). Sent whenever one changes; an empty list, as
+    /// for a session without subagents, hides them.
+    Agents(Vec<crate::agents::Agent>),
 }
 
 /// The refusal of a prompt sent while `/tree` navigates, its draft kept.

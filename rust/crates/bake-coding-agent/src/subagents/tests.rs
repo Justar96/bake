@@ -253,7 +253,7 @@ async fn parent(h: &Arc<Harness>, store: Option<SessionManager>) -> Parent {
         builder: builder(h, parent_id, parent_file),
         recovered: recover(&store),
     });
-    let session = h
+    let mut session = h
         .session(
             store,
             parent_tools(&host, true),
@@ -265,6 +265,7 @@ async fn parent(h: &Arc<Harness>, store: Option<SessionManager>) -> Parent {
         )
         .await
         .expect("parent");
+    session.set_subagents(host.clone());
     Parent {
         session: Arc::new(session),
         host,
@@ -395,19 +396,29 @@ async fn a_background_child_settles_once_into_the_parent() {
         "Count.\n\nYour parent agent id is \"{}\".",
         parent.host.parent_id()
     )));
+    // The child's file is beside the parent's, out of session discovery.
+    let file = PathBuf::from(details["subagent"]["file"].as_str().expect("file"));
+    // A frontend lists the run's settlement and the file with the child,
+    // through the host its session holds.
     assert_eq!(
-        parent.host.list(),
-        vec![ChildRow {
+        parent.session.subagents().map(SubagentHost::list),
+        Some(vec![ChildRow {
             id: id.clone(),
             status: Status::Idle,
             label: "count things".into(),
             route: "faux/faux-2".into(),
-        }]
+            run: 1,
+            settled: Some(Settlement {
+                run: 1,
+                stop: StopReason::Completed,
+                closing: Some("child answer from faux-2".into()),
+                diagnostic: None,
+            }),
+            file: Some(file.clone()),
+        }])
     );
     // Delivered once: nothing is left to deliver.
     assert!(!parent.session.deliver_job_notices().await.expect("no turn"));
-    // The child's file is beside the parent's, out of session discovery.
-    let file = PathBuf::from(details["subagent"]["file"].as_str().expect("file"));
     assert_eq!(file.parent(), Some(children_dir(h.dir.path()).as_path()));
     let header = std::fs::read_to_string(&file).expect("child file");
     assert!(header.contains(&format!(

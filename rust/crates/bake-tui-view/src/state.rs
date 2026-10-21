@@ -5,6 +5,7 @@
 use std::time::Duration;
 
 use crate::activity::{self, Tones};
+use crate::agents::{self, Agent, AgentState};
 use crate::completion::{self, Command};
 use crate::composer::ComposerWindow;
 use crate::dialog::{Dialog, DialogAnswer};
@@ -288,42 +289,18 @@ pub enum Effect {
     /// Stop the background shell with this id; the runtime reports it
     /// stopping and stopped ([`RuntimeUpdate::Jobs`]).
     StopJob(String),
+    /// Stop the run of the subagent with this id; the runtime reports how
+    /// it ended ([`RuntimeUpdate::Agents`]).
+    StopAgent(String),
 }
-
-/// A fixed example row for the agent list; it describes no running work.
-#[derive(Debug, PartialEq, Eq)]
-pub struct SampleAgent {
-    pub id: &'static str,
-    pub name: &'static str,
-    pub detail: &'static [&'static str],
-}
-
-pub const SAMPLE_AGENTS: &[SampleAgent] = &[
-    SampleAgent {
-        id: "sample-explorer",
-        name: "Sample explorer",
-        detail: &[
-            "Example of a child that would read files for its parent.",
-            "It is static text; no agent is running.",
-        ],
-    },
-    SampleAgent {
-        id: "sample-reviewer",
-        name: "Sample reviewer",
-        detail: &[
-            "Example of a child that would review a change.",
-            "It is static text; no agent is running.",
-        ],
-    },
-];
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Focus {
     #[default]
     Composer,
     AgentList,
-    /// Read-only inspection of the sample agent with this id.
-    Inspect(&'static str),
+    /// Read-only inspection of the selected agent ([`State::selected`]).
+    Inspect,
     /// The background shells' list ([`crate::jobs`]).
     Jobs,
     /// The selected background shell's output.
@@ -335,7 +312,7 @@ impl Focus {
         match self {
             Self::Composer => Scope::Composer,
             Self::AgentList => Scope::AgentList,
-            Self::Inspect(_) => Scope::Inspect,
+            Self::Inspect => Scope::Inspect,
             Self::Jobs => Scope::Jobs,
             Self::Shell => Scope::Shell,
         }
@@ -361,9 +338,10 @@ pub enum Notice {
     /// Enter with staged images while a live turn runs: a steer takes text
     /// alone, so the draft waits for the turn to end.
     ImagesWhileRunning,
-    /// A preview-only key, the sample activity or the sample agent list,
-    /// in a live session.
+    /// The preview's sample activity key in a live session.
     PreviewOnly,
+    /// Ctrl+G in a live session that has started no subagents.
+    NoAgents,
     /// The runtime gave prompts back to the draft.
     Returned,
     /// `/tree` or `/fork` put the chosen message into the draft.
@@ -437,7 +415,13 @@ pub struct TurnSummary {
 pub struct State {
     pub draft: Draft,
     pub focus: Focus,
-    pub selected: &'static str,
+    /// The agents the row under the composer counts and Ctrl+G lists: the
+    /// preview's samples, or the subagents a live session reported
+    /// ([`RuntimeUpdate::Agents`]), in start order.
+    pub agents: Vec<Agent>,
+    /// The agent the list selects, by id; one no longer listed selects the
+    /// first.
+    pub selected: String,
     pub notice: Option<Notice>,
     pub activity: Option<Activity>,
     /// What the runtime's turn is doing, as it last reported.
@@ -506,8 +490,9 @@ pub struct State {
     pub quit_until: Option<Duration>,
     /// Whether a live agent session answers the composer instead of the
     /// preview's fixture: the transcript starts with the session's rows,
-    /// staged images are sent, slash prompts reach the runtime, and the
-    /// sample activity and agent list are refused.
+    /// staged images are sent, slash prompts reach the runtime, the
+    /// sample activity is refused, and the agent list holds the session's
+    /// subagents.
     pub live: bool,
     /// Prompts sent to a live runtime that it has not admitted yet, each
     /// with the draft and staged images it came from.
@@ -595,7 +580,8 @@ impl State {
         Self {
             draft: Draft::default(),
             focus: Focus::Composer,
-            selected: SAMPLE_AGENTS[0].id,
+            agents: agents::samples(),
+            selected: String::new(),
             notice: None,
             activity: None,
             phase: None,
@@ -660,6 +646,7 @@ impl State {
         Self {
             transcript: Transcript::new(rows),
             live: true,
+            agents: Vec::new(),
             ..Self::new(frame, tones)
         }
     }
@@ -892,7 +879,7 @@ impl State {
     /// stands for, else idle.
     pub fn mode(&self) -> Mode {
         match (self.focus, self.activity) {
-            (Focus::Inspect(_), _) => Mode::Inspecting,
+            (Focus::Inspect, _) => Mode::Inspecting,
             (_, Some(sample)) if sample.kind == ActivityKind::Compaction => Mode::Compacting,
             (_, Some(_)) => Mode::Running,
             (_, None) => Mode::Idle,
@@ -910,8 +897,15 @@ impl State {
         jobs::selected(&self.jobs, self.job_selected.as_deref())
     }
 
-    pub fn selected_agent(&self) -> &'static SampleAgent {
-        agent(self.selected).unwrap_or(&SAMPLE_AGENTS[0])
+    /// The agent the list selects, if any is listed.
+    pub fn selected_agent(&self) -> Option<&Agent> {
+        agents::selected(&self.agents, Some(&self.selected))
+    }
+
+    /// Whether the row under the composer shows agents: the preview's
+    /// samples, or a live session's subagents once it has any.
+    pub fn agents_row(&self) -> bool {
+        !self.agents.is_empty()
     }
 
     /// How long after [`State::now`] the screen next changes without input:
@@ -1057,7 +1051,7 @@ fn apply(state: &mut State, msg: Msg) -> Vec<Effect> {
             // The list's keys are on the bar; a paste there is ignored, as
             // the oracle ignores one while a sheet is open.
             Focus::AgentList | Focus::Jobs | Focus::Shell => {}
-            Focus::Inspect(_) => state.notice = Some(Notice::ReadOnly),
+            Focus::Inspect => state.notice = Some(Notice::ReadOnly),
         },
         Msg::Resize { cols, .. } => {
             // What was on screen no longer is: the request must be drawn
@@ -1122,6 +1116,20 @@ fn runtime(state: &mut State, update: RuntimeUpdate) {
         }
         RuntimeUpdate::Phase(phase) => state.phase = Some(phase),
         RuntimeUpdate::Pending(pending) => state.pending = pending,
+        RuntimeUpdate::Agents(list) => {
+            state.agents = list;
+            // An inspected agent no longer listed, as after a new session,
+            // returns to the list; an empty list gives the keyboard back to
+            // the composer.
+            if state.focus == Focus::Inspect
+                && !state.agents.iter().any(|agent| agent.id == state.selected)
+            {
+                state.focus = Focus::AgentList;
+            }
+            if state.agents.is_empty() && matches!(state.focus, Focus::AgentList | Focus::Inspect) {
+                state.focus = Focus::Composer;
+            }
+        }
         RuntimeUpdate::Jobs(list) => {
             state.jobs = list;
             state.jobs_at = state.now;
@@ -1366,7 +1374,7 @@ fn pointer_at(state: &mut State, mouse: Mouse) {
             Focus::Composer if direction < 0 => state.transcript.scroll_up(rows),
             Focus::Composer => state.transcript.scroll_down(rows),
             Focus::AgentList => step_selection(state, isize::from(direction)),
-            Focus::Inspect(_) => {}
+            Focus::Inspect => {}
             Focus::Jobs => step_job(state, isize::from(direction)),
             Focus::Shell => scroll_shell(state, -isize::from(direction) * rows as isize),
         }
@@ -1732,8 +1740,8 @@ fn key(state: &mut State, input: KeyInput) -> Vec<Effect> {
             unstage(state);
             return effects;
         }
-        Focus::AgentList => list_key(state, bound),
-        Focus::Inspect(_) => inspect_key(state, bound),
+        Focus::AgentList => return list_key(state, bound),
+        Focus::Inspect => inspect_key(state, bound),
         Focus::Jobs | Focus::Shell => return jobs_key(state, bound),
     }
     Vec::new()
@@ -1893,8 +1901,8 @@ fn composer_key(state: &mut State, bound: Option<Action>, input: KeyInput) -> Ve
     let shells = state.jobs_row();
     let draft = &mut state.draft;
     let complete = match bound {
-        Some(Action::ToggleAgentList) if state.live => {
-            state.notice = Some(Notice::PreviewOnly);
+        Some(Action::ToggleAgentList) if state.agents.is_empty() => {
+            state.notice = Some(Notice::NoAgents);
             return Vec::new();
         }
         Some(Action::ToggleAgentList) => {
@@ -2082,21 +2090,35 @@ fn input_history(transcript: &Transcript) -> Vec<String> {
         .collect()
 }
 
-fn list_key(state: &mut State, bound: Option<Action>) {
+fn list_key(state: &mut State, bound: Option<Action>) -> Vec<Effect> {
     match bound {
         Some(Action::SelectPrevious) => step_selection(state, -1),
         Some(Action::SelectNext) => step_selection(state, 1),
         Some(Action::InspectSelected) => {
-            state.focus = Focus::Inspect(state.selected);
+            if let Some(id) = state.selected_agent().map(|agent| agent.id.clone()) {
+                state.selected = id;
+                state.focus = Focus::Inspect;
+            }
             state.notice = None;
         }
         Some(Action::ReturnToComposer) => {
             state.focus = Focus::Composer;
             state.notice = None;
         }
+        // Only a working subagent's run can be stopped; the runtime says
+        // how it ended.
+        Some(Action::StopAgent) => {
+            if let Some(agent) = state
+                .selected_agent()
+                .filter(|agent| agent.state == AgentState::Working)
+            {
+                return vec![Effect::StopAgent(agent.id.clone())];
+            }
+        }
         // Other keys do nothing: the bar already names the list's keys.
         _ => {}
     }
+    Vec::new()
 }
 
 /// Keys in the background shells' list and in one shell.
@@ -2244,21 +2266,20 @@ fn advance_script(state: &mut State) {
     }
 }
 
-/// Moves the selection by identity, so a reordered list keeps the same agent.
+/// Moves the selection by identity, so a reordered list keeps the same
+/// agent, stopping at the ends.
 fn step_selection(state: &mut State, delta: isize) {
-    let index = SAMPLE_AGENTS
+    let Some(last) = state.agents.len().checked_sub(1) else {
+        return;
+    };
+    let index = state
+        .agents
         .iter()
         .position(|a| a.id == state.selected)
         .unwrap_or(0);
-    let next = index
-        .saturating_add_signed(delta)
-        .min(SAMPLE_AGENTS.len() - 1);
-    state.selected = SAMPLE_AGENTS[next].id;
+    let next = index.saturating_add_signed(delta).min(last);
+    state.selected = state.agents[next].id.clone();
     state.notice = None;
-}
-
-pub fn agent(id: &str) -> Option<&'static SampleAgent> {
-    SAMPLE_AGENTS.iter().find(|a| a.id == id)
 }
 
 #[cfg(test)]
@@ -2532,7 +2553,71 @@ mod tests {
             (None, Some(Notice::PreviewOnly))
         );
         assert_eq!(chord(&mut state, Key::Char('g'), Mods::CTRL), []);
+        assert_eq!(
+            (state.focus, state.notice),
+            (Focus::Composer, Some(Notice::NoAgents))
+        );
+    }
+
+    fn subagent(id: &str, state: AgentState) -> Agent {
+        Agent {
+            id: id.into(),
+            name: format!("child {id}"),
+            state,
+            route: Some("faux/faux-1".into()),
+            detail: None,
+            file: None,
+        }
+    }
+
+    // A live session lists the subagents its runtime reports: `x` asks to
+    // stop the selected one only while it works, and a list that drops the
+    // inspected agent, or empties, gives the keyboard back.
+    #[test]
+    fn live_subagents_open_from_ctrl_g_and_stop_only_while_working() {
+        let mut state = live();
+        assert!(!state.agents_row());
+        runtime(
+            &mut state,
+            RuntimeUpdate::Agents(vec![
+                subagent("a", AgentState::Working),
+                subagent("b", AgentState::Idle(Some(agents::Ended::Completed))),
+                subagent("c", AgentState::Starting),
+            ]),
+        );
+        assert!(state.agents_row());
+        chord(&mut state, Key::Char('g'), Mods::CTRL);
+        assert_eq!(state.focus, Focus::AgentList);
+        assert_eq!(
+            press(&mut state, Key::Char('x')),
+            [Effect::StopAgent("a".into())]
+        );
+        press(&mut state, Key::Down);
+        assert_eq!(state.selected, "b");
+        assert_eq!(press(&mut state, Key::Char('x')), []);
+        // A child still starting has no run to stop yet.
+        press(&mut state, Key::Down);
+        assert_eq!(state.selected, "c");
+        assert_eq!(press(&mut state, Key::Char('x')), []);
+        press(&mut state, Key::Up);
+        press(&mut state, Key::Enter);
+        assert_eq!(state.focus, Focus::Inspect);
+        assert_eq!(
+            state.selected_agent().map(|a| a.name.as_str()),
+            Some("child b")
+        );
+        // Inspection is read only: `x` is a key like any other there.
+        assert_eq!(press(&mut state, Key::Char('x')), []);
+        assert_eq!(state.notice, Some(Notice::ReadOnly));
+        runtime(
+            &mut state,
+            RuntimeUpdate::Agents(vec![subagent("a", AgentState::Working)]),
+        );
+        assert_eq!(state.focus, Focus::AgentList);
+        assert_eq!(state.selected_agent().map(|a| a.id.as_str()), Some("a"));
+        runtime(&mut state, RuntimeUpdate::Agents(Vec::new()));
         assert_eq!(state.focus, Focus::Composer);
+        assert!(!state.agents_row());
     }
 
     /// Draws nothing, but takes the keyboard handoff a frame would start,
@@ -3182,7 +3267,10 @@ mod tests {
         chord(&mut state, Key::Char('g'), Mods::CTRL);
         press(&mut state, Key::Down);
         press(&mut state, Key::Enter);
-        assert_eq!(state.focus, Focus::Inspect("sample-reviewer"));
+        assert_eq!(
+            (state.focus, state.selected.as_str()),
+            (Focus::Inspect, "sample-reviewer")
+        );
         type_str(&mut state, "zz");
         press(&mut state, Key::Backspace);
         chord(&mut state, Key::Char('-'), Mods::CTRL);
@@ -3206,7 +3294,7 @@ mod tests {
         for _ in 0..5 {
             press(&mut state, Key::Down);
         }
-        assert_eq!(state.selected, SAMPLE_AGENTS.last().unwrap().id);
+        assert_eq!(state.selected, state.agents.last().unwrap().id);
         // Typing and pasting are ignored, with no notice repeating the bar.
         type_str(&mut state, "q");
         update(&mut state, Msg::Paste("pasted".into()));
@@ -3214,16 +3302,12 @@ mod tests {
         assert!(state.draft.is_empty());
         chord(&mut state, Key::Char('g'), Mods::CTRL);
         assert_eq!(state.focus, Focus::Composer);
-        assert_eq!(state.selected, SAMPLE_AGENTS.last().unwrap().id);
+        assert_eq!(state.selected, state.agents.last().unwrap().id);
     }
 
     #[test]
     fn a_second_ctrl_c_quits_from_every_focus_and_changes_nothing() {
-        for focus in [
-            Focus::Composer,
-            Focus::AgentList,
-            Focus::Inspect("sample-explorer"),
-        ] {
+        for focus in [Focus::Composer, Focus::AgentList, Focus::Inspect] {
             let mut state = State {
                 focus,
                 ..State::default()

@@ -247,6 +247,34 @@ pub fn estimate_projected_context_tokens(
     }
 }
 
+/// The tokens Pi's `getContextUsage` reports for a session's projection
+/// and branch: the projected estimate, or `None` after the latest
+/// compaction until an assistant response after it records usage, since
+/// usage recorded before it measured the context the summary replaced.
+pub fn projected_context_tokens(
+    projection: &SessionProjection,
+    branch_entries: &[SessionEntry],
+) -> Option<u64> {
+    if let Some(compaction) = branch_entries
+        .iter()
+        .rposition(|entry| entry.entry_type() == "compaction")
+    {
+        let measured: std::collections::HashSet<&str> = projection
+            .entries
+            .iter()
+            .filter(|entry| entry.messages.iter().any(|m| assistant_usage(m).is_some()))
+            .map(|entry| entry.source_entry.id())
+            .collect();
+        if !branch_entries[compaction + 1..]
+            .iter()
+            .any(|entry| measured.contains(entry.id()))
+        {
+            return None;
+        }
+    }
+    Some(estimate_projected_context_tokens(projection, branch_entries).tokens)
+}
+
 /// Pi's `shouldCompact`.
 pub fn should_compact(
     context_tokens: u64,

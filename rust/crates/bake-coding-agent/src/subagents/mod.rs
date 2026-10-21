@@ -223,6 +223,14 @@ pub struct ChildRow {
     pub label: String,
     /// `provider/model`.
     pub route: String,
+    /// Its current or last run; 0 for a child its parent's file recorded
+    /// that has not run since.
+    pub run: u64,
+    /// How its last run in this process ended; `None` before one has, so
+    /// for a recovered child until it runs again.
+    pub settled: Option<Settlement>,
+    /// Its session file, unless it does not persist.
+    pub file: Option<PathBuf>,
 }
 
 /// How a child's run ended.
@@ -309,6 +317,8 @@ struct Child {
     status: Status,
     /// The current or last run.
     run: u64,
+    /// How the last run in this process ended.
+    settled: Option<Settlement>,
     last_used: u64,
     resident: Option<Resident>,
     /// Messages for a child being started, posted once it is resident.
@@ -486,6 +496,7 @@ impl SubagentHost {
                 provider: child.provider,
                 model: child.model,
                 run: 0,
+                settled: None,
                 last_used: 0,
                 resident: None,
                 waiting: Vec::new(),
@@ -572,6 +583,7 @@ impl SubagentHost {
                 model: route.model.id.clone(),
                 status: Status::Starting,
                 run,
+                settled: None,
                 last_used: tick,
                 resident: None,
                 waiting: Vec::new(),
@@ -830,6 +842,9 @@ impl SubagentHost {
                 status: child.status,
                 label: child.label.clone(),
                 route: format!("{}/{}", child.provider, child.model),
+                run: child.run,
+                settled: child.settled.clone(),
+                file: child.file.clone(),
             })
             .collect()
     }
@@ -951,8 +966,8 @@ enum Next {
     Deliver,
     /// The child's own jobs are live: wait for them.
     Wait,
-    /// The run is over; the child is idle.
-    Settle,
+    /// The run is over; the child is idle and records how it ended.
+    Settle(Settlement),
 }
 
 /// One run: the task or the waiting messages, then every message that
@@ -1000,6 +1015,9 @@ async fn activate(
             return None;
         }
         let finished = matches!(result, Ok(RunOutcome::FinishedTurn));
+        // Read before the host's lock: nothing prompts the child while
+        // this run owns it, so its messages stay as they are.
+        let last = last_response(session, before);
         let next = {
             let host = host.upgrade()?;
             let mut state = lock(&host.state);
@@ -1017,12 +1035,16 @@ async fn activate(
                 if interrupted && finished {
                     result = Ok(RunOutcome::Cancelled);
                 }
+                let settlement = settle(last, run, &result);
+                // Under the lock that marks the child idle, so no listing
+                // shows it idle with an earlier run's ending.
                 child.status = Status::Idle;
+                child.settled = Some(settlement.clone());
                 if let Some(resident) = &mut child.resident {
                     resident.control = None;
                     resident.interrupted = false;
                 }
-                Next::Settle
+                Next::Settle(settlement)
             }
         };
         match next {
@@ -1041,10 +1063,9 @@ async fn activate(
                     _ = control.wait_stopped() => {}
                 }
             }
-            Next::Settle => break,
+            Next::Settle(settlement) => return Some(settlement),
         }
     }
-    Some(settle(session, before, run, result))
 }
 
 /// Runs `work` until it ends; when the parent's gate closes first, stops
@@ -1064,16 +1085,24 @@ async fn owned_run(
     }
 }
 
-/// The settlement of a run that returned `result`, from the last response
-/// the run produced.
-fn settle(session: &AgentSession, before: usize, run: u64, result: RunResult) -> Settlement {
+/// The last response of a run that began with `before` messages.
+fn last_response(session: &AgentSession, before: usize) -> Option<bake_ai::AssistantMessage> {
     let messages = session.messages();
-    let assistant = messages
+    messages
         .get(before.min(messages.len())..)
         .unwrap_or_default()
         .iter()
         .rev()
-        .find_map(|message| message.as_assistant().cloned());
+        .find_map(|message| message.as_assistant().cloned())
+}
+
+/// The settlement of a run that returned `result`, whose last response
+/// was `assistant`.
+fn settle(
+    assistant: Option<bake_ai::AssistantMessage>,
+    run: u64,
+    result: &RunResult,
+) -> Settlement {
     let closing = assistant
         .as_ref()
         .map(bake_ai::utils::text::assistant_text)
@@ -1094,7 +1123,9 @@ fn settle(session: &AgentSession, before: usize, run: u64, result: RunResult) ->
         Ok(RunOutcome::Cancelled | RunOutcome::BudgetExhausted { .. }) => {
             (StopReason::Aborted, None)
         }
-        Ok(RunOutcome::Failed { message }) | Err(message) => (StopReason::Error, Some(message)),
+        Ok(RunOutcome::Failed { message }) | Err(message) => {
+            (StopReason::Error, Some(message.clone()))
+        }
     };
     Settlement {
         run,

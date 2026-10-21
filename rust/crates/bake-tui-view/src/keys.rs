@@ -152,6 +152,9 @@ pub enum Action {
     InspectSelected,
     ReturnToComposer,
     ReturnToAgentList,
+    /// `x` in the agent list: ask the runtime to stop the selected working
+    /// subagent's run.
+    StopAgent,
     /// Enter in the background shells' list: that shell's output.
     OpenJob,
     /// `x` in the shells' list or a shell: ask the runtime to stop it.
@@ -332,6 +335,7 @@ pub const BINDINGS: &[Binding] = &[
     bind(S::AgentList, K::Down, ANY, ANY, A::SelectNext),
     bind(S::AgentList, K::Enter, ANY, ANY, A::InspectSelected),
     bind(S::AgentList, K::Esc, ANY, ANY, A::ReturnToComposer),
+    bind(S::AgentList, K::Char('x'), ANY, CTRL_ALT, A::StopAgent),
     bind(
         S::AgentList,
         K::Char('g'),
@@ -425,6 +429,15 @@ mod tests {
         assert_eq!(
             action(Scope::AgentList, ctrl_g),
             Some(Action::ReturnToComposer)
+        );
+        // `x` stops a subagent from the list alone: inspection is read only,
+        // and a chorded `x` is not the bare key.
+        let x = KeyInput::plain(Key::Char('x'));
+        assert_eq!(action(Scope::AgentList, x), Some(Action::StopAgent));
+        assert_eq!(action(Scope::Inspect, x), None);
+        assert_eq!(
+            action(Scope::AgentList, KeyInput::new(Key::Char('x'), Mods::ALT)),
+            None
         );
         // Undo is the unit separator however the terminal names it; Ctrl+Z
         // is not bound.

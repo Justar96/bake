@@ -23,7 +23,7 @@ use bake_coding_agent::compaction::utils::serialize_conversation;
 use bake_coding_agent::compaction::{
     CompactionSettings, SummarizationOptions, compact, estimate_context_tokens,
     estimate_projected_context_tokens, estimate_tokens, find_cut_point,
-    generate_summary_with_usage, prepare_compaction,
+    generate_summary_with_usage, prepare_compaction, projected_context_tokens,
 };
 use bake_coding_agent::session::json::js_stringify;
 use bake_coding_agent::session::messages::convert_to_llm;
@@ -194,6 +194,40 @@ fn edited_contexts_estimate_from_characters_like_pi() {
         }),
         oracle["projectedEstimate"]
     );
+}
+
+// Pi's `getContextUsage`: after a compaction the tokens are unknown until
+// a response after it records usage; a response without usage does not
+// count, and before any compaction the projected estimate stands.
+#[test]
+fn context_tokens_are_unknown_after_a_compaction_until_a_response_measures_them() {
+    let all = entries(&golden());
+    let tokens = |branch: &[SessionEntry]| {
+        projected_context_tokens(
+            &build_session_projection(branch, LeafSelector::Last),
+            branch,
+        )
+    };
+    let estimate = |branch: &[SessionEntry]| {
+        estimate_projected_context_tokens(
+            &build_session_projection(branch, LeafSelector::Last),
+            branch,
+        )
+        .tokens
+    };
+    // e5 is the compaction, e7 the next user message, and e8 the first
+    // response after it with usage; e11 is a response with none.
+    assert_eq!(all[5].entry_type(), "compaction");
+    assert_eq!(tokens(&all[..5]), Some(estimate(&all[..5])));
+    assert_eq!(tokens(&all[..8]), None, "only a summary and a prompt since");
+    let mut unmeasured = all[11].as_json().clone();
+    unmeasured.insert("parentId".into(), json!("e7"));
+    let mut branch = all[..8].to_vec();
+    branch.push(SessionEntry::from_json(unmeasured).unwrap());
+    assert_eq!(tokens(&branch), None, "a response without usage");
+    assert!(estimate(&all[..9]) > 0);
+    assert_eq!(tokens(&all[..9]), Some(estimate(&all[..9])));
+    assert_eq!(tokens(&all), Some(estimate(&all)));
 }
 
 #[test]
