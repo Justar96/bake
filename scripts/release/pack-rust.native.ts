@@ -8,7 +8,8 @@
  * generates for this host, so these tests need cargo-about 0.9.2 on PATH or
  * in `BAKE_CARGO_ABOUT`, and fail without it. This is a package-layout check,
  * not release qualification: no model, provider, sandbox, install, or update
- * runs. Run with `bun run test:rust:package`.
+ * runs. Bake 0.4.0 packs on Linux alone, so on macOS and Windows the pack is
+ * shown to refuse before it builds instead. Run with `bun run test:rust:package`.
  */
 import { afterEach, expect, test } from 'bun:test'
 import {
@@ -20,7 +21,7 @@ import { once } from 'node:events'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { BUNDLE_FILE, INVENTORY_FILE } from './native-licenses.ts'
-import { archiveName, docsDigests, hostTarget, isRustTarget, parseSelfCheck } from './pack-rust.ts'
+import { archiveName, deferredTargetMessage, docsDigests, hostTarget, isReleaseTarget, isRustTarget, parseSelfCheck } from './pack-rust.ts'
 
 const ROOT = resolve(import.meta.dir, '../..')
 const DOCS = join(ROOT, 'rust/crates/bake-cli/docs')
@@ -216,9 +217,9 @@ function cargoVersion(): string {
   return cli.version
 }
 
-test.skipIf(!isRustTarget(hostTarget()))('the packed bake unpacks and runs without Node, Bun, or a usable Bake home', async () => {
+test.skipIf(!isReleaseTarget(hostTarget()))('the packed bake unpacks and runs without Node, Bun, or a usable Bake home', async () => {
   const target = hostTarget()
-  if (!isRustTarget(target)) return
+  if (!isReleaseTarget(target)) return
   const version = cargoVersion()
   const out = join(scratch('out'), 'out dir')
   // An earlier archive of the same name, which a passing pack replaces.
@@ -246,7 +247,7 @@ test.skipIf(!isRustTarget(hostTarget()))('the packed bake unpacks and runs witho
   } finally {
     closeSync(archiveInput)
   }
-  const exe = target === 'win32-x64' ? 'bake.exe' : 'bake'
+  const exe = process.platform === 'win32' ? 'bake.exe' : 'bake'
   expect(readdirSync(unpacked).sort()).toEqual(['LICENSE', 'THIRD_PARTY_NOTICES.md', 'bin', 'licenses', 'notices'])
   expect(readdirSync(join(unpacked, 'bin'))).toEqual([exe])
   // This host's license text and the inventory, exactly as generated, and no other platform's text.
@@ -307,9 +308,9 @@ test.skipIf(!isRustTarget(hostTarget()))('the packed bake unpacks and runs witho
   // deadlines run in turn, and the binary checks after them take seconds.
 }, 720_000)
 
-test.skipIf(!isRustTarget(hostTarget()))('a failed license generation refuses the pack before building and keeps the earlier archive', async () => {
+test.skipIf(!isReleaseTarget(hostTarget()))('a failed license generation refuses the pack before building and keeps the earlier archive', async () => {
   const target = hostTarget()
-  if (!isRustTarget(target)) return
+  if (!isReleaseTarget(target)) return
   const version = cargoVersion()
   const out = join(scratch('out'), 'out dir')
   mkdirSync(out)
@@ -322,6 +323,16 @@ test.skipIf(!isRustTarget(hostTarget()))('a failed license generation refuses th
   expect(stderr).not.toMatch(/Finished `dev` profile/)
   expect(readdirSync(out)).toEqual([archiveName(version, target)])
   expect(readFileSync(join(out, archiveName(version, target)), 'utf8')).toBe(EARLIER)
+})
+
+// macOS and Windows, where 0.4.0 publishes nothing: the pack stops before Cargo builds.
+test.skipIf(isReleaseTarget(hostTarget()) || !isRustTarget(hostTarget()))('a host outside the 0.4.0 release set is refused before building, naming 0.4.x', async () => {
+  const out = join(scratch('out'), 'out dir')
+  const { code, stderr } = await script(['scripts/release/pack-rust.ts', '--profile', 'dev', '--out', out], 60_000)
+  expect(code).toBe(1)
+  expect(stderr).toContain(deferredTargetMessage(hostTarget()))
+  expect(stderr).not.toContain('Finished')
+  expect(readdirSync(join(out, '..'))).toEqual([])
 })
 
 test('a TypeScript release output directory is refused before building', async () => {

@@ -57,6 +57,8 @@ describe('parsing', () => {
     ['another schema', { schema: 'bake-native-release/2' }, /schema is "bake-native-release\/2"/],
     ['another channel', { channel: 'beta' }, /channel is "beta"/],
     ['an invalid version', { version: '../outside' }, /version is invalid/],
+    ['a pre-release with a leading zero', { version: '0.4.0-rc.01' }, /version is invalid: "0\.4\.0-rc\.01"/],
+    ['a pre-release with an empty identifier', { version: '0.4.0-rc..1' }, /version is invalid: "0\.4\.0-rc\.\.1"/],
     ['a fractional publication time', { published: '2026-10-20T00:00:00.000Z' }, /published time is invalid/],
     ['an impossible publication time', { published: '2026-02-30T00:00:00Z' }, /published time is invalid/],
     ['no artifacts', { artifacts: {} }, /lists no artifacts/],
@@ -143,6 +145,7 @@ describe('the host gate', () => {
   }
 
   const targets = ['darwin-arm64', 'darwin-x64', 'linux-arm64', 'linux-x64', 'win32-x64']
+  const releaseTargets = ['linux-arm64', 'linux-x64']
 
   test('accepts a verified single-platform release', () => {
     const result = verify(fixture().root)
@@ -150,20 +153,33 @@ describe('the host gate', () => {
     expect(result.stdout).toContain('Verified native Bake 0.4.0 release: win32-x64')
   })
 
-  test('accepts all five platforms in complete mode, and refuses a missing one', () => {
-    expect(verify(fixture(targets).root, ['--complete']).code).toBe(0)
-    expect(verify(fixture().root, ['--complete']).stderr).toContain('Missing or invalid darwin-arm64 artifact')
+  test('complete mode requires exactly linux-arm64 and linux-x64', () => {
+    const complete = verify(fixture(releaseTargets).root, ['--complete'])
+    expect(complete.code).toBe(0)
+    expect(complete.stdout).toContain('Verified native Bake 0.4.0 release: linux-arm64, linux-x64')
+    expect(verify(fixture(['linux-x64']).root, ['--complete']).stderr).toContain('Missing or invalid linux-arm64 artifact')
+    // A platform 0.4.0 does not release is refused by name, though the grammar reads it.
+    const deferred = verify(fixture(targets).root, ['--complete'])
+    expect(deferred.code).not.toBe(0)
+    expect(deferred.stderr).toContain('Bake 0.4.0 releases linux-arm64 and linux-x64 only; native darwin-arm64 releases arrive in Bake 0.4.x')
+    expect(verify(fixture([...releaseTargets, 'win32-x64']).root, ['--complete']).stderr).toContain('native win32-x64 releases arrive in Bake 0.4.x')
+  })
+
+  test('outside complete mode the grammar still reads all five platforms, so 0.4.x can add them', () => {
+    const result = verify(fixture(targets).root)
+    expect(result.code).toBe(0)
+    expect(result.stdout).toContain(`Verified native Bake 0.4.0 release: ${targets.join(', ')}`)
   })
 
   test('an archive held elsewhere is allowed, and one it holds is still checked', () => {
-    const { root } = fixture(targets)
+    const { root } = fixture(releaseTargets)
     rmSync(join(root, 'public/native/releases/0.4.0/bake-v0.4.0-linux-x64.tar.gz'))
     expect(verify(root, ['--complete']).code).not.toBe(0)
     const allowed = verify(root, ['--complete', '--allow-missing-archives'])
     expect(allowed.code).toBe(0)
     expect(allowed.stdout).toContain('archives held elsewhere: linux-x64')
-    writeFileSync(join(root, 'public/native/releases/0.4.0/bake-v0.4.0-win32-x64.tar.gz'), `${PAYLOAD}!`)
-    expect(verify(root, ['--complete', '--allow-missing-archives']).stderr).toContain('Size mismatch for win32-x64')
+    writeFileSync(join(root, 'public/native/releases/0.4.0/bake-v0.4.0-linux-arm64.tar.gz'), `${PAYLOAD}!`)
+    expect(verify(root, ['--complete', '--allow-missing-archives']).stderr).toContain('Size mismatch for linux-arm64')
   })
 
   test('reports no native release when none is staged, unless one is required', () => {
@@ -195,6 +211,9 @@ describe('the host gate', () => {
     ['another schema', (m: Record<string, unknown>) => { m.schema = 'bake-native-release/2' }, 'Unsupported native manifest schema'],
     ['another channel', (m: Record<string, unknown>) => { m.channel = 'beta' }, 'Unsupported native release channel'],
     ['an invalid version', (m: Record<string, unknown>) => { m.version = '../outside' }, 'Invalid native release version'],
+    ['a pre-release with a leading zero', (m: Record<string, unknown>) => { m.version = '0.4.0-rc.01' }, 'Invalid native release version'],
+    ['a pre-release with an empty identifier', (m: Record<string, unknown>) => { m.version = '0.4.0-rc..1' }, 'Invalid native release version'],
+    ['a core number with a leading zero', (m: Record<string, unknown>) => { m.version = '0.04.0' }, 'Invalid native release version'],
     ['an invalid publication time', (m: Record<string, unknown>) => { m.published = 'yesterday' }, 'Invalid native release published time'],
     ['a rolled-over publication date', (m: Record<string, unknown>) => { m.published = '2026-02-30T00:00:00Z' }, 'Invalid native release published time'],
     ['no artifacts', (m: Record<string, unknown>) => { m.artifacts = {} }, 'No native release artifacts'],
