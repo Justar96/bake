@@ -441,7 +441,7 @@ pub fn default_session_dir_path(cwd: &str, home: &Path) -> PathBuf {
 /// missing.
 pub fn default_session_dir(cwd: &str, home: &Path) -> io::Result<PathBuf> {
     let dir = default_session_dir_path(cwd, home);
-    fs::create_dir_all(&dir)?;
+    super::durable::create_dir_all(&dir)?;
     Ok(dir)
 }
 

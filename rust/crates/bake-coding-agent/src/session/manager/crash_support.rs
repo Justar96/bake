@@ -22,7 +22,7 @@ use crate::session::{
 use crate::test_support::TempDir;
 
 /// The longest a test waits on a child before it fails instead of hanging.
-pub(super) const PATIENCE: Duration = Duration::from_secs(30);
+pub(crate) const PATIENCE: Duration = Duration::from_secs(30);
 
 /// Exit codes a child ends with on its own, which an expected kill must
 /// not be mistaken for: its watchdog, and a write that returned.
@@ -284,7 +284,7 @@ pub(super) fn take_over(file: &Path) -> SessionManager {
 /// forwarding its stdout and stderr lines. Drop kills and reaps the child,
 /// then joins the readers, which end at their pipes' end once the child is
 /// gone, so none outlives the fixture, whichever assertion fails first.
-pub(super) struct TestChild {
+pub(crate) struct TestChild {
     child: Child,
     output: mpsc::Receiver<String>,
     /// Every line received so far, for failure messages.
@@ -325,14 +325,26 @@ impl TestChild {
     /// test's name, so markers are matched within lines; a name that
     /// matches no test still exits 0, so a parent always waits for one.
     pub(super) fn spawn(test: &str, env: &str, spec: &str) -> Self {
-        let mut child = Command::new(std::env::current_exe().expect("test binary"))
+        Self::try_spawn(test, env, spec, |_| {}).expect("spawn child")
+    }
+
+    /// [`Self::spawn`], with `configure` adjusting the command first, such
+    /// as to run a `pre_exec` hook; fails with the error starting it.
+    pub(crate) fn try_spawn(
+        test: &str,
+        env: &str,
+        spec: &str,
+        configure: impl FnOnce(&mut Command),
+    ) -> std::io::Result<Self> {
+        let mut command = Command::new(std::env::current_exe().expect("test binary"));
+        command
             .args(["--exact", test, "--nocapture", "--test-threads", "1"])
             .env(env, spec)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .expect("spawn child");
+            .stderr(Stdio::piped());
+        configure(&mut command);
+        let mut child = command.spawn()?;
         let pipes = (child.stdout.take(), child.stderr.take());
         let (lines, output) = mpsc::channel();
         // Owned before anything can fail, so Drop disposes of the child.
@@ -349,7 +361,7 @@ impl TestChild {
             .readers
             .push(forward("child-stdout", stdout, lines.clone()));
         fixture.readers.push(forward("child-stderr", stderr, lines));
-        fixture
+        Ok(fixture)
     }
 
     /// Wait for a line of output containing `mark`; fail when the child
@@ -395,7 +407,7 @@ impl TestChild {
     /// Wait for the child to end on its own, killing it and failing after
     /// [`PATIENCE`]; returns its status and every line it printed.
     #[cfg(target_os = "linux")]
-    pub(super) fn wait(&mut self) -> (ExitStatus, Vec<String>) {
+    pub(crate) fn wait(&mut self) -> (ExitStatus, Vec<String>) {
         let status = self.reap();
         for reader in self.readers.drain(..) {
             assert!(reader.join().is_ok(), "an output reader panicked");
