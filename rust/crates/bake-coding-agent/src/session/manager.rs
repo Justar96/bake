@@ -1711,6 +1711,22 @@ mod kernel_write_tests;
 #[path = "manager/power_loss_tests.rs"]
 mod power_loss_tests;
 
+#[cfg(all(
+    test,
+    target_os = "linux",
+    any(target_arch = "x86_64", target_arch = "aarch64")
+))]
+#[path = "manager/kernel_faults.rs"]
+pub(crate) mod kernel_faults;
+
+#[cfg(all(
+    test,
+    target_os = "linux",
+    any(target_arch = "x86_64", target_arch = "aarch64")
+))]
+#[path = "manager/seccomp_write_tests.rs"]
+mod seccomp_write_tests;
+
 #[cfg(test)]
 mod tests {
     use super::*;
