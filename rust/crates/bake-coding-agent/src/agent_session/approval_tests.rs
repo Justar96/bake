@@ -1166,6 +1166,8 @@ async fn the_requests_are_the_same_with_and_without_the_entries() {
 }
 
 const CHILD_ROOT: &str = "BAKE_TEST_APPROVAL_ROOT";
+/// The entry after whose write the child holds: `asked` or `decided`.
+const CHILD_HOLD: &str = "BAKE_TEST_APPROVAL_HOLD";
 const READY: &str = "bake-approval-writer-held";
 const CHILD_TEST: &str = "agent_session::approval_tests::approval_writer_child";
 
@@ -1178,14 +1180,21 @@ fn hold() {
     std::process::exit(91);
 }
 
-/// The writer the kill case stops: one call `c1` the answerer allows, held
-/// once its `allowed-once` is written and synced, before the call runs.
+/// The writer the kill cases stop: one call `c1` the answerer allows, held
+/// once the entry [`CHILD_HOLD`] names is written and synced: its `asked`
+/// entry, before the answerer is asked, or its `allowed-once`, before the
+/// call runs.
 #[test]
 fn approval_writer_child() {
     let Some(root) = std::env::var_os(CHILD_ROOT) else {
         return;
     };
     let root = PathBuf::from(root);
+    let hold_after_asked = match std::env::var(CHILD_HOLD).as_deref() {
+        Ok("asked") => true,
+        Ok("decided") => false,
+        other => panic!("bad hold {other:?}"),
+    };
     tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
         .enable_all()
@@ -1209,8 +1218,12 @@ fn approval_writer_child() {
                 true,
             )
             .await;
-            session.core.hooks().approval_written = Some(Arc::new(|entry| {
-                if matches!(entry, ApprovalEntry::Decided { .. }) {
+            session.core.hooks().approval_written = Some(Arc::new(move |entry| {
+                let here = match entry {
+                    ApprovalEntry::Asked { .. } => hold_after_asked,
+                    ApprovalEntry::Decided { .. } => !hold_after_asked,
+                };
+                if here {
                     hold();
                 }
             }));
@@ -1225,10 +1238,12 @@ struct Writer {
 }
 
 impl Writer {
-    fn start(root: &Path) -> Self {
+    /// Start the child, held after the entry `hold` names.
+    fn start(root: &Path, hold: &str) -> Self {
         let child = Command::new(std::env::current_exe().unwrap())
             .args(["--exact", CHILD_TEST, "--nocapture", "--test-threads", "1"])
             .env(CHILD_ROOT, root)
+            .env(CHILD_HOLD, hold)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
@@ -1257,7 +1272,7 @@ impl Writer {
         );
         ready
             .recv_timeout(Duration::from_secs(60))
-            .expect("the child wrote its answer");
+            .expect("the child wrote the entry it holds after");
         writer
     }
 
@@ -1297,7 +1312,7 @@ fn a_writer_killed_after_the_answer_reopens_with_the_call_unanswered() {
     let dir = TempDir::new("approval-crash");
     std::fs::create_dir_all(dir.join("ws")).unwrap();
     std::fs::create_dir_all(dir.join("markers")).unwrap();
-    let mut child = Writer::start(dir.path());
+    let mut child = Writer::start(dir.path(), "decided");
     child.kill();
     drop(child);
     assert!(
@@ -1314,6 +1329,69 @@ fn a_writer_killed_after_the_answer_reopens_with_the_call_unanswered() {
     };
     assert_eq!(record.asked.call_id.as_deref(), Some("c1"));
     assert_eq!(record.outcome, Some(EscalationOutcome::AllowedOnce));
+    assert_eq!(
+        permission_state(&reopened).unwrap().knobs,
+        KnobState::default()
+    );
+    drop(reopened);
+
+    let text = std::fs::read_to_string(&file).unwrap();
+    let unanswered: Vec<String> = build_unanswered_tool_calls(&parsed(&text), LeafSelector::Last)
+        .into_iter()
+        .map(|call| call.tool_call_id)
+        .collect();
+    assert_eq!(unanswered, ["c1"]);
+    match request_from(&text).last() {
+        Some(Message::ToolResult(result)) => {
+            assert_eq!(result.tool_call_id, "c1");
+            assert!(result.is_error);
+            assert!(
+                matches!(result.content.as_slice(),
+                    [UserContentBlock::Text(text)] if text.text == "No result provided"),
+                "{result:?}"
+            );
+        }
+        other => panic!("the request ends with the synthetic result: {other:?}"),
+    }
+}
+
+/// The approval entries of the file at `path`, as kinds.
+fn approval_kinds(path: &Path) -> Vec<String> {
+    approvals_on_disk(path)
+        .iter()
+        .map(|entry| entry["kind"].as_str().unwrap_or("?").to_owned())
+        .collect()
+}
+
+// A writer killed after its `asked` entry is synced and before anyone is
+// asked, so before its `decided` entry, reopens with the request recorded
+// and no answer: the history holds the request without an outcome, nothing
+// is granted, the call is unanswered and closed by Pi's synthetic `No
+// result provided`, and the effect never happened. The next writer takes
+// the file over.
+#[test]
+fn a_writer_killed_between_the_asked_and_decided_entries_reopens_unanswered() {
+    let dir = TempDir::new("approval-crash-asked");
+    std::fs::create_dir_all(dir.join("ws")).unwrap();
+    std::fs::create_dir_all(dir.join("markers")).unwrap();
+    let mut child = Writer::start(dir.path(), "asked");
+    child.kill();
+    drop(child);
+    assert!(
+        !dir.join("markers").join("c1").exists(),
+        "the effect never ran"
+    );
+
+    let file = dir.join("session.jsonl");
+    assert_eq!(approval_kinds(&file), ["asked"]);
+    let reopened = SessionManager::open(&file, None, None).unwrap();
+    let history = approval_history(&reopened);
+    assert!(history.skipped.is_empty(), "{history:?}");
+    let [record] = history.records.as_slice() else {
+        panic!("one record: {history:?}");
+    };
+    assert_eq!(record.asked.call_id.as_deref(), Some("c1"));
+    assert_eq!(record.outcome, None, "{history:?}");
     assert_eq!(
         permission_state(&reopened).unwrap().knobs,
         KnobState::default()
