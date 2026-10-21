@@ -1697,6 +1697,10 @@ mod rewrite_tests;
 mod kernel_write_tests;
 
 #[cfg(test)]
+#[path = "manager/power_loss_tests.rs"]
+mod power_loss_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

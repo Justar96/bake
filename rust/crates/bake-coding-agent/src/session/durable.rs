@@ -97,6 +97,11 @@ use std::time::{Duration, Instant};
 use crate::session::SessionError;
 use crate::session::id::uuid_v4;
 
+#[cfg(test)]
+pub(crate) mod disk_log;
+#[cfg(test)]
+use disk_log::DiskOp;
+
 /// The sidecar lock file of `session_file`: its name with `.lock` appended.
 pub(crate) fn lock_path(session_file: &Path) -> PathBuf {
     let mut name = OsString::from(session_file.as_os_str());
@@ -271,6 +276,27 @@ fn sync(file: &File, all: bool) -> io::Result<()> {
     result
 }
 
+/// [`sync`] `file`, which is at `path`; the crate's tests log it.
+fn sync_file(file: &File, path: &Path, all: bool) -> io::Result<()> {
+    sync(file, all)?;
+    #[cfg(test)]
+    disk_log::record(DiskOp::Fsync(path.to_path_buf()));
+    #[cfg(not(test))]
+    let _ = path;
+    Ok(())
+}
+
+/// Write all of `bytes` to `file`, which is at `path`; the crate's tests
+/// log the write.
+fn write_file(file: &mut File, path: &Path, bytes: &[u8]) -> io::Result<()> {
+    file.write_all(bytes)?;
+    #[cfg(test)]
+    disk_log::record(DiskOp::Write(path.to_path_buf(), bytes.to_vec()));
+    #[cfg(not(test))]
+    let _ = path;
+    Ok(())
+}
+
 /// Sync `path`'s directory so a name created or renamed there survives a
 /// crash; best effort, and nothing on Windows.
 fn sync_parent_dir(path: &Path) {
@@ -280,22 +306,38 @@ fn sync_parent_dir(path: &Path) {
             Some(dir) if !dir.as_os_str().is_empty() => dir,
             _ => Path::new("."),
         };
-        if let Ok(dir) = File::open(dir) {
-            let _ = sync(&dir, true);
+        if let Ok(file) = File::open(dir)
+            && sync(&file, true).is_ok()
+        {
+            #[cfg(test)]
+            disk_log::record(DiskOp::DirSync(dir.to_path_buf()));
         }
     }
     #[cfg(not(unix))]
     let _ = path;
 }
 
-/// Append `bytes`, which end in a newline, on a line of their own, and sync
-/// them. The file is created when missing, as Pi's `appendFileSync` does.
-pub(crate) fn append(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    let mut file = OpenOptions::new()
+/// Open `path` to append to it, creating it when missing; the crate's
+/// tests log a creation.
+fn open_append(path: &Path) -> io::Result<File> {
+    #[cfg(test)]
+    let created = !path.exists();
+    let file = OpenOptions::new()
         .read(true)
         .append(true)
         .create(true)
         .open(path)?;
+    #[cfg(test)]
+    if created {
+        disk_log::record(DiskOp::Create(path.to_path_buf()));
+    }
+    Ok(file)
+}
+
+/// Append `bytes`, which end in a newline, on a line of their own, and sync
+/// them. The file is created when missing, as Pi's `appendFileSync` does.
+pub(crate) fn append(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let mut file = open_append(path)?;
     let len = file.metadata()?.len();
     let mut out = Vec::with_capacity(bytes.len() + 1);
     if len > 0 {
@@ -307,8 +349,8 @@ pub(crate) fn append(path: &Path, bytes: &[u8]) -> io::Result<()> {
         }
     }
     out.extend_from_slice(bytes);
-    file.write_all(&out)?;
-    sync(&file, false)?;
+    write_file(&mut file, path, &out)?;
+    sync_file(&file, path, false)?;
     if len == 0 {
         sync_parent_dir(path);
     }
@@ -483,19 +525,29 @@ impl Faults {
     }
 }
 
-/// Writes `bytes` to `file` as far as it can, returning how many it wrote
-/// before an error.
-fn write_counted(file: &mut File, bytes: &[u8]) -> Result<(), (usize, io::Error)> {
+/// Writes `bytes` to `file`, which is at `path`, as far as it can,
+/// returning how many it wrote before an error; the crate's tests log what
+/// it wrote.
+fn write_counted(file: &mut File, path: &Path, bytes: &[u8]) -> Result<(), (usize, io::Error)> {
     let mut written = 0;
-    while written < bytes.len() {
+    let result = loop {
+        if written == bytes.len() {
+            break Ok(());
+        }
         match file.write(&bytes[written..]) {
-            Ok(0) => return Err((written, io::ErrorKind::WriteZero.into())),
+            Ok(0) => break Err((written, io::ErrorKind::WriteZero.into())),
             Ok(n) => written += n,
             Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
-            Err(error) => return Err((written, error)),
+            Err(error) => break Err((written, error)),
         }
+    };
+    #[cfg(test)]
+    if written > 0 {
+        disk_log::record(DiskOp::Write(path.to_path_buf(), bytes[..written].to_vec()));
     }
-    Ok(())
+    #[cfg(not(test))]
+    let _ = path;
+    result
 }
 
 /// Append `lines`, each ending in a newline, in order, the first on a line
@@ -514,12 +566,7 @@ pub(crate) fn append_lines(
         error,
     };
     let not_written = |error| failure(0, FailedLine::NotWritten, error);
-    let mut file = OpenOptions::new()
-        .read(true)
-        .append(true)
-        .create(true)
-        .open(path)
-        .map_err(not_written)?;
+    let mut file = open_append(path).map_err(not_written)?;
     let len = file.metadata().map_err(not_written)?.len();
     let mut separator = false;
     if len > 0 {
@@ -529,7 +576,7 @@ pub(crate) fn append_lines(
         separator = last[0] != b'\n';
     }
     if separator {
-        write_counted(&mut file, b"\n").map_err(|(_, error)| not_written(error))?;
+        write_counted(&mut file, path, b"\n").map_err(|(_, error)| not_written(error))?;
     }
     #[cfg(not(test))]
     let _ = faults;
@@ -538,7 +585,7 @@ pub(crate) fn append_lines(
         // one panics the test rather than pass for the injected stage.
         #[cfg(test)]
         let real_write = |file: &mut File, bytes: &[u8]| {
-            if let Err((written, error)) = write_counted(file, bytes) {
+            if let Err((written, error)) = write_counted(file, path, bytes) {
                 panic!("test seam: real write failed after {written} bytes: {error}");
             }
         };
@@ -596,7 +643,7 @@ pub(crate) fn append_lines(
                 ));
             }
         }
-        write_counted(&mut file, line).map_err(|(written, error)| {
+        write_counted(&mut file, path, line).map_err(|(written, error)| {
             let state = if written == 0 {
                 FailedLine::NotWritten
             } else {
@@ -604,7 +651,8 @@ pub(crate) fn append_lines(
             };
             failure(index, state, error)
         })?;
-        sync(&file, false).map_err(|error| failure(index, FailedLine::Unsynced, error))?;
+        sync_file(&file, path, false)
+            .map_err(|error| failure(index, FailedLine::Unsynced, error))?;
         if len == 0 && index == 0 {
             sync_parent_dir(path);
         }
@@ -616,8 +664,10 @@ pub(crate) fn append_lines(
 /// its directory entry.
 pub(crate) fn create_new(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let mut file = OpenOptions::new().write(true).create_new(true).open(path)?;
-    file.write_all(bytes)?;
-    sync(&file, false)?;
+    #[cfg(test)]
+    disk_log::record(DiskOp::Create(path.to_path_buf()));
+    write_file(&mut file, path, bytes)?;
+    sync_file(&file, path, false)?;
     drop(file);
     sync_parent_dir(path);
     Ok(())
@@ -659,18 +709,19 @@ impl Staged {
             .open(&staged.temp)?;
         #[cfg(test)]
         {
+            disk_log::record(DiskOp::Create(staged.temp.clone()));
             faults.reach(RewriteStep::Created)?;
             faults.partly_write(&mut file, bytes)?;
         }
         #[cfg(not(test))]
         let _ = faults;
-        file.write_all(bytes)?;
+        write_file(&mut file, &staged.temp, bytes)?;
         #[cfg(test)]
         faults.reach(RewriteStep::Written)?;
         if let Some(permissions) = permissions {
             file.set_permissions(permissions)?;
         }
-        sync(&file, true)?;
+        sync_file(&file, &staged.temp, true)?;
         #[cfg(test)]
         faults.reach(RewriteStep::Synced)?;
         Ok(staged)
@@ -688,6 +739,8 @@ impl Staged {
         fs::rename(&self.temp, &self.target)?;
         self.committed = true;
         #[cfg(test)]
+        disk_log::record(DiskOp::Rename(self.temp.clone(), self.target.clone()));
+        #[cfg(test)]
         faults.reach(RewriteStep::Renamed)?;
         #[cfg(not(test))]
         let _ = faults;
@@ -700,21 +753,30 @@ impl Staged {
 
 impl Drop for Staged {
     fn drop(&mut self) {
-        if !self.committed {
-            let _ = fs::remove_file(&self.temp);
+        if !self.committed && fs::remove_file(&self.temp).is_ok() {
+            #[cfg(test)]
+            disk_log::record(DiskOp::Remove(self.temp.clone()));
         }
     }
 }
 
 /// Truncate `path` and write `bytes` in place, then sync it.
 fn overwrite(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    #[cfg(test)]
+    let created = !path.exists();
     let mut file = OpenOptions::new()
         .write(true)
         .create(true)
         .truncate(true)
         .open(path)?;
-    file.write_all(bytes)?;
-    sync(&file, false)
+    #[cfg(test)]
+    disk_log::record(if created {
+        DiskOp::Create(path.to_path_buf())
+    } else {
+        DiskOp::Truncate(path.to_path_buf())
+    });
+    write_file(&mut file, path, bytes)?;
+    sync_file(&file, path, false)
 }
 
 /// Whether other names link to the file.
