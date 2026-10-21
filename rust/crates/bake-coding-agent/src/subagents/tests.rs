@@ -311,11 +311,13 @@ async fn settled(parent: &Parent) {
     })
     .await
     .expect("children settled");
-    parent
-        .session
-        .deliver_job_notices()
-        .await
-        .expect("notice turn");
+    tokio::time::timeout(
+        Duration::from_secs(20),
+        parent.session.deliver_job_notices(),
+    )
+    .await
+    .expect("the notice turn ended")
+    .expect("notice turn");
 }
 
 /// The custom messages of `session` with `custom_type`, as their texts

@@ -173,13 +173,23 @@ async fn racing_wakeups_dispatch_each_due_reminder_once() {
             let schedules = session.schedules();
             tokio::spawn(async move {
                 // Each racing look is a tick of its own: it delivers what it
-                // finds due until nothing is.
-                while let Step::Again = look(&core, &jobs, &schedules).await {}
+                // finds due until nothing is, within a bound, so a look that
+                // keeps finding the same reminder due fails the test.
+                for _ in 0..8 {
+                    if !matches!(look(&core, &jobs, &schedules).await, Step::Again) {
+                        return true;
+                    }
+                }
+                false
             })
         })
         .collect();
     for racing in looks {
-        racing.await.expect("a look");
+        let settled = tokio::time::timeout(Duration::from_secs(30), racing)
+            .await
+            .expect("the racing looks ended")
+            .expect("a look");
+        assert!(settled, "a look kept finding a reminder due");
     }
     assert!(
         decided.load(Ordering::SeqCst) >= 4,

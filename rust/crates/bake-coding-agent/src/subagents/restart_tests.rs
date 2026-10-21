@@ -370,7 +370,9 @@ async fn a_killed_parent_reports_each_child_run_once_and_reruns_none() {
             settled(&resumed).await;
             assert_eq!(child_requests(), 1, "{mode}");
         }
-        resumed.session.shutdown().await;
+        tokio::time::timeout(Duration::from_secs(30), resumed.session.shutdown())
+            .await
+            .expect("the resumed parent shut down");
         assert!(
             resumed.work.is_closed(),
             "{mode}: the parent's work outlived it"

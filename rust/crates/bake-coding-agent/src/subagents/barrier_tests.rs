@@ -11,6 +11,13 @@ use tokio::sync::Notify;
 
 use super::*;
 
+/// Awaits `work`, failing the test if it takes longer than 30 s.
+async fn bounded<T>(what: &str, work: impl std::future::Future<Output = T>) -> T {
+    tokio::time::timeout(Duration::from_secs(30), work)
+        .await
+        .unwrap_or_else(|_| panic!("{what} did not finish"))
+}
+
 /// Gates the scripted model holds: each child's request until its gate
 /// opens, and the parent's `hold` request until it is cancelled.
 #[derive(Default)]
@@ -183,8 +190,8 @@ async fn race(stop: ParentStop, when: Settles) -> (Arc<Harness>, PathBuf, String
     };
     let stopping = || async {
         match stop {
-            ParentStop::Abort => parent.session.abort().await,
-            ParentStop::Shutdown => parent.session.shutdown().await,
+            ParentStop::Abort => bounded("abort", parent.session.abort()).await,
+            ParentStop::Shutdown => bounded("shutdown", parent.session.shutdown()).await,
         }
     };
     match when {
@@ -215,14 +222,12 @@ async fn race(stop: ParentStop, when: Settles) -> (Arc<Harness>, PathBuf, String
                 "{case}"
             );
             assert!(
-                !parent
-                    .session
-                    .deliver_job_notices()
+                !bounded("delivery", parent.session.deliver_job_notices())
                     .await
                     .expect("nothing left"),
                 "{case}"
             );
-            parent.session.shutdown().await;
+            bounded("shutdown", parent.session.shutdown()).await;
         }
         ParentStop::Shutdown => {
             // Nothing is delivered after shutdown begins: a settlement
@@ -283,7 +288,7 @@ async fn a_child_settling_around_a_parent_stop_is_admitted_once() {
                 [(1, first.to_owned()), (2, "completed".to_owned())],
                 "{case}"
             );
-            resumed.session.shutdown().await;
+            bounded("shutdown", resumed.session.shutdown()).await;
             nothing_left(&h, &resumed, &case);
         }
     }
@@ -357,7 +362,7 @@ async fn notices_are_admitted_in_settlement_order_once_each() {
         file_notices(&parent),
         [(2, "completed".to_owned()), (1, "completed".to_owned())]
     );
-    parent.session.shutdown().await;
+    bounded("shutdown", parent.session.shutdown()).await;
     nothing_left(&h, &parent, "order");
 }
 
@@ -512,8 +517,8 @@ async fn a_parent_stops_its_children_jobs_and_reminders_bottom_up() {
         .expect("the parent's turn is running");
 
     // Esc: the parent's turn alone.
-    parent.session.abort().await;
-    let _ = hold.await.expect("the held turn");
+    bounded("abort", parent.session.abort()).await;
+    let _ = bounded("the held turn", hold).await.expect("the held turn");
     assert_eq!(*log.lock().expect("log"), ["parent turn"]);
     assert_eq!(parent.host.running(), 1, "the child runs on");
     assert_eq!(
@@ -531,7 +536,7 @@ async fn a_parent_stops_its_children_jobs_and_reminders_bottom_up() {
     .expect("the timer looks on");
 
     // Shutdown: everything below the parent ends before it returns.
-    parent.session.shutdown().await;
+    bounded("shutdown", parent.session.shutdown()).await;
     log.lock().expect("log").push("parent shutdown");
     let mut ended = log.lock().expect("log").clone();
     assert_eq!(ended.remove(0), "parent turn");
