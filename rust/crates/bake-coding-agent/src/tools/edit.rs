@@ -127,6 +127,13 @@ pub fn prepare_edit_arguments(input: Value) -> Value {
 
 /// Pi's `createEditToolDefinition`. Its blocking work has no owner: a
 /// dropped call's edit runs to its end unawaited.
+///
+/// For embedders only; `bake` builds its tools under the session's
+/// [`WorkGate`](crate::owned_work::WorkGate)
+/// ([`crate::tools::index::ToolsOptions::owner`]). An embedder that shuts
+/// down while a call may be running must await each call's future to its
+/// end before it treats the file as settled or ends the runtime: dropping
+/// the future does not stop the edit, and nothing waits for it.
 pub fn create_edit_tool_definition(cwd: &Path) -> ToolDefinition {
     owned_edit_tool_definition(cwd, None)
 }
@@ -205,7 +212,9 @@ fn edits_of(args: &Value) -> Result<Vec<Edit>, String> {
 /// Runs an `edit` call, first passing the target to `guard` inside its
 /// mutation queue, after the first abort check and before the file is
 /// checked or read; the file is then read and written through the target
-/// the guard returns. The blocking work has no owner.
+/// the guard returns. The blocking work has no owner: as for
+/// [`create_edit_tool_definition`], the embedder must await the future to
+/// its end, since a dropped one still edits.
 pub async fn execute_guarded(
     cwd: PathBuf,
     args: Value,
