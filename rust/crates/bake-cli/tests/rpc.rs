@@ -12,17 +12,18 @@
 //! through the real binary: D24 approvals answered, refused, and left
 //! unanswered, each against the session file; `abort` and read-only
 //! commands answered while a turn runs; and shutdown on end of input and
-//! on `SIGTERM`, `SIGINT`, and `SIGHUP` with no process left behind.
+//! on `SIGTERM`, `SIGINT`, and `SIGHUP` with no process left behind. The
+//! approval and shutdown cases run on Linux, the platform 0.4.0 qualifies
+//! (D47).
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::{Child, Command, Output, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use bake_coding_agent::permissions::APPROVAL_CUSTOM_TYPE;
 use serde_json::{Value, json};
 
 /// How long one record may take before the test fails.
@@ -191,8 +192,13 @@ fn answer(mut socket: TcpStream, replies: &[Reply], requests: &AtomicUsize, stop
     }
 }
 
+/// The custom entry type of a D24 approval record.
+#[cfg(target_os = "linux")]
+const APPROVAL: &str = bake_coding_agent::permissions::APPROVAL_CUSTOM_TYPE;
+
 /// The session file's entries.
-fn entries(file: &Path) -> Vec<Value> {
+#[cfg(target_os = "linux")]
+fn entries(file: &std::path::Path) -> Vec<Value> {
     std::fs::read_to_string(file)
         .unwrap_or_default()
         .lines()
@@ -201,12 +207,11 @@ fn entries(file: &Path) -> Vec<Value> {
 }
 
 /// The D24 approval records in `entries`, in order.
+#[cfg(target_os = "linux")]
 fn approvals(entries: &[Value]) -> Vec<Value> {
     entries
         .iter()
-        .filter(|entry| {
-            entry["type"] == json!("custom") && entry["customType"] == json!(APPROVAL_CUSTOM_TYPE)
-        })
+        .filter(|entry| entry["type"] == json!("custom") && entry["customType"] == json!(APPROVAL))
         .map(|entry| entry["data"].clone())
         .collect()
 }
@@ -661,6 +666,7 @@ fn an_invalid_mode_lists_rpc() {
 /// asks to escalate the read-only session to `workspace-write`, and waits
 /// for the approval request. Returns the client, the request's id, the
 /// file the write would create, and the session file.
+#[cfg(target_os = "linux")]
 fn ask_for_a_write(workspace: &Workspace) -> (Client, String, PathBuf, PathBuf) {
     let mut client = workspace.rpc(&["--sandbox", "read-only", "--approval", "ask"]);
     let file = client.session_file();
@@ -679,6 +685,7 @@ fn ask_for_a_write(workspace: &Workspace) -> (Client, String, PathBuf, PathBuf) 
 }
 
 /// The model's two answers for [`ask_for_a_write`]: the write, then text.
+#[cfg(target_os = "linux")]
 fn write_then_text() -> ModelServer {
     ModelServer::start(vec![
         Reply::tool_call(
@@ -696,12 +703,13 @@ fn write_then_text() -> ModelServer {
 
 /// The asked and decided records of the one approval in `file`, and the
 /// index in its entries of the `write` call's result, if it has one.
-fn decision(file: &Path) -> (Vec<Value>, Vec<Value>, Option<usize>) {
+#[cfg(target_os = "linux")]
+fn decision(file: &std::path::Path) -> (Vec<Value>, Vec<Value>, Option<usize>) {
     let entries = entries(file);
     let approvals = approvals(&entries);
     let decided = entries.iter().position(|entry| {
         entry["type"] == json!("custom")
-            && entry["customType"] == json!(APPROVAL_CUSTOM_TYPE)
+            && entry["customType"] == json!(APPROVAL)
             && entry["data"]["kind"] == json!("decided")
     });
     let result = entries.iter().position(|entry| {
@@ -719,6 +727,7 @@ fn decision(file: &Path) -> (Vec<Value>, Vec<Value>, Option<usize>) {
 // Scope 13 and D24 through the binary: `confirmed: true` lets the one call
 // run, and the session file holds `asked` then `decided` with
 // `allowed-once`, written before the call's result.
+#[cfg(target_os = "linux")]
 #[test]
 fn an_approved_write_runs_after_its_decision_is_recorded() {
     let server = write_then_text();
@@ -747,6 +756,7 @@ fn an_approved_write_runs_after_its_decision_is_recorded() {
 
 // Scope 13 and D24: `confirmed: false` refuses the call, which writes
 // nothing, and the refusal is recorded before the call's result.
+#[cfg(target_os = "linux")]
 #[test]
 fn a_denied_write_is_refused_and_recorded() {
     let server = write_then_text();
@@ -769,6 +779,7 @@ fn a_denied_write_is_refused_and_recorded() {
 // Scope 13 and D24: a client that disconnects without answering leaves the
 // call refused, never run, and the process exits 0 once the session has
 // recorded the cancellation.
+#[cfg(target_os = "linux")]
 #[test]
 fn a_client_that_disconnects_unanswered_leaves_the_write_refused() {
     let server = write_then_text();

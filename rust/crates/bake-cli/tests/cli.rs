@@ -969,6 +969,7 @@ fn offline_print_and_rpc_modes_make_no_startup_connection() {
             text(&out.stdout)
         );
     }
+    assert_eq!(proxy.catalog_requests(), 0);
     assert_eq!(proxy.seen(), Vec::<String>::new());
 }
 
