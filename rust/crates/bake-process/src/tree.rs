@@ -36,16 +36,24 @@
 //! One Linux exception: a PID namespace a member of the tree started. Its
 //! init (`NSpid` ending in 1) is a child of a member, but may lead its own
 //! session, as bubblewrap's `--unshare-pid --new-session` init does, so the
-//! group's kill misses it. Each kill first looks for such inits, pins each
-//! with a pidfd, and kills it through the pidfd after the group, which ends
-//! every process in its namespace; a killed tree is gone only once each
-//! pinned init has exited, and an init exits only after the kernel has
-//! reaped every other process of its namespace. An init is found only while
-//! its parent is still alive in the group, so the kill looks before it
-//! signals the group and again on every poll of [`ProcessTree::gone`]; one
+//! group's kill misses it. Each kill and each `SIGTERM` request first looks
+//! for such inits and pins each with a pidfd; a kill then kills every
+//! pinned init through its pidfd after the group, which ends every process
+//! in its namespace. A killed tree is gone only once each pinned init has
+//! exited, and an init exits only after the kernel has reaped every other
+//! process of its namespace. An init is found only while its parent is
+//! still alive in the group, so a request or kill looks before it signals
+//! the group, and a kill again on every poll of [`ProcessTree::gone`]; one
 //! created and moved out of the group between the last look and its
 //! parent's death is not awaited (bubblewrap's `--die-with-parent` still
-//! ends it). Without pidfds (kernels before 5.3) no init is pinned.
+//! ends it). A request whose tree then exits by itself and is never killed
+//! releases its pins with the tree. Without pidfds (kernels before 5.3) no
+//! init is pinned.
+//!
+//! As pid 1 (a container without an init) this process also reaps each
+//! pinned init: an exited init that is still another process's child stays
+//! pinned until that parent reaps it, or dies and the init is reparented
+//! here and reaped, so a settled tree leaves no zombie init behind.
 //!
 //! The only `unsafe` code is the FFI calls below, each with its contract.
 
@@ -187,12 +195,18 @@ impl ProcessTree {
     }
 
     /// Sends `SIGTERM` to the group if the tree is still armed (Unix); a
-    /// request only. Windows has no such request, so nothing is sent.
+    /// request only. Windows has no such request, so nothing is sent. On
+    /// Linux it first pins the namespace inits under the group, as a kill
+    /// does: a member the request ends would otherwise take its init's
+    /// parentage with it, so a later [`Self::kill`] still ends that
+    /// namespace and [`Self::gone`] still awaits it.
     pub(crate) fn terminate(&self) {
         let armed = self.armed.lock().unwrap_or_else(PoisonError::into_inner);
         if !*armed {
             return;
         }
+        #[cfg(target_os = "linux")]
+        self.adopt_namespaces();
         #[cfg(unix)]
         self.signal_group(libc::SIGTERM);
         drop(armed);
@@ -485,9 +499,9 @@ mod linux {
 
         /// Whether the pinned init has exited, which it does only once
         /// every other process of its namespace has been reaped. A poll
-        /// that fails reads as still running. As pid 1 this process is the
-        /// init's parent by now, and reaps it, as it reaps the group's
-        /// zombies.
+        /// that fails reads as still running. As pid 1 an exited init
+        /// counts only once it is reaped ([`gone_as_pid1`]): here, or by
+        /// its own parent.
         pub(super) fn exited(&self) -> bool {
             let mut poll = libc::pollfd {
                 fd: self.pidfd.as_raw_fd(),
@@ -497,23 +511,86 @@ mod linux {
             // SAFETY: one valid `pollfd`, no wait.
             let ready = unsafe { libc::poll(&mut poll, 1, 0) };
             let exited = ready > 0 && poll.revents & libc::POLLIN != 0;
-            if exited && std::process::id() == 1 {
-                // SAFETY: a zeroed `siginfo_t` is valid output space.
-                let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
-                // SAFETY: plain syscall on an owned pidfd; it reaps the
-                // init only if it is this process's child (`ECHILD`
-                // otherwise, which is ignored), and nothing else in this
-                // process waits for it: Bake never spawns an init itself.
-                unsafe {
-                    libc::waitid(
-                        libc::P_PIDFD,
-                        libc::id_t::try_from(self.pidfd.as_raw_fd()).unwrap_or(0),
-                        &mut info,
-                        libc::WEXITED | libc::WNOHANG,
-                    );
-                }
+            if !exited || std::process::id() != 1 {
+                return exited;
             }
-            exited
+            gone_as_pid1(self.reap(), || self.exists())
+        }
+
+        /// Reaps the exited init if it is this process's child, without
+        /// waiting.
+        fn reap(&self) -> Wait {
+            let Ok(fd) = libc::id_t::try_from(self.pidfd.as_raw_fd()) else {
+                return Wait::Failed;
+            };
+            // SAFETY: a zeroed `siginfo_t` is valid output space.
+            let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+            // SAFETY: plain syscall on an owned pidfd with valid output
+            // space; it reaps the init only if it is this process's child,
+            // and nothing else in this process waits for it: Bake never
+            // spawns an init itself.
+            let waited = unsafe {
+                libc::waitid(libc::P_PIDFD, fd, &mut info, libc::WEXITED | libc::WNOHANG)
+            };
+            if waited == 0 {
+                // SAFETY: `waitid` filled `info`, or left it zeroed when
+                // nothing was waitable; either way `si_pid` is readable.
+                let pid = unsafe { info.si_pid() };
+                return if pid == 0 {
+                    Wait::NotWaitable
+                } else {
+                    Wait::Reaped
+                };
+            }
+            match io::Error::last_os_error().raw_os_error() {
+                Some(libc::ECHILD) => Wait::NotChild,
+                _ => Wait::Failed,
+            }
+        }
+
+        /// Whether the pinned process still exists, a zombie included: a
+        /// pidfd signals no process once it has been reaped. A check that
+        /// fails otherwise reads as still there.
+        fn exists(&self) -> bool {
+            // SAFETY: plain syscall on a pidfd this value owns, with signal
+            // 0, which checks existence and sends nothing.
+            let sent = unsafe {
+                libc::syscall(
+                    libc::SYS_pidfd_send_signal,
+                    self.pidfd.as_raw_fd(),
+                    0,
+                    std::ptr::null::<libc::siginfo_t>(),
+                    0,
+                )
+            };
+            sent == 0 || io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH)
+        }
+    }
+
+    /// What a non-blocking `waitid` on an exited init's pidfd reported.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub(super) enum Wait {
+        /// This process reaped it.
+        Reaped,
+        /// It is this process's child but was not reported as waitable.
+        NotWaitable,
+        /// It is not this process's child (`ECHILD`).
+        NotChild,
+        /// The call failed otherwise.
+        Failed,
+    }
+
+    /// Whether, as pid 1, an exited init is gone for good: reaped here, or
+    /// not a child here and no longer existing, because its own parent
+    /// reaped it. An init that is still another process's zombie stays
+    /// pinned: its parent reaps it, or dies, and the init is reparented
+    /// here, where the next poll reaps it. Dropping it on `ECHILD` instead
+    /// would leave that reparented zombie with no one to reap it.
+    pub(super) fn gone_as_pid1(wait: Wait, exists: impl FnOnce() -> bool) -> bool {
+        match wait {
+            Wait::Reaped => true,
+            Wait::NotChild => !exists(),
+            Wait::NotWaitable | Wait::Failed => false,
         }
     }
 
@@ -780,6 +857,19 @@ mod linux {
             assert_eq!(namespace_inits(root.path(), 7), vec![114]);
             assert!(namespace_inits(root.path(), 55).is_empty());
             assert!(namespace_inits(&root.join("missing"), 100).is_empty());
+        }
+
+        // As pid 1, an exited init is released only once it is reaped:
+        // here, or by its own parent. One that is still another process's
+        // zombie (`ECHILD` while it exists) stays pinned, so the next poll
+        // reaps it once it is reparented here.
+        #[test]
+        fn as_pid_1_an_exited_init_is_released_only_once_reaped() {
+            assert!(gone_as_pid1(Wait::Reaped, || panic!("not asked")));
+            assert!(gone_as_pid1(Wait::NotChild, || false));
+            assert!(!gone_as_pid1(Wait::NotChild, || true));
+            assert!(!gone_as_pid1(Wait::NotWaitable, || false));
+            assert!(!gone_as_pid1(Wait::Failed, || false));
         }
 
         #[test]

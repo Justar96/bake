@@ -54,8 +54,9 @@
 //! descendant that leaves the tree (`setsid`) is outside this ownership:
 //! the tree is cleanup, not containment, and D24's sandbox is the
 //! boundary. One Linux exception: the init of a PID namespace a member
-//! started, such as bubblewrap's, is pinned by a pidfd, killed with the
-//! tree, and awaited, which ends and awaits its whole namespace. A Windows
+//! started, such as bubblewrap's, is pinned by a pidfd (by a kill, or by
+//! the `SIGTERM` request before one), killed with the tree, and awaited,
+//! which ends and awaits its whole namespace. A Windows
 //! descendant cannot leave: the job allows no breakaway, and one from a
 //! job nested in it stays in it.
 //!
@@ -365,7 +366,10 @@ impl OwnedProcess {
 
     /// Asks the tree to stop: `SIGTERM` to its group on Unix, while the
     /// leader's identity is held. Windows has no such request; this does
-    /// nothing there. Selects no policy and awaits nothing.
+    /// nothing there. Selects no policy and awaits nothing. On Linux it
+    /// first pins the PID namespace inits under the tree, as a kill does,
+    /// so that a later [`Self::kill`] ends and awaits a namespace whose
+    /// parent this request ended.
     pub fn terminate(&mut self) {
         self.check_identity();
         if let Some(tree) = &self.tree {
