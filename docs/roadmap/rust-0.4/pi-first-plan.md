@@ -95,6 +95,8 @@ Under D32, scopes 02 and 03 port Pi's session manager instead of Bake's Session 
 
 **D42 and D43, code mode and plugins (2026-10-19).** Code mode ports Pi's `codemode` tool and its QuickJS engine, with Bake's own native host and no new crate; it supersedes D17's TypeScript `run_code` ([design](code-mode.md)). The native plugin API beyond the implemented veto slice, and D7's management surface, are deferred beyond 0.4.0.
 
+**D47 and D48, Linux-only 0.4.0 (2026-10-21).** 0.4.0 qualifies and publishes Linux x86_64 and aarch64 only; macOS and Windows qualification moves to 0.4.x (D47, narrowing D16). Goals, MCP OAuth, resource subscriptions and prompts, further slash commands, and other provider routes are deferred beyond 0.4.0 (D48).
+
 **D10 and D13, Rust-only support (2026-10-17).** 0.3 bug and security maintenance ends when 0.4.0 ships; from that release, only Rust Bake is shipped and maintained. Supported legacy `dsh`, profile, and package aliases retire with 0.3. Native environment fallbacks and existing user-owned command links remain preserved. Scope 16 must freeze the final TypeScript update route and prevent post-retirement 0.3 publication. Scope 17 owns the retirement notice and TypeScript product removal.
 
 Two earlier decisions were added to the [support register](scope-00/support.md#decision-register) with this plan and decided by request on 2026-10-09:
