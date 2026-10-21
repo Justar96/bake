@@ -1,4 +1,9 @@
-//! Runs the built binary with piped, non-terminal standard streams.
+//! Runs the built binary with piped, non-terminal standard streams, and,
+//! for the interactive `--offline` case, on a pseudo-terminal. Scope 13's
+//! command-line proofs live here: `--export` never writes its input,
+//! `--offline` makes no startup connection, keys are printed only by the
+//! commands that print one, and excluded flags are unknown options. Every
+//! server a case uses binds 127.0.0.1 and belongs to that case.
 
 use std::process::{Command, Output, Stdio};
 
@@ -480,4 +485,670 @@ fn auth_commands_report_a_provider_and_print_its_key() {
         text(&bearer.stderr)
     );
     assert!(!text(&bearer.stderr).contains("sk-faux-stored"));
+}
+
+/// Scope 13: `--export` reads its input without the session's lock and
+/// writes only the page. The session file and its directory are made
+/// read-only and dated in the past, and after the export the file is byte
+/// for byte the same, with the same modification time, and the directory
+/// holds nothing new.
+#[cfg(unix)]
+#[test]
+fn export_never_writes_its_input() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = TempDir::new("export-read-only");
+    let sessions = root.0.join("sessions");
+    let pages = root.0.join("pages");
+    std::fs::create_dir_all(&sessions).expect("sessions");
+    std::fs::create_dir_all(&pages).expect("pages");
+    let session = sessions.join("2026-01-01T00-00-00-000Z_s1.jsonl");
+    std::fs::write(
+        &session,
+        concat!(
+            r#"{"type":"session","version":3,"id":"s1","timestamp":"2026-01-01T00:00:00.000Z","cwd":"/tmp"}"#,
+            "\n",
+            r#"{"type":"message","id":"a1","parentId":null,"timestamp":"2026-01-01T00:00:01.000Z","message":{"role":"user","content":"hi","timestamp":1}}"#,
+            "\n",
+        ),
+    )
+    .expect("write session");
+    let past = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000_000);
+    std::fs::File::options()
+        .write(true)
+        .open(&session)
+        .and_then(|file| file.set_modified(past))
+        .expect("date the session");
+    std::fs::set_permissions(&session, std::fs::Permissions::from_mode(0o444)).expect("chmod");
+    std::fs::set_permissions(&sessions, std::fs::Permissions::from_mode(0o555)).expect("chmod");
+    let listing = |dir: &std::path::Path| {
+        let mut names: Vec<_> = std::fs::read_dir(dir)
+            .expect("list")
+            .map(|entry| entry.expect("entry").file_name())
+            .collect();
+        names.sort();
+        names
+    };
+    let bytes = std::fs::read(&session).expect("read");
+    let before = std::fs::metadata(&session).expect("metadata");
+    let names = listing(&sessions);
+
+    let page = pages.join("out.html");
+    let out = Command::new(env!("CARGO_BIN_EXE_bake"))
+        .arg("--export")
+        .arg(&session)
+        .arg(&page)
+        .current_dir(&pages)
+        .env_remove("BAKE_HOME")
+        .env_remove("DSH_HOME")
+        .stdin(Stdio::null())
+        .output()
+        .expect("bake runs");
+    // Restored first, so the directory can be removed whatever happens.
+    let restore = std::fs::set_permissions(&sessions, std::fs::Permissions::from_mode(0o755));
+    assert!(out.status.success(), "{}", text(&out.stderr));
+    restore.expect("chmod back");
+    assert!(
+        std::fs::read_to_string(&page)
+            .expect("page")
+            .starts_with("<!DOCTYPE html>")
+    );
+    let after = std::fs::metadata(&session).expect("metadata");
+    assert_eq!(std::fs::read(&session).expect("read"), bytes);
+    assert_eq!(after.modified().ok(), before.modified().ok());
+    assert_eq!(after.modified().ok(), Some(past));
+    assert_eq!(after.len(), before.len());
+    assert_eq!(listing(&sessions), names);
+}
+
+/// Scope 13 and D43: Pi's extension and theme flags and `--tui-mode` are
+/// not `bake` options, so each is refused as an unknown option before
+/// anything starts, and nothing is written to standard output.
+#[test]
+fn excluded_flags_are_refused_as_unknown_options() {
+    for (args, expected) in [
+        (&["--extension", "./ext.ts"][..], "--extension"),
+        (&["--no-extensions"], "--no-extensions"),
+        (&["--theme", "./theme.json"], "--theme"),
+        (&["--use-theme", "light"], "--use-theme"),
+        (&["--no-themes"], "--no-themes"),
+        (&["--tui-mode", "fullscreen"], "--tui-mode"),
+        (&["-e", "./ext.ts"], "-e"),
+    ] {
+        let out = run(args);
+        assert_eq!(out.status.code(), Some(1), "{args:?}");
+        assert!(out.stdout.is_empty(), "{args:?}");
+        assert_eq!(
+            text(&out.stderr),
+            format!("Error: Unknown option: {expected}\n"),
+            "{args:?}"
+        );
+    }
+}
+
+/// A Bake home whose `faux` provider has a stored key, for the key cases.
+struct KeyHome {
+    root: TempDir,
+}
+
+/// The stored key, which only the commands that print a key may show.
+const STORED_KEY: &str = "sk-scope13-stored-secret";
+/// The key `models.json` gives a provider inline.
+const INLINE_KEY: &str = "sk-scope13-inline-secret";
+
+impl KeyHome {
+    fn new(name: &str) -> Self {
+        let root = TempDir::new(name);
+        for dir in ["home", "project", "user"] {
+            std::fs::create_dir_all(root.0.join(dir)).expect("dir");
+        }
+        // Port 1 refuses connections, so a prompt fails without the
+        // network.
+        std::fs::write(
+            root.0.join("home/models.json"),
+            serde_json::json!({
+                "providers": {
+                    "faux": { "baseUrl": "http://127.0.0.1:1/v1", "api": "openai-responses",
+                        "models": [{ "id": "faux-1", "contextWindow": 1000 }] },
+                    "inline": { "baseUrl": "http://127.0.0.1:1/v1", "api": "openai-responses",
+                        "apiKey": INLINE_KEY,
+                        "models": [{ "id": "inline-1", "contextWindow": 1000 }] },
+                },
+            })
+            .to_string(),
+        )
+        .expect("models");
+        std::fs::write(
+            root.0.join("home/auth.json"),
+            serde_json::json!({ "faux": { "type": "api_key", "key": STORED_KEY } }).to_string(),
+        )
+        .expect("auth");
+        // A refused connection fails the prompt at once, not after retries.
+        std::fs::write(
+            root.0.join("home/settings.json"),
+            serde_json::json!({ "retry": { "enabled": false } }).to_string(),
+        )
+        .expect("settings");
+        Self { root }
+    }
+
+    fn command(&self, args: &[&str]) -> Command {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_bake"));
+        command
+            .args(args)
+            .current_dir(self.root.0.join("project"))
+            .env("BAKE_HOME", self.root.0.join("home"))
+            .env_remove("DSH_HOME")
+            .env_remove("CLIPROXYAPI_API_KEY")
+            .env("HOME", self.root.0.join("user"))
+            .stdin(Stdio::null());
+        command
+    }
+
+    /// Runs `args`, writing `input` to standard input when it is given.
+    fn run(&self, args: &[&str], input: Option<&str>) -> Output {
+        let mut command = self.command(args);
+        if input.is_none() {
+            return command.output().expect("bake runs");
+        }
+        let mut child = command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("bake starts");
+        if let (Some(mut stdin), Some(input)) = (child.stdin.take(), input) {
+            use std::io::Write;
+            stdin.write_all(input.as_bytes()).expect("write input");
+        }
+        child.wait_with_output().expect("bake output")
+    }
+}
+
+/// Scope 13: a key reaches standard output only from `auth print-api-key`
+/// and `auth check --credentials`, the commands whose purpose is to print
+/// one. Help, listings, checks, failed prompts in every output mode, RPC
+/// state and model listings, and every error leave both keys out of both
+/// streams.
+#[test]
+fn keys_are_printed_only_by_the_commands_that_print_one() {
+    let home = KeyHome::new("keys");
+    let rpc_input = concat!(
+        r#"{"id":"s","type":"get_state"}"#,
+        "\n",
+        r#"{"id":"m","type":"get_available_models"}"#,
+        "\n",
+        r#"{"id":"st","type":"get_session_stats"}"#,
+        "\n",
+        r#"{"id":"c","type":"get_commands"}"#,
+        "\n",
+    );
+    let quiet: &[(&[&str], Option<&str>)] = &[
+        (&["--help"], None),
+        (&["--version"], None),
+        (&["--list-models"], None),
+        (&["--list-models", "faux"], None),
+        (&["auth", "--help"], None),
+        (&["auth", "check", "--provider", "faux"], None),
+        (&["auth", "check", "--provider", "faux", "--json"], None),
+        (&["auth", "check", "--provider", "inline", "--json"], None),
+        (&["auth", "check", "--model", "faux/faux-1"], None),
+        (&["auth", "print-bearer-token", "--provider", "faux"], None),
+        (&["auth", "print-api-key", "--provider", "nope"], None),
+        (&["auth", "print-api-key", "--model", "missing"], None),
+        (&["--model", "faux/faux-1", "-p", "hello"], None),
+        (&["--model", "inline/inline-1", "-p", "hello"], None),
+        (&["--model", "faux/faux-1", "--mode", "json", "hello"], None),
+        (
+            &["--model", "faux/faux-1", "--verbose", "-p", "hello"],
+            None,
+        ),
+        (
+            &["--model", "faux/faux-1", "--mode", "rpc"],
+            Some(rpc_input),
+        ),
+        (
+            &["--model", "inline/inline-1", "--mode", "rpc"],
+            Some(rpc_input),
+        ),
+        (&["--model", "faux/faux-1", "--bogus"], None),
+    ];
+    for (args, input) in quiet {
+        let out = home.run(args, *input);
+        for key in [STORED_KEY, INLINE_KEY] {
+            assert!(
+                !text(&out.stdout).contains(key) && !text(&out.stderr).contains(key),
+                "{args:?} showed a key: {}{}",
+                text(&out.stdout),
+                text(&out.stderr)
+            );
+        }
+    }
+    // The quiet cases did reach the key: the prompt was sent with it and
+    // failed on the refused connection, and RPC mode listed the models.
+    let failed = home.run(&["--model", "faux/faux-1", "-p", "hello"], None);
+    assert_eq!(failed.status.code(), Some(1), "{}", text(&failed.stderr));
+    assert!(!text(&failed.stderr).is_empty());
+    let listed = home.run(
+        &["--model", "faux/faux-1", "--mode", "rpc"],
+        Some(rpc_input),
+    );
+    assert!(
+        text(&listed.stdout).contains("\"faux-1\""),
+        "{}",
+        text(&listed.stdout)
+    );
+    // The commands that exist to print one print exactly it.
+    for (args, key) in [
+        (
+            &["auth", "print-api-key", "--provider", "faux"][..],
+            STORED_KEY,
+        ),
+        (
+            &["auth", "print-api-key", "--provider", "inline"],
+            INLINE_KEY,
+        ),
+        (
+            &["auth", "check", "--provider", "faux", "--credentials"],
+            STORED_KEY,
+        ),
+    ] {
+        let out = home.run(args, None);
+        assert_eq!(
+            out.status.code(),
+            Some(0),
+            "{args:?}: {}",
+            text(&out.stderr)
+        );
+        assert_eq!(text(&out.stdout), format!("{key}\n"), "{args:?}");
+        assert!(!text(&out.stderr).contains(key), "{args:?}");
+    }
+}
+
+/// A loopback CLIProxyAPI that records the request line of every
+/// connection: `GET /v1/models` is the catalog a startup refresh fetches,
+/// and `POST /v1/responses` a model request, answered with the text
+/// stream in `fixtures/`. Stopped and joined on drop.
+struct Proxy {
+    port: u16,
+    seen: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Proxy {
+    fn start() -> Self {
+        use std::io::{Read, Write};
+        use std::sync::atomic::Ordering;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+        listener.set_nonblocking(true).expect("nonblocking");
+        let port = listener.local_addr().expect("address").port();
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let thread = {
+            let (seen, stop) = (seen.clone(), stop.clone());
+            std::thread::spawn(move || {
+                while !stop.load(Ordering::SeqCst) {
+                    let Ok((mut socket, _)) = listener.accept() else {
+                        std::thread::sleep(std::time::Duration::from_millis(5));
+                        continue;
+                    };
+                    let _ = socket.set_nonblocking(false);
+                    let _ = socket.set_read_timeout(Some(std::time::Duration::from_secs(5)));
+                    let mut request = Vec::new();
+                    let mut chunk = [0u8; 8192];
+                    // The whole request is read before the answer, so the
+                    // close that follows it resets nothing unread.
+                    let complete = |request: &[u8]| {
+                        let end = request
+                            .windows(4)
+                            .position(|window| window == b"\r\n\r\n")?;
+                        let head = String::from_utf8_lossy(&request[..end]).to_lowercase();
+                        let length = head
+                            .lines()
+                            .find_map(|line| line.strip_prefix("content-length:"))
+                            .and_then(|value| value.trim().parse::<usize>().ok())
+                            .unwrap_or(0);
+                        (request.len() >= end + 4 + length).then_some(())
+                    };
+                    while complete(&request).is_none() {
+                        match socket.read(&mut chunk) {
+                            Ok(0) | Err(_) => break,
+                            Ok(read) => request.extend_from_slice(&chunk[..read]),
+                        }
+                    }
+                    let line = String::from_utf8_lossy(&request)
+                        .lines()
+                        .next()
+                        .unwrap_or_default()
+                        .to_owned();
+                    seen.lock().expect("seen").push(line.clone());
+                    let (kind, body) = if line.starts_with("GET /v1/models") {
+                        (
+                            "application/json",
+                            r#"{"object":"list","data":[{"id":"proxy-model","object":"model"}]}"#
+                                .to_owned(),
+                        )
+                    } else {
+                        (
+                            "text/event-stream",
+                            format!("{}\n", include_str!("fixtures/openai-responses-text.sse")),
+                        )
+                    };
+                    let _ = socket.write_all(
+                        format!(
+                            "HTTP/1.1 200 OK\r\ncontent-type: {kind}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                            body.len()
+                        )
+                        .as_bytes(),
+                    );
+                }
+            })
+        };
+        Self {
+            port,
+            seen,
+            stop,
+            thread: Some(thread),
+        }
+    }
+
+    fn seen(&self) -> Vec<String> {
+        self.seen.lock().expect("seen").clone()
+    }
+
+    fn catalog_requests(&self) -> usize {
+        self.seen()
+            .iter()
+            .filter(|line| line.starts_with("GET /v1/models"))
+            .count()
+    }
+}
+
+impl Drop for Proxy {
+    fn drop(&mut self) {
+        self.stop.store(true, std::sync::atomic::Ordering::SeqCst);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+/// A Bake home signed in to `proxy`, as `/login` leaves one: the route in
+/// `settings.json` and its key in `auth.json`, bound by one generation.
+fn signed_in_home(name: &str, proxy: &Proxy) -> TempDir {
+    let root = TempDir::new(name);
+    for dir in ["home", "project", "user"] {
+        std::fs::create_dir_all(root.0.join(dir)).expect("dir");
+    }
+    std::fs::write(
+        root.0.join("home/settings.json"),
+        serde_json::json!({
+            "cliproxyapi": {
+                "displayName": "CLIProxyAPI",
+                "apiKeyEnv": "CLIPROXYAPI_API_KEY",
+                "api": "openai-responses",
+                "baseURL": format!("http://127.0.0.1:{}/v1", proxy.port),
+                "models": [{ "id": "proxy-model", "name": "Proxy Model", "contextWindow": 200000,
+                    "maxTokens": 32000, "input": ["text"] }],
+                "retryPolicy": { "mode": "normal", "backoff": { "maxDelayMs": 60000 } },
+                "compat": { "sendSessionAffinityHeaders": true },
+                "account": "generation-1",
+            },
+            "retry": { "enabled": false },
+        })
+        .to_string(),
+    )
+    .expect("settings");
+    std::fs::write(
+        root.0.join("home/auth.json"),
+        serde_json::json!({ "cliproxyapi": { "type": "api_key", "key": "sk-proxy-test", "account": "generation-1" } })
+            .to_string(),
+    )
+    .expect("auth");
+    root
+}
+
+fn home_command(root: &TempDir, args: &[&str]) -> Command {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_bake"));
+    command
+        .args(args)
+        .current_dir(root.0.join("project"))
+        .env("BAKE_HOME", root.0.join("home"))
+        .env_remove("DSH_HOME")
+        .env_remove("BAKE_OFFLINE")
+        .env_remove("DSH_OFFLINE")
+        .env_remove("CLIPROXYAPI_API_KEY")
+        .env("HOME", root.0.join("user"));
+    command
+}
+
+/// Scope 13 and Pi's `offlineMode`: print and RPC mode start no network
+/// operation of their own, with `--offline` or without it. Each run reads
+/// the signed-in account (RPC mode lists its model) and the proxy sees no
+/// connection.
+#[test]
+fn offline_print_and_rpc_modes_make_no_startup_connection() {
+    use std::io::Write;
+    let proxy = Proxy::start();
+    let root = signed_in_home("offline-modes", &proxy);
+    for offline in [true, false] {
+        let flag: &[&str] = if offline { &["--offline"] } else { &[] };
+        let mut args = vec!["--mode", "rpc", "--model", "cliproxyapi/proxy-model"];
+        args.extend_from_slice(flag);
+        let mut child = home_command(&root, &args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("bake starts");
+        child
+            .stdin
+            .take()
+            .expect("stdin")
+            .write_all(b"{\"id\":\"m\",\"type\":\"get_available_models\"}\n")
+            .expect("write");
+        let out = child.wait_with_output().expect("bake output");
+        assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+        assert!(
+            text(&out.stdout).contains("\"proxy-model\""),
+            "{}",
+            text(&out.stdout)
+        );
+
+        let mut args = vec!["--list-models", "proxy"];
+        args.extend_from_slice(flag);
+        let out = home_command(&root, &args)
+            .stdin(Stdio::null())
+            .output()
+            .expect("bake runs");
+        assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+        assert!(
+            text(&out.stdout).contains("proxy-model"),
+            "{}",
+            text(&out.stdout)
+        );
+    }
+    assert_eq!(proxy.seen(), Vec::<String>::new());
+}
+
+/// An interactive `bake` on a pseudo-terminal, which answers the cursor
+/// and device queries a terminal answers; killed and reaped on drop.
+#[cfg(target_os = "linux")]
+struct Terminal {
+    child: std::process::Child,
+    screen: std::sync::Arc<std::sync::Mutex<String>>,
+    input: std::fs::File,
+    reader: Option<std::thread::JoinHandle<()>>,
+}
+
+#[cfg(target_os = "linux")]
+impl Terminal {
+    fn start(mut command: Command) -> Self {
+        use std::io::{Read, Write};
+        use std::os::fd::{FromRawFd, OwnedFd};
+        use std::os::unix::process::CommandExt;
+        let (mut master, mut slave) = (0, 0);
+        let size = libc::winsize {
+            ws_row: 30,
+            ws_col: 100,
+            ws_xpixel: 0,
+            ws_ypixel: 0,
+        };
+        let opened = unsafe {
+            libc::openpty(
+                &mut master,
+                &mut slave,
+                std::ptr::null_mut(),
+                std::ptr::null(),
+                &size,
+            )
+        };
+        assert_eq!(opened, 0, "openpty");
+        // Neither descriptor is inherited as such: the child gets the
+        // terminal as its standard streams only.
+        for fd in [master, slave] {
+            assert_eq!(
+                unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) },
+                0
+            );
+        }
+        let master = unsafe { OwnedFd::from_raw_fd(master) };
+        let slave = unsafe { OwnedFd::from_raw_fd(slave) };
+        command
+            .env("TERM", "xterm-256color")
+            .stdin(Stdio::from(slave.try_clone().expect("slave")))
+            .stdout(Stdio::from(slave.try_clone().expect("slave")))
+            .stderr(Stdio::from(slave));
+        // The terminal becomes the child's controlling terminal, in a
+        // session of its own.
+        unsafe {
+            command.pre_exec(|| {
+                if libc::setsid() < 0 || libc::ioctl(0, libc::TIOCSCTTY, 0) < 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+        let child = command.spawn().expect("bake starts");
+        // The parent's copies of the terminal end with the command.
+        drop(command);
+        let input = std::fs::File::from(master);
+        let mut output = input.try_clone().expect("master");
+        let mut answers = input.try_clone().expect("master");
+        let screen = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+        let reader = {
+            let screen = screen.clone();
+            std::thread::spawn(move || {
+                let mut chunk = [0u8; 8192];
+                // The child's end closing reads as an error (EIO).
+                while let Ok(read) = output.read(&mut chunk) {
+                    if read == 0 {
+                        break;
+                    }
+                    let text = String::from_utf8_lossy(&chunk[..read]).into_owned();
+                    if text.contains("\x1b[6n") {
+                        let _ = answers.write_all(b"\x1b[1;1R");
+                    }
+                    if text.contains("\x1b[c") || text.contains("\x1b[0c") {
+                        let _ = answers.write_all(b"\x1b[?62;22c");
+                    }
+                    screen.lock().expect("screen").push_str(&text);
+                }
+            })
+        };
+        Self {
+            child,
+            screen,
+            input,
+            reader: Some(reader),
+        }
+    }
+
+    fn screen(&self) -> String {
+        self.screen.lock().expect("screen").clone()
+    }
+
+    /// Waits until `ready` holds, failing with what was drawn.
+    fn wait(&self, what: &str, ready: impl Fn() -> bool) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        while !ready() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "no {what}; the terminal shows {:?}",
+                self.screen()
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+
+    fn send(&mut self, keys: &str) {
+        use std::io::Write;
+        self.input.write_all(keys.as_bytes()).expect("type");
+    }
+
+    /// Stops `bake` with `SIGTERM` and returns its status.
+    fn stop(mut self) -> Option<i32> {
+        use std::os::unix::process::ExitStatusExt;
+        unsafe { libc::kill(self.child.id() as i32, libc::SIGTERM) };
+        let status = self.child.wait().expect("bake ends");
+        status.code().or(status.signal().map(|signal| 128 + signal))
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl Drop for Terminal {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+        // The reader ends once the child's end of the terminal is closed.
+        if let Some(reader) = self.reader.take() {
+            let _ = reader.join();
+        }
+    }
+}
+
+/// Scope 13 and Pi's `offlineMode`, end to end in a terminal: an
+/// interactive launch signed in to a loopback CLIProxyAPI refreshes its
+/// catalog at startup, which is the control, and with `--offline` it
+/// does not, though the session still reaches the proxy for its prompt.
+#[cfg(target_os = "linux")]
+#[test]
+fn offline_stops_the_interactive_startup_refresh() {
+    let proxy = Proxy::start();
+    let root = signed_in_home("offline-terminal", &proxy);
+    let launch = |offline: bool| {
+        let mut args = vec!["--model", "cliproxyapi/proxy-model"];
+        if offline {
+            args.push("--offline");
+        }
+        Terminal::start(home_command(&root, &args))
+    };
+
+    let online = launch(false);
+    online.wait("startup catalog refresh", || proxy.catalog_requests() > 0);
+    online.stop();
+    let refreshed = proxy.catalog_requests();
+
+    let mut offline = launch(true);
+    offline.wait("composer", || offline.screen().contains('❯'));
+    offline.send("hello\r");
+    offline.wait("the prompt's model request", || {
+        proxy
+            .seen()
+            .iter()
+            .any(|line| line.starts_with("POST /v1/responses"))
+    });
+    // The answer's words are drawn one cursor move apart; the bar then
+    // reports the turn done.
+    offline.wait("the completed turn", || {
+        let screen = offline.screen();
+        screen.contains("Hello") && screen.contains("loop.") && screen.contains("Completed")
+    });
+    offline.stop();
+    assert_eq!(
+        proxy.catalog_requests(),
+        refreshed,
+        "the offline launch refreshed the catalog: {:?}",
+        proxy.seen()
+    );
 }
