@@ -1,10 +1,13 @@
 #!/bin/sh
 # The Bake native installer: it installs the Rust agent, `bake`, from the
-# signed native release channel. POSIX sh only, and the host needs no Node or
+# signed native release channel. Bake 0.4.0 publishes Linux x64 and arm64
+# releases only; on macOS an install stops before it downloads anything, since
+# those releases arrive in 0.4.x. POSIX sh only, and the host needs no Node or
 # Bun: it needs curl or wget, tar, and sha256sum or shasum. The manifest
 # signature is verified by an OpenSSL with Ed25519 (1.1.1 or newer) where the
-# host has one, and otherwise, on macOS, by the Ed25519 verifier this script
-# embeds, run by `osascript -l JavaScript`.
+# host has one, and otherwise, where `osascript` exists, by the Ed25519
+# verifier this script embeds, run by `osascript -l JavaScript`; the macOS
+# releases of 0.4.x rely on it.
 #
 #   curl -fsSL https://bake.justar.dev/install.sh | sh
 #
@@ -473,7 +476,8 @@ probe_verifier() {
     && ! verify_signature "$ed25519_test_key" "$ed25519_test_signature" "$probe/other"
 }
 
-# Set `target` to this host's release platform.
+# Set `target` to this host's release platform, or stop on a platform Bake
+# 0.4.0 does not release for.
 set_platform() {
   case "$(uname -s)-$(uname -m)" in
     Darwin-arm64) target=darwin-arm64 ;;
@@ -482,6 +486,14 @@ set_platform() {
     Linux-x86_64) target=linux-x64 ;;
     *) fail "this platform has no Bake native release archive" ;;
   esac
+  # BEGIN 0.4.0 PLATFORM REFUSAL
+  # Bake 0.4.0 releases Linux alone (D47); the macOS archives arrive in 0.4.x.
+  # The tests run the install path on macOS through a copy without this block.
+  case $target in
+    linux-*) ;;
+    *) fail "Bake 0.4.0 releases linux-arm64 and linux-x64 only; native $target releases arrive in Bake 0.4.x" ;;
+  esac
+  # END 0.4.0 PLATFORM REFUSAL
 }
 
 # The release `current` names, or empty when the install has no pointer yet.
@@ -715,8 +727,12 @@ install_release() {
   # The manifest, as `bake-native-release/1` fixes it. Whitespace between
   # tokens is removed first; no member of this schema holds any.
   tr -d '[:space:]' < "$temporary/stable.json" > "$temporary/manifest"
+  # The grammar names all five platforms, so a 0.4.x manifest still reads;
+  # the version is canonical SemVer, as every other native reader requires.
   entry='"(darwin-arm64|darwin-x64|linux-arm64|linux-x64|win32-x64)":\{"file":"[A-Za-z0-9._-]+","sha256":"[0-9a-f]{64}","size":[0-9]+\}'
-  grep -Eq '^\{"schema":"bake-native-release/1","channel":"stable","version":"[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?","published":"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z","artifacts":\{'"$entry"'(,'"$entry"')*\}\}$' \
+  number='(0|[1-9][0-9]*)'
+  identifier='(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)'
+  grep -Eq '^\{"schema":"bake-native-release/1","channel":"stable","version":"'"$number"'\.'"$number"'\.'"$number"'(-'"$identifier"'(\.'"$identifier"')*)?","published":"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z","artifacts":\{'"$entry"'(,'"$entry"')*\}\}$' \
     "$temporary/manifest" || fail 'the native release manifest is not a bake-native-release/1 manifest'
   repeated=$(awk -v names='darwin-arm64 darwin-x64 linux-arm64 linux-x64 win32-x64' '
     {

@@ -4,9 +4,19 @@
 #
 #   irm https://bake.justar.dev/install.ps1 | iex
 #
+# Bake 0.4.0 publishes Linux releases only, so this script stops at its start,
+# before it reads any setting or downloads anything; native Windows releases
+# arrive in 0.4.x, and the rest of this script is the installer they use.
+#
 # See distribution/README.md, "Native installers", for the route, the install
 # layout, the `bake` takeover, and the lock these steps take.
 $ErrorActionPreference = 'Stop'
+
+# BEGIN 0.4.0 PLATFORM REFUSAL
+# Thrown, not `exit`: under `irm | iex` an exit would close the user's shell.
+# The tests run the installer below through a copy without this block.
+throw 'Bake install: Bake 0.4.0 releases linux-arm64 and linux-x64 only; native win32-x64 releases arrive in Bake 0.4.x'
+# END 0.4.0 PLATFORM REFUSAL
 
 # The native release key (distribution/host/native-release-key.pub), base64
 # DER SubjectPublicKeyInfo. A release test holds every copy equal. Tests
@@ -482,8 +492,12 @@ function BakeInstall() {
   # install.sh uses. Whitespace between tokens is removed first; no member of
   # this schema holds any.
   $compact = ([Text.Encoding]::UTF8.GetString($manifestBytes)) -replace '\s', ''
+  # The version is canonical SemVer, as every other native reader requires.
   $entry = '"(?:darwin-arm64|darwin-x64|linux-arm64|linux-x64|win32-x64)":\{"file":"[A-Za-z0-9._-]+","sha256":"[0-9a-f]{64}","size":[0-9]+\}'
-  $grammar = '^\{"schema":"bake-native-release/1","channel":"stable","version":"[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?",' +
+  $number = '(?:0|[1-9][0-9]*)'
+  $identifier = '(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)'
+  $grammar = '^\{"schema":"bake-native-release/1","channel":"stable","version":"' + $number + '\.' + $number + '\.' + $number +
+    '(?:-' + $identifier + '(?:\.' + $identifier + ')*)?",' +
     '"published":"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z","artifacts":\{' + $entry + '(?:,' + $entry + ')*\}\}$'
   if ($compact -notmatch $grammar) { throw 'Bake install: the native release manifest is not a bake-native-release/1 manifest' }
   foreach ($platform in @('darwin-arm64', 'darwin-x64', 'linux-arm64', 'linux-x64', 'win32-x64')) {
