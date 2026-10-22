@@ -29,6 +29,10 @@ export const RUST_EXTERNAL_INPUTS: readonly RustExternalInput[] = [
   { path: 'CHANGELOG.md', consumers: ['bake-tui'], read: 'include_str! in live/commands/changelog.rs' },
   { path: 'distribution/host/native-release-key.pub', consumers: ['bake-update'], read: 'include_str! in manifest.rs' },
   {
+    path: 'scripts/release/fixtures/native-version-order.txt', consumers: ['bake-update'],
+    read: 'include_str! in version.rs, the case table both installers are tested against',
+  },
+  {
     path: 'rust/crates/bake-plugin-sdk/wit/', consumers: ['bake-cli', 'bake-coding-agent'],
     read: 'the plugin world: wasmtime bindgen! path and include_str! in tests/wasm_plugin_host/fixtures.rs',
   },
