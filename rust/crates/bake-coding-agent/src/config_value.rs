@@ -931,17 +931,21 @@ mod tests {
 
     // Bake: a descendant that left the shell's group (`setsid`) and keeps
     // the output open holds the read until the timeout, and then nothing
-    // resolves, though the shell exited with a value.
+    // resolves, though the shell exited with a value. The group is killed
+    // as soon as the shell exits, so the shell waits for the holder to
+    // have left it: a shell that exits at once, as dash does, takes
+    // `setsid` with it before it escapes.
     #[cfg(target_os = "linux")]
     #[test]
     fn an_escaped_holder_of_the_output_fails_the_command_at_the_timeout() {
         let dir = crate::test_support::TempDir::new("config-value-escaped");
         let pid = dir.join("pid");
         let script = format!(
-            "setsid sh -c 'echo $$ > \"$0\"; exec sleep 1000' '{}' & echo escaped-key",
+            "setsid sh -c 'echo $$ > \"$0\"; exec sleep 1000' '{0}' & \
+             while [ ! -s '{0}' ]; do sleep 0.01; done; echo escaped-key",
             pid.display()
         );
-        let outcome = run_command(&script, Duration::from_millis(500), None);
+        let outcome = run_command(&script, Duration::from_secs(2), None);
         let deadline = Instant::now() + Duration::from_secs(10);
         while !pid.exists() && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(5));
