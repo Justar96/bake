@@ -1,13 +1,19 @@
 name: Release
 
-# Push a tag `v<version>` from the default branch to release: every platform is built and checked on
-# its own runner, then one job signs the manifest, drafts the GitHub release,
-# deploys the download service, checks what it serves, and publishes the
-# draft. Run it by hand for a dry run of the builds, which publishes nothing.
+# Push a tag `v<version>` from the default branch to release the native agent,
+# for linux-x64 and linux-arm64 alone (D47): each is built, packed, and
+# installed by the shipped installer on its own runner, the two archives are
+# assembled into one complete release, then one job signs the native
+# manifest, drafts and publishes the GitHub release, deploys the download
+# service, and checks what it serves. Run it by hand for a dry run of the
+# builds and the assembly, which publishes nothing and reports what would
+# refuse a tag.
 #
-# The GitHub release carries everything a client needs, signed the same way,
-# so it is a release host of its own. Set the repository variable
-# BAKE_DOWNLOAD_SERVICE to `off` to publish there alone, without Railway.
+# The native installers and `bake update` read `native/` paths that a GitHub
+# release cannot serve, so the download service is required; it redirects
+# each archive to the version's GitHub release. It also keeps serving the
+# frozen 0.3 route, `latest.json`, which 0.3 installs update from: the publish
+# job carries the served copy forward unchanged.
 on:
   push:
     tags: ['v[0-9]+.[0-9]+.[0-9]+*']
@@ -32,9 +38,6 @@ jobs:
       version: ${{ steps.check.outputs.version }}
     env:
       DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-      DOWNLOAD_SERVICE: ${{ vars.BAKE_DOWNLOAD_SERVICE }}
-      REPOSITORY_VISIBILITY: ${{ github.event.repository.visibility }}
-      GITHUB_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -42,21 +45,19 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
-      # A manual run always checks builds only, including when started on a tag.
-      # A pushed tag must be on the default branch and name a new release.
+      # A manual run always checks builds only, including when started on a
+      # tag, and builds whatever version the workspace holds. A pushed tag must
+      # be on the default branch and name a new native release; a rerun may
+      # find the version it already deployed.
       - id: check
         run: |
           if [ "$GITHUB_EVENT_NAME" = push ]; then
             git merge-base --is-ancestor HEAD "origin/$DEFAULT_BRANCH" || { echo "The release tag must point to a commit on $DEFAULT_BRANCH" >&2; exit 1; }
             args=(--tag "$GITHUB_REF_NAME" --notes release-notes.md)
             if [ "$GITHUB_RUN_ATTEMPT" -gt 1 ]; then args+=(--retry); fi
-            if [ "$DOWNLOAD_SERVICE" = off ]; then
-              [ "$REPOSITORY_VISIBILITY" = public ] || { echo 'GitHub-only releases require a public repository' >&2; exit 1; }
-              args+=(--offline --github-repository "$GITHUB_REPOSITORY")
-            fi
             bun scripts/release/preflight.ts "${args[@]}"
           else
-            bun scripts/release/preflight.ts --offline --notes release-notes.md
+            bun scripts/release/preflight.ts --dry-run --notes release-notes.md
           fi
       - uses: actions/upload-artifact@v4
         with:
@@ -67,20 +68,20 @@ jobs:
   build:
     needs: preflight
     strategy:
-      # Every platform reports, but publishing needs all of them.
+      # Both platforms report, but publishing needs both.
       fail-fast: false
       matrix:
         include:
           - { target: linux-x64, os: ubuntu-24.04 }
           - { target: linux-arm64, os: ubuntu-24.04-arm }
-          - { target: darwin-arm64, os: macos-15 }
-          - { target: darwin-x64, os: macos-15-intel }
-          - { target: win32-x64, os: windows-latest }
     name: build ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 40
+    # A clean release build, without the CI job's dependency cache, plus
+    # cargo-about built from source.
+    timeout-minutes: 75
     env:
       VERSION: ${{ needs.preflight.outputs.version }}
+      ARCHIVE: .artifacts/bake-native-release/${{ needs.preflight.outputs.version }}/bake-v${{ needs.preflight.outputs.version }}-${{ matrix.target }}.tar.gz
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -90,56 +91,70 @@ jobs:
         with:
           bun-version-file: package.json
       - run: bun install --frozen-lockfile
-      - run: bun run build
-      # Native modules are built for the runner, so the runner must be the target.
+      # The archive is named for the host it was built on.
       - name: Check the runner builds ${{ matrix.target }}
-        shell: bash
         run: |
           host="$(node -p 'process.platform + "-" + process.arch')"
           [ "$host" = "${{ matrix.target }}" ] || { echo "Runner is $host, not ${{ matrix.target }}" >&2; exit 1; }
-      - run: bun run release:pack
-      # Install this archive with the frozen 0.3 installer, which
-      # scripts/release/fixtures/legacy-0.3/ keeps, and update through it,
-      # signed with a throwaway key; the release key never reaches a build.
-      - run: bun run release:assemble --ephemeral-key
-      - run: bun run release:verify-local
-      # The bash tool runs in bubblewrap, which Ubuntu runners lack, and
-      # AppArmor there denies it the unprivileged user namespaces it needs.
+      # The installed bake's self-check runs on a host like the user's, with
+      # the bash tool's bubblewrap sandbox available; AppArmor on Ubuntu
+      # runners otherwise denies it the unprivileged user namespaces it needs.
       - name: Enable the Linux sandbox
-        if: runner.os == 'Linux'
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq bubblewrap
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-      # The PTY driver needs a POSIX terminal.
-      - name: Built-profile terminal scenarios
-        if: runner.os != 'Windows'
-        timeout-minutes: 15
-        run: bun run test:e2e --no-build
-      # The driver keeps a failed scenario's session logs and workspace in the
-      # OS temporary directory, which is not /tmp on macOS.
-      - name: Collect kept terminal sessions
-        if: failure() && runner.os != 'Windows'
+      - name: Install the pinned Rust toolchain
+        working-directory: rust
+        run: rustup toolchain install --no-self-update
+      # The archive's dependency license text is generated with exactly
+      # cargo-about 0.9.2, built here rather than restored from a cache.
+      - name: Install cargo-about 0.9.2
+        working-directory: rust
         run: |
-          mkdir -p apps/tui/.smoke/sessions
-          cp -RP "$(node -p 'require("node:os").tmpdir()')"/dsh-tui-pty-* apps/tui/.smoke/sessions/ 2>/dev/null || true
-      - uses: actions/upload-artifact@v4
-        if: failure() && runner.os != 'Windows'
-        with:
-          name: terminal-failures-${{ matrix.target }}
-          path: apps/tui/.smoke/
-          if-no-files-found: ignore
-          retention-days: 7
+          cargo install cargo-about --version =0.9.2 --locked --features cli --root "$RUNNER_TEMP/cargo-about-0.9.2"
+          echo "BAKE_CARGO_ABOUT=$RUNNER_TEMP/cargo-about-0.9.2/bin/cargo-about" >> "$GITHUB_ENV"
+      # Builds the release bake, checks its self-check, and archives it with
+      # its license bundle.
+      - run: bun run release:pack:rust
+      - name: Check the glibc floor
+        run: bun scripts/release/glibc-floor.ts rust/target/release/bake
+      # The archive this run publishes, installed by the shipped install.sh
+      # from a loopback host signed with a throwaway key; the release key
+      # never reaches a build.
+      - name: Install the archive with the shipped installer
+        run: BAKE_REHEARSAL_ARCHIVE="$ARCHIVE" bun run test:rust:install
       - uses: actions/upload-artifact@v4
         with:
           name: archive-${{ matrix.target }}
-          path: .artifacts/bake-release/${{ env.VERSION }}/bake-v${{ env.VERSION }}-${{ matrix.target }}.tar.gz
+          path: ${{ env.ARCHIVE }}
           if-no-files-found: error
           retention-days: 7
           compression-level: 0
 
-  publish:
+  # Both archives, assembled into the complete release the publish job signs,
+  # with a throwaway key; on a manual run this is the last step.
+  assemble:
     needs: [preflight, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      VERSION: ${{ needs.preflight.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: archive-*
+          path: .artifacts/bake-native-release/${{ env.VERSION }}
+          merge-multiple: true
+      - run: bun run release:assemble:rust "$VERSION" --complete --ephemeral-key --offline
+
+  publish:
+    needs: [preflight, assemble]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -161,35 +176,52 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
+      - run: bun install --frozen-lockfile
       - uses: actions/download-artifact@v4
         with:
           pattern: archive-*
-          path: .artifacts/bake-release/${{ env.VERSION }}
+          path: .artifacts/bake-native-release/${{ env.VERSION }}
           merge-multiple: true
       - uses: actions/download-artifact@v4
         with:
           name: release-notes
-      - name: Sign the manifest
+      # A rerun may follow a published GitHub release whose deploy failed: the
+      # service must then serve exactly what that release holds, never a
+      # manifest signed again. Otherwise the assembler signs the archives and
+      # refuses a version the live channel does not precede.
+      - name: Stage the signed release
         env:
-          BAKE_RELEASE_SIGNING_KEY: ${{ secrets.BAKE_RELEASE_SIGNING_KEY }}
+          BAKE_NATIVE_RELEASE_SIGNING_KEY: ${{ secrets.BAKE_NATIVE_RELEASE_SIGNING_KEY }}
         run: |
-          [ -n "$BAKE_RELEASE_SIGNING_KEY" ] || { echo 'The release environment has no BAKE_RELEASE_SIGNING_KEY secret' >&2; exit 1; }
-          key="$RUNNER_TEMP/release-signing-key.pem"
-          trap 'rm -f "$key"' EXIT
-          ( umask 077; printf '%s\n' "$BAKE_RELEASE_SIGNING_KEY" > "$key" )
-          BAKE_RELEASE_SIGNING_KEY_FILE="$key" bun run release:assemble --complete
-      # The image build's own gate, run first: the committed key only.
-      - run: node distribution/host/verify-manifest.mjs --complete
-      # A retry may follow a successful deploy. Never replace the archives of
-      # an already served version with different bytes.
-      - name: Check the current release before publishing
-        if: vars.BAKE_DOWNLOAD_SERVICE != 'off'
-        run: bun run release:preflight --tag "$GITHUB_REF_NAME" --retry --expected-manifest distribution/host/public/latest.json
-      # A rerun may follow a published GitHub release whose deploy failed: it
-      # keeps those assets, and the next step proves they are this build's.
+          public=distribution/host/public/native
+          if [ "$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft 2>/dev/null)" = false ]; then
+            echo "GitHub release $GITHUB_REF_NAME is already published; staging its signed assets instead of signing new ones"
+            published="$RUNNER_TEMP/bake-published"
+            gh release download "$GITHUB_REF_NAME" --dir "$published" --pattern 'stable.json*' --pattern "bake-v$VERSION-*.tar.gz"
+            mkdir -p "$public/releases/$VERSION"
+            cp "$published/stable.json" "$published/stable.json.sig" "$public/"
+            cp "$published"/bake-v"$VERSION"-*.tar.gz "$public/releases/$VERSION/"
+          else
+            [ -n "$BAKE_NATIVE_RELEASE_SIGNING_KEY" ] || { echo 'The release environment has no BAKE_NATIVE_RELEASE_SIGNING_KEY secret' >&2; exit 1; }
+            key="$RUNNER_TEMP/native-release-signing-key.pem"
+            trap 'rm -f "$key"' EXIT
+            ( umask 077; printf '%s\n' "$BAKE_NATIVE_RELEASE_SIGNING_KEY" > "$key" )
+            BAKE_NATIVE_RELEASE_SIGNING_KEY_FILE="$key" bun run release:assemble:rust "$VERSION" --complete
+          fi
+      # The image build's own gate, run first: the committed native key only.
+      - run: node distribution/host/verify-native-manifest.mjs --complete --required
+      # The service image refuses to build without a signed latest.json, and
+      # 0.3 installs keep updating from it, so the served copy goes forward
+      # unchanged, checked against the committed 0.3 key.
+      - name: Carry the frozen 0.3 route forward
+        run: |
+          for file in latest.json latest.json.sig; do
+            curl -fsSL --retry 3 "$BAKE_RELEASE_BASE_URL/$file" -o "distribution/host/public/$file"
+          done
+          node distribution/host/verify-manifest.mjs --allow-missing-archives
       - name: Draft the GitHub release
         run: |
-          files=(distribution/host/public/releases/"$VERSION"/*.tar.gz distribution/host/public/latest.json distribution/host/public/latest.json.sig distribution/host/install.sh distribution/host/install.ps1)
+          files=(distribution/host/public/native/releases/"$VERSION"/*.tar.gz distribution/host/public/native/stable.json distribution/host/public/native/stable.json.sig distribution/host/install.sh distribution/host/install.ps1)
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             if [ "$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft)" = true ]; then
               gh release upload "$GITHUB_REF_NAME" "${files[@]}" --clobber
@@ -205,22 +237,14 @@ jobs:
           downloaded="$RUNNER_TEMP/bake-release-assets"
           mkdir -p "$downloaded"
           gh release download "$GITHUB_REF_NAME" --dir "$downloaded"
-          files=(distribution/host/public/releases/"$VERSION"/*.tar.gz distribution/host/public/latest.json distribution/host/public/latest.json.sig distribution/host/install.sh distribution/host/install.ps1)
+          files=(distribution/host/public/native/releases/"$VERSION"/*.tar.gz distribution/host/public/native/stable.json distribution/host/public/native/stable.json.sig distribution/host/install.sh distribution/host/install.ps1)
           for file in "${files[@]}"; do cmp "$file" "$downloaded/$(basename "$file")"; done
           [ "$(find "$downloaded" -maxdepth 1 -type f | wc -l)" -eq "${#files[@]}" ] || { echo 'The release has unexpected assets' >&2; exit 1; }
       # The download service redirects every archive to this release, so it
-      # is published and checked first.
+      # is published first.
       - run: gh release edit "$GITHUB_REF_NAME" --draft=false --latest
-      # Its assets download without a login only from a public repository.
-      - name: Check the GitHub release as a client reads it
-        if: github.event.repository.visibility == 'public'
-        env:
-          BAKE_RELEASE_BASE_URL: https://github.com/${{ github.repository }}/releases/latest/download
-        run: bun run release:verify-live "$VERSION" --complete
-      # Five archives exceed Railway's upload limit, so the service carries the
-      # signed manifest and installers alone.
+      # The archives are left out: the service redirects them to the release.
       - name: Deploy the download service
-        if: vars.BAKE_DOWNLOAD_SERVICE != 'off'
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
           REPOSITORY_VISIBILITY: ${{ github.event.repository.visibility }}
@@ -229,12 +253,12 @@ jobs:
           [ "$REPOSITORY_VISIBILITY" = public ] || { echo 'The download service redirects to GitHub release assets, which need a public repository' >&2; exit 1; }
           host="$RUNNER_TEMP/bake-downloads"
           cp -R distribution/host "$host"
-          rm -rf "$host/public/releases"
+          rm -rf "$host/public/releases" "$host/public/native/releases"
           npm install --global @railway/cli@5.62.1
           railway up "$host" --path-as-root --no-gitignore --ci \
             --project 28ff3000-7240-4c57-81d1-7bd05445c1ee \
             --environment production --service bake-downloads \
             -m "Bake $VERSION ($GITHUB_SHA)"
-      # A successful deploy is not a release until the public host serves it.
-      - if: vars.BAKE_DOWNLOAD_SERVICE != 'off'
-        run: bun run release:verify-live "$VERSION" --complete
+      # A successful deploy is not a release until the public host serves it,
+      # with the 0.3 route intact.
+      - run: bun run release:verify-live "$VERSION" --complete

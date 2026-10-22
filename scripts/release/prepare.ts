@@ -2,15 +2,20 @@
 /**
  * Prepare a release commit: `bun run release:prepare <version>`.
  *
- * Sets the version in both release manifests and the lockfile, and gives the
- * changelog a section for it: the `[Unreleased]` entry moves under the new
- * heading, or a placeholder the preflight refuses marks where to write one.
- * Commit the result, then push the tag it prints.
+ * A release from `develop` is native, so this sets the version every native
+ * crate carries, `[workspace.package]` in `rust/Cargo.toml`, refreshes both
+ * Cargo lockfiles, and gives the changelog a section for it: the
+ * `[Unreleased]` entry moves under the new heading, or a placeholder the
+ * preflight refuses marks where to write one. It prints the steps that follow.
  */
 
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { CHANGELOG_PLACEHOLDER, changelogSection, compareVersions, isPublishableVersion, VERSIONED_MANIFESTS, workspaceVersion } from './version.ts'
+import { NATIVE_VERSION_MANIFEST, nativeVersion, withNativeVersion } from './native-channel.ts'
+import { CHANGELOG_PLACEHOLDER, changelogSection, compareVersions, isPublishableVersion } from './version.ts'
+
+/** The Cargo workspaces whose lockfiles record the native crates' version. */
+export const CARGO_WORKSPACES = ['rust', 'rust/fuzz'] as const
 
 /** What {@link prepareRelease} changed, for the summary it prints. */
 export interface Prepared {
@@ -21,31 +26,25 @@ export interface Prepared {
 }
 
 /**
- * Move the workspace to `version`.
+ * Move the native workspace to `version`.
  * @param root - repository root.
  * @param version - the new release version, newer than the current one.
  * @param today - release date for the changelog heading, `YYYY-MM-DD`.
- * @returns what changed; the lockfile is the caller's to refresh.
+ * @returns what changed; the lockfiles are the caller's to refresh.
  */
 export function prepareRelease(root: string, version: string, today: string): Prepared {
   if (!isPublishableVersion(version)) throw new Error(`Not a stable release version: ${version}`)
   const date = new Date(`${today}T00:00:00Z`)
   if (!/^\d{4}-\d{2}-\d{2}$/.test(today) || Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== today) throw new Error(`Invalid release date: ${today}`)
-  const from = workspaceVersion(root)
+  const from = nativeVersion(root)
   if (compareVersions(version, from) <= 0) throw new Error(`${version} is not newer than the current ${from}`)
   const path = join(root, 'CHANGELOG.md')
   const changelog = readFileSync(path, 'utf8')
   if (changelogSection(changelog, version) !== undefined) throw new Error(`CHANGELOG.md already has a ${version} section`)
-  // Validate every edit before writing any file, so a malformed manifest does
-  // not leave the workspace with different versions. A text edit, not `bun pm
-  // version`: that writes each manifest at once and re-serializes all of it.
-  const manifests = VERSIONED_MANIFESTS.map((file) => {
-    const manifest = join(root, file)
-    const text = readFileSync(manifest, 'utf8')
-    const field = `"version": "${from}"`
-    if (!text.includes(field)) throw new Error(`${file} has no ${field}`)
-    return { manifest, text: text.replace(field, () => `"version": "${version}"`) }
-  })
+  // Every edit is made before any file is written, so a refused one leaves
+  // the workspace as it was.
+  const manifest = join(root, NATIVE_VERSION_MANIFEST)
+  const cargo = withNativeVersion(readFileSync(manifest, 'utf8'), version)
   const heading = `## [${version}] - ${today}`
   const unreleased = /^## \[Unreleased\][^\n]*\n([\s\S]*?)(?=^## |(?![\s\S]))/m.exec(changelog)
   let next: string
@@ -62,7 +61,7 @@ export function prepareRelease(root: string, version: string, today: string): Pr
       ? changelog.replace(unreleased[0], () => `## [Unreleased]\n\n${section}`)
       : first === null ? `${changelog.trimEnd()}\n\n${section}` : `${changelog.slice(0, first.index)}${section}${changelog.slice(first.index)}`
   }
-  for (const { manifest, text } of manifests) writeFileSync(manifest, text)
+  writeFileSync(manifest, cargo)
   writeFileSync(path, `${next.trimEnd()}\n`)
   return { from, to: version, placeholder }
 }
@@ -75,9 +74,12 @@ if (import.meta.main) {
   }
   const root = resolve(import.meta.dir, '../..')
   const prepared = prepareRelease(root, version, new Date().toISOString().slice(0, 10))
-  const install = Bun.spawnSync(['bun', 'install'], { cwd: root, stdout: 'inherit', stderr: 'inherit' })
-  if (install.exitCode !== 0) throw new Error('bun install could not refresh bun.lock')
+  // Only the workspace's own crates move; no dependency is resolved again.
+  for (const workspace of CARGO_WORKSPACES) {
+    const update = Bun.spawnSync(['cargo', 'update', '--workspace', '--offline'], { cwd: join(root, workspace), stdout: 'inherit', stderr: 'inherit' })
+    if (update.exitCode !== 0) throw new Error(`cargo update could not refresh ${workspace}/Cargo.lock`)
+  }
   console.log(`\nPrepared Bake ${prepared.from} → ${prepared.to}.`)
   if (prepared.placeholder) console.log(`Write the ${prepared.to} section in CHANGELOG.md; the release refuses the placeholder.`)
-  console.log(`Then:\n  git commit -am "release: ${prepared.to}"\n  git tag v${prepared.to}\n  git push origin HEAD v${prepared.to}`)
+  console.log(`Then run bun run release:preflight --offline --tag v${prepared.to}, commit as "release: ${prepared.to}", push develop, and open the pull request into main; tag its merge commit v${prepared.to} once it merges.`)
 }

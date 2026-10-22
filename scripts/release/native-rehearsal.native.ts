@@ -17,9 +17,13 @@
  * Keyless: no model, provider, or network host outside loopback. Run with
  * `bun run test:rust:install`, after the Rust workspace is built.
  *
+ * `BAKE_REHEARSAL_ARCHIVE` names an archive `bun run release:pack:rust` made
+ * on this host instead, which must be this checkout's version for this
+ * platform: the release workflow installs the archive it is about to
+ * publish this way, real license bundle included, on each release platform.
+ *
  * What this rehearsal does not cover, and release qualification still needs:
- * the same run on linux-x64 and linux-arm64, the 0.4.0 release targets, an
- * update and rollback driven by `bake update` itself, and the D46 Wasm veto
+ * an update and rollback driven by `bake update` itself, and the D46 Wasm veto
  * plugin run against the installed artifact. The Windows installer's run on
  * Windows waits for the 0.4.x Windows release.
  */
@@ -75,8 +79,21 @@ function strippedBinary(directory: string, binary: string): string {
   return copy
 }
 
+/** An archive staged for the rehearsal's host: its name, where it is, and what the manifest says of it. */
+interface Rehearsed {
+  readonly file: string
+  readonly path: string
+  readonly artifact: NativeArtifact
+}
+
+/** The manifest entry for the archive at `path`, named `file`. */
+function rehearsed(file: string, path: string): Rehearsed {
+  const bytes = readFileSync(path)
+  return { file, path, artifact: { file, sha256: createHash('sha256').update(bytes).digest('hex'), size: bytes.byteLength } }
+}
+
 /** Archive the built binary in the release layout, as `pack-rust.ts` lays it out. */
-function packRehearsal(directory: string, build: ReturnType<typeof workspace>): { file: string; artifact: NativeArtifact } {
+function packRehearsal(directory: string, build: ReturnType<typeof workspace>): Rehearsed {
   const stage = join(directory, 'stage')
   const binary = strippedBinary(directory, build.binary)
   const files = payload({ binary, root: ROOT, notices: build.notices }, build.target, {
@@ -101,8 +118,14 @@ function packRehearsal(directory: string, build: ReturnType<typeof workspace>): 
     encoding: 'utf8',
   })
   if (packed.status !== 0) throw new Error(`tar exited ${String(packed.status)}: ${packed.stderr}`)
-  const bytes = readFileSync(archive)
-  return { file, artifact: { file, sha256: createHash('sha256').update(bytes).digest('hex'), size: bytes.byteLength } }
+  return rehearsed(file, archive)
+}
+
+/** A release archive `release:pack:rust` made, which must be this checkout's archive for this host. */
+function packedArchive(path: string, build: ReturnType<typeof workspace>): Rehearsed {
+  const file = archiveName(build.version, build.target)
+  if (basename(path) !== file) throw new Error(`BAKE_REHEARSAL_ARCHIVE names ${basename(path)}, not ${file}, this checkout's archive for this host`)
+  return rehearsed(file, path)
 }
 
 /** What one run of an installed command reported. */
@@ -122,12 +145,13 @@ function run(command: string, args: readonly string[], env: Record<string, strin
 
 test.skipIf(process.platform === 'win32')('installs the real bake this checkout builds, then keeps it as the release a rollback returns to', async () => {
   const build = workspace()
-  if (!existsSync(build.binary)) {
+  const archive = process.env['BAKE_REHEARSAL_ARCHIVE']
+  if (archive === undefined && !existsSync(build.binary)) {
     throw new Error(`${build.binary} is missing; build it first: cd rust && cargo build --locked -p bake-cli --bin bake`)
   }
   const directory = mkdtempSync(join(tmpdir(), 'bake-native-rehearsal-'))
   roots.push(directory)
-  const real = packRehearsal(directory, build)
+  const real = archive === undefined ? packRehearsal(directory, build) : packedArchive(resolve(archive), build)
   const key = ephemeralKey()
   const home = join(directory, 'home')
   const nativeRoot = join(home, '.local/share/bake-native')
@@ -146,7 +170,7 @@ test.skipIf(process.platform === 'win32')('installs the real bake this checkout 
       releases: new Map([[`/native/releases/${version}/${artifact.file}`, bytes]]),
     }
   }
-  publish(build.version, real.artifact, readFileSync(join(directory, real.file)))
+  publish(build.version, real.artifact, readFileSync(real.path))
   const installer = installerTrusting('install.sh', key.publicKey, directory)
   const env = {
     HOME: home,

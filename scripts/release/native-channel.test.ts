@@ -92,13 +92,12 @@ describe('the native signing key', () => {
 describe('release preflight', () => {
   const HEADER = '# Changelog\n\nNotable changes to Bake.\n\n'
 
-  /** A workspace ready to release 0.1.1, with or without the placeholder marker. */
+  /** A workspace ready to release 0.4.0, with or without the placeholder marker. */
   function workspace(placeholder: boolean): string {
     const root = scratch()
-    mkdirSync(join(root, 'apps/cli'), { recursive: true })
-    writeFileSync(join(root, 'package.json'), '{\n  "name": "bake",\n  "version": "0.1.1"\n}\n')
-    writeFileSync(join(root, 'apps/cli/package.json'), '{\n  "name": "bake-cli",\n  "version": "0.1.1"\n}\n')
-    writeFileSync(join(root, 'CHANGELOG.md'), `${HEADER}## [0.1.1] - 2026-10-20\n\n- Added the native route.\n`)
+    mkdirSync(join(root, 'rust'), { recursive: true })
+    writeFileSync(join(root, 'rust/Cargo.toml'), '[workspace.package]\nversion = "0.4.0"\n')
+    writeFileSync(join(root, 'CHANGELOG.md'), `${HEADER}## [0.4.0] - 2026-10-20\n\n- Added the native route.\n`)
     if (placeholder) {
       mkdirSync(join(root, 'distribution/host'), { recursive: true })
       writeFileSync(join(root, NATIVE_KEY_PLACEHOLDER), 'placeholder\n')
@@ -107,12 +106,12 @@ describe('release preflight', () => {
   }
 
   test('fails while the native key is a placeholder, and passes once it is not', async () => {
-    await expect(preflight({ root: workspace(true), tag: 'v0.1.1' })).rejects.toThrow(/native-release-key\.pub is still a placeholder/)
-    await expect(preflight({ root: workspace(false), tag: 'v0.1.1' })).resolves.toMatchObject({ version: '0.1.1' })
+    await expect(preflight({ root: workspace(true), tag: 'v0.4.0' })).rejects.toThrow(/native-release-key\.pub is still a placeholder/)
+    await expect(preflight({ root: workspace(false), tag: 'v0.4.0' })).resolves.toMatchObject({ version: '0.4.0' })
   })
 
   test('fails in this repository, which still carries the placeholder', async () => {
-    const run = Bun.spawnSync(['bun', 'run', 'release:preflight', '--offline', '--tag', 'v0.3.8'], { cwd: ROOT, stdout: 'pipe', stderr: 'pipe', timeout: 60_000 })
+    const run = Bun.spawnSync(['bun', 'run', 'release:preflight', '--offline', '--tag', 'v0.4.0'], { cwd: ROOT, stdout: 'pipe', stderr: 'pipe', timeout: 60_000 })
     expect(run.exitCode).toBe(1)
     expect(`${run.stdout.toString()}${run.stderr.toString()}`).toContain('native-release-key.pub is still a placeholder')
   })
