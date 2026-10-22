@@ -127,7 +127,7 @@ try {
   const health = await fetch(`${base}/health`)
   if (health.status !== 200) throw new Error('Download server health check failed')
   const page = await fetch(base)
-  if (page.status !== 200 || !(await page.text()).includes('/install.ps1')) {
+  if (page.status !== 200 || !(await page.text()).includes('/install.sh')) {
     throw new Error('Download page did not serve the installer commands')
   }
   const manifest = await (await fetch(`${base}/latest.json`)).json() as {
