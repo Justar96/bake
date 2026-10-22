@@ -9,7 +9,10 @@
 //! after the previous one settles. Pi's built-in slash commands that
 //! [`commands`] does not run are refused with the draft kept, as is any other
 //! `/word` that names no prompt template; `/skill:name` and prompt
-//! templates reach the session, which expands them.
+//! templates reach the session, which expands them. A command-line prompt
+//! is checked the same way before it is sent, and one refused goes into
+//! the draft instead, as does one naming a command [`commands`] runs,
+//! which runs only from the composer.
 //!
 //! One driver task owns every runtime decision. The loop's requests reach
 //! it over a channel; it starts each prompt as its own task, so a cancel or
@@ -94,10 +97,18 @@ use driver::{INTERRUPTED_PROMPT, refused_command, work_outcome};
 use mcp::McpNotices;
 use projection::Projector;
 
-/// Pi v1.2.0's built-in slash commands (`core/slash-commands.ts`) that
-/// `bake` does not run yet; [`commands::COMMANDS`] are the ones it
-/// runs. A prompt that names one is refused instead of reaching the model.
-const PI_COMMANDS: &[&str] = &[
+/// The slash commands `bake` does not run in 0.4.0, which D48 defers to a
+/// later 0.4.x release; [`commands::COMMANDS`] are the ones it runs. They
+/// are Pi v1.3.0's remaining built-ins (`core/slash-commands.ts`) and Bake
+/// 0.3's terminal and runtime commands
+/// (`apps/tui/packages/app/src/{controller,navigation}.ts` and the runtime's
+/// `/goal`, `/feedback`, and `/permission`). A prompt that names one is
+/// refused instead of reaching the model, from the composer with its draft
+/// kept and from the interactive command line with its text put in the
+/// draft. Print and RPC mode do not refuse it: they send the text to the
+/// model as Pi does.
+const DEFERRED_COMMANDS: &[&str] = &[
+    // Pi v1.3.0.
     "scoped-models",
     "export",
     "import",
@@ -106,6 +117,20 @@ const PI_COMMANDS: &[&str] = &[
     "trust",
     "reload",
     "quit",
+    // Bake 0.3's terminal.
+    "agents",
+    "attach",
+    "clear-attachments",
+    "remove-attachment",
+    "help",
+    "terminal-setup",
+    "update",
+    "sessions",
+    "clear",
+    // Bake 0.3's runtime.
+    "goal",
+    "feedback",
+    "permission",
 ];
 
 /// A session the command line set up for interactive mode.

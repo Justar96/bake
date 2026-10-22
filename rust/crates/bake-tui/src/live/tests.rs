@@ -682,20 +682,163 @@ fn quitting_mid_turn_shuts_the_session_down_before_stop_returns() {
 }
 
 #[test]
-fn pi_commands_are_refused_and_the_draft_comes_back() {
+fn deferred_commands_are_refused_and_the_draft_comes_back() {
     let h = harness(Vec::new(), Vec::new());
     h.until(|update| matches!(update, RuntimeUpdate::Status(_)));
-    h.submit_id(4, Submission::FollowUp("/copy gpt".into()));
-    let updates = h.until(|update| matches!(update, RuntimeUpdate::Refused { .. }));
-    assert!(matches!(
-        updates.last(),
-        Some(RuntimeUpdate::Refused { id: 4, reason }) if reason.starts_with("/copy is not available")
-    ));
-    assert!(!updates.iter().any(|u| matches!(
-        u,
-        RuntimeUpdate::TurnStarted { .. } | RuntimeUpdate::Commit(_)
-    )));
+    for (id, word) in (1..).zip(DEFERRED_COMMANDS) {
+        h.submit_id(id, Submission::FollowUp(format!("/{word} gpt")));
+        let updates = h.until(|update| matches!(update, RuntimeUpdate::Refused { .. }));
+        let expected = format!(
+            "/{word} is not available in bake yet; it is planned for a later 0.4.x release, and your draft is kept."
+        );
+        assert!(
+            matches!(
+                updates.last(),
+                Some(RuntimeUpdate::Refused { id: refused, reason }) if *refused == id && *reason == expected
+            ),
+            "{updates:#?}"
+        );
+        assert!(!updates.iter().any(|u| matches!(
+            u,
+            RuntimeUpdate::TurnStarted { .. } | RuntimeUpdate::Commit(_)
+        )));
+    }
+    assert_eq!(h.faux.call_count(), 0);
     h.stop();
+}
+
+/// A started port over a session with the `review` prompt template, whose
+/// command line gave `prompts`.
+fn harness_with_review_template(prompts: &[&str]) -> Harness {
+    let (runtime, faux, mut live) = setup(
+        Vec::new(),
+        prompts
+            .iter()
+            .map(|text| ((*text).to_owned(), Vec::new()))
+            .collect(),
+        Some("test-key"),
+    );
+    live.session
+        .set_prompt_templates(vec![bake_coding_agent::prompt_templates::PromptTemplate {
+            name: "review".into(),
+            description: "Review".into(),
+            argument_hint: None,
+            content: "Review $1 carefully.".into(),
+            source: "path".into(),
+            file_path: "/tmp/review.md".into(),
+        }]);
+    let (sender, updates) = std_mpsc::channel();
+    let mut port = LivePort::start(live, move |update| sender.send(update).is_ok());
+    port.begin();
+    Harness {
+        runtime,
+        faux,
+        port: Some(port),
+        updates,
+    }
+}
+
+/// D48 on the interactive command line: a deferred command, an unknown
+/// command-like word, and a command that runs only from the composer never
+/// reach the session. Their texts go into the draft together, in order,
+/// with the first one's reason; the prompt after them still runs.
+#[test]
+fn command_line_commands_are_refused_into_the_draft_and_the_rest_run() {
+    let h = harness_with_review_template(&["/goal ship it", "/frobnicate now", "/model", "hello"]);
+    h.faux
+        .set_responses(vec![faux_assistant_message("Hi.").into()]);
+    let updates = h.until_turn_end();
+    let declined: Vec<&RuntimeUpdate> = updates
+        .iter()
+        .filter(|u| matches!(u, RuntimeUpdate::Declined { .. }))
+        .collect();
+    assert_eq!(
+        declined,
+        [&RuntimeUpdate::Declined {
+            texts: vec![
+                "/goal ship it".into(),
+                "/frobnicate now".into(),
+                "/model".into()
+            ],
+            reason: driver::deferred_command("goal"),
+        }],
+        "{updates:#?}"
+    );
+    // Only the plain prompt started a turn, after the refusal.
+    let starts = updates
+        .iter()
+        .filter(|u| matches!(u, RuntimeUpdate::TurnStarted { .. }))
+        .count();
+    assert_eq!(starts, 1, "{updates:#?}");
+    let declined_at = updates
+        .iter()
+        .position(|u| matches!(u, RuntimeUpdate::Declined { .. }));
+    let started_at = updates
+        .iter()
+        .position(|u| matches!(u, RuntimeUpdate::TurnStarted { .. }));
+    assert!(declined_at < started_at, "{updates:#?}");
+    assert_eq!(
+        committed(&updates),
+        [Row::User("hello".into()), Row::Answer("Hi.".into())]
+    );
+    assert_eq!(h.faux.call_count(), 1);
+    h.stop();
+}
+
+/// A command-line prompt that names a template or `/skill:name`, or starts
+/// with a path, goes to the session as the composer's does.
+#[test]
+fn command_line_templates_skills_and_paths_still_run() {
+    let h = harness_with_review_template(&[
+        "/review src",
+        "/skill:missing go",
+        "/home/me/notes.txt is broken",
+    ]);
+    h.faux.set_responses(vec![
+        faux_assistant_message("one").into(),
+        faux_assistant_message("two").into(),
+        faux_assistant_message("three").into(),
+    ]);
+    let mut updates = Vec::new();
+    for _ in 0..3 {
+        updates.extend(h.until_turn_end());
+    }
+    assert!(
+        !updates
+            .iter()
+            .any(|u| matches!(u, RuntimeUpdate::Declined { .. })),
+        "{updates:#?}"
+    );
+    let users: Vec<Row> = committed(&updates)
+        .into_iter()
+        .filter(|row| matches!(row, Row::User(_)))
+        .collect();
+    assert_eq!(
+        users,
+        [
+            // The session expanded the template.
+            Row::User("Review src carefully.".into()),
+            Row::User("/skill:missing go".into()),
+            Row::User("/home/me/notes.txt is broken".into()),
+        ]
+    );
+    assert_eq!(h.faux.call_count(), 3);
+    h.stop();
+}
+
+#[test]
+fn a_command_line_command_bake_runs_is_kept_for_the_composer() {
+    assert_eq!(
+        driver::command_line_refusal("/model faux", &[]),
+        Some("/model runs only from the composer; press Enter to run it from your draft.".into())
+    );
+    assert_eq!(
+        driver::command_line_refusal("/help", &[]),
+        Some(driver::deferred_command("help"))
+    );
+    let templates = ["review".to_owned()];
+    assert_eq!(driver::command_line_refusal("/review x", &templates), None);
+    assert_eq!(driver::command_line_refusal("plain", &templates), None);
 }
 
 #[test]
@@ -892,11 +1035,20 @@ fn a_driver_panic_still_shuts_the_session_down_and_is_reported() {
 #[test]
 fn commands_are_refused_but_skills_templates_and_paths_are_not() {
     let templates = ["review".to_owned()];
-    assert!(refused_command("/quit", &templates).is_some_and(|r| r.contains("not available")));
+    assert!(refused_command("/quit", &templates).is_some_and(|r| r.contains("0.4.x")));
     assert!(refused_command("  /copy x", &templates).is_some());
+    assert!(refused_command("/clear ship it", &templates).is_some_and(|r| r.contains("0.4.x")));
     assert!(
-        refused_command("/goal ship it", &templates).is_some_and(|r| r.contains("not a command"))
+        refused_command("/frobnicate ship it", &templates)
+            .is_some_and(|r| r.contains("not a command"))
     );
+    // A word with `-` or `_` after its first letter is still command-like.
+    for word in ["/snake_case x", "/kebab-case x"] {
+        assert!(
+            refused_command(word, &templates).is_some_and(|r| r.contains("not a command")),
+            "{word}"
+        );
+    }
     assert_eq!(refused_command("/review src", &templates), None);
     assert_eq!(refused_command("/skill:review src", &templates), None);
     assert_eq!(
@@ -904,6 +1056,69 @@ fn commands_are_refused_but_skills_templates_and_paths_are_not() {
         None
     );
     assert_eq!(refused_command("plain", &templates), None);
+}
+
+/// D48: every Pi v1.3.0 built-in and Bake 0.3 slash command that `bake`
+/// does not run is refused with the same deferral sentence, bare or with
+/// an argument, and none of them is one `bake` runs.
+#[test]
+fn each_deferred_command_refuses_with_a_deferral_sentence() {
+    let pi = [
+        "scoped-models",
+        "export",
+        "import",
+        "copy",
+        "hotkeys",
+        "trust",
+        "reload",
+        "quit",
+    ];
+    let bake_03 = [
+        "agents",
+        "attach",
+        "clear-attachments",
+        "remove-attachment",
+        "help",
+        "terminal-setup",
+        "update",
+        "sessions",
+        "clear",
+        "goal",
+        "feedback",
+        "permission",
+    ];
+    let expected: Vec<&str> = pi.iter().chain(&bake_03).copied().collect();
+    assert_eq!(DEFERRED_COMMANDS, expected.as_slice());
+    for word in DEFERRED_COMMANDS {
+        assert!(!commands::COMMANDS.contains(word), "/{word} runs");
+        let sentence = format!(
+            "/{word} is not available in bake yet; it is planned for a later 0.4.x release, and your draft is kept."
+        );
+        assert_eq!(
+            refused_command(&format!("/{word}"), &[]),
+            Some(sentence.clone())
+        );
+        assert_eq!(
+            refused_command(&format!("  /{word} with an argument"), &[]),
+            Some(sentence)
+        );
+        assert_eq!(commands::parse(&format!("/{word}")), None);
+    }
+}
+
+/// D48: neither slash menu, the preview's or a live session's, lists a
+/// deferred command; `commands`' `the_menu_lists_exactly_the_commands_that_run`
+/// pins the live menu to the commands that run.
+#[test]
+fn the_menus_list_no_deferred_command() {
+    use bake_tui_view::completion::{CATALOG, LIVE_CATALOG};
+    for command in CATALOG.iter().chain(LIVE_CATALOG) {
+        assert!(
+            !DEFERRED_COMMANDS.contains(&command.name),
+            "the menu lists the deferred /{}",
+            command.name
+        );
+    }
 }
 
 // ---- Approvals (D24) ----

@@ -4,7 +4,8 @@
 //! re-initialization after an expired session, the resource tools and
 //! instructions a reconnection republishes, a call that fails without a
 //! retry, a stalled startup, the session `DELETE`, an awaited shutdown, the
-//! OAuth refusal, and redaction.
+//! OAuth refusal, redaction, and the deferred prompts and resource
+//! subscriptions that no request reaches.
 //!
 //! The cases named after a Pi case follow `packages/mcp/test/streamable-http.test.ts`
 //! (v1.3.0) through the session instead of the transport; the rest are
@@ -22,7 +23,9 @@ use bake_ai::UserContentBlock;
 use serde_json::{Value, json};
 
 use super::super::egress::{HostResolver, MAX_REDIRECTS};
-use super::super::http_test_server::{Call, Initialize, Redirect, Server, Shared, protocol};
+use super::super::http_test_server::{
+    Call, Initialize, Redirect, Server, Shared, State, initialize_result, json_reply, protocol,
+};
 use super::super::{
     McpHttpOptions, McpOptions, McpServerState, McpServers, McpTimings, McpToolFilter,
     READ_MCP_RESOURCE_TOOL, RESOURCE_TOOL_NAMES, parse_mcp_config,
@@ -714,9 +717,16 @@ async fn an_authorization_challenge_says_oauth_is_not_supported() {
         "{error}"
     );
     assert!(
-        error.contains("does not support OAuth sign-in yet"),
+        error.contains(
+            "OAuth sign-in for MCP servers is not available in bake yet and is planned for a later release"
+        ),
         "{error}"
     );
+    // Frontends recognize the deferral by this ending; the model sees
+    // neither it nor the server, which declares no tool and is not listed.
+    assert!(error.ends_with(super::OAUTH_DEFERRED), "{error}");
+    assert_eq!(started.servers.servers_prompt_section(), None);
+    assert!(started.servers.declared_tool_names().is_empty());
     assert_eq!(server.rpc("initialize").len(), 1, "not retried");
     started.shutdown().await;
     server.stop().await;
@@ -763,6 +773,66 @@ async fn header_values_never_appear_in_an_error_or_a_status() {
         (listed.header("x-api-key"), listed.header("authorization")),
         (Some(KEY), Some(format!("Bearer {TOKEN}").as_str())),
         "the server is the only one that sees them"
+    );
+    started.shutdown().await;
+    server.stop().await;
+}
+
+// D48 defers MCP prompts and resource subscriptions. A server that offers
+// both, with change notifications, is still only listed and read: the
+// session sends no `prompts/*` request and no `resources/subscribe`, and
+// publishes no tool for either.
+#[tokio::test]
+async fn offered_prompts_and_subscriptions_are_never_requested() {
+    let state = Shared::default();
+    state.set(|state| {
+        state.resources = vec![("docs://intro".to_owned(), "intro".to_owned())];
+    });
+    let plain = protocol(&state);
+    let offered = state.clone();
+    let server = Server::start(Arc::new(move |request| {
+        let message = request.json();
+        if message.get("method").and_then(Value::as_str) != Some("initialize") {
+            return plain(request);
+        }
+        let mut fixture = State::default();
+        offered.set(|state| fixture.resources.clone_from(&state.resources));
+        let mut result = initialize_result(&message["id"], &fixture);
+        result["result"]["capabilities"]["prompts"] = json!({"listChanged": true});
+        result["result"]["capabilities"]["resources"] =
+            json!({"subscribe": true, "listChanged": true});
+        json_reply(&[("mcp-session-id", &fixture.session)], &result)
+    }))
+    .await;
+    let started = start(entry(&server.url), quick(), None);
+    started.wait_for("the connection", connected).await;
+    assert_eq!(
+        started
+            .call_with(
+                READ_MCP_RESOURCE_TOOL,
+                json!({ "server": "remote", "uri": "docs://intro" }),
+            )
+            .await,
+        Ok("intro".into())
+    );
+    let methods: Vec<String> = server
+        .requests()
+        .iter()
+        .filter_map(|request| request.rpc_method())
+        .collect();
+    assert!(
+        methods
+            .iter()
+            .all(|method| !method.starts_with("prompts/") && method != "resources/subscribe"),
+        "{methods:?}"
+    );
+    assert!(methods.iter().any(|method| method == "resources/read"));
+    let tools = started.servers.tool_names();
+    assert!(
+        tools
+            .iter()
+            .all(|tool| !tool.contains("prompt") && !tool.contains("subscribe")),
+        "{tools:?}"
     );
     started.shutdown().await;
     server.stop().await;

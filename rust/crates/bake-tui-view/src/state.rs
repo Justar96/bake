@@ -1187,6 +1187,11 @@ fn runtime(state: &mut State, update: RuntimeUpdate) {
                 state.notice = Some(Notice::Returned);
             }
         }
+        RuntimeUpdate::Declined { texts, reason } => {
+            prepend_to_draft(state, &texts);
+            state.refusal = Some(reason);
+            state.notice = Some(Notice::Refused);
+        }
         RuntimeUpdate::Restored(text) => {
             if prepend_to_draft(state, std::slice::from_ref(&text)) {
                 state.notice = Some(Notice::Restored);
@@ -3070,6 +3075,26 @@ mod tests {
         assert_eq!(state.notice, Some(Notice::Returned));
     }
 
+    // Declined command-line prompts go ahead of the draft, in order, and
+    // say why as a refusal does.
+    #[test]
+    fn declined_prompts_go_ahead_of_the_draft_with_their_reason() {
+        let mut state = live();
+        type_str(&mut state, "typed");
+        runtime(
+            &mut state,
+            RuntimeUpdate::Declined {
+                texts: vec!["/goal ship".into(), "/help".into()],
+                reason: "deferred".into(),
+            },
+        );
+        assert_eq!(state.draft.text(), "/goal ship\n\n/help\n\ntyped");
+        assert_eq!(
+            (state.notice, state.refusal.as_deref()),
+            (Some(Notice::Refused), Some("deferred"))
+        );
+    }
+
     // `/tree` and `/fork` give the chosen message back ahead of anything
     // typed since; an empty text changes nothing.
     #[test]
@@ -3548,17 +3573,19 @@ mod tests {
     }
 
     #[test]
-    fn enter_on_the_menu_runs_a_command_or_fills_one_that_needs_input() {
+    fn enter_on_the_menu_runs_a_command_whose_argument_is_optional() {
         let mut state = State::default();
         type_str(&mut state, "/mo");
         press(&mut state, Key::Enter);
         assert_eq!(state.draft.text(), "/model");
         assert_eq!(state.notice, Some(Notice::NoCommands));
-        // A command that cannot run bare is filled in for its argument.
+        // An optional argument does not hold the command back for input.
         chord(&mut state, Key::Char('u'), Mods::CTRL);
-        type_str(&mut state, "/att");
+        type_str(&mut state, "/thi");
+        state.notice = None;
         press(&mut state, Key::Enter);
-        assert_eq!(state.draft.text(), "/attach ");
+        assert_eq!(state.draft.text(), "/thinking");
+        assert_eq!(state.notice, Some(Notice::NoCommands));
         // With nothing to choose, Enter submits what was typed; a bare `/`
         // does nothing.
         chord(&mut state, Key::Char('u'), Mods::CTRL);

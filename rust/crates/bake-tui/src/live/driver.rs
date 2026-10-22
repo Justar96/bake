@@ -62,7 +62,7 @@ impl Driver {
             self.resume = false;
             self.command(None, String::new(), commands::RESUME, String::new());
         } else {
-            self.waiting.append(&mut self.held);
+            self.release_held();
             if let Some(next) = self.waiting.pop_front() {
                 running = Some(self.begin(next));
             }
@@ -134,7 +134,7 @@ impl Driver {
                     // The startup picker ended: the command line's prompts
                     // become ordinary waiting prompts, in order.
                     if !self.held.is_empty() && self.command.is_none() {
-                        self.waiting.append(&mut self.held);
+                        self.release_held();
                         if running.is_none()
                             && let Some(next) = self.waiting.pop_front()
                         {
@@ -200,6 +200,43 @@ impl Driver {
                 self.send(RuntimeUpdate::Returned(vec![text]));
             }
             None => {}
+        }
+    }
+
+    /// The names of the session's prompt templates, which a slash prompt
+    /// may name ([`refused_command`]).
+    pub(super) fn template_names(&self) -> Vec<String> {
+        self.session
+            .prompt_templates()
+            .iter()
+            .map(|template| template.name.clone())
+            .collect()
+    }
+
+    /// Makes the command line's prompts waiting prompts, in order, but for
+    /// those [`command_line_refusal`] refuses, checked against the session
+    /// in use now, after any startup `/resume`. The refused ones never
+    /// reach the session: their texts go into the draft together, in
+    /// order, with the first one's reason, and the rest still run, as Pi
+    /// runs each initial message after one that fails.
+    pub(super) fn release_held(&mut self) {
+        let templates = self.template_names();
+        let mut declined = Vec::new();
+        let mut reason = None;
+        for prompt in std::mem::take(&mut self.held) {
+            match command_line_refusal(&prompt.text, &templates) {
+                Some(why) => {
+                    reason.get_or_insert(why);
+                    declined.push(prompt.text);
+                }
+                None => self.waiting.push_back(prompt),
+            }
+        }
+        if let Some(reason) = reason {
+            self.send(RuntimeUpdate::Declined {
+                texts: declined,
+                reason,
+            });
         }
     }
 
@@ -359,10 +396,12 @@ pub(super) fn work_outcome(outcome: &commands::Outcome) -> Outcome {
 pub(super) const INTERRUPTED_PROMPT: &str =
     "Stopped before it was sent; your prompt is back in the draft.";
 
-/// Why a slash prompt is refused: it names one of Pi's built-in commands,
-/// which `bake` does not run yet, or another command-like word that is
-/// neither `/skill:name` nor one of `templates`. Text whose first word is
-/// not command-like, such as a path, goes to the model as Pi sends it.
+/// Why a composer slash prompt that names none of [`commands::COMMANDS`]
+/// is refused: it names one of [`DEFERRED_COMMANDS`], or another
+/// command-like word that is neither `/skill:name` nor one of `templates`.
+/// Text whose first word is not command-like, such as a path, goes to the
+/// model as Pi sends it. Interactive command-line prompts are checked by
+/// [`command_line_refusal`]; print and RPC mode check neither.
 pub(super) fn refused_command(text: &str, templates: &[String]) -> Option<String> {
     let word = text
         .trim_start()
@@ -379,10 +418,8 @@ pub(super) fn refused_command(text: &str, templates: &[String]) -> Option<String
         && word
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
-    if PI_COMMANDS.contains(&word) {
-        Some(format!(
-            "/{word} is not available in bake yet; your draft is kept."
-        ))
+    if DEFERRED_COMMANDS.contains(&word) {
+        Some(deferred_command(word))
     } else if command_like {
         Some(format!(
             "/{word} is not a command or prompt template; your draft is kept."
@@ -390,4 +427,23 @@ pub(super) fn refused_command(text: &str, templates: &[String]) -> Option<String
     } else {
         None
     }
+}
+
+/// Why an interactive command-line prompt is refused: as the composer's
+/// is ([`refused_command`]), and also when it names one of
+/// [`commands::COMMANDS`], which run only from the composer.
+pub(super) fn command_line_refusal(text: &str, templates: &[String]) -> Option<String> {
+    if let Some((name, _)) = commands::parse(text) {
+        return Some(format!(
+            "/{name} runs only from the composer; press Enter to run it from your draft."
+        ));
+    }
+    refused_command(text, templates)
+}
+
+/// The refusal of a command in [`DEFERRED_COMMANDS`].
+pub(super) fn deferred_command(word: &str) -> String {
+    format!(
+        "/{word} is not available in bake yet; it is planned for a later 0.4.x release, and your draft is kept."
+    )
 }

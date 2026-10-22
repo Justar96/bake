@@ -146,6 +146,11 @@ pub enum RuntimeUpdate {
     /// into the draft ahead of what it holds, as Pi's
     /// `restoreQueuedMessagesToEditor` does, so no submission is lost.
     Returned(Vec<String>),
+    /// Command-line prompts the runtime will not run, as text, oldest
+    /// first, and why. They had no draft, so they go into the draft ahead
+    /// of what it holds, as [`RuntimeUpdate::Returned`] prompts do, and
+    /// the reason shows as a [`RuntimeUpdate::Refused`] prompt's does.
+    Declined { texts: Vec<String>, reason: String },
     /// A message to edit and send again, as `/tree` and `/fork` give back
     /// the user message they move before, Pi's `editorText` and
     /// `selectedText`. It goes into the draft ahead of what the draft

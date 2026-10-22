@@ -9,12 +9,7 @@ impl Driver {
             Request::Submit(prompt) => {
                 let id = Some(prompt.id);
                 let text = prompt.submission.text().to_owned();
-                let templates: Vec<String> = self
-                    .session
-                    .prompt_templates()
-                    .iter()
-                    .map(|template| template.name.clone())
-                    .collect();
+                let templates = self.template_names();
                 if let Some((name, argument)) = commands::parse(&text) {
                     if self.command.is_some() {
                         return self.refuse(

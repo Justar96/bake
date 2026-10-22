@@ -450,13 +450,14 @@ impl Context {
     }
 }
 
-/// Why a command refuses `argument` before doing anything: `/login`,
-/// `/logout`, and `/refresh-models` know CLIProxyAPI alone, and
-/// `/settings` takes no argument.
+/// Why a command refuses `argument` before doing anything: `/login` and
+/// `/logout` know CLIProxyAPI alone, since D8 and D48 defer every other
+/// provider to a later release, and `/refresh-models`, `/settings`, and
+/// the session commands take no argument.
 pub fn refuse_argument(name: &str, argument: &str) -> Option<String> {
     match name {
         "login" | "logout" if !argument.is_empty() && argument != CLIPROXYAPI_ID => Some(format!(
-            "/{name} knows only CLIProxyAPI in bake, not {argument}; your draft is kept."
+            "/{name} {argument} is not available in bake yet; providers other than CLIProxyAPI are planned for a later release, and your draft is kept."
         )),
         "refresh-models" | "settings" | "session" | "new" | "resume" | "tree" | "fork"
         | "clone" | "changelog" | "share"
@@ -1826,8 +1827,18 @@ mod tests {
     fn only_cliproxyapi_is_signed_in_or_out() {
         assert_eq!(refuse_argument("login", ""), None);
         assert_eq!(refuse_argument("logout", "cliproxyapi"), None);
-        assert!(refuse_argument("logout", "openai").is_some());
-        assert!(refuse_argument("login", "anthropic").is_some());
+        assert_eq!(
+            refuse_argument("logout", "openai").as_deref(),
+            Some(
+                "/logout openai is not available in bake yet; providers other than CLIProxyAPI are planned for a later release, and your draft is kept."
+            )
+        );
+        assert_eq!(
+            refuse_argument("login", "anthropic").as_deref(),
+            Some(
+                "/login anthropic is not available in bake yet; providers other than CLIProxyAPI are planned for a later release, and your draft is kept."
+            )
+        );
         assert!(refuse_argument("refresh-models", "x").is_some());
         assert_eq!(refuse_argument("model", "faux/faux-1"), None);
     }

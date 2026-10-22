@@ -344,7 +344,8 @@ fn logout_of_another_provider_writes_nothing() {
     h.submit_id(1, Submission::FollowUp("/logout openai".into()));
     let updates = h.command_end(1);
     assert!(
-        refusal(&updates).is_some_and(|r| r.contains("only CLIProxyAPI")),
+        refusal(&updates).is_some_and(|r| r
+            == "/logout openai is not available in bake yet; providers other than CLIProxyAPI are planned for a later release, and your draft is kept."),
         "{updates:?}"
     );
     h.stop();

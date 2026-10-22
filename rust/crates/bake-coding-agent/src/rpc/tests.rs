@@ -2,6 +2,52 @@
 //! `test/rpc.test.ts`, named after the Pi test each follows, plus Bake's
 //! approval cases (D24). They run the RPC loop over in-memory pipes
 //! against `bake-ai`'s faux provider, as the session tests do.
+//!
+//! Each of Pi's RPC cases (v1.3.0, `71023aec1546d6d677a65669c5665c0927ce0dd0`)
+//! and the test that ports it; an `it.each` counts once, as Pi's file
+//! declares it. Pi's `rpc.test.ts` runs against a live Anthropic model;
+//! these run against the faux provider. "Excluded" cases need a subsystem
+//! `bake` does not port, and the test named beside them proves the command
+//! is refused instead.
+//!
+//! | Pi file: case | Test |
+//! |---|---|
+//! | `rpc.test.ts`: should get state | [`reports_state_models_and_thinking_levels`]; `bake-cli/tests/rpc.rs` `answers_commands_on_its_pipes_and_shuts_down_on_end_of_input` |
+//! | `rpc.test.ts`: should save messages to session file | [`should_save_messages_to_session_file`] |
+//! | `rpc.test.ts`: should handle manual compaction | [`should_handle_manual_compaction_and_retain_pre_compaction_entries`] |
+//! | `rpc.test.ts`: should execute bash command | Excluded, `bash` is refused: [`refuses_the_commands_bake_does_not_support`] |
+//! | `rpc.test.ts`: should add bash output to context | Excluded, `bash` is refused: [`refuses_the_commands_bake_does_not_support`] |
+//! | `rpc.test.ts`: should include bash output in LLM context | Excluded, `bash` is refused: [`refuses_the_commands_bake_does_not_support`] |
+//! | `rpc.test.ts`: should set and get thinking level | [`reports_state_models_and_thinking_levels`] |
+//! | `rpc.test.ts`: should cycle thinking level | [`reports_state_models_and_thinking_levels`] |
+//! | `rpc.test.ts`: should get available thinking levels | [`reports_state_models_and_thinking_levels`] |
+//! | `rpc.test.ts`: should get available models | [`reports_state_models_and_thinking_levels`] |
+//! | `rpc.test.ts`: should get session stats | [`should_save_messages_to_session_file`], [`reports_state_models_and_thinking_levels`] |
+//! | `rpc.test.ts`: should create new session | [`should_create_new_session`] |
+//! | `rpc.test.ts`: should export to HTML | [`should_export_to_html`] |
+//! | `rpc.test.ts`: should get last assistant text | [`reports_entries_tree_and_last_assistant_text`] |
+//! | `rpc.test.ts`: should get session entries with since cursor | [`reports_entries_tree_and_last_assistant_text`] |
+//! | `rpc.test.ts`: should get session tree | [`reports_entries_tree_and_last_assistant_text`] |
+//! | `rpc.test.ts`: should retain pre-compaction entries in get_entries | [`should_handle_manual_compaction_and_retain_pre_compaction_entries`] |
+//! | `rpc.test.ts`: should set and get session name | [`should_set_and_get_session_name`] |
+//! | `rpc-prompt-response-semantics.test.ts`: emits one failure response when prompt preflight rejects | [`emits_one_failure_response_when_prompt_preflight_rejects`], [`pipelined_prompts_each_answer_for_themselves`] |
+//! | `rpc-prompt-response-semantics.test.ts`: emits one started response when prompt preflight succeeds | [`emits_one_started_response_when_prompt_preflight_succeeds`], [`pipelined_prompts_each_answer_for_themselves`] |
+//! | `rpc-prompt-response-semantics.test.ts`: reports extension commands and intercepted input as handled without starting a run | Excluded: no extensions (D43), so nothing registers a command or intercepts input |
+//! | `rpc-prompt-response-semantics.test.ts`: emits one success response when prompt is queued during streaming | [`returns_and_clears_queued_steering_and_follow_up_messages`] |
+//! | `rpc-prompt-response-semantics.test.ts`: reports %s as handled even when an extension queues another message | Excluded: no extension `input` handler (D43) |
+//! | `rpc-prompt-response-semantics.test.ts`: reports %s as queued after input transformation | Excluded: no extension `input` handler (D43) |
+//! | `rpc-prompt-response-semantics.test.ts`: returns and clears queued steering and follow-up messages | [`returns_and_clears_queued_steering_and_follow_up_messages`] |
+//! | `rpc-jsonl.test.ts`: serializes strict JSONL records without escaping Unicode separators | `jsonl.rs` `serializes_strict_jsonl_records_without_escaping_unicode_separators` |
+//! | `rpc-jsonl.test.ts`: splits on LF only and preserves U+2028/U+2029 inside payloads | `jsonl.rs` `splits_on_lf_only_and_preserves_unicode_separators_inside_payloads` |
+//! | `rpc-jsonl.test.ts`: handles CRLF-delimited input | `jsonl.rs` `handles_crlf_delimited_input` |
+//! | `rpc-jsonl.test.ts`: emits a final line without trailing LF | `jsonl.rs` `emits_a_final_line_without_trailing_lf` |
+//! | `rpc-client-clear-queue.test.ts`: sends the clear_queue RPC command | `bake-cli/tests/rpc.rs` `sends_the_clear_queue_rpc_command` |
+//! | `rpc-client-clone.test.ts`: sends the clone RPC command | `bake-cli/tests/rpc.rs` `sends_the_clone_rpc_command` |
+//! | `rpc-client-process-exit.test.ts`: rejects an in-flight request when the child process exits | `bake-cli/tests/rpc.rs` `a_request_in_flight_when_the_process_exits_gets_no_response` |
+//!
+//! Pi's `RpcClient` itself (`modes/rpc/rpc-client.ts`) is not ported:
+//! `bake` ships no RPC client, so the `rpc-client-*` cases drive the built
+//! binary through `bake-cli/tests/rpc.rs`'s test client instead.
 
 use std::io::{Read, Write};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -276,27 +322,22 @@ async fn returns_and_clears_queued_steering_and_follow_up_messages() {
     let dir = TempDir::new("rpc-queue");
     let h = harness();
     // The first response waits, so the queued prompts arrive while the
-    // turn runs, as Pi's delayed stream does.
+    // turn runs, as Pi's delayed stream does. They are sent once its
+    // request is out: a steer that arrives between `agent_start` and the
+    // first request is taken into that request, not left queued.
     let release = Arc::new(Notify::new());
-    {
-        let release = Arc::clone(&release);
-        h.faux.set_responses(vec![
-            FauxResponseStep::Factory(Arc::new(move |_, _, _, _| {
-                let release = Arc::clone(&release);
-                Box::pin(async move {
-                    release.notified().await;
-                    Ok(faux_assistant_message("first"))
-                })
-            })),
-            faux_assistant_message("done").into(),
-        ]);
-    }
+    let (started, mut requested) = tokio::sync::mpsc::unbounded_channel();
+    h.faux.set_responses(vec![
+        held_reply(started, Arc::clone(&release), "first"),
+        faux_assistant_message("done").into(),
+    ]);
     let session = session(&dir, &h).await;
     let (input, pipe) = Input::new();
     let out = Output(Arc::new(Mutex::new(Vec::new())));
     let mode = start(session, pipe, &out, None);
     input.send(json!({ "id": "start", "type": "prompt", "message": "Start" }));
     out.wait_for_response("start").await;
+    requested.recv().await.expect("the first request started");
     // Pi's `prompt`: while a turn runs, a prompt without a streaming
     // behavior is refused with the reason to pass one.
     input.send(json!({ "id": "busy", "type": "prompt", "message": "Now" }));
@@ -343,8 +384,8 @@ async fn returns_and_clears_queued_steering_and_follow_up_messages() {
 }
 
 // Pi `test/rpc.test.ts`: "should get state", "should set and get thinking
-// level", "should get available thinking levels", and "should get available
-// models", over one session.
+// level", "should cycle thinking level", "should get available thinking
+// levels", and "should get available models", over one session.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn reports_state_models_and_thinking_levels() {
     let dir = TempDir::new("rpc-state");
@@ -358,6 +399,7 @@ async fn reports_state_models_and_thinking_levels() {
     input.send(json!({ "id": "s", "type": "get_state" }));
     let state = out.wait_for_response("s").await;
     assert_eq!(state["data"]["model"]["provider"], json!("faux"));
+    assert_eq!(state["data"]["model"]["id"], json!("faux-1"));
     assert_eq!(state["data"]["isStreaming"], json!(false));
     assert_eq!(state["data"]["messageCount"], json!(0));
     assert_eq!(state["data"]["sessionId"], json!(session_id));
@@ -383,12 +425,28 @@ async fn reports_state_models_and_thinking_levels() {
     let cycled = out.wait_for_response("c").await;
     assert!(levels.contains(&cycled["data"]["level"]), "{cycled}");
     assert_ne!(cycled["data"]["level"], json!("high"));
+    // Pi "should cycle thinking level": the state reports the new level.
+    input.send(json!({ "id": "s3", "type": "get_state" }));
+    let state = out.wait_for_response("s3").await;
+    assert_eq!(state["data"]["thinkingLevel"], cycled["data"]["level"]);
 
     input.send(json!({ "id": "m", "type": "get_available_models" }));
     let models = out.wait_for_response("m").await;
     let models = models["data"]["models"].as_array().expect("models").clone();
     assert_eq!(models.len(), 1);
     assert_eq!(models[0]["id"], json!("faux-1"));
+    // Pi: every model names its provider, a context window, and whether it
+    // reasons.
+    for model in &models {
+        assert!(model["provider"].is_string(), "{model}");
+        assert!(
+            model["contextWindow"]
+                .as_u64()
+                .is_some_and(|window| window > 0),
+            "{model}"
+        );
+        assert!(model["reasoning"].is_boolean(), "{model}");
+    }
 
     // Pi: "should get session stats".
     input.send(json!({ "id": "st", "type": "get_session_stats" }));
@@ -1085,4 +1143,201 @@ async fn switch_session_replaces_the_session_and_rebinds_its_events() {
     // The run was recorded in the session that was switched to.
     let written = std::fs::read_to_string(&path).expect("the other session");
     assert!(written.contains("and now"), "{written}");
+}
+
+/// The entries of the session file at `file`, one JSON value per line.
+fn file_entries(file: &std::path::Path) -> Vec<Value> {
+    std::fs::read_to_string(file)
+        .expect("session file")
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("an entry"))
+        .collect()
+}
+
+/// Sends `prompt` and waits until its run has settled.
+async fn prompt_and_wait(input: &Input, out: &Output, id: &str, prompt: &str) {
+    let settled = out.of_kind("agent_settled").len();
+    input.send(json!({ "id": id, "type": "prompt", "message": prompt }));
+    assert_eq!(
+        out.wait_for_response(id).await["data"],
+        json!({ "disposition": "started" })
+    );
+    out.wait_for("agent_settled", |out| {
+        out.of_kind("agent_settled").len() > settled
+    })
+    .await;
+}
+
+// Pi `test/rpc.test.ts`: "should save messages to session file": the run's
+// user and assistant messages end, and the session file starts with its
+// header and holds both. With "should get session stats", which counts them
+// after a run.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn should_save_messages_to_session_file() {
+    let dir = TempDir::new("rpc-save");
+    let h = harness();
+    h.faux
+        .set_responses(vec![faux_assistant_message("hello").into()]);
+    let session = session(&dir, &h).await;
+    let file = session.session_file().expect("persisted");
+    let (input, pipe) = Input::new();
+    let out = Output(Arc::new(Mutex::new(Vec::new())));
+    let mode = start(session, pipe, &out, None);
+    prompt_and_wait(&input, &out, "p", "Reply with just the word 'hello'").await;
+    assert!(out.of_kind("message_end").len() >= 2, "{:?}", out.records());
+    input.send(json!({ "id": "st", "type": "get_session_stats" }));
+    let stats = out.wait_for_response("st").await["data"].clone();
+    assert_eq!(
+        stats["sessionFile"],
+        json!(file.to_string_lossy()),
+        "{stats}"
+    );
+    assert!(stats["sessionId"].is_string(), "{stats}");
+    assert_eq!(stats["userMessages"], json!(1), "{stats}");
+    assert_eq!(stats["assistantMessages"], json!(1), "{stats}");
+    input.close();
+    assert_eq!(mode.await.expect("the loop ends"), 0);
+    let entries = file_entries(&file);
+    assert_eq!(entries[0]["type"], json!("session"));
+    let roles: Vec<&Value> = entries
+        .iter()
+        .filter(|entry| entry["type"] == json!("message"))
+        .map(|entry| &entry["message"]["role"])
+        .collect();
+    assert!(roles.contains(&&json!("user")), "{roles:?}");
+    assert!(roles.contains(&&json!("assistant")), "{roles:?}");
+}
+
+// Pi `test/rpc.test.ts`: "should handle manual compaction" and "should
+// retain pre-compaction entries in get_entries": `compact` answers with
+// the summary and the tokens before it, the file gains one compaction
+// entry, and `get_entries` still lists every earlier entry in order.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn should_handle_manual_compaction_and_retain_pre_compaction_entries() {
+    let dir = TempDir::new("rpc-compact");
+    let h = harness();
+    let session = compactable_session(&dir, &h).await;
+    let file = session.session_file().expect("persisted");
+    let (input, pipe) = Input::new();
+    let out = Output(Arc::new(Mutex::new(Vec::new())));
+    let mode = start(session, pipe, &out, None);
+    input.send(json!({ "id": "before", "type": "get_entries" }));
+    let before = out.wait_for_response("before").await["data"]["entries"].clone();
+    let before_ids: Vec<Value> = before
+        .as_array()
+        .expect("entries")
+        .iter()
+        .map(|entry| entry["id"].clone())
+        .collect();
+    assert!(!before_ids.is_empty());
+    // A compaction that keeps one token summarizes the last turn's prefix
+    // too, so it takes two summaries.
+    h.faux.set_responses(vec![
+        faux_assistant_message("## Goal\nSay hello").into(),
+        faux_assistant_message("## Original Request\nthree").into(),
+    ]);
+    input.send(json!({ "id": "c", "type": "compact" }));
+    let compacted = out.wait_for_response("c").await;
+    assert_eq!(compacted["success"], json!(true), "{compacted}");
+    assert!(
+        compacted["data"]["summary"]
+            .as_str()
+            .is_some_and(|summary| !summary.is_empty()),
+        "{compacted}"
+    );
+    assert!(
+        compacted["data"]["tokensBefore"]
+            .as_u64()
+            .is_some_and(|tokens| tokens > 0),
+        "{compacted}"
+    );
+    input.send(json!({ "id": "after", "type": "get_entries" }));
+    let after = out.wait_for_response("after").await["data"]["entries"].clone();
+    let after = after.as_array().expect("entries");
+    let after_ids: Vec<Value> = after.iter().map(|entry| entry["id"].clone()).collect();
+    assert_eq!(after_ids[..before_ids.len()], before_ids[..]);
+    assert!(
+        after
+            .iter()
+            .any(|entry| entry["type"] == json!("compaction"))
+    );
+    input.close();
+    assert_eq!(mode.await.expect("the loop ends"), 0);
+    let compactions: Vec<Value> = file_entries(&file)
+        .into_iter()
+        .filter(|entry| entry["type"] == json!("compaction"))
+        .collect();
+    assert_eq!(compactions.len(), 1, "{compactions:?}");
+    assert!(compactions[0]["summary"].is_string(), "{compactions:?}");
+}
+
+// Pi `test/rpc.test.ts`: "should create new session": after a run the
+// session has messages, and `new_session` replaces it with one that has
+// none.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn should_create_new_session() {
+    let dir = TempDir::new("rpc-new");
+    let h = harness();
+    h.faux
+        .set_responses(vec![faux_assistant_message("hello").into()]);
+    let session = session(&dir, &h).await;
+    let first = session.session_id();
+    let (input, pipe) = Input::new();
+    let out = Output(Arc::new(Mutex::new(Vec::new())));
+    let mode = start_with(
+        session,
+        pipe,
+        &out,
+        None,
+        Some(factory(&dir)),
+        crate::cli::no_interrupt(),
+    );
+    prompt_and_wait(&input, &out, "p", "Hello").await;
+    input.send(json!({ "id": "s", "type": "get_state" }));
+    let state = out.wait_for_response("s").await;
+    assert!(
+        state["data"]["messageCount"]
+            .as_u64()
+            .is_some_and(|count| count > 0),
+        "{state}"
+    );
+    input.send(json!({ "id": "new", "type": "new_session" }));
+    let created = out.wait_for_response("new").await;
+    assert_eq!(created["success"], json!(true), "{created}");
+    assert_eq!(created["data"], json!({ "cancelled": false }));
+    input.send(json!({ "id": "s2", "type": "get_state" }));
+    let state = out.wait_for_response("s2").await;
+    assert_eq!(state["data"]["messageCount"], json!(0), "{state}");
+    assert_ne!(state["data"]["sessionId"], json!(first), "{state}");
+    input.close();
+    assert_eq!(mode.await.expect("the loop ends"), 0);
+}
+
+// Pi `test/rpc.test.ts`: "should export to HTML": after a run, the export
+// answers with the path of the HTML file it wrote.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn should_export_to_html() {
+    let dir = TempDir::new("rpc-export");
+    let h = harness();
+    h.faux
+        .set_responses(vec![faux_assistant_message("hello").into()]);
+    let session = session(&dir, &h).await;
+    let (input, pipe) = Input::new();
+    let out = Output(Arc::new(Mutex::new(Vec::new())));
+    let mode = start(session, pipe, &out, None);
+    prompt_and_wait(&input, &out, "p", "Hello").await;
+    input.send(json!({ "id": "x", "type": "export_html" }));
+    let exported = out.wait_for_response("x").await;
+    assert_eq!(exported["success"], json!(true), "{exported}");
+    let path = exported["data"]["path"].as_str().expect("a path");
+    assert!(
+        std::path::Path::new(path)
+            .extension()
+            .is_some_and(|extension| extension == "html"),
+        "{path}"
+    );
+    let html = std::fs::read_to_string(path).expect("the export");
+    assert!(html.starts_with("<!DOCTYPE html>"), "{html:.80}");
+    input.close();
+    assert_eq!(mode.await.expect("the loop ends"), 0);
 }
