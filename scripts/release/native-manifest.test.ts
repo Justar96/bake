@@ -57,6 +57,8 @@ describe('parsing', () => {
     ['another schema', { schema: 'bake-native-release/2' }, /schema is "bake-native-release\/2"/],
     ['another channel', { channel: 'beta' }, /channel is "beta"/],
     ['an invalid version', { version: '../outside' }, /version is invalid/],
+    ['a pre-release with a leading zero', { version: '0.4.0-rc.01' }, /version is invalid: "0\.4\.0-rc\.01"/],
+    ['a pre-release with an empty identifier', { version: '0.4.0-rc..1' }, /version is invalid: "0\.4\.0-rc\.\.1"/],
     ['a fractional publication time', { published: '2026-10-20T00:00:00.000Z' }, /published time is invalid/],
     ['an impossible publication time', { published: '2026-02-30T00:00:00Z' }, /published time is invalid/],
     ['no artifacts', { artifacts: {} }, /lists no artifacts/],
@@ -118,7 +120,7 @@ describe('the host gate', () => {
     writeFileSync(join(root, 'public/native/stable.json.sig'), `${sign(null, bytes, signer).toString('base64')}\n`)
   }
 
-  function fixture(platforms = ['win32-x64'], payload = PAYLOAD): { root: string; manifest: NativeManifest } {
+  function fixture(platforms = ['linux-x64'], payload = PAYLOAD): { root: string; manifest: NativeManifest } {
     const root = mkdtempSync(join(tmpdir(), 'bake-native-manifest-'))
     roots.push(root)
     copyFileSync(join(ROOT, 'distribution/host/verify-native-manifest.mjs'), join(root, 'verify-native-manifest.mjs'))
@@ -143,27 +145,46 @@ describe('the host gate', () => {
   }
 
   const targets = ['darwin-arm64', 'darwin-x64', 'linux-arm64', 'linux-x64', 'win32-x64']
+  const releaseTargets = ['linux-arm64', 'linux-x64']
 
   test('accepts a verified single-platform release', () => {
     const result = verify(fixture().root)
     expect(result.code).toBe(0)
-    expect(result.stdout).toContain('Verified native Bake 0.4.0 release: win32-x64')
+    expect(result.stdout).toContain('Verified native Bake 0.4.0 release: linux-x64')
   })
 
-  test('accepts all five platforms in complete mode, and refuses a missing one', () => {
-    expect(verify(fixture(targets).root, ['--complete']).code).toBe(0)
-    expect(verify(fixture().root, ['--complete']).stderr).toContain('Missing or invalid darwin-arm64 artifact')
+  test('complete mode requires exactly linux-arm64 and linux-x64', () => {
+    const complete = verify(fixture(releaseTargets).root, ['--complete'])
+    expect(complete.code).toBe(0)
+    expect(complete.stdout).toContain('Verified native Bake 0.4.0 release: linux-arm64, linux-x64')
+    expect(verify(fixture(['linux-x64']).root, ['--complete']).stderr).toContain('Missing or invalid linux-arm64 artifact')
+    // A platform 0.4.0 does not release is refused by name, though the grammar reads it.
+    const deferred = verify(fixture(targets).root, ['--complete'])
+    expect(deferred.code).not.toBe(0)
+    expect(deferred.stderr).toContain('Bake 0.4.0 releases linux-arm64 and linux-x64 only; native darwin-arm64 releases arrive in Bake 0.4.x')
+    expect(verify(fixture([...releaseTargets, 'win32-x64']).root, ['--complete']).stderr).toContain('native win32-x64 releases arrive in Bake 0.4.x')
+  })
+
+  test('a macOS or Windows archive is refused by name whatever the flags, as the image build runs the gate too', () => {
+    for (const target of ['darwin-arm64', 'darwin-x64', 'win32-x64']) {
+      for (const flags of [[], ['--allow-missing-archives'], ['--required']]) {
+        const refused = verify(fixture([...releaseTargets, target]).root, flags)
+        expect(refused.code).not.toBe(0)
+        expect(refused.stderr).toContain(`Bake 0.4.0 releases linux-arm64 and linux-x64 only; native ${target} releases arrive in Bake 0.4.x`)
+      }
+    }
+    expect(verify(fixture(['win32-x64']).root, ['--allow-missing-archives']).stderr).toContain('native win32-x64 releases arrive in Bake 0.4.x')
   })
 
   test('an archive held elsewhere is allowed, and one it holds is still checked', () => {
-    const { root } = fixture(targets)
+    const { root } = fixture(releaseTargets)
     rmSync(join(root, 'public/native/releases/0.4.0/bake-v0.4.0-linux-x64.tar.gz'))
     expect(verify(root, ['--complete']).code).not.toBe(0)
     const allowed = verify(root, ['--complete', '--allow-missing-archives'])
     expect(allowed.code).toBe(0)
     expect(allowed.stdout).toContain('archives held elsewhere: linux-x64')
-    writeFileSync(join(root, 'public/native/releases/0.4.0/bake-v0.4.0-win32-x64.tar.gz'), `${PAYLOAD}!`)
-    expect(verify(root, ['--complete', '--allow-missing-archives']).stderr).toContain('Size mismatch for win32-x64')
+    writeFileSync(join(root, 'public/native/releases/0.4.0/bake-v0.4.0-linux-arm64.tar.gz'), `${PAYLOAD}!`)
+    expect(verify(root, ['--complete', '--allow-missing-archives']).stderr).toContain('Size mismatch for linux-arm64')
   })
 
   test('reports no native release when none is staged, unless one is required', () => {
@@ -195,14 +216,17 @@ describe('the host gate', () => {
     ['another schema', (m: Record<string, unknown>) => { m.schema = 'bake-native-release/2' }, 'Unsupported native manifest schema'],
     ['another channel', (m: Record<string, unknown>) => { m.channel = 'beta' }, 'Unsupported native release channel'],
     ['an invalid version', (m: Record<string, unknown>) => { m.version = '../outside' }, 'Invalid native release version'],
+    ['a pre-release with a leading zero', (m: Record<string, unknown>) => { m.version = '0.4.0-rc.01' }, 'Invalid native release version'],
+    ['a pre-release with an empty identifier', (m: Record<string, unknown>) => { m.version = '0.4.0-rc..1' }, 'Invalid native release version'],
+    ['a core number with a leading zero', (m: Record<string, unknown>) => { m.version = '0.04.0' }, 'Invalid native release version'],
     ['an invalid publication time', (m: Record<string, unknown>) => { m.published = 'yesterday' }, 'Invalid native release published time'],
     ['a rolled-over publication date', (m: Record<string, unknown>) => { m.published = '2026-02-30T00:00:00Z' }, 'Invalid native release published time'],
     ['no artifacts', (m: Record<string, unknown>) => { m.artifacts = {} }, 'No native release artifacts'],
     ['an unsupported target', (m: Record<string, unknown>) => { (m.artifacts as Record<string, unknown>)['freebsd-x64'] = { file: 'x', sha256: 'y', size: 1 } }, 'Unsupported native release target: freebsd-x64'],
-    ['an archive name of another version', (m: Record<string, unknown>) => { ((m.artifacts as Record<string, Record<string, unknown>>)['win32-x64'] as Record<string, unknown>).file = 'bake-v0.4.1-win32-x64.tar.gz' }, 'Missing or invalid win32-x64 artifact'],
-    ['an extra artifact member', (m: Record<string, unknown>) => { ((m.artifacts as Record<string, Record<string, unknown>>)['win32-x64'] as Record<string, unknown>).url = 'http://elsewhere' }, 'Unknown win32-x64 artifact members: url'],
-    ['a wrong hash', (m: Record<string, unknown>) => { ((m.artifacts as Record<string, Record<string, unknown>>)['win32-x64'] as Record<string, unknown>).sha256 = '0'.repeat(64) }, 'SHA-256 mismatch for win32-x64'],
-    ['a wrong size', (m: Record<string, unknown>) => { ((m.artifacts as Record<string, Record<string, unknown>>)['win32-x64'] as Record<string, unknown>).size = 7 }, 'Size mismatch for win32-x64'],
+    ['an archive name of another version', (m: Record<string, unknown>) => { ((m.artifacts as Record<string, Record<string, unknown>>)['linux-x64'] as Record<string, unknown>).file = 'bake-v0.4.1-linux-x64.tar.gz' }, 'Missing or invalid linux-x64 artifact'],
+    ['an extra artifact member', (m: Record<string, unknown>) => { ((m.artifacts as Record<string, Record<string, unknown>>)['linux-x64'] as Record<string, unknown>).url = 'http://elsewhere' }, 'Unknown linux-x64 artifact members: url'],
+    ['a wrong hash', (m: Record<string, unknown>) => { ((m.artifacts as Record<string, Record<string, unknown>>)['linux-x64'] as Record<string, unknown>).sha256 = '0'.repeat(64) }, 'SHA-256 mismatch for linux-x64'],
+    ['a wrong size', (m: Record<string, unknown>) => { ((m.artifacts as Record<string, Record<string, unknown>>)['linux-x64'] as Record<string, unknown>).size = 7 }, 'Size mismatch for linux-x64'],
   ])('refuses %s', (_what, edit, message) => {
     const { root, manifest: written } = fixture()
     const value = JSON.parse(JSON.stringify(written)) as Record<string, unknown>

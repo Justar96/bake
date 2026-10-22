@@ -1,7 +1,10 @@
 #!/usr/bin/env bun
 /**
  * Build `bake` with the pinned Cargo toolchain and archive it for this
- * host: a preview of the native 0.4 package layout, not a release.
+ * host: a preview of the native 0.4 package layout, not a release. The host
+ * must be a 0.4.0 release platform, `linux-x64` or `linux-arm64`; on macOS
+ * and Windows the run stops before it builds, since those archives arrive
+ * in 0.4.x.
  *
  * The archive holds the binary, the repository license and notices, the
  * NOTICE of each Bake crate linked into the binary, and this platform's
@@ -33,9 +36,21 @@ import {
 } from './native-licenses.ts'
 import { tarEntries, SHARED_WRITE } from './permissions.ts'
 
-/** The five release platforms, as Node names them; `bake --self-check` uses the same names. */
+/**
+ * The five platform names a native manifest may carry, as Node names them;
+ * `bake --self-check` uses the same names. The grammar keeps all five so a
+ * 0.4.x release can add a platform without a new manifest schema.
+ */
 export const RUST_TARGETS = ['darwin-arm64', 'darwin-x64', 'linux-arm64', 'linux-x64', 'win32-x64'] as const
 export type RustTarget = typeof RUST_TARGETS[number]
+
+/**
+ * The platforms Bake 0.4.0 packs, publishes, and installs
+ * ([D47](../../docs/roadmap/rust-0.4/scope-00/support.md#decision-register)):
+ * Linux alone. The other {@link RUST_TARGETS} arrive in 0.4.x.
+ */
+export const RELEASE_TARGETS = ['linux-arm64', 'linux-x64'] as const satisfies readonly RustTarget[]
+export type ReleaseTarget = typeof RELEASE_TARGETS[number]
 
 /** The record `bake --self-check` prints, schema 1 (`rust/crates/bake-cli/src/self_check.rs`). */
 export interface SelfCheckRecord {
@@ -115,13 +130,34 @@ const BINARY_MODE = 0o755
 const FILE_MODE = 0o644
 const DIRECTORY_MODE = 0o755
 
-/** A Cargo version usable in a file name: SemVer with an optional pre-release, no build metadata. */
+/**
+ * One canonical SemVer pre-release identifier: a number without leading
+ * zeros, or alphanumerics holding a letter or hyphen. `bake-update`'s
+ * `is_release_version` and the host's gate apply the same rule, which keeps
+ * the version order total.
+ */
+const PRERELEASE_IDENTIFIER = '(?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*)'
+const NATIVE_VERSION = new RegExp(`^(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)(?:-${PRERELEASE_IDENTIFIER}(?:\\.${PRERELEASE_IDENTIFIER})*)?$`, 'u')
+
+/** A Cargo version usable in a file name: canonical SemVer with an optional pre-release, no build metadata. */
 export function isNativeVersion(value: unknown): value is string {
-  return typeof value === 'string' && /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/u.test(value)
+  return typeof value === 'string' && NATIVE_VERSION.test(value)
 }
 
 export function isRustTarget(value: unknown): value is RustTarget {
   return typeof value === 'string' && (RUST_TARGETS as readonly string[]).includes(value)
+}
+
+export function isReleaseTarget(value: unknown): value is ReleaseTarget {
+  return typeof value === 'string' && (RELEASE_TARGETS as readonly string[]).includes(value)
+}
+
+/**
+ * Why `target`, a manifest platform outside {@link RELEASE_TARGETS}, is
+ * refused: the sentence every 0.4.0 release tool and installer uses.
+ */
+export function deferredTargetMessage(target: string): string {
+  return `Bake 0.4.0 releases ${RELEASE_TARGETS.join(' and ')} only; native ${target} releases arrive in Bake 0.4.x`
 }
 
 /** This host's platform name, whether or not Bake releases for it. */
@@ -521,14 +557,15 @@ async function run(argv: readonly string[], cwd: string): Promise<void> {
  * call and removed on return, and the archive is renamed into place only
  * after both checks pass, so an earlier archive of the same name survives
  * any failure.
- * @throws when the target is not this host's release platform, the version
- * is not a native version, {@link targetLicenses} refuses the license bundle,
+ * @throws when the target is not a 0.4.0 release platform or not this
+ * host's, the version is not a native version, {@link targetLicenses} refuses the license bundle,
  * a payload file is missing, empty, or a link, or a check fails; each before
  * the binary runs or the archive is moved into place.
  */
 export async function packRust(options: PackOptions): Promise<PackResult> {
   const { target, version } = options
-  if (!isRustTarget(target)) throw new Error(`${target} is not a Bake release platform (${RUST_TARGETS.join(', ')})`)
+  if (!isRustTarget(target)) throw new Error(`${target} is not a Bake release platform (${RELEASE_TARGETS.join(', ')})`)
+  if (!isReleaseTarget(target)) throw new Error(deferredTargetMessage(target))
   if (target !== hostTarget()) throw new Error(`This host is ${hostTarget()}; a ${target} archive must be built and checked on ${target}`)
   if (!isNativeVersion(version)) throw new Error(`${JSON.stringify(version)} is not a native release version`)
   const timeoutMs = options.timeoutMs ?? 30_000
@@ -705,6 +742,9 @@ async function main(): Promise<void> {
   const outputDir = resolve(values.out ?? join(root, '.artifacts/bake-native-release', inputs.version))
   // Before building: packRust checks again, but a refused directory should cost no build.
   checkOutputDir(root, outputDir)
+  // Likewise a host outside the 0.4.0 release set, which packRust refuses.
+  const target = hostTarget()
+  if (isRustTarget(target) && !isReleaseTarget(target)) throw new Error(deferredTargetMessage(target))
   // Generated for this run, never read from an earlier --write, and before
   // building, so a missing cargo-about or an uncovered license costs no build.
   // The bundle reads every platform's crate sources, which the host build alone
@@ -715,7 +755,7 @@ async function main(): Promise<void> {
   await run(['cargo', 'build', '--locked', '-p', 'bake-cli', '--bin', 'bake', ...profile === 'release' ? ['--release'] : []], rust)
   const binary = join(inputs.targetDir, profile === 'release' ? 'release' : 'debug', process.platform === 'win32' ? 'bake.exe' : 'bake')
   const { docs, notices, version } = inputs
-  const result = await packRust({ binary, root, docs, notices, licenses, version, target: hostTarget(), outputDir })
+  const result = await packRust({ binary, root, docs, notices, licenses, version, target, outputDir })
   console.log(result.listing.join('\n'))
   console.log(JSON.stringify(result.record))
   console.log(result.archive)

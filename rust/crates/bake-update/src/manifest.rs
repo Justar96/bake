@@ -25,8 +25,10 @@ pub const SCHEMA: &str = "bake-native-release/1";
 /// The only `channel` 0.4.0 publishes.
 pub const CHANNEL: &str = "stable";
 
-/// The platforms a native release can carry an archive for, as
-/// `bake --self-check` and `scripts/release/pack-rust.ts` name them.
+/// The platforms a native release manifest can carry an archive for, as
+/// `bake --self-check` and `scripts/release/pack-rust.ts` name them. The
+/// grammar keeps all five so a 0.4.x release can add one; Bake 0.4.0
+/// publishes [`RELEASE_TARGETS`] alone.
 pub const TARGETS: [&str; 5] = [
     "darwin-arm64",
     "darwin-x64",
@@ -34,6 +36,12 @@ pub const TARGETS: [&str; 5] = [
     "linux-x64",
     "win32-x64",
 ];
+
+/// The platforms Bake 0.4.0 publishes native releases and updates for
+/// ([D47]); the rest of [`TARGETS`] arrive in 0.4.x.
+///
+/// [D47]: ../../../docs/roadmap/rust-0.4/scope-00/support.md
+pub const RELEASE_TARGETS: [&str; 2] = ["linux-arm64", "linux-x64"];
 
 /// Largest manifest or signature that is read; a real one is a few
 /// hundred bytes.
@@ -65,6 +73,28 @@ pub fn host_target() -> Option<&'static str> {
         ("linux", "x86_64") => Some("linux-x64"),
         ("windows", "x86_64") => Some("win32-x64"),
         _ => None,
+    }
+}
+
+/// `host`, this executable's [`host_target`], when Bake publishes native
+/// updates for it.
+///
+/// # Errors
+///
+/// [`UpdateError::Platform`] for a platform outside [`RELEASE_TARGETS`],
+/// naming the 0.4.x releases that bring a manifest platform's updates.
+pub fn release_target(host: Option<&'static str>) -> Result<&'static str, UpdateError> {
+    match host {
+        Some(target) if RELEASE_TARGETS.contains(&target) => Ok(target),
+        Some(target) => Err(UpdateError::Platform(format!(
+            "Bake 0.4.0 publishes native updates for {} only; native updates for {target} arrive in Bake 0.4.x",
+            RELEASE_TARGETS.join(" and ")
+        ))),
+        None => Err(UpdateError::Platform(format!(
+            "Bake publishes no native release for {}-{}",
+            std::env::consts::OS,
+            std::env::consts::ARCH
+        ))),
     }
 }
 
@@ -359,7 +389,7 @@ mod tests {
 
     #[test]
     fn every_malformed_manifest_is_refused_by_name() {
-        let cases: [(&str, &str); 12] = [
+        let cases: [(&str, &str); 14] = [
             ("not json", "is not JSON"),
             ("[]", "is not an object"),
             (
@@ -376,6 +406,16 @@ mod tests {
             ),
             (
                 &manifest_text(&VALID.replace("\"0.4.0\"", "\"0.4\"")),
+                "invalid version",
+            ),
+            // Non-canonical prereleases, which the 0.3 pattern accepted: a
+            // leading zero and an empty identifier.
+            (
+                &manifest_text(&VALID.replace("\"0.4.0\"", "\"0.4.0-rc.01\"")),
+                "invalid version",
+            ),
+            (
+                &manifest_text(&VALID.replace("\"0.4.0\"", "\"0.4.0-rc..1\"")),
                 "invalid version",
             ),
             (
@@ -451,6 +491,43 @@ mod tests {
         ] {
             assert!(!is_published_instant(value), "{value}");
         }
+    }
+
+    #[test]
+    fn native_updates_are_published_for_the_two_linux_platforms_alone() {
+        assert_eq!(RELEASE_TARGETS, ["linux-arm64", "linux-x64"]);
+        assert!(
+            RELEASE_TARGETS
+                .iter()
+                .all(|target| TARGETS.contains(target))
+        );
+        for target in RELEASE_TARGETS {
+            assert_eq!(release_target(Some(target)), Ok(target));
+        }
+        for target in ["darwin-arm64", "darwin-x64", "win32-x64"] {
+            assert_eq!(
+                release_target(Some(target)),
+                Err(UpdateError::Platform(format!(
+                    "Bake 0.4.0 publishes native updates for linux-arm64 and linux-x64 only; native updates for {target} arrive in Bake 0.4.x"
+                )))
+            );
+        }
+        let unknown = release_target(None).expect_err("no platform");
+        assert!(matches!(unknown, UpdateError::Platform(_)), "{unknown}");
+        assert!(
+            unknown
+                .message()
+                .starts_with("Bake publishes no native release for "),
+            "{unknown}"
+        );
+        // A 0.4.x manifest may still list the other platforms, and this
+        // reader keeps them.
+        let five = parse_manifest(&manifest_text(&VALID.replace(
+            "\"linux-x64\":{\"file\":\"bake-v0.4.0-linux-x64.tar.gz\"",
+            "\"darwin-arm64\":{\"file\":\"bake-v0.4.0-darwin-arm64.tar.gz\"",
+        )))
+        .expect("a darwin-arm64 artifact parses");
+        assert!(five.artifact("darwin-arm64").is_some());
     }
 
     #[test]

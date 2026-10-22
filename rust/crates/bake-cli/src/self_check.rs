@@ -22,7 +22,10 @@ pub const SCHEMA: u64 = 1;
 /// The Bake release platform of an operating system and architecture, as
 /// Rust's `target_os` and `target_arch` name them, or `None` for a host Bake
 /// does not release for. The names are Node's `process.platform` and
-/// `process.arch`, which the release archives and manifests use.
+/// `process.arch`, which the release archives and manifests use. All five
+/// manifest platforms are named, so a macOS or Windows build still checks
+/// itself; Bake 0.4.0 packs and publishes the two Linux ones alone
+/// (`bake_update::RELEASE_TARGETS`).
 pub fn platform(os: &str, arch: &str) -> Option<&'static str> {
     match (os, arch) {
         ("macos", "aarch64") => Some("darwin-arm64"),

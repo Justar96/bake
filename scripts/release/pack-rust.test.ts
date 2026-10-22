@@ -16,7 +16,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { BUNDLE_FILE, INVENTORY_FILE, PLATFORMS, SCHEMA } from './native-licenses.ts'
 import {
-  archiveName, canonicalPath, checkOutputDir, docsDigests, hostTarget, inside, isNativeVersion, isRustTarget, packRust, parseSelfCheck,
+  archiveName, canonicalPath, checkOutputDir, deferredTargetMessage, docsDigests, hostTarget, inside, isNativeVersion, isReleaseTarget,
+  isRustTarget, packRust, parseSelfCheck, RELEASE_TARGETS,
   payload, targetLicenses, verifyArchive, workspaceInputs, type Expected, type PackOptions, type RustTarget, type TargetLicenses,
 } from './pack-rust.ts'
 
@@ -34,7 +35,7 @@ const sha = (text: string): string => createHash('sha256').update(text).digest('
 const DOCS = { cli: '# CLI\n\nRun it.\n', home: '# Home\n\nWhere it lives.\n' }
 const VERSION = '0.4.0-dev'
 const host = hostTarget()
-const releaseHost = isRustTarget(host)
+const releaseHost = isReleaseTarget(host)
 const target = host as RustTarget
 
 /** The record the real binary prints, members in its order. */
@@ -155,9 +156,30 @@ describe('version and platform names', () => {
     expect(archiveName('0.4.0-dev', 'linux-x64')).toBe('bake-v0.4.0-dev-linux-x64.tar.gz')
   })
 
+  test('Bake 0.4.0 releases the two Linux platforms, and the others arrive in 0.4.x', () => {
+    expect([...RELEASE_TARGETS]).toEqual(['linux-arm64', 'linux-x64'])
+    for (const name of ['linux-arm64', 'linux-x64']) expect(isReleaseTarget(name)).toBe(true)
+    for (const name of ['darwin-arm64', 'darwin-x64', 'win32-x64', 'freebsd-x64', '']) expect(isReleaseTarget(name)).toBe(false)
+    expect(deferredTargetMessage('darwin-arm64')).toBe('Bake 0.4.0 releases linux-arm64 and linux-x64 only; native darwin-arm64 releases arrive in Bake 0.4.x')
+  })
+
+  test.each(['darwin-arm64', 'darwin-x64', 'win32-x64'])('refuses to pack a %s archive on any host, naming 0.4.x, before anything runs', async (deferred) => {
+    const root = scratch()
+    const outputDir = join(root, '.artifacts/bake-native-release', VERSION)
+    // Nothing here exists: the refusal comes before any file is read or the binary runs.
+    await expect(packRust({
+      binary: join(root, 'missing-bake'), root, docs: join(root, 'missing-docs'), notices: {}, licenses: {}, version: VERSION, target: deferred, outputDir,
+    })).rejects.toThrow(deferredTargetMessage(deferred))
+    expect(existsSync(outputDir)).toBe(false)
+  })
+
   test('a native version is SemVer without build metadata', () => {
     for (const version of ['0.4.0', '0.4.0-dev', '1.2.3-rc.1']) expect(isNativeVersion(version)).toBe(true)
     for (const version of ['0.4', '00.4.0', '0.4.0+abc', '0.4.0-', 'v0.4.0', '0.4.0/../x', 4]) expect(isNativeVersion(version)).toBe(false)
+    // Canonical pre-releases only, so the version order is total: numbers
+    // without leading zeros, alphanumerics, and no empty identifier.
+    for (const version of ['1.0.0-0', '1.0.0-0a', '1.0.0--', '1.0.0-a-b.2', '1.0.0-x.7.z.92']) expect(isNativeVersion(version)).toBe(true)
+    for (const version of ['1.0.0-01', '1.0.0-1.00', '1.0.0-a..b', '1.0.0-.a', '1.0.0-a.', '1.0.0-a_b']) expect(isNativeVersion(version)).toBe(false)
   })
 
   test('the output guard knows what is inside a directory', () => {

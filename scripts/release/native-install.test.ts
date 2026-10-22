@@ -5,6 +5,12 @@
  * user-owned command, refused manifests and archives, a failed self-check,
  * and the `<root>/install.lock` directory the Rust updater shares.
  *
+ * Bake 0.4.0 installs on Linux alone: the shipped script refuses macOS before
+ * it downloads anything, which the platform tests prove with a stand-in
+ * `uname`. On macOS the other scenarios run through a copy without that
+ * refusal (`installerTrusting`), so the install path 0.4.x ships there, and
+ * its osascript verifier, keep their evidence.
+ *
  * Every scenario owns its home, command directory, install root, and host.
  * No Node runs inside the installer: it is POSIX sh over curl, tar,
  * sha256sum, and openssl.
@@ -12,12 +18,13 @@
 import { afterEach, expect, test } from 'bun:test'
 import { spawnSync } from 'node:child_process'
 import {
-  chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync,
+  chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
-  embeddedKey, ephemeralKey, installerTrusting, manifestBytes, releasePath, runInstaller, signManifest, startReleaseHost, stubRelease,
+  embeddedKey, ephemeralKey, installerTrusting, manifestBytes, releasePath, runInstaller, shippedInstaller, signManifest,
+  startReleaseHost, stubRelease, versionNewerCases, versionOrderRegion,
   type HostFiles, type InstallerRun, type NativeRelease, type ReleaseHost, type StubOptions,
 } from './native-install-fixture.ts'
 
@@ -292,6 +299,13 @@ posix('refuses a manifest with an unknown member, another schema, or a renamed a
   world.serve(release, manifestBytes({ channel: 'beta', version: '0.4.0', artifacts }))
   expect((await world.run()).stderr).toContain('not a bake-native-release/1 manifest')
 
+  // A version other than canonical SemVer: a leading zero, an empty identifier.
+  for (const version of ['0.4.0-01', '0.4.0-rc..1', '00.4.0']) {
+    const file = `bake-v${version}-${release.target}.tar.gz`
+    world.serve(release, manifestBytes({ version, artifacts: { [release.target]: { ...release.artifact, file } } }))
+    expect((await world.run()).stderr).toContain('not a bake-native-release/1 manifest')
+  }
+
   world.serve(release, manifestBytes({
     version: '0.4.0',
     artifacts: { [release.target]: { ...release.artifact, sha256: 'NOTHEX'.padEnd(64, 'f') } },
@@ -535,6 +549,115 @@ darwin('verifies with real osascript when no openssl can', async () => {
   const refused = await world.run([], forced)
   expect(refused.stderr).toContain('signature did not verify')
   expect(installedVersion(world.root)).toBe('0.4.0')
+}, 180_000)
+
+/**
+ * A directory holding a `uname` that names `system` and `machine`, as
+ * `uname -s` and `uname -m` print them, put first on PATH.
+ */
+function unameStub(directory: string, system: string, machine: string): string {
+  const shims = join(directory, `uname-${system}-${machine}`)
+  mkdirSync(shims, { recursive: true })
+  writeFileSync(join(shims, 'uname'), `#!/bin/sh
+case \${1:-} in
+  -s) printf '%s\\n' '${system}' ;;
+  -m) printf '%s\\n' '${machine}' ;;
+  *) printf '%s\\n' '${system}' ;;
+esac
+`)
+  chmodSync(join(shims, 'uname'), 0o755)
+  return shims
+}
+
+/** Run the shipped install.sh, unmodified, against `world`'s host as `system`/`machine`. */
+function runShipped(world: Scenario, system: string, machine: string, args: readonly string[] = []): Promise<InstallerRun> {
+  return runInstaller(['sh', shippedInstaller('install.sh'), ...args], {
+    PATH: `${unameStub(world.directory, system, machine)}:${process.env['PATH'] ?? '/usr/bin:/bin'}`,
+    HOME: world.home,
+    TMPDIR: join(world.directory, 'tmp'),
+    BAKE_DOWNLOAD_URL: world.host.origin,
+    BAKE_NATIVE_ROOT: world.root,
+    BAKE_BIN_DIR: world.binDir,
+  })
+}
+
+posix.each([
+  ['Darwin', 'arm64', 'darwin-arm64'],
+  ['Darwin', 'x86_64', 'darwin-x64'],
+])('the shipped installer refuses %s %s with a 0.4.x message before it downloads anything', async (system, machine, target) => {
+  const world = scenario()
+  setup(world.directory)
+  world.publish('0.4.0')
+  const result = await runShipped(world, system, machine)
+  expect(result.status).toBe(1)
+  expect(result.stdout).toBe('')
+  expect(result.stderr).toBe(`Bake install: Bake 0.4.0 releases linux-arm64 and linux-x64 only; native ${target} releases arrive in Bake 0.4.x\n`)
+  expect(world.host.requests).toEqual([])
+  // Refused before its temporary directory, its lock, or its root exist.
+  expect(readdirSync(join(world.directory, 'tmp'))).toEqual([])
+  expect(existsSync(world.root)).toBe(false)
+  expect(readdirSync(world.binDir)).toEqual([])
+})
+
+posix('the shipped installer goes past its platform check on Linux and reads the manifest', async () => {
+  const world = scenario()
+  setup(world.directory)
+  world.publish('0.4.0')
+  const result = await runShipped(world, 'Linux', 'x86_64')
+  // The shipped script trusts the committed key, not this test's ephemeral
+  // one, so once it has read the manifest it stops at the signature.
+  expect(result.status).toBe(1)
+  expect(world.host.requests).toEqual(['/native/stable.json', '/native/stable.json.sig'])
+  expect(result.stderr).toBe('Bake install: the native release manifest signature did not verify\n')
+  expect(existsSync(join(world.root, 'current'))).toBe(false)
+})
+
+posix.each([
+  ['x86_64', 'linux-x64'],
+  ['aarch64', 'linux-arm64'],
+  ['arm64', 'linux-arm64'],
+])('Linux %s installs the %s archive', async (machine, target) => {
+  const world = scenario()
+  setup(world.directory)
+  world.serve(stubRelease(world.directory, '0.4.0', target))
+  const result = await world.run([], { PATH: `${unameStub(world.directory, 'Linux', machine)}:${process.env['PATH'] ?? '/usr/bin:/bin'}` })
+  expect(result.stderr).toBe('')
+  expect(result.status).toBe(0)
+  expect(result.stdout).toContain(`Found Bake 0.4.0 for ${target}`)
+  expect(world.host.requests).toContain(`/native/releases/0.4.0/bake-v0.4.0-${target}.tar.gz`)
+  expect(installedVersion(world.root)).toBe('0.4.0')
+})
+
+posix('the shipped installer still runs --uninstall-links on a platform it refuses to install on', async () => {
+  const world = scenario()
+  setup(world.directory)
+  // With nothing recorded it has nothing to restore, which it says instead of the platform refusal.
+  const restored = await runShipped(world, 'Darwin', 'arm64', ['--uninstall-links'])
+  expect(restored.status).toBe(1)
+  expect(restored.stderr).toBe(`Bake install: ${join(world.root, 'links.json')} does not exist, so there is nothing to restore\n`)
+  expect(world.host.requests).toEqual([])
+})
+
+/**
+ * The shipped `version_newer`, run over every ordered pair of the case table
+ * `bake-update`'s `compare_versions` is tested against, in one shell. Among
+ * them: 0.4.0-rc.10 is newer than 0.4.0-rc.9, and core numbers past 2^53
+ * still order by value.
+ */
+posix('orders versions as bake-update does, over the shared case table', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'bake-native-version-order-'))
+  roots.push(directory)
+  const cases = versionNewerCases()
+  writeFileSync(join(directory, 'cases'), cases.map(({ candidate, installed }) => `${candidate} ${installed}\n`).join(''))
+  writeFileSync(join(directory, 'order.sh'), `${versionOrderRegion('install.sh')}
+while read -r candidate installed; do
+  if version_newer "$candidate" "$installed"; then echo "$candidate $installed yes"; else echo "$candidate $installed no"; fi
+done < "$1"
+`)
+  const result = spawnSync('sh', [join(directory, 'order.sh'), join(directory, 'cases')], { encoding: 'utf8', timeout: 120_000 })
+  expect(result.stderr).toBe('')
+  expect(result.status).toBe(0)
+  expect(result.stdout.trim().split('\n')).toEqual(cases.map(({ candidate, installed, newer }) => `${candidate} ${installed} ${newer ? 'yes' : 'no'}`))
 }, 180_000)
 
 test('reports whether the POSIX installer checks ran', () => {

@@ -4,6 +4,12 @@
  * `node:crypto`, then the installer itself run end to end against a loopback
  * release host with an ephemeral key.
  *
+ * Bake 0.4.0 releases Linux alone, so the shipped script refuses at its start,
+ * before it reads a setting or downloads anything; the refusal tests run it
+ * as published. The end-to-end tests run a copy without that refusal
+ * (`installerTrusting`), which is the installer the 0.4.x Windows release
+ * ships.
+ *
  * Windows PowerShell and Windows CNG have no Ed25519 primitive and the native
  * installer runs no Node, so the verifier is the installer's own code; these
  * tests run the exact shipped region. PowerShell 7 on Linux runs the same
@@ -17,8 +23,8 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import {
-  ed25519VerifierRegion, ephemeralKey, installerTrusting, manifestBytes, releasePath, runInstaller, signManifest, startReleaseHost,
-  stubRelease, type HostFiles, type InstallerRun, type ReleaseHost,
+  ed25519VerifierRegion, ephemeralKey, installerTrusting, manifestBytes, releasePath, runInstaller, shippedInstaller, signManifest,
+  startReleaseHost, stubRelease, versionNewerCases, versionOrderRegion, type HostFiles, type InstallerRun, type ReleaseHost,
 } from './native-install-fixture.ts'
 
 const roots: string[] = []
@@ -402,6 +408,102 @@ Invoke-Expression (Get-Content -Raw -LiteralPath $env:BAKE_TEST_INSTALLER)
     expect(existsSync(join(root, 'current.txt'))).toBe(false)
     expect(existsSync(join(binDir, 'bake.cmd'))).toBe(false)
   }, 180_000)
+})
+
+describe.skipIf(PWSH === undefined)('the Windows installer\'s manifest grammar', () => {
+  test('refuses a version other than canonical SemVer, signed or not', async () => {
+    const directory = scratch('install-ps1-version')
+    const key = ephemeralKey()
+    const root = join(directory, 'root')
+    const binDir = join(directory, 'bin')
+    mkdirSync(binDir, { recursive: true })
+    let files: HostFiles = { manifest: Buffer.from('{}'), signature: '', releases: new Map() }
+    const host = startReleaseHost(() => files)
+    hosts.push(host)
+    const installer = installerTrusting('install.ps1', key.publicKey, directory)
+    const shims = process.platform === 'win32' ? '' : `${tarShim(directory)}:`
+    const env = {
+      PATH: `${shims}${process.env['PATH'] ?? ''}`,
+      BAKE_DOWNLOAD_URL: host.origin,
+      BAKE_NATIVE_ROOT: root,
+      BAKE_BIN_DIR: binDir,
+      BAKE_SKIP_PATH_UPDATE: '1',
+    }
+    for (const version of ['0.4.0-01', '0.4.0-rc..1', '00.4.0']) {
+      const release = stubRelease(directory, version, 'win32-x64', { executableName: 'bake.exe' })
+      const manifest = manifestBytes({ version, artifacts: { 'win32-x64': release.artifact } })
+      files = { manifest, signature: signManifest(manifest, key), releases: new Map([[releasePath(release), release.bytes]]) }
+      const result = await runPowerShell(installer, [], env)
+      expect(result.status).not.toBe(0)
+      expect(said(result)).toContain('not a bake-native-release/1 manifest')
+    }
+    expect(existsSync(join(root, 'current.txt'))).toBe(false)
+  }, 180_000)
+})
+
+describe.skipIf(PWSH === undefined)('the Windows installer\'s version order', () => {
+  // The shipped BakeVersionNewer over every ordered pair of the case table
+  // bake-update's compare_versions is tested against, in one PowerShell run.
+  // Among them: 0.4.0-rc.10 is newer than 0.4.0-rc.9, and core numbers past
+  // [int]'s 2^31-1 order by value instead of throwing.
+  test('orders versions as bake-update does, over the shared case table', async () => {
+    const directory = scratch('version-order')
+    const cases = versionNewerCases()
+    writeFileSync(join(directory, 'order.ps1'), versionOrderRegion('install.ps1'))
+    writeFileSync(join(directory, 'cases.json'), JSON.stringify(cases))
+    writeFileSync(join(directory, 'run.ps1'), `$ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'order.ps1')
+$cases = Get-Content -Raw (Join-Path $PSScriptRoot 'cases.json') | ConvertFrom-Json
+foreach ($case in $cases) {
+  Write-Output ("" + $case.candidate + " " + $case.installed + " " + (BakeVersionNewer $case.candidate $case.installed))
+}
+`)
+    const result = await runPowerShell(join(directory, 'run.ps1'), [])
+    expect(result.stderr).toBe('')
+    expect(result.status).toBe(0)
+    expect(result.stdout.trim().split(/\r?\n/u)).toEqual(cases.map(({ candidate, installed, newer }) => `${candidate} ${installed} ${newer ? 'True' : 'False'}`))
+  }, 180_000)
+})
+
+describe.skipIf(PWSH === undefined)('the shipped Windows installer', () => {
+  const REFUSAL = 'Bake install: Bake 0.4.0 releases linux-arm64 and linux-x64 only; native win32-x64 releases arrive in Bake 0.4.x'
+
+  /** A host that records requests and serves nothing, and the environment that points the installer at it. */
+  function world(label: string): { root: string; binDir: string; host: ReleaseHost; env: Record<string, string> } {
+    const directory = scratch(label)
+    const root = join(directory, 'root')
+    const binDir = join(directory, 'bin')
+    const host = startReleaseHost(() => ({ manifest: Buffer.from('{}'), signature: '', releases: new Map() }))
+    hosts.push(host)
+    return {
+      root, binDir, host,
+      env: { BAKE_DOWNLOAD_URL: host.origin, BAKE_NATIVE_ROOT: root, BAKE_BIN_DIR: binDir, BAKE_SKIP_PATH_UPDATE: '1' },
+    }
+  }
+
+  test.each([[[]], [['--uninstall-links']], [['--no-such-option']]])('refuses %p at its start, naming 0.4.x, before it reads anything', async (args) => {
+    const { root, binDir, host, env } = world('install-ps1-refused')
+    const result = await runPowerShell(shippedInstaller('install.ps1'), args, env)
+    expect(result.status).not.toBe(0)
+    expect(said(result)).toContain(REFUSAL)
+    expect(host.requests).toEqual([])
+    expect(existsSync(root)).toBe(false)
+    expect(existsSync(binDir)).toBe(false)
+  }, RUN_TIMEOUT_MS)
+
+  test('refuses through the documented irm | iex entry point too', async () => {
+    const { root, host, env } = world('install-ps1-refused-iex')
+    const directory = scratch('install-ps1-refused-iex-script')
+    const piped = join(directory, 'piped.ps1')
+    writeFileSync(piped, `$ErrorActionPreference = 'Stop'
+Invoke-Expression (Get-Content -Raw -LiteralPath $env:BAKE_TEST_INSTALLER)
+`)
+    const result = await runPowerShell(piped, [], { ...env, BAKE_TEST_INSTALLER: shippedInstaller('install.ps1') })
+    expect(result.status).not.toBe(0)
+    expect(said(result)).toContain(REFUSAL)
+    expect(host.requests).toEqual([])
+    expect(existsSync(root)).toBe(false)
+  }, RUN_TIMEOUT_MS)
 })
 
 test('reports whether the PowerShell installer checks ran', () => {

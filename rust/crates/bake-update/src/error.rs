@@ -29,6 +29,8 @@ pub enum UpdateError {
     /// This executable is not part of a native install, or the install's
     /// files are not the ones an install has.
     NotInstalled(String),
+    /// Bake publishes no native update for this host's platform.
+    Platform(String),
     /// A file under the install root could not be read or written.
     Install(String),
 }
@@ -46,6 +48,7 @@ impl UpdateError {
             | Self::SelfCheck(message)
             | Self::Locked(message)
             | Self::NotInstalled(message)
+            | Self::Platform(message)
             | Self::Install(message) => message,
         }
     }

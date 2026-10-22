@@ -7,7 +7,10 @@
  * The key reaches the installer by replacing the one embedded line in a copy
  * of the published script, never through its environment: the published
  * installers trust exactly the key they carry, so nothing a caller sets can
- * steer them.
+ * steer them. Bake 0.4.0 installs on Linux alone, so `install.ps1`, and
+ * `install.sh` outside Linux, stop at their platform refusal; the copy drops
+ * that block there, so the installer body 0.4.x ships keeps its tests, and
+ * the refusal itself is tested on the shipped scripts.
  */
 import { spawnSync } from 'node:child_process'
 import { createHash, generateKeyPairSync, sign, type KeyObject } from 'node:crypto'
@@ -215,6 +218,8 @@ export function signManifest(bytes: Buffer, key: EphemeralKey): string {
 /** The host the installer downloads from, which the test owns and closes. */
 export interface ReleaseHost {
   readonly origin: string
+  /** The path of every request served, in order. */
+  readonly requests: readonly string[]
   stop(): void
 }
 
@@ -223,11 +228,13 @@ export interface ReleaseHost {
  * loopback, from files the caller may replace between installs.
  */
 export function startReleaseHost(files: () => HostFiles): ReleaseHost {
+  const requests: string[] = []
   const server = Bun.serve({
     port: 0,
     hostname: '127.0.0.1',
     fetch(request) {
       const { pathname } = new URL(request.url)
+      requests.push(pathname)
       const served = files()
       if (pathname === '/native/stable.json') return new Response(new Uint8Array(served.manifest))
       if (pathname === '/native/stable.json.sig') return new Response(`${served.signature}\n`)
@@ -237,6 +244,7 @@ export function startReleaseHost(files: () => HostFiles): ReleaseHost {
   })
   return {
     origin: `http://127.0.0.1:${String(server.port)}`,
+    requests,
     stop(): void { server.stop(true) },
   }
 }
@@ -318,15 +326,67 @@ export function ed25519VerifierRegion(): string {
 }
 
 /**
+ * The shipped installer's version order, the region between its
+ * `BEGIN VERSION ORDER` and `END VERSION ORDER` markers: `version_newer` in
+ * `install.sh`, `BakeVersionNewer` and its helpers in `install.ps1`.
+ */
+export function versionOrderRegion(installer: keyof typeof KEY_LINES): string {
+  const source = readFileSync(join(HOST, installer), 'utf8')
+  const region = /^# BEGIN VERSION ORDER\n([\s\S]*?)^# END VERSION ORDER$/mu.exec(source)?.[1]
+  if (region === undefined) throw new Error(`${installer} has no version order region`)
+  return region
+}
+
+/**
+ * The versions of `scripts/release/fixtures/native-version-order.txt`, in
+ * ascending precedence, which `bake-update`'s own test reads too.
+ */
+export function sharedVersionOrder(): string[] {
+  return readFileSync(resolve(import.meta.dir, 'fixtures/native-version-order.txt'), 'utf8')
+    .split('\n').filter(line => line !== '' && !line.startsWith('#'))
+}
+
+/**
+ * Every ordered pair of {@link sharedVersionOrder}, with whether the first is
+ * newer than the second: the answers each installer's order must give.
+ */
+export function versionNewerCases(): { candidate: string; installed: string; newer: boolean }[] {
+  const ordered = sharedVersionOrder()
+  return ordered.flatMap((left, i) => ordered.map((right, j) => ({ candidate: left, installed: right, newer: i > j })))
+}
+
+/** The block holding each installer's 0.4.0 platform refusal, markers included. */
+const PLATFORM_REFUSAL = /^ *# BEGIN 0\.4\.0 PLATFORM REFUSAL\n[\s\S]*?^ *# END 0\.4\.0 PLATFORM REFUSAL\n/mu
+
+/** The path of a shipped installer, which the refusal tests run as published. */
+export function shippedInstaller(installer: keyof typeof KEY_LINES): string {
+  return join(HOST, installer)
+}
+
+/**
+ * Whether the shipped installer stops on this host at its 0.4.0 platform
+ * refusal: `install.ps1` everywhere, `install.sh` outside Linux.
+ */
+export function refusesThisHost(installer: keyof typeof KEY_LINES): boolean {
+  return installer === 'install.ps1' || process.platform !== 'linux'
+}
+
+/**
  * A private copy of the shipped installer that trusts `key`: the one embedded
- * key line is replaced, and nothing else.
+ * key line is replaced and, where {@link refusesThisHost}, the platform
+ * refusal block is removed; nothing else changes.
  * @returns the copy's path.
  */
 export function installerTrusting(installer: keyof typeof KEY_LINES, key: string, directory: string): string {
   const source = readFileSync(join(HOST, installer), 'utf8')
   const replacement = installer === 'install.sh' ? `native_release_key='${key}'` : `$nativeReleaseKey = '${key}'`
-  const next = source.replace(KEY_LINES[installer], replacement)
+  let next = source.replace(KEY_LINES[installer], replacement)
   if (next === source) throw new Error(`${installer} has no embedded native release key line`)
+  if (refusesThisHost(installer)) {
+    const unrefused = next.replace(PLATFORM_REFUSAL, '')
+    if (unrefused === next) throw new Error(`${installer} has no 0.4.0 platform refusal block`)
+    next = unrefused
+  }
   const path = join(directory, installer)
   writeFileSync(path, next)
   chmodSync(path, 0o755)

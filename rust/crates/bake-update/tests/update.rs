@@ -96,9 +96,11 @@ impl Fixture {
         }
     }
 
-    /// An updater for this install, running `running`.
+    /// An updater for this install, running `running`. It names the
+    /// fixture's target explicitly, so these tests run on the hosts Bake
+    /// 0.4.0 publishes no native update for, where `Updater::new` refuses.
     fn updater(&self, running: &str) -> Updater {
-        Updater::new(self.root(), self.source(), running).expect("a release platform")
+        Updater::for_target(self.root(), self.source(), self.target, running)
     }
 
     /// Every file under the root, for a byte-for-byte comparison.
@@ -699,4 +701,50 @@ async fn forcing_a_version_reinstalls_only_what_is_published() {
         }
     );
     assert_eq!(fixture.run_current(), "bake 1.0.0");
+}
+
+/// Bake 0.4.0 publishes native updates for Linux alone, so `Updater::new`
+/// refuses on macOS and Windows; the fixture's explicit target keeps this
+/// suite running there. Each platform's archive is updated to and rolled
+/// back from here, whatever this host is.
+#[tokio::test]
+async fn the_fixture_updates_every_manifest_platform_on_every_host() {
+    let host = Updater::new(
+        Root::new(std::env::temp_dir().join("bake-update-new-on-host-unused")),
+        Source::default(),
+        "1.0.0",
+    );
+    match (host, bake_update::release_target(host_target())) {
+        (Ok(updater), Ok(target)) => assert_eq!(updater.target, target),
+        (Err(error), Err(expected)) => {
+            assert!(matches!(error, UpdateError::Platform(_)), "{error}");
+            assert_eq!(error, expected);
+        }
+        (host, expected) => panic!(
+            "Updater::new gave {:?}, the release platform {expected:?}",
+            host.map(|updater| updater.target)
+        ),
+    }
+    for target in ["darwin-arm64", "win32-x64", "linux-x64"] {
+        let mut fixture = Fixture::new(&format!("explicit-{target}"));
+        fixture.target = target;
+        fixture.installed("1.0.0");
+        fixture.publish("2.0.0", &release_archive("2.0.0", target, "2.0.0", 0));
+        let mut updater = fixture.updater("1.0.0");
+        updater.check = Arc::new(AcceptCandidate);
+        assert_eq!(updater.target, target);
+        assert!(
+            matches!(
+                updater.update(None).await.expect(target),
+                Outcome::Updated { .. }
+            ),
+            "{target}"
+        );
+        assert_eq!(fixture.root().current(), Some("2.0.0".to_owned()));
+        assert!(matches!(
+            updater.rollback().expect(target),
+            Outcome::RolledBack { .. }
+        ));
+        assert_eq!(fixture.root().current(), Some("1.0.0".to_owned()));
+    }
 }

@@ -9,7 +9,7 @@ import {
 } from './assemble-rust.ts'
 import { NATIVE_KEY_FILE, NATIVE_KEY_PLACEHOLDER } from './native-channel.ts'
 import { nativeManifestBytes, parseNativeManifest, type NativeManifest } from './native-manifest.ts'
-import { archiveName, type RustTarget } from './pack-rust.ts'
+import { archiveName, deferredTargetMessage, type RustTarget } from './pack-rust.ts'
 
 // A test starts a Node server and a verifier; a cold runner took over Bun's default 5 s.
 setDefaultTimeout(30_000)
@@ -112,14 +112,38 @@ describe('assembling', () => {
   })
 
   test('publishes every platform of the version, in platform order', async () => {
-    const { root, sourceDir, publicRoot } = fixture('0.4.1', ['win32-x64', 'darwin-arm64', 'linux-x64'])
+    const { root, sourceDir, publicRoot } = fixture('0.4.1', ['linux-x64', 'linux-arm64'])
     const result = await assembleNativeRelease(options({ root, sourceDir, publicRoot, version: '0.4.1' }))
-    expect(Object.keys(result.manifest.artifacts)).toEqual(['darwin-arm64', 'linux-x64', 'win32-x64'])
+    expect(Object.keys(result.manifest.artifacts)).toEqual(['linux-arm64', 'linux-x64'])
     expect(readdirSync(join(publicRoot, 'native/releases/0.4.1')).sort()).toEqual([...result.files].sort())
+  })
+
+  test.each(['darwin-arm64', 'darwin-x64', 'win32-x64'] as const)('refuses a %s archive, naming 0.4.x, and writes nothing', async (deferred) => {
+    const { root, sourceDir, publicRoot } = fixture('0.4.0', ['linux-x64', 'linux-arm64', deferred])
+    await expect(assembleNativeRelease(options({ root, sourceDir, publicRoot })))
+      .rejects.toThrow(`${archiveName('0.4.0', deferred)} is refused: ${deferredTargetMessage(deferred)}`)
+    expect(existsSync(join(publicRoot, 'native'))).toBe(false)
+  })
+
+  test('a complete release needs exactly linux-arm64 and linux-x64', async () => {
+    for (const targets of [['linux-x64'], ['linux-arm64']] as RustTarget[][]) {
+      const { root, sourceDir, publicRoot } = fixture('0.4.0', targets)
+      const missing = targets[0] === 'linux-x64' ? 'linux-arm64' : 'linux-x64'
+      await expect(assembleNativeRelease(options({ root, sourceDir, publicRoot, complete: true })))
+        .rejects.toThrow(`A complete release needs ${archiveName('0.4.0', missing)} in ${sourceDir}`)
+      expect(existsSync(join(publicRoot, 'native'))).toBe(false)
+    }
+    const { root, sourceDir, publicRoot } = fixture('0.4.0', ['linux-x64', 'linux-arm64'])
+    const result = await assembleNativeRelease(options({ root, sourceDir, publicRoot, complete: true }))
+    expect(Object.keys(result.manifest.artifacts)).toEqual(['linux-arm64', 'linux-x64'])
+    // Without --complete, one platform publishes alone.
+    const single = fixture('0.4.0', ['linux-arm64'])
+    await expect(assembleNativeRelease(options({ ...single }))).resolves.toMatchObject({ files: [archiveName('0.4.0', 'linux-arm64')] })
   })
 
   test.each([
     ['a version that is not a native version', (f: ReturnType<typeof fixture>) => ({ ...f, version: '0.4' }), /Not a native release version: 0\.4/],
+    ['a non-canonical pre-release', (f: ReturnType<typeof fixture>) => ({ ...f, version: '0.4.0-rc.01' }), /Not a native release version: 0\.4\.0-rc\.01/],
     ['a missing source directory', (f: ReturnType<typeof fixture>) => ({ ...f, sourceDir: join(f.root, 'absent') }), /No archives at .*absent/],
   ])('refuses %s', async (_what, edit, message) => {
     const { root, sourceDir, publicRoot, version } = { version: '0.4.0', ...edit(fixture()) }

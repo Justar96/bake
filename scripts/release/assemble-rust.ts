@@ -2,7 +2,7 @@
 /**
  * Copy checked native archives into the download service payload and sign the
  * native manifest that lists them:
- * `bun run release:assemble:rust <version> [--ephemeral-key] [--key-file <pem>] [--offline]`.
+ * `bun run release:assemble:rust <version> [--complete] [--ephemeral-key] [--key-file <pem>] [--offline]`.
  *
  * The native route is `native/stable.json`, `native/stable.json.sig`, and
  * `native/releases/<version>/` under `distribution/host/public/`, separate
@@ -14,6 +14,12 @@
  * `distribution/host/native-release-key.pub`. `--ephemeral-key` signs a local
  * check with a throwaway key instead and leaves its public half beside the
  * archives, where a check passes it to the clients.
+ *
+ * Bake 0.4.0 publishes `linux-x64` and `linux-arm64` alone
+ * ([D47](../../docs/roadmap/rust-0.4/scope-00/support.md#decision-register)):
+ * a macOS or Windows archive is refused, and `--complete` requires exactly
+ * those two. The manifest grammar still names all five platforms, so 0.4.x
+ * can add the others.
  *
  * See distribution/README.md, "Native release".
  */
@@ -28,7 +34,9 @@ import {
   NATIVE_CHANNEL, NATIVE_MANIFEST_PATH, NATIVE_MANIFEST_SCHEMA, NATIVE_RELEASES_DIR, NATIVE_SIGNATURE_PATH,
   nativeManifestBytes, parseNativeManifest, publishedAt, type NativeArtifact, type NativeManifest,
 } from './native-manifest.ts'
-import { archiveName, isNativeVersion, RUST_TARGETS, type RustTarget } from './pack-rust.ts'
+import {
+  archiveName, deferredTargetMessage, isNativeVersion, isReleaseTarget, RELEASE_TARGETS, RUST_TARGETS, type RustTarget,
+} from './pack-rust.ts'
 import { compareVersions } from './version.ts'
 
 /** Where `--ephemeral-key` leaves the throwaway public key, beside the archives. */
@@ -53,6 +61,8 @@ export interface AssembleNativeOptions {
   /** The live host origin, checked for a newer published version; absent is `--offline`. */
   readonly base?: string | undefined
   readonly fetch?: typeof fetch
+  /** Require an archive for every one of {@link RELEASE_TARGETS}; `--complete`. */
+  readonly complete?: boolean
 }
 
 export interface NativeReleaseResult {
@@ -91,7 +101,8 @@ async function publishedVersions(options: AssembleNativeOptions, publicRoot: str
  * Stage and sign a native release.
  *
  * Every archive in the source directory must be this version's archive for a
- * release platform and must hold the native payload; the version must be
+ * 0.4.0 release platform and must hold the native payload, and with
+ * `complete` every release platform must have one; the version must be
  * strictly newer than every published native release, local and live, because
  * a channel never moves backward. Nothing here writes `latest.json` or
  * `releases/`, the TypeScript route.
@@ -120,6 +131,7 @@ export async function assembleNativeRelease(options: AssembleNativeOptions): Pro
     if (target === undefined) {
       throw new Error(`${file} is not a native archive of ${version} for a release platform; expected ${archiveName(version, 'linux-x64')} and its siblings`)
     }
+    if (!isReleaseTarget(target)) throw new Error(`${file} is refused: ${deferredTargetMessage(target)}`)
     const path = join(source, file)
     assertNativeArchive(await readArchiveLayout(path))
     const archive = Bun.file(path)
@@ -131,6 +143,10 @@ export async function assembleNativeRelease(options: AssembleNativeOptions): Pro
     staged.push({ target, path, file })
   }
   if (staged.length === 0) throw new Error(`No native archives found in ${source}`)
+  if (options.complete === true) {
+    const missing = RELEASE_TARGETS.filter(target => artifacts[target] === undefined)
+    if (missing.length > 0) throw new Error(`A complete release needs ${missing.map(target => archiveName(version, target)).join(' and ')} in ${source}`)
+  }
   const manifest: NativeManifest = {
     schema: NATIVE_MANIFEST_SCHEMA, channel: NATIVE_CHANNEL, version,
     published: publishedAt(options.now ?? new Date()), artifacts,
@@ -191,6 +207,7 @@ export const DEFAULT_NATIVE_BASE_URL = 'https://bake.justar.dev'
 async function main(): Promise<void> {
   const { values, positionals } = parseArgs({
     options: {
+      complete: { type: 'boolean', default: false },
       'ephemeral-key': { type: 'boolean', default: false },
       'key-file': { type: 'string' },
       offline: { type: 'boolean', default: false },
@@ -198,7 +215,7 @@ async function main(): Promise<void> {
     allowPositionals: true, strict: true,
   })
   const [version, ...extra] = positionals
-  if (version === undefined || extra.length > 0) throw new Error('Usage: bun run release:assemble:rust <version> [--ephemeral-key] [--key-file <pem>] [--offline]')
+  if (version === undefined || extra.length > 0) throw new Error('Usage: bun run release:assemble:rust <version> [--complete] [--ephemeral-key] [--key-file <pem>] [--offline]')
   const root = resolve(import.meta.dir, '../..')
   const sourceDir = nativeSourceDir(root, version)
   const signingKey = nativeSigningKey({
@@ -206,7 +223,9 @@ async function main(): Promise<void> {
     keyFile: values['key-file'] ?? process.env.BAKE_NATIVE_RELEASE_SIGNING_KEY_FILE,
   })
   const base = (process.env.BAKE_NATIVE_RELEASE_BASE_URL?.trim() || DEFAULT_NATIVE_BASE_URL).replace(/\/+$/, '')
-  const result = await assembleNativeRelease({ root, version, sourceDir, signingKey, base: values.offline ? undefined : base })
+  const result = await assembleNativeRelease({
+    root, version, sourceDir, signingKey, base: values.offline ? undefined : base, complete: values.complete,
+  })
   console.log(`Staged and signed ${Object.keys(result.manifest.artifacts).join(', ')} for native Bake ${version}`)
 }
 

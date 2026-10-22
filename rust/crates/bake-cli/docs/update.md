@@ -11,6 +11,16 @@
 
 `bake update` exits 0 when it installed the release or the install is already up to date, and 1 with one line on standard error when it refused. `--check` exits 10 when a newer release is published, so a script can tell a waiting update from a failed check.
 
+## On macOS and Windows
+
+Bake 0.4.0 publishes native releases for Linux alone, x64 and arm64. On macOS and Windows every `bake update` run refuses with exit status 1 before it reaches the network or changes anything, including `--check`, `--force`, and `--rollback`, and names the release that brings those platforms:
+
+```
+update needs a native install, and Bake 0.4.0 publishes native updates for linux-arm64 and linux-x64 only; native updates for darwin-arm64 arrive in Bake 0.4.x
+```
+
+With `BAKE_NATIVE_ROOT` naming an install root, the line is the same without its first clause. The installers refuse those platforms too, so there is no native install there to update: wait for Bake 0.4.x, whose installer brings the macOS and Windows releases. A Bake 0.3 install keeps working with its own data and its own `dsh` command.
+
 ## What an update does
 
 1. It fetches `stable.json` and its signature over HTTPS and refuses the manifest unless Bake's native release key signed exactly those bytes. Bake 0.3's release key cannot sign it, and its `latest.json` route is never read.

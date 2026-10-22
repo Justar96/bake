@@ -1,10 +1,13 @@
 #!/bin/sh
 # The Bake native installer: it installs the Rust agent, `bake`, from the
-# signed native release channel. POSIX sh only, and the host needs no Node or
+# signed native release channel. Bake 0.4.0 publishes Linux x64 and arm64
+# releases only; on macOS an install stops before it downloads anything, since
+# those releases arrive in 0.4.x. POSIX sh only, and the host needs no Node or
 # Bun: it needs curl or wget, tar, and sha256sum or shasum. The manifest
 # signature is verified by an OpenSSL with Ed25519 (1.1.1 or newer) where the
-# host has one, and otherwise, on macOS, by the Ed25519 verifier this script
-# embeds, run by `osascript -l JavaScript`.
+# host has one, and otherwise, where `osascript` exists, by the Ed25519
+# verifier this script embeds, run by `osascript -l JavaScript`; the macOS
+# releases of 0.4.x rely on it.
 #
 #   curl -fsSL https://bake.justar.dev/install.sh | sh
 #
@@ -184,27 +187,53 @@ json_path() {
   printf '%s' "$1" | sed 's/\\u0022/"/g; s/\\u005c/\\/g'
 }
 
-# `0.4.1` is newer than `0.4.0` and than `0.4.1-rc.1`; a pre-release is older
-# than its own release, and two pre-releases compare as text.
+# BEGIN VERSION ORDER
+# Whether release `$1` is newer than `$2`, by the SemVer precedence
+# bake-update's `compare_versions` applies: a pre-release is older than its
+# own release; identifiers compare one by one, numeric ones by value at any
+# length, alphanumeric ones as ASCII text, a numeric one before an
+# alphanumeric one, and a shorter list first when the other extends it.
+# Numbers are compared as digit strings, never as awk numbers, which lose
+# precision past 2^53; the C locale keeps text comparison bytewise.
+# scripts/release/fixtures/native-version-order.txt holds the cases every
+# implementation is tested against.
 version_newer() {
-  awk -v left="$1" -v right="$2" '
-    function core(v) { sub(/-.*$/, "", v); return v }
-    function pre(v) { return index(v, "-") ? substr(v, index(v, "-") + 1) : "" }
-    BEGIN {
-      split(core(left), a, ".")
-      split(core(right), b, ".")
-      for (i = 1; i <= 3; i++) {
-        if (a[i] + 0 > b[i] + 0) { print "yes"; exit }
-        if (a[i] + 0 < b[i] + 0) { print "no"; exit }
-      }
-      x = pre(left); y = pre(right)
-      if (x == y) { print "no"; exit }
-      if (x == "") { print "yes"; exit }
-      if (y == "") { print "no"; exit }
-      print (x > y) ? "yes" : "no"
+  LC_ALL=C awk -v left="$1" -v right="$2" '
+    function digits(x) { return x ~ /^[0-9]+$/ }
+    function text(x, y) { x = x ""; y = y ""; return x == y ? 0 : (x < y ? -1 : 1) }
+    function number(x, y) {
+      sub(/^0+/, "", x); sub(/^0+/, "", y)
+      if (length(x) != length(y)) return length(x) < length(y) ? -1 : 1
+      return text(x, y)
     }
+    function identifier(x, y) {
+      if (digits(x) && digits(y)) return number(x, y)
+      if (digits(x)) return -1
+      if (digits(y)) return 1
+      return text(x, y)
+    }
+    function compare(l, r,    lc, rc, lp, rp, a, b, n, m, i, o) {
+      lc = l; lp = ""; if (index(l, "-")) { lc = substr(l, 1, index(l, "-") - 1); lp = substr(l, index(l, "-") + 1) }
+      rc = r; rp = ""; if (index(r, "-")) { rc = substr(r, 1, index(r, "-") - 1); rp = substr(r, index(r, "-") + 1) }
+      split(lc, a, "."); split(rc, b, ".")
+      for (i = 1; i <= 3; i++) {
+        o = number(digits(a[i]) ? a[i] : "0", digits(b[i]) ? b[i] : "0")
+        if (o != 0) return o
+      }
+      if (!index(l, "-") && !index(r, "-")) return 0
+      if (!index(l, "-")) return 1
+      if (!index(r, "-")) return -1
+      n = split(lp, a, "."); m = split(rp, b, ".")
+      for (i = 1; i <= n && i <= m; i++) {
+        o = identifier(a[i], b[i])
+        if (o != 0) return o
+      }
+      return n == m ? 0 : (n < m ? -1 : 1)
+    }
+    BEGIN { print (compare(left, right) > 0) ? "yes" : "no" }
   ' | grep -q '^yes$'
 }
+# END VERSION ORDER
 
 # RFC 8032 section 7.1 TEST 2: the public key as the installers carry one,
 # base64 DER SubjectPublicKeyInfo, and its signature over the one-byte
@@ -473,7 +502,8 @@ probe_verifier() {
     && ! verify_signature "$ed25519_test_key" "$ed25519_test_signature" "$probe/other"
 }
 
-# Set `target` to this host's release platform.
+# Set `target` to this host's release platform, or stop on a platform Bake
+# 0.4.0 does not release for.
 set_platform() {
   case "$(uname -s)-$(uname -m)" in
     Darwin-arm64) target=darwin-arm64 ;;
@@ -482,6 +512,14 @@ set_platform() {
     Linux-x86_64) target=linux-x64 ;;
     *) fail "this platform has no Bake native release archive" ;;
   esac
+  # BEGIN 0.4.0 PLATFORM REFUSAL
+  # Bake 0.4.0 releases Linux alone (D47); the macOS archives arrive in 0.4.x.
+  # The tests run the install path on macOS through a copy without this block.
+  case $target in
+    linux-*) ;;
+    *) fail "Bake 0.4.0 releases linux-arm64 and linux-x64 only; native $target releases arrive in Bake 0.4.x" ;;
+  esac
+  # END 0.4.0 PLATFORM REFUSAL
 }
 
 # The release `current` names, or empty when the install has no pointer yet.
@@ -715,8 +753,12 @@ install_release() {
   # The manifest, as `bake-native-release/1` fixes it. Whitespace between
   # tokens is removed first; no member of this schema holds any.
   tr -d '[:space:]' < "$temporary/stable.json" > "$temporary/manifest"
+  # The grammar names all five platforms, so a 0.4.x manifest still reads;
+  # the version is canonical SemVer, as every other native reader requires.
   entry='"(darwin-arm64|darwin-x64|linux-arm64|linux-x64|win32-x64)":\{"file":"[A-Za-z0-9._-]+","sha256":"[0-9a-f]{64}","size":[0-9]+\}'
-  grep -Eq '^\{"schema":"bake-native-release/1","channel":"stable","version":"[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?","published":"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z","artifacts":\{'"$entry"'(,'"$entry"')*\}\}$' \
+  number='(0|[1-9][0-9]*)'
+  identifier='(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)'
+  grep -Eq '^\{"schema":"bake-native-release/1","channel":"stable","version":"'"$number"'\.'"$number"'\.'"$number"'(-'"$identifier"'(\.'"$identifier"')*)?","published":"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z","artifacts":\{'"$entry"'(,'"$entry"')*\}\}$' \
     "$temporary/manifest" || fail 'the native release manifest is not a bake-native-release/1 manifest'
   repeated=$(awk -v names='darwin-arm64 darwin-x64 linux-arm64 linux-x64 win32-x64' '
     {

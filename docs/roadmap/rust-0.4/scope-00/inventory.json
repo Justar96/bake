@@ -1315,6 +1315,7 @@
     {"path":"scripts/preflight.test.ts","lane":"bun-scripts","owner":"scripts:workspace","scopes":["01"],"disposition":"replace-tooling","basis":"scripts:workspace"},
     {"path":"scripts/project-reference-faces.test.ts","lane":"bun-scripts","owner":"scripts:workspace","scopes":["01"],"disposition":"replace-tooling","basis":"scripts:workspace"},
     {"path":"scripts/release/assemble-rust.test.ts","lane":"bun-scripts","owner":"scripts:release","scopes":["16"],"disposition":"replace-tooling","basis":"scripts:release"},
+    {"path":"scripts/release/glibc-floor.test.ts","lane":"bun-scripts","owner":"scripts:release","scopes":["16"],"disposition":"replace-tooling","basis":"scripts:release"},
     {"path":"scripts/release/launcher.test.ts","lane":"bun-scripts","owner":"scripts:release","scopes":["16"],"disposition":"replace-tooling","basis":"scripts:release"},
     {"path":"scripts/release/legacy-updater-takeover.test.ts","lane":"bun-scripts","owner":"scripts:release","scopes":["16"],"disposition":"replace-tooling","basis":"scripts:release"},
     {"path":"scripts/release/manifest.test.ts","lane":"bun-scripts","owner":"scripts:release","scopes":["16"],"disposition":"replace-tooling","basis":"scripts:release"},
