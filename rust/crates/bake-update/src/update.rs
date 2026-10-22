@@ -109,15 +109,34 @@ impl Updater {
     /// [`UpdateError::Platform`] on a platform Bake publishes no native
     /// update for, which in 0.4.0 is every platform but Linux.
     pub fn new(root: Root, source: Source, running: &str) -> Result<Self, UpdateError> {
-        let target = release_target(host_target())?;
-        Ok(Self {
+        Self::on_host(host_target(), root, source, running)
+    }
+
+    /// [`Updater::new`] on the host platform `host` names.
+    fn on_host(
+        host: Option<&'static str>,
+        root: Root,
+        source: Source,
+        running: &str,
+    ) -> Result<Self, UpdateError> {
+        let target = release_target(host)?;
+        Ok(Self::for_target(root, source, target, running))
+    }
+
+    /// An updater for `root` that installs `target`'s archive, with the
+    /// shipped effects and self-check, whether or not Bake publishes
+    /// native updates for `target`. A run on this host goes through
+    /// [`Updater::new`], which refuses the platforms 0.4.0 leaves out;
+    /// this one lets a test drive the update on every host.
+    pub fn for_target(root: Root, source: Source, target: &str, running: &str) -> Self {
+        Self {
             root,
             source,
             target: target.to_owned(),
             running: running.to_owned(),
             effects: Arc::new(HostEffects),
             check: Arc::new(SelfCheck::default()),
-        })
+        }
     }
 
     /// The release the next command runs: the pointer's, or this
@@ -423,6 +442,31 @@ pub mod tests {
              esac\n\
              exit 2\n"
         )
+    }
+
+    #[test]
+    fn an_updater_is_made_only_for_a_release_platform() {
+        let root = || Root::new(std::env::temp_dir().join("bake-update-on-host-unused"));
+        for target in crate::manifest::RELEASE_TARGETS {
+            let updater =
+                Updater::on_host(Some(target), root(), Source::default(), "0.4.0").expect(target);
+            assert_eq!(updater.target, target);
+        }
+        for host in [
+            Some("darwin-arm64"),
+            Some("darwin-x64"),
+            Some("win32-x64"),
+            None,
+        ] {
+            match Updater::on_host(host, root(), Source::default(), "0.4.0") {
+                Ok(updater) => panic!("{host:?} made an updater for {}", updater.target),
+                Err(error) => assert_eq!(Err(error), release_target(host).map(|_| ())),
+            }
+        }
+        // `for_target` is the explicit route, and names any platform.
+        let explicit = Updater::for_target(root(), Source::default(), "win32-x64", "0.4.0");
+        assert_eq!(explicit.target, "win32-x64");
+        assert_eq!(explicit.installed(), "0.4.0");
     }
 
     #[test]

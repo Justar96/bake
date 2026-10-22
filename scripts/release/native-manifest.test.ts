@@ -120,7 +120,7 @@ describe('the host gate', () => {
     writeFileSync(join(root, 'public/native/stable.json.sig'), `${sign(null, bytes, signer).toString('base64')}\n`)
   }
 
-  function fixture(platforms = ['win32-x64'], payload = PAYLOAD): { root: string; manifest: NativeManifest } {
+  function fixture(platforms = ['linux-x64'], payload = PAYLOAD): { root: string; manifest: NativeManifest } {
     const root = mkdtempSync(join(tmpdir(), 'bake-native-manifest-'))
     roots.push(root)
     copyFileSync(join(ROOT, 'distribution/host/verify-native-manifest.mjs'), join(root, 'verify-native-manifest.mjs'))
@@ -150,7 +150,7 @@ describe('the host gate', () => {
   test('accepts a verified single-platform release', () => {
     const result = verify(fixture().root)
     expect(result.code).toBe(0)
-    expect(result.stdout).toContain('Verified native Bake 0.4.0 release: win32-x64')
+    expect(result.stdout).toContain('Verified native Bake 0.4.0 release: linux-x64')
   })
 
   test('complete mode requires exactly linux-arm64 and linux-x64', () => {
@@ -165,10 +165,15 @@ describe('the host gate', () => {
     expect(verify(fixture([...releaseTargets, 'win32-x64']).root, ['--complete']).stderr).toContain('native win32-x64 releases arrive in Bake 0.4.x')
   })
 
-  test('outside complete mode the grammar still reads all five platforms, so 0.4.x can add them', () => {
-    const result = verify(fixture(targets).root)
-    expect(result.code).toBe(0)
-    expect(result.stdout).toContain(`Verified native Bake 0.4.0 release: ${targets.join(', ')}`)
+  test('a macOS or Windows archive is refused by name whatever the flags, as the image build runs the gate too', () => {
+    for (const target of ['darwin-arm64', 'darwin-x64', 'win32-x64']) {
+      for (const flags of [[], ['--allow-missing-archives'], ['--required']]) {
+        const refused = verify(fixture([...releaseTargets, target]).root, flags)
+        expect(refused.code).not.toBe(0)
+        expect(refused.stderr).toContain(`Bake 0.4.0 releases linux-arm64 and linux-x64 only; native ${target} releases arrive in Bake 0.4.x`)
+      }
+    }
+    expect(verify(fixture(['win32-x64']).root, ['--allow-missing-archives']).stderr).toContain('native win32-x64 releases arrive in Bake 0.4.x')
   })
 
   test('an archive held elsewhere is allowed, and one it holds is still checked', () => {
@@ -218,10 +223,10 @@ describe('the host gate', () => {
     ['a rolled-over publication date', (m: Record<string, unknown>) => { m.published = '2026-02-30T00:00:00Z' }, 'Invalid native release published time'],
     ['no artifacts', (m: Record<string, unknown>) => { m.artifacts = {} }, 'No native release artifacts'],
     ['an unsupported target', (m: Record<string, unknown>) => { (m.artifacts as Record<string, unknown>)['freebsd-x64'] = { file: 'x', sha256: 'y', size: 1 } }, 'Unsupported native release target: freebsd-x64'],
-    ['an archive name of another version', (m: Record<string, unknown>) => { ((m.artifacts as Record<string, Record<string, unknown>>)['win32-x64'] as Record<string, unknown>).file = 'bake-v0.4.1-win32-x64.tar.gz' }, 'Missing or invalid win32-x64 artifact'],
-    ['an extra artifact member', (m: Record<string, unknown>) => { ((m.artifacts as Record<string, Record<string, unknown>>)['win32-x64'] as Record<string, unknown>).url = 'http://elsewhere' }, 'Unknown win32-x64 artifact members: url'],
-    ['a wrong hash', (m: Record<string, unknown>) => { ((m.artifacts as Record<string, Record<string, unknown>>)['win32-x64'] as Record<string, unknown>).sha256 = '0'.repeat(64) }, 'SHA-256 mismatch for win32-x64'],
-    ['a wrong size', (m: Record<string, unknown>) => { ((m.artifacts as Record<string, Record<string, unknown>>)['win32-x64'] as Record<string, unknown>).size = 7 }, 'Size mismatch for win32-x64'],
+    ['an archive name of another version', (m: Record<string, unknown>) => { ((m.artifacts as Record<string, Record<string, unknown>>)['linux-x64'] as Record<string, unknown>).file = 'bake-v0.4.1-linux-x64.tar.gz' }, 'Missing or invalid linux-x64 artifact'],
+    ['an extra artifact member', (m: Record<string, unknown>) => { ((m.artifacts as Record<string, Record<string, unknown>>)['linux-x64'] as Record<string, unknown>).url = 'http://elsewhere' }, 'Unknown linux-x64 artifact members: url'],
+    ['a wrong hash', (m: Record<string, unknown>) => { ((m.artifacts as Record<string, Record<string, unknown>>)['linux-x64'] as Record<string, unknown>).sha256 = '0'.repeat(64) }, 'SHA-256 mismatch for linux-x64'],
+    ['a wrong size', (m: Record<string, unknown>) => { ((m.artifacts as Record<string, Record<string, unknown>>)['linux-x64'] as Record<string, unknown>).size = 7 }, 'Size mismatch for linux-x64'],
   ])('refuses %s', (_what, edit, message) => {
     const { root, manifest: written } = fixture()
     const value = JSON.parse(JSON.stringify(written)) as Record<string, unknown>

@@ -24,7 +24,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import {
   ed25519VerifierRegion, ephemeralKey, installerTrusting, manifestBytes, releasePath, runInstaller, shippedInstaller, signManifest,
-  startReleaseHost, stubRelease, type HostFiles, type InstallerRun, type ReleaseHost,
+  startReleaseHost, stubRelease, versionNewerCases, versionOrderRegion, type HostFiles, type InstallerRun, type ReleaseHost,
 } from './native-install-fixture.ts'
 
 const roots: string[] = []
@@ -438,6 +438,30 @@ describe.skipIf(PWSH === undefined)('the Windows installer\'s manifest grammar',
       expect(said(result)).toContain('not a bake-native-release/1 manifest')
     }
     expect(existsSync(join(root, 'current.txt'))).toBe(false)
+  }, 180_000)
+})
+
+describe.skipIf(PWSH === undefined)('the Windows installer\'s version order', () => {
+  // The shipped BakeVersionNewer over every ordered pair of the case table
+  // bake-update's compare_versions is tested against, in one PowerShell run.
+  // Among them: 0.4.0-rc.10 is newer than 0.4.0-rc.9, and core numbers past
+  // [int]'s 2^31-1 order by value instead of throwing.
+  test('orders versions as bake-update does, over the shared case table', async () => {
+    const directory = scratch('version-order')
+    const cases = versionNewerCases()
+    writeFileSync(join(directory, 'order.ps1'), versionOrderRegion('install.ps1'))
+    writeFileSync(join(directory, 'cases.json'), JSON.stringify(cases))
+    writeFileSync(join(directory, 'run.ps1'), `$ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'order.ps1')
+$cases = Get-Content -Raw (Join-Path $PSScriptRoot 'cases.json') | ConvertFrom-Json
+foreach ($case in $cases) {
+  Write-Output ("" + $case.candidate + " " + $case.installed + " " + (BakeVersionNewer $case.candidate $case.installed))
+}
+`)
+    const result = await runPowerShell(join(directory, 'run.ps1'), [])
+    expect(result.stderr).toBe('')
+    expect(result.status).toBe(0)
+    expect(result.stdout.trim().split(/\r?\n/u)).toEqual(cases.map(({ candidate, installed, newer }) => `${candidate} ${installed} ${newer ? 'True' : 'False'}`))
   }, 180_000)
 })
 

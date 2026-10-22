@@ -187,27 +187,53 @@ json_path() {
   printf '%s' "$1" | sed 's/\\u0022/"/g; s/\\u005c/\\/g'
 }
 
-# `0.4.1` is newer than `0.4.0` and than `0.4.1-rc.1`; a pre-release is older
-# than its own release, and two pre-releases compare as text.
+# BEGIN VERSION ORDER
+# Whether release `$1` is newer than `$2`, by the SemVer precedence
+# bake-update's `compare_versions` applies: a pre-release is older than its
+# own release; identifiers compare one by one, numeric ones by value at any
+# length, alphanumeric ones as ASCII text, a numeric one before an
+# alphanumeric one, and a shorter list first when the other extends it.
+# Numbers are compared as digit strings, never as awk numbers, which lose
+# precision past 2^53; the C locale keeps text comparison bytewise.
+# scripts/release/fixtures/native-version-order.txt holds the cases every
+# implementation is tested against.
 version_newer() {
-  awk -v left="$1" -v right="$2" '
-    function core(v) { sub(/-.*$/, "", v); return v }
-    function pre(v) { return index(v, "-") ? substr(v, index(v, "-") + 1) : "" }
-    BEGIN {
-      split(core(left), a, ".")
-      split(core(right), b, ".")
-      for (i = 1; i <= 3; i++) {
-        if (a[i] + 0 > b[i] + 0) { print "yes"; exit }
-        if (a[i] + 0 < b[i] + 0) { print "no"; exit }
-      }
-      x = pre(left); y = pre(right)
-      if (x == y) { print "no"; exit }
-      if (x == "") { print "yes"; exit }
-      if (y == "") { print "no"; exit }
-      print (x > y) ? "yes" : "no"
+  LC_ALL=C awk -v left="$1" -v right="$2" '
+    function digits(x) { return x ~ /^[0-9]+$/ }
+    function text(x, y) { x = x ""; y = y ""; return x == y ? 0 : (x < y ? -1 : 1) }
+    function number(x, y) {
+      sub(/^0+/, "", x); sub(/^0+/, "", y)
+      if (length(x) != length(y)) return length(x) < length(y) ? -1 : 1
+      return text(x, y)
     }
+    function identifier(x, y) {
+      if (digits(x) && digits(y)) return number(x, y)
+      if (digits(x)) return -1
+      if (digits(y)) return 1
+      return text(x, y)
+    }
+    function compare(l, r,    lc, rc, lp, rp, a, b, n, m, i, o) {
+      lc = l; lp = ""; if (index(l, "-")) { lc = substr(l, 1, index(l, "-") - 1); lp = substr(l, index(l, "-") + 1) }
+      rc = r; rp = ""; if (index(r, "-")) { rc = substr(r, 1, index(r, "-") - 1); rp = substr(r, index(r, "-") + 1) }
+      split(lc, a, "."); split(rc, b, ".")
+      for (i = 1; i <= 3; i++) {
+        o = number(digits(a[i]) ? a[i] : "0", digits(b[i]) ? b[i] : "0")
+        if (o != 0) return o
+      }
+      if (!index(l, "-") && !index(r, "-")) return 0
+      if (!index(l, "-")) return 1
+      if (!index(r, "-")) return -1
+      n = split(lp, a, "."); m = split(rp, b, ".")
+      for (i = 1; i <= n && i <= m; i++) {
+        o = identifier(a[i], b[i])
+        if (o != 0) return o
+      }
+      return n == m ? 0 : (n < m ? -1 : 1)
+    }
+    BEGIN { print (compare(left, right) > 0) ? "yes" : "no" }
   ' | grep -q '^yes$'
 }
+# END VERSION ORDER
 
 # RFC 8032 section 7.1 TEST 2: the public key as the installers carry one,
 # base64 DER SubjectPublicKeyInfo, and its signature over the one-byte

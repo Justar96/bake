@@ -3,7 +3,8 @@
 // archives this image holds. It mirrors verify-manifest.mjs for the native
 // route, which no 0.3 updater reads, and trusts the native key alone. The
 // grammar names all five platforms so a 0.4.x release can add one; Bake 0.4.0
-// publishes Linux alone (D47), so --complete requires exactly linux-arm64 and
+// publishes Linux alone (D47), so a manifest naming any other platform is
+// refused whatever the flags, and --complete requires exactly linux-arm64 and
 // linux-x64.
 import { createHash, createPublicKey, verify } from 'node:crypto'
 import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs'
@@ -61,7 +62,7 @@ if (artifacts === null || typeof artifacts !== 'object' || Array.isArray(artifac
 const available = Object.keys(artifacts)
 for (const target of available) {
   if (!supported.includes(target)) throw new Error(`Unsupported native release target: ${target}`)
-  if (complete && !releaseTargets.includes(target)) throw new Error(`Bake 0.4.0 releases linux-arm64 and linux-x64 only; native ${target} releases arrive in Bake 0.4.x`)
+  if (!releaseTargets.includes(target)) throw new Error(`Bake 0.4.0 releases linux-arm64 and linux-x64 only; native ${target} releases arrive in Bake 0.4.x`)
 }
 const targets = complete ? releaseTargets : available
 // The service image holds no archives; its server redirects to the GitHub release.

@@ -18,9 +18,10 @@
  * `bun run test:rust:install`, after the Rust workspace is built.
  *
  * What this rehearsal does not cover, and release qualification still needs:
- * the same run on each of the five release targets, the Windows installer on
- * Windows, an update and rollback driven by `bake update` itself, and the
- * D46 Wasm veto plugin run against the installed artifact.
+ * the same run on linux-x64 and linux-arm64, the 0.4.0 release targets, an
+ * update and rollback driven by `bake update` itself, and the D46 Wasm veto
+ * plugin run against the installed artifact. The Windows installer's run on
+ * Windows waits for the 0.4.x Windows release.
  */
 import { afterEach, expect, test } from 'bun:test'
 import { spawnSync } from 'node:child_process'

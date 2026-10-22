@@ -278,20 +278,58 @@ function BakeJsonPath([string]$value) {
   return $value.Replace('\u0022', '"').Replace('\u005c', '\')
 }
 
-function BakeVersionNewer([string]$candidate, [string]$installed) {
-  $left = ($candidate -split '-')[0] -split '\.'
-  $right = ($installed -split '-')[0] -split '\.'
-  for ($index = 0; $index -lt 3; $index++) {
-    if ([int]$left[$index] -gt [int]$right[$index]) { return $true }
-    if ([int]$left[$index] -lt [int]$right[$index]) { return $false }
-  }
-  $leftPre = if ($candidate -match '-') { $candidate.Substring($candidate.IndexOf('-') + 1) } else { '' }
-  $rightPre = if ($installed -match '-') { $installed.Substring($installed.IndexOf('-') + 1) } else { '' }
-  if ($leftPre -eq $rightPre) { return $false }
-  if ($leftPre -eq '') { return $true }
-  if ($rightPre -eq '') { return $false }
-  return ([string]::CompareOrdinal($leftPre, $rightPre) -gt 0)
+# BEGIN VERSION ORDER
+# Release versions by the SemVer precedence bake-update's `compare_versions`
+# applies: a pre-release is older than its own release; identifiers compare
+# one by one, numeric ones by value at any length, alphanumeric ones as
+# ordinal text, a numeric one before an alphanumeric one, and a shorter list
+# first when the other extends it. Numbers are compared as digit strings, so
+# no [int] cast overflows on a number the grammar accepts.
+# scripts/release/fixtures/native-version-order.txt holds the cases every
+# implementation is tested against.
+function BakeCompareNumbers([string]$left, [string]$right) {
+  $left = $left.TrimStart('0')
+  $right = $right.TrimStart('0')
+  if ($left.Length -ne $right.Length) { return [Math]::Sign($left.Length - $right.Length) }
+  return [Math]::Sign([string]::CompareOrdinal($left, $right))
 }
+
+function BakeCompareVersions([string]$left, [string]$right) {
+  $leftDash = $left.IndexOf('-')
+  $rightDash = $right.IndexOf('-')
+  $leftCore = if ($leftDash -ge 0) { $left.Substring(0, $leftDash) } else { $left }
+  $rightCore = if ($rightDash -ge 0) { $right.Substring(0, $rightDash) } else { $right }
+  $a = @($leftCore.Split('.'))
+  $b = @($rightCore.Split('.'))
+  for ($index = 0; $index -lt 3; $index++) {
+    $x = if ($index -lt $a.Count -and $a[$index] -cmatch '^[0-9]+$') { $a[$index] } else { '0' }
+    $y = if ($index -lt $b.Count -and $b[$index] -cmatch '^[0-9]+$') { $b[$index] } else { '0' }
+    $order = BakeCompareNumbers $x $y
+    if ($order -ne 0) { return $order }
+  }
+  if ($leftDash -lt 0 -and $rightDash -lt 0) { return 0 }
+  if ($leftDash -lt 0) { return 1 }
+  if ($rightDash -lt 0) { return -1 }
+  $a = @($left.Substring($leftDash + 1).Split('.'))
+  $b = @($right.Substring($rightDash + 1).Split('.'))
+  for ($index = 0; $index -lt $a.Count -and $index -lt $b.Count; $index++) {
+    $x = $a[$index]
+    $y = $b[$index]
+    $xNumber = $x -cmatch '^[0-9]+$'
+    $yNumber = $y -cmatch '^[0-9]+$'
+    $order = if ($xNumber -and $yNumber) { BakeCompareNumbers $x $y }
+      elseif ($xNumber) { -1 }
+      elseif ($yNumber) { 1 }
+      else { [Math]::Sign([string]::CompareOrdinal($x, $y)) }
+    if ($order -ne 0) { return $order }
+  }
+  return [Math]::Sign($a.Count - $b.Count)
+}
+
+function BakeVersionNewer([string]$candidate, [string]$installed) {
+  return ((BakeCompareVersions $candidate $installed) -gt 0)
+}
+# END VERSION ORDER
 
 # The release `current.txt` names, or an empty string when there is no pointer.
 function BakeCurrentVersion() {

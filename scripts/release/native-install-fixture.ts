@@ -325,6 +325,36 @@ export function ed25519VerifierRegion(): string {
   return region
 }
 
+/**
+ * The shipped installer's version order, the region between its
+ * `BEGIN VERSION ORDER` and `END VERSION ORDER` markers: `version_newer` in
+ * `install.sh`, `BakeVersionNewer` and its helpers in `install.ps1`.
+ */
+export function versionOrderRegion(installer: keyof typeof KEY_LINES): string {
+  const source = readFileSync(join(HOST, installer), 'utf8')
+  const region = /^# BEGIN VERSION ORDER\n([\s\S]*?)^# END VERSION ORDER$/mu.exec(source)?.[1]
+  if (region === undefined) throw new Error(`${installer} has no version order region`)
+  return region
+}
+
+/**
+ * The versions of `scripts/release/fixtures/native-version-order.txt`, in
+ * ascending precedence, which `bake-update`'s own test reads too.
+ */
+export function sharedVersionOrder(): string[] {
+  return readFileSync(resolve(import.meta.dir, 'fixtures/native-version-order.txt'), 'utf8')
+    .split('\n').filter(line => line !== '' && !line.startsWith('#'))
+}
+
+/**
+ * Every ordered pair of {@link sharedVersionOrder}, with whether the first is
+ * newer than the second: the answers each installer's order must give.
+ */
+export function versionNewerCases(): { candidate: string; installed: string; newer: boolean }[] {
+  const ordered = sharedVersionOrder()
+  return ordered.flatMap((left, i) => ordered.map((right, j) => ({ candidate: left, installed: right, newer: i > j })))
+}
+
 /** The block holding each installer's 0.4.0 platform refusal, markers included. */
 const PLATFORM_REFUSAL = /^ *# BEGIN 0\.4\.0 PLATFORM REFUSAL\n[\s\S]*?^ *# END 0\.4\.0 PLATFORM REFUSAL\n/mu
 

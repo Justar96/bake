@@ -197,6 +197,36 @@ mod tests {
         }
     }
 
+    /// The case table the installers' own version orders are tested
+    /// against, so all three agree.
+    const SHARED_ORDER: &str =
+        include_str!("../../../../scripts/release/fixtures/native-version-order.txt");
+
+    #[test]
+    fn the_shared_case_table_is_in_ascending_order() {
+        let ordered: Vec<&str> = SHARED_ORDER
+            .lines()
+            .filter(|line| !line.is_empty() && !line.starts_with('#'))
+            .collect();
+        assert!(ordered.len() > 30, "{}", ordered.len());
+        for (index, left) in ordered.iter().enumerate() {
+            assert!(is_release_version(left), "{left}");
+            assert_eq!(compare_versions(left, left), Ordering::Equal, "{left}");
+            for right in &ordered[index + 1..] {
+                assert_eq!(
+                    compare_versions(left, right),
+                    Ordering::Less,
+                    "{left} {right}"
+                );
+                assert_eq!(
+                    compare_versions(right, left),
+                    Ordering::Greater,
+                    "{right} {left}"
+                );
+            }
+        }
+    }
+
     #[test]
     fn numeric_identifiers_compare_by_value_at_any_size() {
         for (left, right) in [

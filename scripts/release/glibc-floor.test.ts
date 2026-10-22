@@ -3,18 +3,27 @@ import { describe, expect, test } from 'bun:test'
 import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import {
-  checkGlibcFloor, compareGlibc, DEFAULT_GLIBC_FLOOR, glibcFloor, parseVersionNeeds, readVersionNeeds,
+  checkGlibcFloor, compareGlibc, DEFAULT_GLIBC_FLOOR, glibcFloor, parseVersionNeeds, readelfEnvironment, readVersionNeeds,
 } from './glibc-floor.ts'
 
 const ROOT = resolve(import.meta.dir, '../..')
 
 /**
- * `readelf --version-info --wide` of a release `bake` built on Fedora with
- * glibc 2.43, cut to its three sections: the symbol versions, which name
- * versions but are not needs, and the needs, which include a `GCC_` one and
- * weak glibc ones above the hard floor.
+ * `readelf --dynamic --version-info --wide` of a release `bake` built on
+ * Fedora with glibc 2.43, cut to its dynamic section's shared libraries and
+ * two version sections: the symbol versions, which name versions but are
+ * not needs, and the needs, which include a `GCC_` one and weak glibc ones
+ * above the hard floor.
  */
 const FEDORA_READELF = `
+Dynamic section at offset 0x2b60ce8 contains 30 entries:
+  Tag        Type                         Name/Value
+ 0x0000000000000001 (NEEDED)             Shared library: [libgcc_s.so.1]
+ 0x0000000000000001 (NEEDED)             Shared library: [libm.so.6]
+ 0x0000000000000001 (NEEDED)             Shared library: [libc.so.6]
+ 0x0000000000000001 (NEEDED)             Shared library: [ld-linux-x86-64.so.2]
+ 0x0000000000000000 (NULL)               0x0
+
 Version symbols section '.gnu.version' contains 6 entries:
  Addr: 0x0000000000001234  Offset: 0x00001234  Link: 7 (.dynsym)
   000:   0 (*local*)       0 (*local*)       2 (GLIBC_2.34)   21 (GLIBC_2.39)
@@ -69,7 +78,35 @@ describe('reading version needs', () => {
     // A weak need at or below the floor adds nothing to report.
     expect(glibcFloor([{ name: 'GLIBC_2.34', weak: false }, { name: 'GLIBC_2.18', weak: true }])).toEqual({ required: 'GLIBC_2.34', weak: undefined })
     expect(glibcFloor([])).toEqual({ required: undefined, weak: undefined })
-    expect(parseVersionNeeds('\nNo version information found in this file.\n')).toEqual([])
+  })
+
+  test('a static binary, with no dynamic section or none naming a library, needs nothing', () => {
+    // A static musl binary, as zig cc -static links one.
+    expect(parseVersionNeeds('\nThere is no dynamic section in this file.\n\nNo version information found in this file.\n')).toEqual([])
+    // A static-pie binary has a dynamic section, but no NEEDED entry.
+    expect(parseVersionNeeds('\nDynamic section at offset 0x1000 contains 2 entries:\n 0x000000006ffffffb (FLAGS_1)            Flags: PIE\n 0x0000000000000000 (NULL)               0x0\n\nNo version information found in this file.\n')).toEqual([])
+    expect(checkGlibcFloor('bake', glibcFloor([]), 'GLIBC_2.17')).toEqual({ ok: true, report: 'bake is statically linked and needs no glibc symbol version' })
+  })
+
+  test('fails closed on output it cannot read', () => {
+    expect(() => parseVersionNeeds('')).toThrow(/no dynamic section report/)
+    // readelf in a French locale, which this check never asks for.
+    const french = FEDORA_READELF
+      .replace('Dynamic section at offset', 'La section dynamique à l\'offset')
+      .replace('Version needs section', 'Section des besoins de version')
+      .replaceAll('Name:', 'Nom:').replaceAll('Flags: none', 'Fanions: aucun').replaceAll('Flags: WEAK', 'Fanions: WEAK')
+    expect(() => parseVersionNeeds(french)).toThrow(/no dynamic section report/)
+    // A dynamic section in English, but needs it cannot read.
+    const unreadNeeds = FEDORA_READELF.replace('Version needs section', 'Section des besoins de version')
+    expect(() => parseVersionNeeds(unreadNeeds)).toThrow(/loads 4 shared libraries but readelf shows no glibc version need/)
+    // A dynamically linked binary whose needs name no glibc version.
+    const gccOnly = FEDORA_READELF.split('\n').filter(line => !/Name: GLIBC_/u.test(line)).join('\n')
+    expect(() => parseVersionNeeds(gccOnly)).toThrow(/no glibc version need/)
+  })
+
+  test('readelf runs in the C locale', () => {
+    expect(readelfEnvironment({ PATH: '/usr/bin', LC_ALL: 'fr_FR.UTF-8', LANG: 'ja_JP.UTF-8', LANGUAGE: 'es_ES:fr', LC_MESSAGES: 'fr_FR.UTF-8', UNSET: undefined }))
+      .toEqual({ PATH: '/usr/bin', LC_ALL: 'C', LANG: 'C', LC_MESSAGES: 'fr_FR.UTF-8' })
   })
 })
 
@@ -77,10 +114,10 @@ describe('the floor check', () => {
   const fedora = glibcFloor(parseVersionNeeds(FEDORA_READELF))
 
   test('passes at or above the binary\'s floor and fails below it', () => {
-    expect(DEFAULT_GLIBC_FLOOR).toBe('GLIBC_2.35')
+    expect(DEFAULT_GLIBC_FLOOR).toBe('GLIBC_2.34')
     expect(checkGlibcFloor('bake', fedora, DEFAULT_GLIBC_FLOOR)).toEqual({
       ok: true,
-      report: 'bake needs GLIBC_2.34, within the GLIBC_2.35 floor; weak references up to GLIBC_2.39 are used only where the host has them',
+      report: 'bake needs GLIBC_2.34, within the GLIBC_2.34 floor; weak references up to GLIBC_2.39 are used only where the host has them',
     })
     expect(checkGlibcFloor('bake', fedora, 'GLIBC_2.34').ok).toBe(true)
     expect(checkGlibcFloor('bake', fedora, 'GLIBC_2.33')).toEqual({
@@ -111,8 +148,10 @@ if (linuxBake === undefined) {
 describe.skipIf(linuxBake === undefined)('a built bake', () => {
   const binary = linuxBake as string
 
-  function run(args: readonly string[]): { code: number; stdout: string; stderr: string } {
-    const child = Bun.spawnSync(['bun', join(import.meta.dir, 'glibc-floor.ts'), binary, ...args], { stdout: 'pipe', stderr: 'pipe', timeout: 30_000 })
+  function run(args: readonly string[], env: Record<string, string> = {}): { code: number; stdout: string; stderr: string } {
+    const child = Bun.spawnSync(['bun', join(import.meta.dir, 'glibc-floor.ts'), binary, ...args], {
+      stdout: 'pipe', stderr: 'pipe', timeout: 30_000, env: { ...process.env, ...env },
+    })
     return { code: child.exitCode, stdout: child.stdout.toString(), stderr: child.stderr.toString() }
   }
 
@@ -127,5 +166,14 @@ describe.skipIf(linuxBake === undefined)('a built bake', () => {
     const refused = run(['--floor', below])
     expect(refused.code).toBe(1)
     expect(refused.stdout).toContain(`needs ${required}, above the ${below} floor`)
+  })
+
+  test('finds the same floor when the caller\'s locale translates readelf', () => {
+    const { required } = glibcFloor(readVersionNeeds(binary))
+    for (const locale of ['fr_FR.UTF-8', 'ja_JP.UTF-8', 'es_ES.UTF-8']) {
+      const translated = run(['--floor', 'GLIBC_2.17'], { LC_ALL: locale, LANG: locale, LANGUAGE: locale.slice(0, 2) })
+      expect(translated.code).toBe(1)
+      expect(translated.stdout).toContain(`needs ${required as string}, above the GLIBC_2.17 floor`)
+    }
   })
 })

@@ -24,7 +24,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   embeddedKey, ephemeralKey, installerTrusting, manifestBytes, releasePath, runInstaller, shippedInstaller, signManifest,
-  startReleaseHost, stubRelease, type HostFiles, type InstallerRun, type NativeRelease, type ReleaseHost, type StubOptions,
+  startReleaseHost, stubRelease, versionNewerCases, versionOrderRegion,
+  type HostFiles, type InstallerRun, type NativeRelease, type ReleaseHost, type StubOptions,
 } from './native-install-fixture.ts'
 
 const roots: string[] = []
@@ -636,6 +637,28 @@ posix('the shipped installer still runs --uninstall-links on a platform it refus
   expect(restored.stderr).toBe(`Bake install: ${join(world.root, 'links.json')} does not exist, so there is nothing to restore\n`)
   expect(world.host.requests).toEqual([])
 })
+
+/**
+ * The shipped `version_newer`, run over every ordered pair of the case table
+ * `bake-update`'s `compare_versions` is tested against, in one shell. Among
+ * them: 0.4.0-rc.10 is newer than 0.4.0-rc.9, and core numbers past 2^53
+ * still order by value.
+ */
+posix('orders versions as bake-update does, over the shared case table', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'bake-native-version-order-'))
+  roots.push(directory)
+  const cases = versionNewerCases()
+  writeFileSync(join(directory, 'cases'), cases.map(({ candidate, installed }) => `${candidate} ${installed}\n`).join(''))
+  writeFileSync(join(directory, 'order.sh'), `${versionOrderRegion('install.sh')}
+while read -r candidate installed; do
+  if version_newer "$candidate" "$installed"; then echo "$candidate $installed yes"; else echo "$candidate $installed no"; fi
+done < "$1"
+`)
+  const result = spawnSync('sh', [join(directory, 'order.sh'), join(directory, 'cases')], { encoding: 'utf8', timeout: 120_000 })
+  expect(result.stderr).toBe('')
+  expect(result.status).toBe(0)
+  expect(result.stdout.trim().split('\n')).toEqual(cases.map(({ candidate, installed, newer }) => `${candidate} ${installed} ${newer ? 'yes' : 'no'}`))
+}, 180_000)
 
 test('reports whether the POSIX installer checks ran', () => {
   if (process.platform === 'win32') {
