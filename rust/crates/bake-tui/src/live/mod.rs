@@ -9,7 +9,10 @@
 //! after the previous one settles. Pi's built-in slash commands that
 //! [`commands`] does not run are refused with the draft kept, as is any other
 //! `/word` that names no prompt template; `/skill:name` and prompt
-//! templates reach the session, which expands them.
+//! templates reach the session, which expands them. A command-line prompt
+//! is checked the same way before it is sent, and one refused goes into
+//! the draft instead, as does one naming a command [`commands`] runs,
+//! which runs only from the composer.
 //!
 //! One driver task owns every runtime decision. The loop's requests reach
 //! it over a channel; it starts each prompt as its own task, so a cancel or
@@ -100,7 +103,10 @@ use projection::Projector;
 /// 0.3's terminal and runtime commands
 /// (`apps/tui/packages/app/src/{controller,navigation}.ts` and the runtime's
 /// `/goal`, `/feedback`, and `/permission`). A prompt that names one is
-/// refused with its draft kept instead of reaching the model.
+/// refused instead of reaching the model, from the composer with its draft
+/// kept and from the interactive command line with its text put in the
+/// draft. Print and RPC mode do not refuse it: they send the text to the
+/// model as Pi does.
 const DEFERRED_COMMANDS: &[&str] = &[
     // Pi v1.3.0.
     "scoped-models",
@@ -119,6 +125,8 @@ const DEFERRED_COMMANDS: &[&str] = &[
     "help",
     "terminal-setup",
     "update",
+    "sessions",
+    "clear",
     // Bake 0.3's runtime.
     "goal",
     "feedback",

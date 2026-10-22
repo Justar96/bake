@@ -725,10 +725,18 @@ fn keys_are_printed_only_by_the_commands_that_print_one() {
         }
     }
     // The quiet cases did reach the key: the prompt was sent with it and
-    // failed on the refused connection, and RPC mode listed the models.
+    // failed on the refused connection, which only a request that found
+    // the key makes (without one it fails first, with "No API key found"),
+    // and RPC mode listed the models.
     let failed = home.run(&["--model", "faux/faux-1", "-p", "hello"], None);
     assert_eq!(failed.status.code(), Some(1), "{}", text(&failed.stderr));
-    assert!(!text(&failed.stderr).is_empty());
+    assert!(
+        text(&failed.stderr).starts_with(
+            "Connection error. error sending request for url (http://127.0.0.1:1/v1/responses)"
+        ),
+        "{}",
+        text(&failed.stderr)
+    );
     let listed = home.run(
         &["--model", "faux/faux-1", "--mode", "rpc"],
         Some(rpc_input),
@@ -1088,12 +1096,27 @@ impl Terminal {
         self.input.write_all(keys.as_bytes()).expect("type");
     }
 
-    /// Stops `bake` with `SIGTERM` and returns its status.
-    fn stop(mut self) -> Option<i32> {
-        use std::os::unix::process::ExitStatusExt;
-        unsafe { libc::kill(self.child.id() as i32, libc::SIGTERM) };
-        let status = self.child.wait().expect("bake ends");
-        status.code().or(status.signal().map(|signal| 128 + signal))
+    /// Stops `bake` with `SIGTERM` and returns its status. One that has
+    /// not ended within the patience is killed with its process group
+    /// (`setsid` made it the group's leader), reaped, and fails the test.
+    fn stop(mut self) -> std::process::ExitStatus {
+        let pid = self.child.id() as i32;
+        unsafe { libc::kill(pid, libc::SIGTERM) };
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        loop {
+            if let Some(status) = self.child.try_wait().expect("bake's status") {
+                return status;
+            }
+            if std::time::Instant::now() >= deadline {
+                unsafe { libc::kill(-pid, libc::SIGKILL) };
+                let _ = self.child.wait();
+                panic!(
+                    "bake did not end within 30 seconds of SIGTERM; killed. The terminal shows {:?}",
+                    self.screen()
+                );
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
     }
 }
 
@@ -1189,8 +1212,15 @@ fn no_built_in_model_catalog_or_provider_route_is_reachable() {
     .stdin(Stdio::null())
     .output()
     .expect("bake runs");
+    // With no catalog there is no model at all; a built-in catalog would
+    // find the model and fail on its missing key instead.
     assert_eq!(prompt.status.code(), Some(1));
     assert!(prompt.stdout.is_empty());
+    assert!(
+        text(&prompt.stderr).starts_with("Error: No models available."),
+        "{}",
+        text(&prompt.stderr)
+    );
     let check = home_command(
         &root,
         &["auth", "check", "--provider", "anthropic", "--json"],

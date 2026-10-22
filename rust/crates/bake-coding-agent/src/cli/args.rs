@@ -614,11 +614,20 @@ mod tests {
 
     #[test]
     fn modes_and_their_errors() {
-        assert_eq!(parse(&["--mode", "json"]).mode, Some(Mode::Json));
-        assert_eq!(parse(&["--mode", "text"]).mode, Some(Mode::Text));
-        assert_eq!(parse(&["--mode", "rpc"]).mode, Some(Mode::Rpc));
+        for (value, mode) in [
+            ("json", Mode::Json),
+            ("text", Mode::Text),
+            ("rpc", Mode::Rpc),
+        ] {
+            let args = parse(&["--mode", value]);
+            assert_eq!(args.mode, Some(mode), "{value}");
+            assert!(args.diagnostics.is_empty(), "{value}");
+        }
+        let missing = parse(&["--mode"]);
+        assert_eq!(missing.mode, None);
+        assert!(missing.unknown_flags.is_empty());
         assert_eq!(
-            parse(&["--mode"]).diagnostics,
+            missing.diagnostics,
             [Diagnostic::error("--mode requires text, json, or rpc")]
         );
         assert_eq!(
@@ -1069,10 +1078,12 @@ mod tests {
             );
             assert!(args.diagnostics.is_empty(), "{flags:?}");
         }
+        let modifiers = parse(&["-t", "+codemode,-write"]);
         assert_eq!(
-            parse(&["-t", "+codemode,-write"]).tools,
+            modifiers.tools,
             Some(vec!["+codemode".into(), "-write".into()])
         );
+        assert!(modifiers.diagnostics.is_empty());
         assert_eq!(
             parse(&["-t", "+mcp__radius__*"]).diagnostics,
             [Diagnostic::error(

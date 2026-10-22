@@ -69,7 +69,7 @@ use super::egress::{self, AdmissionError};
 use super::server::{
     Connection, End, ServerContext, client_options, serve, stop_client, unless_aborted,
 };
-use super::{McpHttpOptions, McpServerState};
+use super::{McpHttpOptions, McpServerState, OAUTH_DEFERRED};
 
 /// How one connection attempt ended.
 enum Attempt {
@@ -233,7 +233,7 @@ fn classify(name: &str, end: End, failure: Option<HttpError>) -> Attempt {
     }
     match failure {
         Some(HttpError::AuthorizationRequired { status, .. }) => Attempt::Unauthorized(format!(
-            "MCP server \"{name}\" requires authorization (HTTP {status}); OAuth sign-in for MCP servers is not available in bake yet and is planned for a later release, so give the server a credential in its \"headers\" in mcp.json"
+            "MCP server \"{name}\" requires authorization (HTTP {status}); {OAUTH_DEFERRED}"
         )),
         Some(HttpError::SessionExpired { .. }) => Attempt::Expired(format!(
             "MCP server \"{name}\" ended: the server expired its HTTP session"

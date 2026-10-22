@@ -384,8 +384,8 @@ async fn returns_and_clears_queued_steering_and_follow_up_messages() {
 }
 
 // Pi `test/rpc.test.ts`: "should get state", "should set and get thinking
-// level", "should get available thinking levels", and "should get available
-// models", over one session.
+// level", "should cycle thinking level", "should get available thinking
+// levels", and "should get available models", over one session.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn reports_state_models_and_thinking_levels() {
     let dir = TempDir::new("rpc-state");
@@ -399,6 +399,7 @@ async fn reports_state_models_and_thinking_levels() {
     input.send(json!({ "id": "s", "type": "get_state" }));
     let state = out.wait_for_response("s").await;
     assert_eq!(state["data"]["model"]["provider"], json!("faux"));
+    assert_eq!(state["data"]["model"]["id"], json!("faux-1"));
     assert_eq!(state["data"]["isStreaming"], json!(false));
     assert_eq!(state["data"]["messageCount"], json!(0));
     assert_eq!(state["data"]["sessionId"], json!(session_id));
@@ -424,12 +425,28 @@ async fn reports_state_models_and_thinking_levels() {
     let cycled = out.wait_for_response("c").await;
     assert!(levels.contains(&cycled["data"]["level"]), "{cycled}");
     assert_ne!(cycled["data"]["level"], json!("high"));
+    // Pi "should cycle thinking level": the state reports the new level.
+    input.send(json!({ "id": "s3", "type": "get_state" }));
+    let state = out.wait_for_response("s3").await;
+    assert_eq!(state["data"]["thinkingLevel"], cycled["data"]["level"]);
 
     input.send(json!({ "id": "m", "type": "get_available_models" }));
     let models = out.wait_for_response("m").await;
     let models = models["data"]["models"].as_array().expect("models").clone();
     assert_eq!(models.len(), 1);
     assert_eq!(models[0]["id"], json!("faux-1"));
+    // Pi: every model names its provider, a context window, and whether it
+    // reasons.
+    for model in &models {
+        assert!(model["provider"].is_string(), "{model}");
+        assert!(
+            model["contextWindow"]
+                .as_u64()
+                .is_some_and(|window| window > 0),
+            "{model}"
+        );
+        assert!(model["reasoning"].is_boolean(), "{model}");
+    }
 
     // Pi: "should get session stats".
     input.send(json!({ "id": "st", "type": "get_session_stats" }));

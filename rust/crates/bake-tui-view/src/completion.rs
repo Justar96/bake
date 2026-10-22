@@ -220,7 +220,8 @@ mod tests {
     }
 
     /// D48: the preview advertises no deferred command, so each command it
-    /// samples is one a live session runs.
+    /// samples is one a live session runs. `bake-tui`'s live tests check
+    /// both catalogs against its list of deferred commands.
     #[test]
     fn the_preview_lists_only_commands_a_live_session_runs() {
         for command in CATALOG {
@@ -229,9 +230,6 @@ mod tests {
                 "/{} is not run",
                 command.name
             );
-        }
-        for deferred in ["agents", "attach", "clear", "goal", "help"] {
-            assert!(!CATALOG.iter().any(|c| c.name == deferred), "/{deferred}");
         }
     }
 

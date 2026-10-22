@@ -454,13 +454,13 @@ impl Client {
     }
 
     /// Closes standard input, as a client asking for shutdown does, and
-    /// returns the exit status.
-    fn close(&mut self) -> i32 {
+    /// returns the exit code ([`exit_code`]).
+    fn close(&mut self) -> Option<i32> {
         drop(self.input.take());
         self.wait()
     }
 
-    fn wait(&mut self) -> i32 {
+    fn wait(&mut self) -> Option<i32> {
         let deadline = Instant::now() + TIMEOUT;
         loop {
             match self.child.try_wait().expect("status") {
@@ -471,7 +471,7 @@ impl Client {
                     if let Some(errors) = self.errors.take() {
                         let _ = errors.join();
                     }
-                    return status_code(status);
+                    return exit_code(status);
                 }
                 None if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(10)),
                 None => {
@@ -496,18 +496,16 @@ impl Drop for Client {
     }
 }
 
-#[cfg(unix)]
-fn status_code(status: std::process::ExitStatus) -> i32 {
-    use std::os::unix::process::ExitStatusExt;
-    status
-        .code()
-        .or_else(|| status.signal().map(|signal| 128 + signal))
-        .unwrap_or(1)
-}
-
-#[cfg(not(unix))]
-fn status_code(status: std::process::ExitStatus) -> i32 {
-    status.code().unwrap_or(1)
+/// The code `bake` exited with. Pi's signal handlers exit with 128 plus
+/// the signal's number, so a process a signal killed must not read as one:
+/// that fails here instead.
+fn exit_code(status: std::process::ExitStatus) -> Option<i32> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        assert_eq!(status.signal(), None, "a signal killed bake: {status}");
+    }
+    status.code()
 }
 
 // Pi `docs/rpc.md`, "Correlate commands and responses": a command's
@@ -529,7 +527,7 @@ fn answers_commands_on_its_pipes_and_shuts_down_on_end_of_input() {
         "{state}"
     );
     // Pi `docs/rpc.md`, "Shutdown": closing stdin shuts the session down.
-    assert_eq!(client.close(), 0);
+    assert_eq!(client.close(), Some(0));
 }
 
 // Pi `test/rpc-client-clear-queue.test.ts`: the `clear_queue` command
@@ -549,7 +547,7 @@ fn sends_the_clear_queue_rpc_command() {
             "data": { "steering": [], "followUp": [] },
         })
     );
-    assert_eq!(client.close(), 0);
+    assert_eq!(client.close(), Some(0));
 }
 
 // Pi `test/rpc-client-clone.test.ts`: the `clone` command is answered. A
@@ -570,7 +568,7 @@ fn sends_the_clone_rpc_command() {
             "error": "This session has not been saved yet. Send a message before cloning or forking it.",
         })
     );
-    assert_eq!(client.close(), 0);
+    assert_eq!(client.close(), Some(0));
 }
 
 // Pi `docs/rpc.md`, "Errors": a malformed line and an unknown command
@@ -596,7 +594,7 @@ fn answers_a_malformed_record_and_an_unknown_command() {
     assert_eq!(parse.get("id"), None, "{parse}");
     client.send(json!({ "id": "s", "type": "get_state" }));
     assert_eq!(client.response("s")["success"], json!(true));
-    assert_eq!(client.close(), 0);
+    assert_eq!(client.close(), Some(0));
 }
 
 // Pi `test/rpc-client-process-exit.test.ts`: a request in flight when the
@@ -614,7 +612,7 @@ fn a_request_in_flight_when_the_process_exits_gets_no_response() {
         unsafe { libc::kill(client.child.id() as i32, libc::SIGTERM) },
         0
     );
-    assert_eq!(client.wait(), 143);
+    assert_eq!(client.wait(), Some(143));
     // The protocol stream has ended with the process, so a request sent
     // afterwards is never answered; a client must report the exit instead
     // of waiting.
@@ -738,7 +736,7 @@ fn an_approved_write_runs_after_its_decision_is_recorded() {
     client.wait_for("the settled run", |record| {
         record["type"] == json!("agent_settled")
     });
-    assert_eq!(client.close(), 0);
+    assert_eq!(client.close(), Some(0));
     assert_eq!(
         std::fs::read_to_string(&notes).expect("the approved write"),
         "approved"
@@ -766,7 +764,7 @@ fn a_denied_write_is_refused_and_recorded() {
     client.wait_for("the settled run", |record| {
         record["type"] == json!("agent_settled")
     });
-    assert_eq!(client.close(), 0);
+    assert_eq!(client.close(), Some(0));
     assert!(!notes.exists(), "the denied write ran");
     let (approvals, entries, result) = decision(&file);
     assert_eq!(approvals.len(), 2, "{approvals:?}");
@@ -785,7 +783,7 @@ fn a_client_that_disconnects_unanswered_leaves_the_write_refused() {
     let server = write_then_text();
     let workspace = Workspace::with_model("disconnect", server.port);
     let (mut client, _, notes, file) = ask_for_a_write(&workspace);
-    assert_eq!(client.close(), 0);
+    assert_eq!(client.close(), Some(0));
     assert!(!notes.exists(), "the unanswered write ran");
     let (approvals, _, _) = decision(&file);
     assert_eq!(approvals.len(), 2, "{approvals:?}");
@@ -826,7 +824,7 @@ fn abort_and_read_only_commands_are_answered_while_a_turn_runs() {
     });
     client.send(json!({ "id": "s2", "type": "get_state" }));
     assert_eq!(client.response("s2")["data"]["isStreaming"], json!(false));
-    assert_eq!(client.close(), 0);
+    assert_eq!(client.close(), Some(0));
 }
 
 /// A process's start time, field 22 of `/proc/<pid>/stat`, which tells a
@@ -938,7 +936,7 @@ fn ends_with_no_process_left(ending: Ending, expected: i32) {
             client.wait()
         }
     };
-    assert_eq!(status, expected, "{ending:?}: {}", client.stderr());
+    assert_eq!(status, Some(expected), "{ending:?}: {}", client.stderr());
     let left: Vec<u32> = tree
         .iter()
         .filter(|(pid, start)| started_at(*pid).as_ref() == Some(start))

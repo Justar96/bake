@@ -722,6 +722,11 @@ async fn an_authorization_challenge_says_oauth_is_not_supported() {
         ),
         "{error}"
     );
+    // Frontends recognize the deferral by this ending; the model sees
+    // neither it nor the server, which declares no tool and is not listed.
+    assert!(error.ends_with(super::OAUTH_DEFERRED), "{error}");
+    assert_eq!(started.servers.servers_prompt_section(), None);
+    assert!(started.servers.declared_tool_names().is_empty());
     assert_eq!(server.rpc("initialize").len(), 1, "not retried");
     started.shutdown().await;
     server.stop().await;

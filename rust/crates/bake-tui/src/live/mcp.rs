@@ -2,7 +2,7 @@
 //! model turns. The driver owns the subscription and stops reading it
 //! before shutting down or replacing the session.
 
-use bake_coding_agent::mcp::{McpServerState, McpServerStatus, McpServers};
+use bake_coding_agent::mcp::{McpServerState, McpServerStatus, McpServers, OAUTH_DEFERRED};
 use bake_tui_view::transcript::Row;
 use tokio::sync::watch;
 
@@ -51,7 +51,7 @@ fn changed_rows(previous: &[McpServerStatus], current: &[McpServerStatus]) -> Ve
             // Server errors can contain stderr, credentials, and terminal
             // controls. Only the configured name reaches this diagnostic.
             let name = super::visible(&status.name);
-            let message = match &status.state {
+            let mut message = match &status.state {
                 McpServerState::Refused { .. } => {
                     format!("MCP server \"{name}\" was refused; its tools are unavailable.")
                 }
@@ -69,6 +69,16 @@ fn changed_rows(previous: &[McpServerStatus], current: &[McpServerStatus]) -> Ve
                 ),
                 _ => return None,
             };
+            // A server that requires authorization ends with the OAuth
+            // deferral (D48), Bake's own text, so it is shown as well.
+            if let McpServerState::Failed { error } | McpServerState::Disconnected { error } =
+                &status.state
+                && error.ends_with(OAUTH_DEFERRED)
+            {
+                message.push(' ');
+                message.push_str(OAUTH_DEFERRED);
+                message.push('.');
+            }
             Some(Row::Error(message))
         })
         .collect()
@@ -131,6 +141,43 @@ mod tests {
             [Row::Error(
                 "MCP server \"host\\u{1b}[2J\\u{a}\\u{202e}name\" failed to start; its tools are unavailable."
                     .into()
+            )]
+        );
+    }
+
+    // D48: a server that requires authorization says that OAuth is
+    // deferred, whether it never served or its connection ended; the rest
+    // of its error, which a server can shape, stays out.
+    #[test]
+    fn a_server_that_needs_oauth_shows_the_deferral() {
+        let error =
+            format!("MCP server \"fixture\" requires authorization (HTTP 401); {OAUTH_DEFERRED}");
+        let sentence = format!(" its tools are unavailable. {OAUTH_DEFERRED}.");
+        for (state, opening) in [
+            (
+                McpServerState::Failed {
+                    error: error.clone(),
+                },
+                "MCP server \"fixture\" failed to start;",
+            ),
+            (
+                McpServerState::Disconnected { error },
+                "MCP server \"fixture\" disconnected;",
+            ),
+        ] {
+            assert_eq!(
+                changed_rows(&[], &snapshot(state)),
+                [Row::Error(format!("{opening}{sentence}"))]
+            );
+        }
+        // Another failure says nothing of OAuth.
+        let failed = snapshot(McpServerState::Failed {
+            error: "spawn failed".into(),
+        });
+        assert_eq!(
+            changed_rows(&[], &failed),
+            [Row::Error(
+                "MCP server \"fixture\" failed to start; its tools are unavailable.".into()
             )]
         );
     }

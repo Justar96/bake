@@ -157,6 +157,12 @@ pub use tools::{MAX_DECLARATION_BYTES, MAX_TOOLS_PER_SERVER, MCP_OUTPUT_MAX_BYTE
 /// MCP servers, Pi's `MCP_SERVERS_SECTION`.
 pub const MCP_SERVERS_SECTION: &str = "mcp_servers";
 
+/// How the failure of a server that requires authorization (HTTP 401, or
+/// 403 with an `insufficient_scope` challenge) ends: OAuth for MCP servers
+/// is deferred (D48). Frontends show it after the server's name; it never
+/// reaches the model, which sees only connected servers.
+pub const OAUTH_DEFERRED: &str = "OAuth sign-in for MCP servers is not available in bake yet and is planned for a later release, so give the server a credential in its \"headers\" in mcp.json";
+
 /// The most of a server's `instructions` kept, in bytes on a character
 /// boundary. Bake's bound on untrusted text a server sends once.
 pub const MAX_SERVER_INSTRUCTIONS_BYTES: usize = 4 * 1024;

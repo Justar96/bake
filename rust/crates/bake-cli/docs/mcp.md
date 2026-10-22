@@ -71,7 +71,7 @@ The server's tools are published once it has answered `initialize` and `tools/li
 - When the server expires that session (HTTP 404), bake connects again at once, lists the tools afresh, and gives the next prompt the new list. A prompt in flight sees the tools it started with.
 - A lost connection is retried, waiting 500 ms and doubling to 30 seconds, and the server gives up after ten failures in a row; a connection that served for longer than 30 seconds starts that count again.
 - A tool call interrupted by any of this fails with an error: bake never sends a call twice, because the server may have run the first one already. The one exception is a server that answers the call with a same-origin redirect, which bake follows and which resends the call.
-- A server that answers 401, or 403 asking for a wider scope, needs OAuth sign-in, which bake does not support yet: it reports that and stops. Put a token in `headers` instead.
+- A server that answers 401, or 403 asking for a wider scope, needs OAuth sign-in, which is not available yet and is planned for a later release: bake says so and stops the server. Put a token in `headers` instead.
 - Closing a session ends each HTTP session (`DELETE`) before bake exits.
 
 ## Resources
@@ -102,7 +102,7 @@ Servers start in the background as the session opens. The first prompt waits up 
 - `--exclude-tools` removes the MCP tools it matches.
 - `--no-tools` alone gives the model no tool, so bake starts no MCP server; with `--tools`, only the tools it names.
 
-A problem with `mcp.json` or one of its entries is a warning when bake starts; the other entries still start. In print mode, a server that could not start, failed, or is still connecting after the wait is also a warning before the answer. Interactive mode does not show a server's own failure yet.
+A problem with `mcp.json` or one of its entries is a warning when bake starts; the other entries still start. In print mode, a server that could not start, failed, or is still connecting after the wait is also a warning before the answer. An interactive session shows a line naming each server that was refused, failed, or disconnected, without the server's own output, and says when one needs OAuth sign-in. RPC mode does not report a server's failure.
 
 `--no-mcp` reads no `mcp.json` and starts no server.
 

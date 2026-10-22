@@ -76,7 +76,7 @@ bake auth print-api-key --provider cliproxyapi  # the key, on standard output
 
 - `bake auth check` prints one word: `ready` when the provider exists and a key is configured for it, `not_ready` when the provider is missing or has no key, and `invalid` when `models.json` could not be composed. It exits 0, 1, and 2 to match. `--json` prints `{"status":…,"provider":…}` with `reason` or `authType` instead, and `--credentials` prints the key itself, or includes it as `credentials` in the JSON.
 - `bake auth print-api-key` prints a provider's API key on standard output. With `--provider` it names the provider; with `--model` alone it searches the providers that have a key in `auth.json` for one whose model that names exactly. More than one match, or none, is an error naming `--provider`.
-- `bake auth print-bearer-token` has no token to print: bake has no OAuth provider, so it always fails with the reason. `--min-expiry <30m|1h|…>` is checked and then unused.
+- `bake auth print-bearer-token` is not available yet: bearer tokens belong to OAuth providers, which are planned for a later release, so it always fails with that reason. `--min-expiry <30m|1h|…>` is checked and then unused.
 - `--no-refresh` is accepted and changes nothing: nothing to refresh, and these commands never write. All three read `models.json`, `auth.json`, and `settings.json` only, reach no network, and accept no flag but `--provider` and `--model`; `--api-key` is refused. `bake auth` prints their help.
 - A key is printed only by `print-api-key` and by `check --credentials`, whose purpose is to print it; no error message or status line carries one.
 
