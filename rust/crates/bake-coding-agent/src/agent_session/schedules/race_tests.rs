@@ -1,8 +1,8 @@
-//! Scope 11 race and restart proofs for reminders ([D39]): looks that race
-//! on one due reminder, wall-clock jumps forward and back, a daylight-saving
-//! gap and overlap through the tools, overdue delivery on resume, and a
-//! process killed with `SIGKILL` on either side of a dispatch and after its
-//! delivery. Each case counts the durable dispatches and the posted and
+//! Scope 11 race and restart proofs for reminders ([D39]): a delete that
+//! lands between a look's decision and its dispatch, wall-clock jumps
+//! forward and back, a daylight-saving gap and overlap through the tools,
+//! overdue delivery on resume, and a process killed with `SIGKILL` on
+//! either side of a dispatch and after its delivery. Each case counts the durable dispatches and the posted and
 //! delivered reminders: a reminder occurrence reaches the model at most
 //! once. Time is the test clock, as in the parent module.
 //!
@@ -130,18 +130,18 @@ fn occurrences(batch: &str) -> Vec<String> {
         .collect()
 }
 
-// Duplicate wake-ups: two looks race on the same due one-shot, then on
-// the same due fixed-rate batch, each pair held until both have decided
-// before either writes. One dispatch is written for each and one reminder
-// posted; the look that lost decides again from the file. A second
-// dispatch would also corrupt the log, which refuses a dispatch of an
-// inactive one-shot and a fixed-rate dispatch before its next target.
-// Wake-ups after that change nothing.
+// A delete between the decision and the dispatch: the timer finds a
+// one-shot due, then a fixed-rate batch due, and each time `schedule_delete`
+// removes the reminder through the model's tool call while the look is
+// held after its decision and before its write. No dispatch is written
+// for the deleted reminder, nothing is posted or delivered, and the file
+// still folds and loads: a dispatch of a deleted reminder would leave the
+// log corrupt for good. The look decides again and finds nothing due.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn racing_wakeups_dispatch_each_due_reminder_once() {
-    let dir = TempDir::new("schedule-race-wakeups");
+async fn a_delete_between_decision_and_dispatch_writes_no_dispatch() {
+    let dir = TempDir::new("schedule-race-delete");
     let h = harness();
-    let clock = Arc::new(AtomicI64::new(START));
+    let clock = Arc::new(AtomicI64::new(BASE));
     let file = with_reminders(
         &dir,
         vec![
@@ -149,77 +149,80 @@ async fn racing_wakeups_dispatch_each_due_reminder_once() {
             every("schedule-2", 300, BASE + 5 * MINUTE),
         ],
     );
+    let path = file.session_file().expect("a file").to_owned();
     let session = open(&h, file, &dir, &clock).await;
     quiet().await;
-    // Each odd decision waits for the next one, so the two racing looks
-    // both decide before either writes. The timer sleeps through the race:
-    // the clock is moved without waking it.
-    let decided = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let counter = Arc::clone(&decided);
+    // The look that found a reminder due waits here until the test has
+    // deleted it; its thread is a worker of its own, so the delete runs.
+    let held = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let released = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let (entered, release) = (Arc::clone(&held), Arc::clone(&released));
     session.schedules().set_before_dispatch(Arc::new(move || {
-        let mine = counter.fetch_add(1, Ordering::SeqCst) + 1;
-        if mine % 2 == 1 {
-            let bound = std::time::Instant::now() + Duration::from_secs(10);
-            while counter.load(Ordering::SeqCst) == mine && std::time::Instant::now() < bound {
-                std::thread::sleep(Duration::from_millis(1));
-            }
+        let mine = entered.fetch_add(1, Ordering::SeqCst) + 1;
+        let bound = std::time::Instant::now() + Duration::from_secs(10);
+        while release.load(Ordering::SeqCst) < mine && std::time::Instant::now() < bound {
+            std::thread::sleep(Duration::from_millis(1));
         }
     }));
-    clock.store(BASE + HOUR, Ordering::SeqCst);
-    let looks: Vec<_> = (0..2)
-        .map(|_| {
-            let core = Arc::clone(&session.core);
-            let jobs = session.jobs().clone();
-            let schedules = session.schedules();
-            tokio::spawn(async move {
-                // Each racing look is a tick of its own: it delivers what it
-                // finds due until nothing is, within a bound, so a look that
-                // keeps finding the same reminder due fails the test.
-                for _ in 0..8 {
-                    if !matches!(look(&core, &jobs, &schedules).await, Step::Again) {
-                        return true;
-                    }
-                }
-                false
-            })
+    for (round, (id, due)) in [
+        ("schedule-1", BASE + MINUTE),
+        ("schedule-2", BASE + 5 * MINUTE),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let round = round + 1;
+        advance(&session, &clock, due);
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while held.load(Ordering::SeqCst) < round {
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
         })
-        .collect();
-    for racing in looks {
-        let settled = tokio::time::timeout(Duration::from_secs(30), racing)
-            .await
-            .expect("the racing looks ended")
-            .expect("a look");
-        assert!(settled, "a look kept finding a reminder due");
+        .await
+        .expect("the timer decided the reminder is due");
+        h.faux.set_responses(vec![
+            call("schedule_delete", json!({ "id": id }), &format!("d{round}")),
+            faux_assistant_message("deleted").into(),
+        ]);
+        tokio::time::timeout(
+            Duration::from_secs(30),
+            session.prompt("delete it", Vec::new()),
+        )
+        .await
+        .expect("the delete's turn ended")
+        .expect("prompt");
+        assert_eq!(
+            tool_results(&session).last(),
+            Some(&json!({ "id": id, "deleted": true })),
+            "{id}"
+        );
+        released.store(round, Ordering::SeqCst);
+        quiet().await;
+        let folded = crate::schedules::fold(&lock(&session.session)).map(drop);
+        assert!(
+            folded.is_ok(),
+            "{id}: the log is corrupt: {folded:?}: {:?}",
+            changes(&session)
+        );
+        assert_eq!(
+            held.load(Ordering::SeqCst),
+            round,
+            "{id}: decided again as due"
+        );
+        assert!(
+            dispatches(&session).is_empty(),
+            "{id}: {:?}",
+            changes(&session)
+        );
+        assert!(claim_posted(&session).is_empty(), "{id}");
     }
-    assert!(
-        decided.load(Ordering::SeqCst) >= 4,
-        "both looks decided twice"
-    );
-    for _ in 0..8 {
-        session.schedules().kick();
-    }
-    quiet().await;
-    assert_eq!(
-        dispatches(&session),
-        ["schedule-1", "schedule-2 2100-01-01T01:00:00.000Z"]
-    );
-    let posted = claim_posted(&session);
-    assert_eq!(posted.len(), 2, "{posted:#?}");
-    assert!(
-        posted[0].starts_with("[SCHEDULE REMINDER]\n"),
-        "{posted:#?}"
-    );
-    assert_eq!(occurrences(&posted[1]), ["2100-01-01T01:00:00.000Z"]);
-    let folded = crate::schedules::fold(&lock(&session.session)).expect("the log stays valid");
-    assert_eq!(
-        folded
-            .active
-            .iter()
-            .map(|record| crate::schedules::instant(record.scheduled_at))
-            .collect::<Vec<_>>(),
-        ["2100-01-01T01:05:00.000Z"]
-    );
-    session.shutdown().await;
+    assert!(reminders(&session).is_empty());
+    tokio::time::timeout(Duration::from_secs(30), session.shutdown())
+        .await
+        .expect("the session shut down");
+    let reopened = SessionManager::open(&path, None, None).expect("the file loads");
+    let folded = crate::schedules::fold(&reopened).expect("the log is not corrupt");
+    assert!(folded.active.is_empty(), "{:?}", folded.active);
 }
 
 // Wall-clock jumps: a jump forward over many fixed-rate occurrences
@@ -405,8 +408,8 @@ async fn an_overdue_reminder_is_delivered_once_across_resumes() {
 }
 
 /// Runs a session with one due reminder to the kill point its mode names
-/// and halts there: inside the look that found it due, before its dispatch
-/// (`before-dispatch`); once it is dispatched and posted, before a turn
+/// and halts there: in the look that found it due, after its decision and
+/// before its dispatch is written (`before-dispatch`); once it is dispatched and posted, before a turn
 /// takes it (`after-dispatch`, and `every-after-dispatch` for a fixed-rate
 /// reminder); or once the turn's reminder message is synced
 /// (`after-delivery`).
@@ -455,17 +458,17 @@ fn reminder_crash_fixture() {
         opts.settings.schedules = true;
         opts.active_tool_names.extend(NAMES.map(str::to_owned));
         let session = AgentSession::create(opts).await.expect("agent session");
-        let halt_in_look = mode == "before-dispatch";
-        let clock_dir = dir.clone();
+        if mode == "before-dispatch" {
+            let look_dir = dir.clone();
+            session
+                .schedules()
+                .set_before_dispatch(Arc::new(move || halt(&look_dir)));
+        }
         let now = Arc::new(AtomicI64::new(BASE));
         let read = Arc::clone(&now);
-        session.schedules().set_clock(Arc::new(move || {
-            let now = read.load(Ordering::SeqCst);
-            if halt_in_look && now >= due {
-                halt(&clock_dir);
-            }
-            now
-        }));
+        session
+            .schedules()
+            .set_clock(Arc::new(move || read.load(Ordering::SeqCst)));
         let delivered_dir = dir.clone();
         let _subscription = session.subscribe(move |event| {
             if let SessionEvent::Agent(AgentEvent::MessageEnd {
@@ -508,12 +511,12 @@ async fn kill_at(mode: &str) -> (TempDir, PathBuf) {
     (dir, path)
 }
 
-// SIGKILL around a dispatch: killed inside the look, before the dispatch,
-// the reminder stays due and the resumed session delivers it once; killed
-// after the durable dispatch, before any turn took it, it is lost, never
-// repeated; killed once its message is synced, it is not delivered again.
-// A fixed-rate reminder killed after its dispatch resumes at its next
-// occurrence.
+// SIGKILL around a dispatch: killed in the look between its decision and
+// the dispatch's write, the reminder stays due and the resumed session
+// delivers it once; killed after the durable dispatch, before any turn
+// took it, it is lost, never repeated; killed once its message is synced,
+// it is not delivered again. A fixed-rate reminder killed after its
+// dispatch resumes at its next occurrence.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_killed_session_delivers_a_reminder_at_most_once() {
     for (mode, posted_on_resume, delivered_before) in [
@@ -523,6 +526,19 @@ async fn a_killed_session_delivers_a_reminder_at_most_once() {
         ("every-after-dispatch", false, 0),
     ] {
         let (dir, path) = kill_at(mode).await;
+        let written = std::fs::read_to_string(&path)
+            .expect("the file")
+            .lines()
+            .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+            .filter(|entry| {
+                entry["customType"] == CHANGE_TYPE && entry["data"]["operation"] == "dispatch"
+            })
+            .count();
+        assert_eq!(
+            written,
+            usize::from(mode != "before-dispatch"),
+            "{mode}: the dispatches the killed process wrote"
+        );
         let due = if mode == "every-after-dispatch" {
             BASE + 5 * MINUTE
         } else {
@@ -561,12 +577,17 @@ async fn a_killed_session_delivers_a_reminder_at_most_once() {
         }
         h.faux
             .set_responses(vec![faux_assistant_message("ok").into()]);
-        session
-            .prompt("continue", Vec::new())
-            .await
-            .expect("prompt");
+        tokio::time::timeout(
+            Duration::from_secs(30),
+            session.prompt("continue", Vec::new()),
+        )
+        .await
+        .expect("the prompt's turn ended")
+        .expect("prompt");
         assert_eq!(reminders(&session).len(), delivered_before, "{mode}");
         assert_eq!(h.faux.call_count(), 1, "{mode}: only the prompt's request");
-        session.shutdown().await;
+        tokio::time::timeout(Duration::from_secs(30), session.shutdown())
+            .await
+            .expect("the session shut down");
     }
 }

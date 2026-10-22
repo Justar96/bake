@@ -92,7 +92,9 @@
 //! ([`JobRegistry::post`]): a subagent's message or settlement waits here
 //! beside the completion notices and is delivered on their path, and a
 //! running subagent holds the live count ([`JobRegistry::hold_live`]), so an
-//! owner waiting for jobs waits for it too ([`crate::subagents`]).
+//! owner waiting for jobs waits for it too ([`crate::subagents`]). A
+//! subagent's settlement is written to the session's file first
+//! (`JobRegistry::record_fact`), as a job's terminal fact is.
 
 pub mod process;
 
@@ -495,12 +497,24 @@ struct Inner {
     settled: Notify,
     events: watch::Sender<Events>,
     recorder: OnceLock<JobRecorder>,
+    facts: OnceLock<FactRecorder>,
 }
 
 /// A session's durable lifecycle writer. The driver awaits it before
 /// invoking the producer and before publishing a terminal outcome.
 pub(crate) type JobRecorder = Arc<
     dyn Fn(JobSnapshot) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> + Send + Sync,
+>;
+
+/// A session's writer of other work's durable facts, as a custom entry
+/// of the given type and data ([`JobRegistry::record_fact`]).
+pub(crate) type FactRecorder = Arc<
+    dyn Fn(
+            &'static str,
+            serde_json::Value,
+        ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>>
+        + Send
+        + Sync,
 >;
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -838,6 +852,7 @@ impl JobRegistry {
                 settled: Notify::new(),
                 events: watch::Sender::new(Events::default()),
                 recorder: OnceLock::new(),
+                facts: OnceLock::new(),
             }),
         }
     }
@@ -856,6 +871,30 @@ impl JobRegistry {
             .recorder
             .set(recorder)
             .map_err(|_| "The job journal is already attached.".into())
+    }
+
+    /// Attached with the job journal, by the session that owns the file.
+    pub(crate) fn attach_fact_recorder(&self, facts: FactRecorder) -> Result<(), String> {
+        self.inner
+            .facts
+            .set(facts)
+            .map_err(|_| "The fact recorder is already attached.".into())
+    }
+
+    /// Writes `data` as a `custom_type` custom entry of the attached
+    /// session's file and waits until it is durable; a standalone registry
+    /// records nothing. Other work makes its outcome durable here before it
+    /// posts the notice ([`Self::post`]) the session delivers later, so a
+    /// process that stops in between leaves the outcome on record.
+    pub(crate) async fn record_fact(
+        &self,
+        custom_type: &'static str,
+        data: serde_json::Value,
+    ) -> Result<(), String> {
+        match self.inner.facts.get() {
+            Some(facts) => facts(custom_type, data).await,
+            None => Ok(()),
+        }
     }
 
     pub(crate) async fn wait_admitted(&self, id: JobId) -> Result<(), String> {

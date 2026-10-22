@@ -26,9 +26,14 @@ pub(crate) fn halt(directory: &Path) -> ! {
 /// child process with `env`, waits up to a minute for it to report its kill
 /// point in `directory` ([`halt`]), and kills it with `SIGKILL`. Fails if
 /// the fixture exits first or its exit is anything but that kill.
+///
+/// The fixture's temporary directory is `directory`: the kill skips its
+/// own cleanup, so whatever temporary directories it made are removed with
+/// the test's `directory`, on every path out of the test.
 pub(crate) async fn kill_fixture(name: &str, env: &[(&str, &std::ffi::OsStr)], directory: &Path) {
     let mut child = tokio::process::Command::new(std::env::current_exe().expect("test binary"))
         .args(["--exact", name, "--nocapture"])
+        .envs(["TMPDIR", "TMP", "TEMP"].map(|key| (key, directory)))
         .envs(env.iter().copied())
         .kill_on_drop(true)
         .spawn()

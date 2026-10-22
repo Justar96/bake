@@ -11,13 +11,6 @@ use tokio::sync::Notify;
 
 use super::*;
 
-/// Awaits `work`, failing the test if it takes longer than 30 s.
-async fn bounded<T>(what: &str, work: impl std::future::Future<Output = T>) -> T {
-    tokio::time::timeout(Duration::from_secs(30), work)
-        .await
-        .unwrap_or_else(|_| panic!("{what} did not finish"))
-}
-
 /// Gates the scripted model holds: each child's request until its gate
 /// opens, and the parent's `hold` request until it is cancelled.
 #[derive(Default)]
@@ -172,9 +165,7 @@ async fn race(stop: ParentStop, when: Settles) -> (Arc<Harness>, PathBuf, String
     let gates = Gates::default();
     script(&h, &gates);
     let parent = parent(&h, None).await;
-    parent
-        .session
-        .prompt("delegate", Vec::new())
+    bounded("delegate", parent.session.prompt("delegate", Vec::new()))
         .await
         .expect("delegate");
     let id = parent.host.list()[0].id.clone();
@@ -231,10 +222,20 @@ async fn race(stop: ParentStop, when: Settles) -> (Arc<Harness>, PathBuf, String
         }
         ParentStop::Shutdown => {
             // Nothing is delivered after shutdown begins: a settlement
-            // posted before it is dropped with the registry's mail, and a
-            // run still going is stopped and reports nothing.
+            // posted before it is dropped with the registry's mail, though
+            // the file records it first, and a run still going is stopped
+            // and records and reports nothing.
             assert!(file_notices(&parent).is_empty(), "{case}");
             assert!(!parent.session.jobs().has_undelivered(), "{case}");
+            let recorded = file_settled(&file);
+            match when {
+                Settles::Before => assert_eq!(recorded, [(1, "completed".to_owned())], "{case}"),
+                Settles::During => assert!(
+                    recorded.is_empty() || recorded == [(1, "completed".to_owned())],
+                    "{case}: {recorded:?}"
+                ),
+                Settles::After => assert!(recorded.is_empty(), "{case}: {recorded:?}"),
+            }
         }
     }
     nothing_left(&h, &parent, &case);
@@ -243,10 +244,13 @@ async fn race(stop: ParentStop, when: Settles) -> (Arc<Harness>, PathBuf, String
 
 // The settlement of a background child's run before, during, and after
 // the parent's turn is aborted is admitted once into the parent's file,
-// and a resumed parent reports nothing more for it. After a shutdown
-// stopped the parent first, the file has no settlement, and the resumed
-// parent reports the run once, as interrupted. In every case the resumed
-// parent continues the child as a new run, settled once.
+// and a resumed parent reports nothing more for it. A run that settled
+// before the parent's shutdown has its settlement recorded, though its
+// notice was never delivered, and the resumed parent delivers that
+// finished notice once; a run the shutdown stopped first is reported once,
+// as interrupted; one settling during it is either, as the race fell. In
+// every case the resumed parent continues the child as a new run, settled
+// once.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_child_settling_around_a_parent_stop_is_admitted_once() {
     for stop in [ParentStop::Abort, ParentStop::Shutdown] {
@@ -260,25 +264,40 @@ async fn a_child_settling_around_a_parent_stop_is_admitted_once() {
                 usize::from(stop == ParentStop::Shutdown),
                 "{case}: {lost:?}"
             );
+            let first = match (stop, when) {
+                (ParentStop::Abort, _) | (ParentStop::Shutdown, Settles::Before) => "completed",
+                (ParentStop::Shutdown, Settles::After) => "interrupted",
+                (ParentStop::Shutdown, Settles::During) => {
+                    if file_settled(&file).is_empty() {
+                        "interrupted"
+                    } else {
+                        "completed"
+                    }
+                }
+            };
+            if stop == ParentStop::Shutdown {
+                let text = bake_ai::utils::text::user_content_text(&lost[0].content, "\n");
+                let expected = match first {
+                    "completed" => format!(
+                        "Background subagent {id} finished and will do no further work unless you send it more.\nIts closing message:\nfirst answer"
+                    ),
+                    _ => format!(
+                        "Background subagent {id} was interrupted when Bake stopped and did not finish. Send it a message to continue it."
+                    ),
+                };
+                assert_eq!(text, expected, "{case}");
+            }
             let resumed = parent(&h, Some(store)).await;
             assert_eq!(resumed.host.list()[0].status, Status::Ready, "{case}");
-            resumed
-                .session
-                .prompt("next", Vec::new())
+            bounded("the prompt", resumed.session.prompt("next", Vec::new()))
                 .await
                 .expect("prompt");
-            let first = match stop {
-                ParentStop::Abort => "completed",
-                ParentStop::Shutdown => "interrupted",
-            };
             assert_eq!(
                 file_notices(&resumed),
                 [(1, first.to_owned())],
                 "{case}: one notice for run 1"
             );
-            let (_, run) = resumed
-                .host
-                .message_child(&id, "resume")
+            let (_, run) = bounded("the message", resumed.host.message_child(&id, "resume"))
                 .await
                 .expect("continue");
             assert_eq!(run, Some(2), "{case}");
@@ -304,11 +323,12 @@ async fn notices_are_admitted_in_settlement_order_once_each() {
     let gates = Gates::default();
     script(&h, &gates);
     let parent = parent(&h, None).await;
-    parent
-        .session
-        .prompt("delegate two", Vec::new())
-        .await
-        .expect("delegate");
+    bounded(
+        "delegate",
+        parent.session.prompt("delegate two", Vec::new()),
+    )
+    .await
+    .expect("delegate");
     let started = tool_results(&parent.session, "subagent");
     let ids: Vec<String> = started
         .iter()
@@ -337,9 +357,7 @@ async fn notices_are_admitted_in_settlement_order_once_each() {
     gates.second.notify_one();
     posted().await;
     assert!(
-        parent
-            .session
-            .deliver_job_notices()
+        bounded("delivery", parent.session.deliver_job_notices())
             .await
             .expect("delivered")
     );
@@ -367,6 +385,8 @@ async fn notices_are_admitted_in_settlement_order_once_each() {
 }
 
 /// Pushes its name onto a log when dropped: when the work holding it ends.
+/// The log's order is the order the pushes took its lock, one sequence for
+/// every event of the test.
 struct Ended(Arc<Mutex<Vec<&'static str>>>, &'static str);
 
 impl Drop for Ended {
@@ -375,12 +395,85 @@ impl Drop for Ended {
     }
 }
 
-// Ownership, bottom-up (scope 11 addition): a parent with a running child,
-// a background job's process, and a pending reminder. Esc aborts only the
-// parent's turn; the child, the job, and the timer go on. The parent's
-// shutdown then stops everything below it before it returns: the child's
-// turn and session, the job's process, and the timer end first, and
-// nothing of the parent or the child is left running.
+/// How long the child's job's producer takes to end after its process
+/// has: a parent that does not wait for its child's teardown returns first
+/// by this margin, so the log shows it. A correct parent waits however
+/// long it is.
+#[cfg(unix)]
+const SLOW_END: Duration = Duration::from_millis(200);
+
+/// Starts a background job on `jobs` whose producer is a real `sh`
+/// process that writes its pid to `pid_file` and sleeps; logs `name`
+/// `slow` after the process has ended. Returns the job and the process's
+/// pid.
+#[cfg(unix)]
+async fn sleeping_job(
+    jobs: &JobRegistry,
+    pid_file: PathBuf,
+    log: &Arc<Mutex<Vec<&'static str>>>,
+    name: &'static str,
+    slow: Duration,
+) -> (crate::jobs::JobId, libc::pid_t) {
+    let spec = bake_process::ProcessSpec {
+        program: "sh".into(),
+        args: vec![
+            "-c".into(),
+            format!("echo $$ > '{}'; exec sleep 1000", pid_file.display()).into(),
+        ],
+        cwd: None,
+        env: None,
+        stdin: false,
+    };
+    let ended = Ended(Arc::clone(log), name);
+    let job = jobs
+        .start(
+            crate::jobs::JobSpec {
+                kind: "bash",
+                label: "sleep".into(),
+                output: crate::jobs::OutputMode::Stream,
+            },
+            move |context| async move {
+                let outcome = crate::jobs::process::run_process(context, spec).await;
+                tokio::time::sleep(slow).await;
+                drop(ended);
+                outcome
+            },
+        )
+        .expect("a job");
+    let pid = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            if let Some(pid) = std::fs::read_to_string(&pid_file)
+                .ok()
+                .and_then(|text| text.trim().parse().ok())
+            {
+                return pid;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("the job's process started");
+    (job, pid)
+}
+
+/// Whether `pid` names no process any more.
+#[cfg(unix)]
+fn gone(pid: libc::pid_t) -> bool {
+    // SAFETY: plain syscall with an integer pid and the null signal; it
+    // only probes whether the pid exists.
+    let probe = unsafe { libc::kill(pid, 0) };
+    (probe, std::io::Error::last_os_error().raw_os_error()) == (-1, Some(libc::ESRCH))
+}
+
+// Ownership, bottom-up (scope 11 addition): a parent with a running child
+// that has a background job of its own, a background job's process of the
+// parent's, and a pending reminder. Esc aborts only the parent's turn; the
+// child, both jobs, and the timer go on. The parent's shutdown then stops
+// everything below it before it returns: the child's turn, and after it,
+// as the child's own shutdown, the child's job's process; the parent's
+// job's process; and the timer. Each ending is logged in one sequence,
+// checked in the order it happened, and nothing of the parent or the
+// child is left running.
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_parent_stops_its_children_jobs_and_reminders_bottom_up() {
@@ -459,57 +552,38 @@ async fn a_parent_stops_its_children_jobs_and_reminders_bottom_up() {
         counted.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         FAR
     }));
-    let reads = || reads.load(std::sync::atomic::Ordering::SeqCst);
-
+    let timer_log = Arc::clone(&log);
     parent
         .session
-        .prompt("delegate", Vec::new())
+        .schedules()
+        .set_timer_ended(Arc::new(move || {
+            timer_log.lock().expect("log").push("timer");
+        }));
+    let reads = || reads.load(std::sync::atomic::Ordering::SeqCst);
+
+    bounded("delegate", parent.session.prompt("delegate", Vec::new()))
         .await
         .expect("delegate");
     tokio::time::timeout(Duration::from_secs(10), child_entered.notified())
         .await
         .expect("the child's turn is running");
-    let pid_file = h.place.join("job.pid");
-    let job_log = Arc::clone(&log);
-    let spec = bake_process::ProcessSpec {
-        program: "sh".into(),
-        args: vec![
-            "-c".into(),
-            format!("echo $$ > '{}'; exec sleep 1000", pid_file.display()).into(),
-        ],
-        cwd: None,
-        env: None,
-        stdin: false,
-    };
-    let job = parent
-        .session
-        .jobs()
-        .start(
-            crate::jobs::JobSpec {
-                kind: "bash",
-                label: "sleep".into(),
-                output: crate::jobs::OutputMode::Stream,
-            },
-            move |context| async move {
-                let outcome = crate::jobs::process::run_process(context, spec).await;
-                job_log.lock().expect("log").push("job process");
-                outcome
-            },
-        )
-        .expect("a job");
-    let pid: libc::pid_t = tokio::time::timeout(Duration::from_secs(10), async {
-        loop {
-            if let Some(pid) = std::fs::read_to_string(&pid_file)
-                .ok()
-                .and_then(|text| text.trim().parse().ok())
-            {
-                return pid;
-            }
-            tokio::time::sleep(Duration::from_millis(5)).await;
-        }
-    })
-    .await
-    .expect("the job's process started");
+    let child_jobs = h.child_jobs.lock().expect("jobs")[0].clone();
+    let (child_job, child_pid) = sleeping_job(
+        &child_jobs,
+        h.place.join("child-job.pid"),
+        &log,
+        "child job process",
+        SLOW_END,
+    )
+    .await;
+    let (job, pid) = sleeping_job(
+        parent.session.jobs(),
+        h.place.join("job.pid"),
+        &log,
+        "job process",
+        Duration::ZERO,
+    )
+    .await;
     let running = Arc::clone(&parent.session);
     let hold = tokio::spawn(async move { running.prompt("hold", Vec::new()).await });
     tokio::time::timeout(Duration::from_secs(10), held.notified())
@@ -525,6 +599,10 @@ async fn a_parent_stops_its_children_jobs_and_reminders_bottom_up() {
         parent.session.jobs().get(job).expect("job").status,
         crate::jobs::JobStatus::Running
     );
+    assert_eq!(
+        child_jobs.get(child_job).expect("child job").status,
+        crate::jobs::JobStatus::Running
+    );
     let before = reads();
     parent.session.schedules().kick();
     tokio::time::timeout(Duration::from_secs(10), async {
@@ -535,30 +613,44 @@ async fn a_parent_stops_its_children_jobs_and_reminders_bottom_up() {
     .await
     .expect("the timer looks on");
 
-    // Shutdown: everything below the parent ends before it returns.
+    // Shutdown: everything below the parent ends before it returns, and
+    // the child's job ends after the child's turn, by the child's shutdown.
     bounded("shutdown", parent.session.shutdown()).await;
     log.lock().expect("log").push("parent shutdown");
-    let mut ended = log.lock().expect("log").clone();
-    assert_eq!(ended.remove(0), "parent turn");
-    assert_eq!(ended.last(), Some(&"parent shutdown"));
-    ended.sort_unstable();
-    assert_eq!(ended, ["child turn", "job process", "parent shutdown"]);
+    let ended = log.lock().expect("log").clone();
+    let at = |name: &str| {
+        let found: Vec<usize> = ended
+            .iter()
+            .enumerate()
+            .filter(|(_, event)| **event == name)
+            .map(|(index, _)| index)
+            .collect();
+        assert_eq!(found.len(), 1, "{name} once: {ended:?}");
+        found[0]
+    };
+    assert_eq!(at("parent turn"), 0, "{ended:?}");
+    assert_eq!(at("parent shutdown"), ended.len() - 1, "{ended:?}");
+    assert_eq!(ended.len(), 6, "{ended:?}");
+    for below in ["child turn", "child job process", "job process", "timer"] {
+        assert!(at(below) < at("parent shutdown"), "{below}: {ended:?}");
+    }
+    assert!(
+        at("child turn") < at("child job process"),
+        "the child's job ended before its turn: {ended:?}"
+    );
     nothing_left(&h, &parent, "bottom-up");
     assert_eq!(
         parent.session.jobs().get(job).expect("job").status,
         crate::jobs::JobStatus::Killed
     );
-    // SAFETY: plain syscall with an integer pid and the null signal; it
-    // only probes whether the pid exists.
-    let probe = unsafe { libc::kill(pid, 0) };
     assert_eq!(
-        (probe, std::io::Error::last_os_error().raw_os_error()),
-        (-1, Some(libc::ESRCH)),
-        "the job's process outlived the parent"
+        child_jobs.get(child_job).expect("child job").status,
+        crate::jobs::JobStatus::Killed
     );
-    let after = reads();
-    parent.session.schedules().kick();
-    tokio::time::sleep(Duration::from_millis(100)).await;
-    assert_eq!(reads(), after, "the timer outlived the parent");
+    assert!(gone(pid), "the job's process outlived the parent");
+    assert!(
+        gone(child_pid),
+        "the child's job's process outlived the parent"
+    );
     assert_eq!(h.faux.call_count(), 4, "delegate, its answer, child, hold");
 }

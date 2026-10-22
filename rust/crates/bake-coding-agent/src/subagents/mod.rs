@@ -36,9 +36,11 @@
 //! - **Restart.** The parent's file is the record: `subagent` results name
 //!   each child and the run they started, `send_message` results the runs
 //!   they started, and notices the runs that settled. A resumed parent
-//!   lists its children as `ready` ([`recover`]); a run with no settlement
-//!   gets one lost-run notice with the next prompt ([`lost_runs`]) and is
-//!   never re-run.
+//!   lists its children as `ready` ([`recover`]). A background run's
+//!   settlement is recorded ([`SETTLED_TYPE`]) before its notice is posted,
+//!   so a run whose notice the file lacks gets that notice with the next
+//!   prompt, or, with no settlement recorded, one lost-run notice
+//!   ([`lost_runs`]); it is never re-run.
 //!
 //! Ported from Bake's TypeScript `packages/subagent/subagent/src/{continuation,
 //! continuation-activation,lifecycle,inbox,list-children,depth}.ts` and
@@ -85,6 +87,10 @@ pub const CHILDREN_DIR: &str = "subagents";
 
 /// The `customType` of the entry that starts a child's file.
 pub const CHILD_ENTRY: &str = "bake.subagent.child";
+
+/// The `customType` of the custom entry, outside the model's context, that
+/// records a background run's settlement before its notice is posted.
+pub const SETTLED_TYPE: &str = "bake.subagent.settled";
 
 /// The `details` key of a `subagent` result that records the child: its
 /// `agentId`, `label`, route, and whether it ran in the `foreground`.
@@ -933,7 +939,14 @@ async fn drive(
                     settlement.stop,
                     settlement.closing.as_deref(),
                 );
-                let _ = parent_jobs.post(notice);
+                // Durable before it is posted, as a job's terminal fact is:
+                // a parent that stops before delivering the notice reports
+                // this outcome on resume, not an interrupted run. A failed
+                // write stops the parent's session, so nothing is posted.
+                let fact = settled_fact(&id, &settlement);
+                if parent_jobs.record_fact(SETTLED_TYPE, fact).await.is_ok() {
+                    let _ = parent_jobs.post(notice);
+                }
             }
         }
         drop(live);
@@ -958,6 +971,17 @@ async fn drive(
             };
         }
     }
+}
+
+/// The data of a [`SETTLED_TYPE`] entry for `settlement`, child `id`'s.
+fn settled_fact(id: &str, settlement: &Settlement) -> Value {
+    json!({
+        "version": 1,
+        "agentId": id,
+        "runId": settlement.run,
+        "stopReason": settlement.stop.as_str(),
+        "closing": settlement.closing,
+    })
 }
 
 /// What a run's end check decided.
@@ -1166,9 +1190,29 @@ struct RunRecord {
     on_branch: bool,
 }
 
-/// The `subagent` and `send_message` results and notices of `session`,
-/// as children, started runs, and settled runs.
-fn project(session: &SessionManager) -> (Recovered, Vec<RunRecord>, Vec<(String, u64)>) {
+/// A settlement [`SETTLED_TYPE`] records: its child, run, stop reason,
+/// and closing text.
+struct SettledRecord {
+    agent: String,
+    run: u64,
+    stop: StopReason,
+    closing: Option<String>,
+}
+
+/// What [`project`] reads from a parent's file.
+struct Projection {
+    recovered: Recovered,
+    /// Runs started.
+    runs: Vec<RunRecord>,
+    /// Runs whose notice is on the current branch.
+    settled: Vec<(String, u64)>,
+    /// Settlements recorded on any branch: a run's end cannot be undone.
+    recorded: Vec<SettledRecord>,
+}
+
+/// The `subagent` and `send_message` results, notices, and recorded
+/// settlements of `session`.
+fn project(session: &SessionManager) -> Projection {
     let branch: std::collections::BTreeSet<&str> = session
         .branch_entries(None)
         .iter()
@@ -1177,6 +1221,7 @@ fn project(session: &SessionManager) -> (Recovered, Vec<RunRecord>, Vec<(String,
     let mut recovered = Recovered::default();
     let mut runs = Vec::new();
     let mut settled = Vec::new();
+    let mut recorded = Vec::new();
     for entry in session.entries() {
         let on_branch = branch.contains(entry.id());
         match entry.entry_type() {
@@ -1256,23 +1301,62 @@ fn project(session: &SessionManager) -> (Recovered, Vec<RunRecord>, Vec<(String,
                     }
                 }
             }
+            "custom" if entry.get("customType").and_then(Value::as_str) == Some(SETTLED_TYPE) => {
+                let Some(data) = entry.get("data") else {
+                    continue;
+                };
+                if data.get("version").and_then(Value::as_u64) != Some(1) {
+                    continue;
+                }
+                let (Some(agent), Some(run), Some(stop)) = (
+                    data.get("agentId").and_then(Value::as_str),
+                    data.get("runId").and_then(Value::as_u64),
+                    data.get("stopReason")
+                        .and_then(Value::as_str)
+                        .and_then(StopReason::parse),
+                ) else {
+                    continue;
+                };
+                recovered.last_run = recovered.last_run.max(run);
+                recorded.push(SettledRecord {
+                    agent: agent.to_owned(),
+                    run,
+                    stop,
+                    closing: data
+                        .get("closing")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned),
+                });
+            }
             _ => {}
         }
     }
-    (recovered, runs, settled)
+    Projection {
+        recovered,
+        runs,
+        settled,
+        recorded,
+    }
 }
 
 /// The children `session`, a parent's store, records, for a resumed
 /// parent's host.
 pub fn recover(session: &SessionManager) -> Recovered {
-    project(session).0
+    project(session).recovered
 }
 
-/// A lost-run notice for each run started on the current branch that has
-/// no settlement there: the process ended while it ran. Each is reported
-/// once, with the next prompt, and never re-run.
+/// A notice for each run started on the current branch whose notice is
+/// not there: the settlement notice its recorded settlement
+/// ([`SETTLED_TYPE`]) names, or, with none, a lost-run notice, since the
+/// process ended while it ran. Each is reported once, with the next
+/// prompt, and never re-run.
 pub fn lost_runs(session: &SessionManager) -> Vec<CustomMessage> {
-    let (_, runs, settled) = project(session);
+    let Projection {
+        runs,
+        settled,
+        recorded,
+        ..
+    } = project(session);
     let mut seen = std::collections::BTreeSet::new();
     runs.into_iter()
         .filter(|record| record.on_branch)
@@ -1283,7 +1367,23 @@ pub fn lost_runs(session: &SessionManager) -> Vec<CustomMessage> {
         })
         .filter(|record| seen.insert(record.run))
         .map(|record| {
-            messages::settlement_notice(&record.agent, record.run, StopReason::Interrupted, None)
+            match recorded
+                .iter()
+                .find(|fact| fact.agent == record.agent && fact.run == record.run)
+            {
+                Some(fact) => messages::settlement_notice(
+                    &fact.agent,
+                    fact.run,
+                    fact.stop,
+                    fact.closing.as_deref(),
+                ),
+                None => messages::settlement_notice(
+                    &record.agent,
+                    record.run,
+                    StopReason::Interrupted,
+                    None,
+                ),
+            }
         })
         .collect()
 }

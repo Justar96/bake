@@ -82,8 +82,9 @@ fn subagent_crash_fixture() {
         .build()
         .expect("runtime");
     runtime.block_on(async move {
+        // In the test's directory, which the test removes: the kill skips
+        // the harness's cleanup ([`kill_fixture`]).
         let h = harness("subagent-crash-fixture");
-        // The kill skips the harness's cleanup; the test removes it.
         std::fs::write(dir.join("place"), h.place.to_string_lossy().as_bytes()).expect("place");
         let parent_done = Arc::new(Notify::new());
         fixture_model(&h, &mode, &dir, &parent_done);
@@ -128,20 +129,11 @@ fn subagent_crash_fixture() {
     });
 }
 
-/// A directory the killed fixture made, removed on drop.
-struct Leftover(PathBuf);
-
-impl Drop for Leftover {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
-/// What a killed fixture left: its directory, its sessions directory, and
-/// the parent's file.
+/// What a killed fixture left: its directory, which holds everything the
+/// fixture made, its sessions directory, and the parent's file.
 struct Killed {
     _dir: TempDir,
-    place: Leftover,
+    place: PathBuf,
     parent: PathBuf,
 }
 
@@ -157,8 +149,10 @@ async fn kill_at(mode: &str) -> Killed {
     )
     .await;
     let read = |name: &str| PathBuf::from(std::fs::read_to_string(dir.join(name)).expect(name));
+    let place = read("place");
+    assert!(place.starts_with(dir.path()), "{mode}: {place:?}");
     Killed {
-        place: Leftover(read("place")),
+        place,
         parent: read("parent"),
         _dir: dir,
     }
@@ -211,27 +205,30 @@ fn file_notices(path: &std::path::Path) -> Vec<(u64, String)> {
 
 // A parent killed with each child's run at a different point. Both files
 // load; the resumed parent's next request is provider-valid and carries
-// one interrupted notice for a background run with no settlement in the
-// file (`child-running`, and `notice-posted`, whose posted notice died
-// with the process); a notice already synced (`notice-delivered`) is not
-// admitted again; a foreground child's open call gets Pi's synthetic
+// one notice for a background run: the interrupted notice for a run in
+// flight at the kill (`child-running`); for a run that settled before it,
+// whose settlement the file records before its notice is posted
+// (`notice-posted`), the same finished notice the live parent would have
+// delivered; and none again for a notice already synced
+// (`notice-delivered`). A foreground child's open call gets Pi's synthetic
 // result and no notice. No child is re-run, a second resume reports
-// nothing, and a background child continues from its file.
+// nothing, and a background child continues from its file; each run's
+// notice is in the file once, in run order.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_killed_parent_reports_each_child_run_once_and_reruns_none() {
-    for (mode, interrupted, notices_before) in [
-        ("child-running", 1, 0),
-        ("notice-posted", 1, 0),
-        ("notice-delivered", 0, 1),
-        ("foreground-running", 0, 0),
+    for (mode, first, recorded, notices_before) in [
+        ("child-running", Some("interrupted"), false, 0),
+        ("notice-posted", Some("completed"), true, 0),
+        ("notice-delivered", Some("completed"), true, 1),
+        ("foreground-running", None, false, 0),
     ] {
         let killed = kill_at(mode).await;
-        let background = mode != "foreground-running";
+        let background = first.is_some();
 
         // Both files load, and the child's names its parent.
-        let parent_store = SessionManager::open(&killed.parent, Some(&killed.place.0), None)
-            .expect("parent loads");
-        let children: Vec<PathBuf> = std::fs::read_dir(children_dir(&killed.place.0))
+        let parent_store =
+            SessionManager::open(&killed.parent, Some(&killed.place), None).expect("parent loads");
+        let children: Vec<PathBuf> = std::fs::read_dir(children_dir(&killed.place))
             .expect("children directory")
             .map(|entry| entry.expect("entry").path())
             .filter(|path| {
@@ -241,7 +238,7 @@ async fn a_killed_parent_reports_each_child_run_once_and_reruns_none() {
             .collect();
         assert_eq!(children.len(), 1, "{mode}: {children:?}");
         let child_store =
-            SessionManager::open(&children[0], Some(&children_dir(&killed.place.0)), None)
+            SessionManager::open(&children[0], Some(&children_dir(&killed.place)), None)
                 .expect("child loads");
         let header: serde_json::Value = serde_json::from_str(
             std::fs::read_to_string(&children[0])
@@ -270,10 +267,19 @@ async fn a_killed_parent_reports_each_child_run_once_and_reruns_none() {
         );
         drop(child_store);
         assert_eq!(file_notices(&killed.parent).len(), notices_before, "{mode}");
+        assert_eq!(
+            file_settled(&killed.parent),
+            if recorded {
+                vec![(1, "completed".to_owned())]
+            } else {
+                Vec::new()
+            },
+            "{mode}: the settlement the killed parent recorded"
+        );
 
         let h = harness_in(
             &format!("subagent-resume-{mode}"),
-            Some(killed.place.0.clone()),
+            Some(killed.place.clone()),
         );
         let seen: Arc<Mutex<Vec<Vec<Message>>>> = Arc::default();
         let child_requests = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -300,9 +306,7 @@ async fn a_killed_parent_reports_each_child_run_once_and_reruns_none() {
                 "{mode}: an unanswered foreground start records no child"
             );
         }
-        resumed
-            .session
-            .prompt("next", Vec::new())
+        bounded("the prompt", resumed.session.prompt("next", Vec::new()))
             .await
             .expect("prompt");
         let request = seen.lock().expect("seen")[0].clone();
@@ -311,22 +315,28 @@ async fn a_killed_parent_reports_each_child_run_once_and_reruns_none() {
             "{mode}: {request:#?}"
         );
         let texts: Vec<String> = request.iter().filter_map(user_text).collect();
-        assert_eq!(
-            texts
-                .iter()
-                .filter(|text| text.contains(INTERRUPTED))
-                .count(),
-            interrupted,
-            "{mode}: {texts:#?}"
-        );
-        assert_eq!(
-            texts
-                .iter()
-                .filter(|text| text.starts_with("Background subagent"))
-                .count(),
-            interrupted + notices_before,
-            "{mode}: one notice for the run, {texts:#?}"
-        );
+        let notices: Vec<&String> = texts
+            .iter()
+            .filter(|text| text.starts_with("Background subagent"))
+            .collect();
+        match first {
+            Some("interrupted") => {
+                assert_eq!(notices.len(), 1, "{mode}: {texts:#?}");
+                assert!(notices[0].contains(INTERRUPTED), "{mode}: {texts:#?}");
+            }
+            Some(_) => {
+                // The live parent's notice, word for word.
+                let id = &listed[0].id;
+                assert_eq!(
+                    notices,
+                    [&format!(
+                        "Background subagent {id} finished and will do no further work unless you send it more.\nIts closing message:\nchild answer"
+                    )],
+                    "{mode}"
+                );
+            }
+            None => assert!(notices.is_empty(), "{mode}: {texts:#?}"),
+        }
         if !background {
             let synthetic = bake_ai::api::transform_messages::transform_messages(
                 &request,
@@ -343,53 +353,35 @@ async fn a_killed_parent_reports_each_child_run_once_and_reruns_none() {
         }
         let child_requests = || child_requests.load(std::sync::atomic::Ordering::SeqCst);
         assert_eq!(child_requests(), 0, "{mode}: a child was re-run");
-        let expected: Vec<(u64, String)> = if background {
-            vec![(
-                1,
-                if interrupted == 1 {
-                    "interrupted"
-                } else {
-                    "completed"
-                }
-                .to_owned(),
-            )]
-        } else {
-            Vec::new()
-        };
+        let mut expected: Vec<(u64, String)> =
+            first.map(|stop| (1, stop.to_owned())).into_iter().collect();
         assert_eq!(file_notices(&killed.parent), expected, "{mode}");
 
         // A background child continues from its file as run 2.
         if background {
             let id = listed[0].id.clone();
-            let (_, run) = resumed
-                .host
-                .message_child(&id, "resume")
+            let (_, run) = bounded("the message", resumed.host.message_child(&id, "resume"))
                 .await
                 .expect("continue the child");
             assert_eq!(run, Some(2), "{mode}");
             settled(&resumed).await;
             assert_eq!(child_requests(), 1, "{mode}");
+            expected.push((2, "completed".to_owned()));
         }
-        tokio::time::timeout(Duration::from_secs(30), resumed.session.shutdown())
-            .await
-            .expect("the resumed parent shut down");
+        bounded("the resumed parent's shutdown", resumed.session.shutdown()).await;
         assert!(
             resumed.work.is_closed(),
             "{mode}: the parent's work outlived it"
         );
 
-        // A second resume reports nothing more.
+        // A second resume reports nothing more, and each run's notice is
+        // in the file exactly once, in run order.
         let store =
-            SessionManager::open(&killed.parent, Some(&killed.place.0), None).expect("reopen");
+            SessionManager::open(&killed.parent, Some(&killed.place), None).expect("reopen");
         assert!(lost_runs(&store).is_empty(), "{mode}");
-        let mut runs: Vec<u64> = file_notices(&killed.parent)
-            .iter()
-            .map(|(run, _)| *run)
-            .collect();
-        runs.dedup();
         assert_eq!(
-            runs,
-            if background { vec![1, 2] } else { Vec::new() },
+            file_notices(&killed.parent),
+            expected,
             "{mode}: each run settles once"
         );
     }

@@ -59,9 +59,13 @@ pub(crate) struct Schedules {
     #[cfg(test)]
     clock: Mutex<Option<Clock>>,
     /// Runs in a look that found a reminder due, before its dispatch is
-    /// written, so a test can hold one look while another decides.
+    /// written, so a test can change the log between the decision and the
+    /// write.
     #[cfg(test)]
     before_dispatch: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
+    /// Runs once the timer's task has ended, however it ended.
+    #[cfg(test)]
+    timer_ended: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
 }
 
 impl Schedules {
@@ -101,6 +105,34 @@ impl Schedules {
             .before_dispatch
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(hook);
+    }
+
+    /// Sets the hook the timer runs as its task ends, for tests.
+    #[cfg(test)]
+    pub(crate) fn set_timer_ended(&self, hook: Arc<dyn Fn() + Send + Sync>) {
+        *self
+            .timer_ended
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(hook);
+    }
+}
+
+/// Runs [`Schedules::timer_ended`] when dropped with the timer's future.
+#[cfg(test)]
+struct TimerEnded(Arc<Schedules>);
+
+#[cfg(test)]
+impl Drop for TimerEnded {
+    fn drop(&mut self) {
+        let hook = self
+            .0
+            .timer_ended
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        if let Some(hook) = hook {
+            hook();
+        }
     }
 }
 
@@ -499,6 +531,8 @@ enum Step {
 }
 
 async fn timer(core: Weak<Core>, jobs: JobRegistry, schedules: Arc<Schedules>, scope: TaskScope) {
+    #[cfg(test)]
+    let _ended = TimerEnded(Arc::clone(&schedules));
     loop {
         // Enabled before the look, so a change made during it still wakes.
         let changed = schedules.changed.notified();
@@ -558,8 +592,10 @@ async fn look(core: &Arc<Core>, jobs: &JobRegistry, schedules: &Arc<Schedules>) 
     }
     // The dispatch is durable before the reminder is posted: a crash
     // between them loses the reminder rather than repeating it. The
-    // decision is made again under the write's lock, so a look that raced
-    // another to the same reminder writes nothing and looks again.
+    // decision is made again under the write's lock: a `schedule_delete`
+    // that landed after the decision would otherwise get a dispatch of an
+    // inactive reminder, which the fold refuses as a corrupt log for good.
+    // A changed decision writes nothing, and the timer looks again.
     let Ok(task) = core.owned_context_commit(move |core| {
         write_session(&core.session, &core.gap, |session| {
             let current = schedules::fold(session).and_then(|folded| schedules::due(&folded, now));

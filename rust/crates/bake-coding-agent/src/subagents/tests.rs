@@ -40,6 +40,8 @@ struct Harness {
     requests: Arc<Mutex<Vec<(String, String)>>>,
     /// The work gate of each child built, in build order.
     child_gates: Mutex<Vec<WorkGate>>,
+    /// The job registry of each child built, in build order.
+    child_jobs: Mutex<Vec<JobRegistry>>,
     /// The settings a parent session runs with; a child's are the default.
     parent_settings: Mutex<Settings>,
 }
@@ -78,6 +80,7 @@ fn harness_in(name: &str, place: Option<PathBuf>) -> Arc<Harness> {
         dir,
         requests: Arc::default(),
         child_gates: Mutex::default(),
+        child_jobs: Mutex::default(),
         parent_settings: Mutex::default(),
     })
 }
@@ -230,6 +233,7 @@ fn builder(h: &Arc<Harness>, parent_id: String, parent_file: Option<PathBuf>) ->
             let work = WorkGate::default();
             h.child_gates.lock().expect("gates").push(work.clone());
             let jobs = JobRegistry::new(work.clone(), crate::jobs::JobLimits::default());
+            h.child_jobs.lock().expect("jobs").push(jobs.clone());
             h.session(
                 store,
                 child_tools(&spec.link),
@@ -319,6 +323,33 @@ async fn settled(parent: &Parent) {
     .await
     .expect("the notice turn ended")
     .expect("notice turn");
+}
+
+/// The settlements the parent's file records ([`SETTLED_TYPE`]), as their
+/// run and stop reason.
+fn file_settled(path: &std::path::Path) -> Vec<(u64, String)> {
+    std::fs::read_to_string(path)
+        .expect("parent file")
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .filter(|entry| entry["type"] == "custom" && entry["customType"] == SETTLED_TYPE)
+        .map(|entry| {
+            (
+                entry["data"]["runId"].as_u64().unwrap_or_default(),
+                entry["data"]["stopReason"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_owned(),
+            )
+        })
+        .collect()
+}
+
+/// Awaits `work`, failing the test if it takes longer than 30 s.
+async fn bounded<T>(what: &str, work: impl std::future::Future<Output = T>) -> T {
+    tokio::time::timeout(Duration::from_secs(30), work)
+        .await
+        .unwrap_or_else(|_| panic!("{what} did not finish"))
 }
 
 /// The custom messages of `session` with `custom_type`, as their texts

@@ -612,6 +612,28 @@ async fn a_killed_host_reports_its_process_job_once_and_never_restarts_it() {
         ),
     ] {
         let dir = TempDir::new(&format!("journal-process-{mode}"));
+        // Kills the running process on every path out of this case, a
+        // panic in the fixture's kill included: armed before the fixture
+        // starts, it reads the pid the process wrote when it drops. Only a
+        // process that is to be running at the kill is killed, so no pid
+        // an exited process freed is signalled.
+        struct Orphan(Option<PathBuf>);
+        impl Drop for Orphan {
+            fn drop(&mut self) {
+                let Some(pid) = self.0.as_ref().and_then(|path| {
+                    std::fs::read_to_string(path)
+                        .ok()?
+                        .trim()
+                        .parse::<libc::pid_t>()
+                        .ok()
+                }) else {
+                    return;
+                };
+                // SAFETY: plain syscall with an integer pid and signal.
+                unsafe { libc::kill(pid, libc::SIGKILL) };
+            }
+        }
+        let _orphan = Orphan((mode == "process-running").then(|| dir.join("pid")));
         crate::jobs::crash_fixture::kill_fixture(
             "agent_session::job_journal::tests::process_job_crash_fixture",
             &[
@@ -621,20 +643,6 @@ async fn a_killed_host_reports_its_process_job_once_and_never_restarts_it() {
             dir.path(),
         )
         .await;
-        let pid: libc::pid_t = std::fs::read_to_string(dir.join("pid"))
-            .unwrap()
-            .trim()
-            .parse()
-            .unwrap();
-        // Removed on every path out of this case.
-        struct Orphan(libc::pid_t);
-        impl Drop for Orphan {
-            fn drop(&mut self) {
-                // SAFETY: plain syscall with an integer pid and signal.
-                unsafe { libc::kill(self.0, libc::SIGKILL) };
-            }
-        }
-        let _orphan = (mode == "process-running").then_some(Orphan(pid));
         let path = PathBuf::from(std::fs::read_to_string(dir.join("session-path")).unwrap());
         let phases: Vec<String> = std::fs::read_to_string(&path)
             .unwrap()
@@ -682,9 +690,17 @@ async fn a_killed_host_reports_its_process_job_once_and_never_restarts_it() {
                 Vec::new(),
             )
             .await;
-        session.prompt("continue", Vec::new()).await.unwrap();
+        tokio::time::timeout(
+            Duration::from_secs(30),
+            session.prompt("continue", Vec::new()),
+        )
+        .await
+        .expect("the prompt's turn ended")
+        .unwrap();
         assert!(session.jobs().list().is_empty(), "{mode}: a producer ran");
-        session.shutdown().await;
+        tokio::time::timeout(Duration::from_secs(30), session.shutdown())
+            .await
+            .expect("the session shut down");
         assert_eq!(
             seen.lock().unwrap()[0],
             [notice.to_owned(), "continue".to_owned()],
@@ -701,6 +717,8 @@ async fn a_killed_host_reports_its_process_job_once_and_never_restarts_it() {
             job_notices::recover(&reopened, &jobs).is_empty(),
             "{mode}: reported twice"
         );
-        jobs.close().await;
+        tokio::time::timeout(Duration::from_secs(30), jobs.close())
+            .await
+            .expect("the registry closed");
     }
 }
