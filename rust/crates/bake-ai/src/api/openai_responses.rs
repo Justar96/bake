@@ -1,8 +1,9 @@
 //! The OpenAI Responses protocol (`openai-responses`).
 //!
-//! Ported from Pi `packages/ai/src/api/openai-responses.ts` (v1.1.0):
-//! compatibility defaults, request building, prompt-cache fields, reasoning
-//! effort, service-tier pricing, and the stream lifecycle. The request goes to
+//! Ported from Pi `packages/ai/src/api/openai-responses.ts` (v1.1.0, with
+//! v1.4.0's ChatGPT workspace limit hint): compatibility defaults, request
+//! building, prompt-cache fields, reasoning effort, service-tier pricing, and
+//! the stream lifecycle. The request goes to
 //! `{baseUrl}/responses` as the `openai` SDK sends it. Not ported: GitHub
 //! Copilot headers and grammar, additional-tools, and tool-search requests.
 
@@ -37,6 +38,7 @@ const OPENAI_TOOL_CALL_PROVIDERS: [&str; 3] = ["openai", "openai-codex", "openco
 /// OpenAI Responses rejects `max_output_tokens` below 16.
 const MIN_OUTPUT_TOKENS: u64 = 16;
 const CHATGPT_USAGE_URL: &str = "https://chatgpt.com/settings/usage";
+const CHATGPT_WORKSPACE_LIMIT_HINT: &str = "You've reached your ChatGPT workspace's usage limit. Ask your workspace admin to increase it at admin.openai.com → Workspace → Usage limits.";
 
 /// Options of the Responses protocol.
 #[derive(Debug, Clone, Default)]
@@ -299,9 +301,16 @@ async fn run(
                 }
             );
             let message = format_provider_error(&normalize_provider_error(&error), Some(&prefix));
+            // Sign in with ChatGPT shares the subscription's usage limit
+            // with other apps; on ChatGPT Business plans the workspace admin
+            // also sets a per-user limit.
             output.error_message = Some(
                 if message.contains("subscription_sharing_usage_limit_exceeded") {
                     format!("{message}\nCheck your ChatGPT usage: {CHATGPT_USAGE_URL}")
+                } else if message
+                    .contains("subscription_sharing_workplace_individual_usage_limit_exceeded")
+                {
+                    format!("{message}\n{CHATGPT_WORKSPACE_LIMIT_HINT}")
                 } else {
                     message
                 },

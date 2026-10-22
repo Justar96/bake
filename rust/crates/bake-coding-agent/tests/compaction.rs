@@ -1,4 +1,4 @@
-//! Pi v1.1.0's compaction as the oracle. `fixtures/pi-compaction/golden.json`
+//! Pi v1.4.0's compaction as the oracle. `fixtures/pi-compaction/golden.json`
 //! records what Pi's own `compaction.ts`, `branch-summarization.ts`,
 //! `utils.ts`, and `messages.ts` produce for one set of messages and session
 //! entries (see `generate.mjs` beside it): the summarization prompts and
@@ -95,16 +95,22 @@ impl Recorder {
                 Message::User(user) => user_content_text(&user.content, "\n"),
                 _ => String::new(),
             };
-            recorder.requests.lock().unwrap().push(json!({
+            let mut request = json!({
                 "model": model.id,
                 "systemPrompt": system,
                 "roles": transcript.iter().map(Message::role).collect::<Vec<_>>(),
                 "prompt": prompt,
-                "maxTokens": options.base.max_tokens,
                 "reasoning": options.reasoning.map(|level| level.as_str()),
                 "cacheRetention": to_json(&options.base.cache_retention),
                 "sessionIdSupplied": options.base.session_id.as_deref() == Some("routing"),
-            }));
+            });
+            // JSON leaves out an unset JavaScript `maxTokens`.
+            if let (Some(max_tokens), Some(object)) =
+                (options.base.max_tokens, request.as_object_mut())
+            {
+                object.insert("maxTokens".into(), json!(max_tokens));
+            }
+            recorder.requests.lock().unwrap().push(request);
             let text = recorder
                 .answers
                 .lock()
@@ -308,7 +314,6 @@ async fn summaries_send_pis_prompts_and_build_pis_results() {
         let result = generate_summary_with_usage(
             &messages,
             &model,
-            20000,
             case["customInstructions"].as_str(),
             case["previousSummary"].as_str(),
             &stream_fn,

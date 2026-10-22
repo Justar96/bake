@@ -1,7 +1,7 @@
 //! Shared helpers of compaction and branch summarization.
 //!
 //! Ported from Pi `packages/coding-agent/src/core/compaction/utils.ts`
-//! (v1.1.0): file-operation tracking, conversation serialization, and the
+//! (v1.4.0): file-operation tracking, conversation serialization, and the
 //! summarization system prompt. Lengths count UTF-16 code units, as
 //! JavaScript's `String.length` does.
 
@@ -192,6 +192,10 @@ pub(crate) fn js_entries(object: &JsonObject) -> Vec<(&String, &Value)> {
 /// summarizer does not continue the conversation. Tool results are cut at
 /// 2000 characters; call [`crate::session::messages::convert_to_llm`]
 /// first.
+///
+/// Thinking is omitted: providers return summaries of the real reasoning,
+/// and replayed thinking is often not part of the model's live context, so
+/// it could make the request larger than the context it summarizes.
 pub fn serialize_conversation(messages: &[Message]) -> String {
     let mut parts: Vec<String> = Vec::new();
     for message in messages {
@@ -206,23 +210,15 @@ pub fn serialize_conversation(messages: &[Message]) -> String {
                 }
             }
             Message::Assistant(assistant) => {
-                let mut thinking: Vec<&str> = Vec::new();
                 let mut calls: Vec<String> = Vec::new();
                 for block in &assistant.content {
-                    match block {
-                        AssistantContentBlock::Thinking(block) => thinking.push(&block.thinking),
-                        AssistantContentBlock::ToolCall(call) => {
-                            let args: Vec<String> = js_entries(&call.arguments)
-                                .into_iter()
-                                .map(|(key, value)| format!("{key}={}", js_stringify(value)))
-                                .collect();
-                            calls.push(format!("{}({})", call.name, args.join(", ")));
-                        }
-                        AssistantContentBlock::Text(_) => {}
+                    if let AssistantContentBlock::ToolCall(call) = block {
+                        let args: Vec<String> = js_entries(&call.arguments)
+                            .into_iter()
+                            .map(|(key, value)| format!("{key}={}", js_stringify(value)))
+                            .collect();
+                        calls.push(format!("{}({})", call.name, args.join(", ")));
                     }
-                }
-                if !thinking.is_empty() {
-                    parts.push(format!("[Assistant thinking]: {}", thinking.join("\n")));
                 }
                 if assistant
                     .content
@@ -307,6 +303,26 @@ mod tests {
         ]);
         assert!(!result.contains("truncated"));
         assert!(result.contains(&long));
+    }
+
+    // Pi v1.2.0: "should omit thinking".
+    #[test]
+    fn omits_thinking() {
+        use bake_ai::providers::faux::{
+            faux_assistant_blocks, faux_text, faux_thinking, faux_tool_call,
+        };
+        let assistant = faux_assistant_blocks(
+            vec![
+                faux_thinking("private reasoning"),
+                faux_text("visible reply"),
+                faux_tool_call("read", serde_json::json!({ "path": "a.ts" }), Some("tc1")),
+            ],
+            bake_ai::StopReason::ToolUse,
+        );
+        assert_eq!(
+            serialize_conversation(&[Message::Assistant(assistant)]),
+            "[Assistant]: visible reply\n\n[Assistant tool calls]: read(path=\"a.ts\")"
+        );
     }
 
     // Pi `test/compaction-nested-calls.test.ts`: "include files touched by

@@ -306,11 +306,6 @@ pub async fn generate_branch_summary(
         None => BRANCH_SUMMARY_PROMPT.to_owned(),
     };
     let prompt = format!("<conversation>\n{conversation}\n</conversation>\n\n{instructions}");
-    let max_tokens = if model.max_tokens > 0 {
-        model.max_tokens.min(4096)
-    } else {
-        4096
-    };
     let context = bake_ai::transcript::normalize_context(Context {
         system_prompt: Some(SUMMARIZATION_SYSTEM_PROMPT.to_owned()),
         messages: vec![Message::User(UserMessage {
@@ -324,7 +319,7 @@ pub async fn generate_branch_summary(
     request.base.headers = options.headers.clone();
     request.base.env = options.env.clone();
     request.base.signal = Some(options.signal.clone());
-    request.base.max_tokens = Some(max_tokens);
+    // No output cap: the model's own limit, as Pi v1.4.0 (#9512).
     let response = complete_summarization(
         model,
         &context,

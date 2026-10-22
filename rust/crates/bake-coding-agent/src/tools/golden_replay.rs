@@ -97,11 +97,15 @@ fn grep_formats_recorded_rg_output_as_pi() {
             context: args["context"].as_f64().filter(|c| *c > 0.0).unwrap_or(0.0),
             limit: args["limit"].as_f64().unwrap_or(100.0).max(1.0),
         };
+        // The recording is Pi v1.1.0's argv; v1.4.0 puts `--no-config`
+        // before it.
+        let args = request.args();
         assert_eq!(
-            argv(&request.args(), &dir_text),
-            case["argv"],
+            args.first().map(OsString::as_os_str),
+            Some("--no-config".as_ref()),
             "{name} argv"
         );
+        assert_eq!(argv(&args[1..], &dir_text), case["argv"], "{name} argv");
         let stdout = substitute(&case["stdout"], &dir_text);
         let mut formatter = GrepFormatter::new(request);
         let mut stopped = false;

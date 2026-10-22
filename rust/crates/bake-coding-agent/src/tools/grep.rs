@@ -1,5 +1,6 @@
-//! The `grep` tool, ported from Pi `src/core/tools/grep.ts` (v1.1.0; see
-//! the crate's `NOTICE`): `rg --json` from `PATH`, its matches formatted as
+//! The `grep` tool, ported from Pi `src/core/tools/grep.ts` (v1.1.0;
+//! `--no-config` from v1.4.0; see the crate's `NOTICE`): `rg --json` from
+//! `PATH`, its matches formatted as
 //! `path:line: text` with `path-line- text` context lines, limited to
 //! `limit` matches and 50 KB, with lines cut to 500 characters.
 //!
@@ -125,11 +126,19 @@ pub(crate) struct GrepRequest {
 }
 
 impl GrepRequest {
-    /// Pi's `rg` arguments.
+    /// Pi's `rg` arguments. `--no-config`: the tool's contract (literal,
+    /// glob, limit) must not depend on ambient configuration such as
+    /// `RIPGREP_CONFIG_PATH`.
     pub(crate) fn args(&self) -> Vec<OsString> {
-        let mut args: Vec<OsString> = ["--json", "--line-number", "--color=never", "--hidden"]
-            .map(OsString::from)
-            .to_vec();
+        let mut args: Vec<OsString> = [
+            "--no-config",
+            "--json",
+            "--line-number",
+            "--color=never",
+            "--hidden",
+        ]
+        .map(OsString::from)
+        .to_vec();
         if self.ignore_case {
             args.push("--ignore-case".into());
         }
@@ -599,5 +608,42 @@ mod tests {
         assert!(long[0].0.ends_with("... [truncated]"));
         assert_eq!(lines(&dir.join("missing"), 0, 0).1, None);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // Pi v1.4.0 "should ignore RIPGREP_CONFIG_PATH" (#11203). The variable
+    // is set on this `rg` child only, with a config that would make the
+    // regex search literal.
+    #[test]
+    fn rg_ignores_its_config_file() {
+        let Some(rg) = process::find_executable(&["rg"]) else {
+            eprintln!("skipped: rg is not on PATH");
+            return;
+        };
+        let dir = crate::test_support::TempDir::new("grep-config");
+        let config = dir.join("rg-config");
+        let file = dir.join("fixture.txt");
+        std::fs::write(&config, "--fixed-strings\n").expect("write");
+        std::fs::write(&file, "aXb\na.b\n").expect("write");
+        let request = GrepRequest {
+            pattern: "a.b".into(),
+            search_path: file,
+            is_directory: false,
+            glob: None,
+            ignore_case: false,
+            literal: false,
+            context: 0.0,
+            limit: 100.0,
+        };
+        let output = std::process::Command::new(rg)
+            .args(request.args())
+            .env("RIPGREP_CONFIG_PATH", &config)
+            .output()
+            .expect("rg");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let matches = stdout
+            .lines()
+            .filter(|line| line.contains("\"type\":\"match\""))
+            .count();
+        assert_eq!(matches, 2, "{stdout}");
     }
 }

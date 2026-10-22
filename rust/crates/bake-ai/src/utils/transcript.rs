@@ -1,6 +1,7 @@
 //! Transcript normalization and system-message replay.
 //!
-//! Ported from Pi `packages/ai/src/utils/transcript.ts` (v1.1.0). The
+//! Ported from Pi `packages/ai/src/utils/transcript.ts` (v1.1.0;
+//! `resolveTranscriptTools` from v1.4.0). The
 //! leading system message is the prompt; later system messages add
 //! instructions, patch named sections, and add or remove tools.
 
@@ -57,8 +58,12 @@ pub fn get_initial_system_message(messages: &[Message]) -> Option<&SystemMessage
 
 /// The tools available after every system message, in first-declaration order.
 pub fn get_current_tools(messages: &[Message]) -> Vec<Tool> {
+    current_tools(messages.iter().filter_map(system))
+}
+
+fn current_tools<'a>(systems: impl IntoIterator<Item = &'a SystemMessage>) -> Vec<Tool> {
     let mut tools: Vec<Tool> = Vec::new();
-    for message in messages.iter().filter_map(system) {
+    for message in systems {
         for removed in message.tools_removed.iter().flatten() {
             tools.retain(|tool| tool.name != removed.name);
         }
@@ -244,21 +249,79 @@ pub fn has_non_additive_tool_changes(messages: &[Message]) -> bool {
     false
 }
 
-/// Pi's `resolveTranscriptTools`: the request-level tools and whether later
-/// system messages carry their additions in place.
+/// How a transport can express tool changes after the first request, Pi's
+/// `TranscriptToolSupport`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TranscriptToolSupport {
+    /// Only the top-level tool list exists; it always holds the current
+    /// tools.
+    None,
+    /// Tools can be added at a later message, but not removed or redefined.
+    Additions,
+    /// Every tool, the initial ones included, is declared in place, and a
+    /// later declaration under the same name replaces the earlier one.
+    Changes,
+}
+
+/// Pi's `TranscriptTools`: how tool declarations split between the
+/// top-level request field and the system messages that changed them.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TranscriptTools {
+    /// Tools sent in the top-level request field.
+    pub request_tools: Vec<Tool>,
+    /// Leading system messages whose tool changes `request_tools` already
+    /// holds; every later system message carries its own in place.
+    pub folded_system_messages: usize,
+}
+
+/// Pi's `resolveTranscriptTools` (v1.4.0). With [`TranscriptToolSupport::Changes`]
+/// every system message declares its tools in place. With
+/// [`TranscriptToolSupport::Additions`], a removal or redefinition cannot
+/// be expressed in place, so the top-level list becomes the tool state
+/// after the last one and later additions stay anchored: the cached prefix
+/// changes once per removal rather than on every later addition. With
+/// [`TranscriptToolSupport::None`], the top-level list is the current set.
 pub fn resolve_transcript_tools(
     messages: &[Message],
-    supports_tool_additions: bool,
-) -> (Vec<Tool>, bool) {
-    let anchors_additions = supports_tool_additions && !has_non_additive_tool_changes(messages);
-    let request_tools = if anchors_additions {
-        get_initial_system_message(messages)
-            .and_then(|message| message.tools_added.clone())
-            .unwrap_or_default()
-    } else {
-        get_current_tools(messages)
+    support: TranscriptToolSupport,
+) -> TranscriptTools {
+    let systems: Vec<&SystemMessage> = messages.iter().filter_map(system).collect();
+    let folded = match support {
+        TranscriptToolSupport::None => systems.len(),
+        TranscriptToolSupport::Changes => {
+            return TranscriptTools {
+                request_tools: Vec::new(),
+                folded_system_messages: 0,
+            };
+        }
+        TranscriptToolSupport::Additions => {
+            let mut folded = usize::from(get_initial_system_message(messages).is_some());
+            // A name declared before counts as redeclared even after its
+            // removal: Kimi K3 ignores a removed tool that a later tool
+            // message declares again.
+            let mut declared = BTreeSet::new();
+            for (index, message) in systems.iter().enumerate() {
+                if message
+                    .tools_removed
+                    .as_ref()
+                    .is_some_and(|removed| !removed.is_empty())
+                {
+                    folded = folded.max(index + 1);
+                }
+                // Name by name, so a name a message lists twice counts too.
+                for tool in message.tools_added.as_deref().unwrap_or_default() {
+                    if !declared.insert(tool.name.as_str()) {
+                        folded = folded.max(index + 1);
+                    }
+                }
+            }
+            folded
+        }
     };
-    (request_tools, anchors_additions)
+    TranscriptTools {
+        request_tools: current_tools(systems.iter().take(folded).copied()),
+        folded_system_messages: folded,
+    }
 }
 
 #[cfg(test)]
@@ -484,6 +547,88 @@ mod tests {
                 ..tool("a")
             }
         ));
+    }
+
+    // transcript-tool-changes.test.ts (v1.4.0): "resolves the top-level
+    // tool boundary per transport" (#10940).
+    #[test]
+    fn resolves_the_top_level_tool_boundary_per_transport() {
+        let system = |content: &str, added: Vec<Tool>, removed: &[&str], timestamp| {
+            Message::System(SystemMessage {
+                content: content.into(),
+                tools_added: (!added.is_empty()).then_some(added),
+                tools_removed: (!removed.is_empty()).then(|| {
+                    removed
+                        .iter()
+                        .map(|name| ToolReference {
+                            name: (*name).into(),
+                        })
+                        .collect()
+                }),
+                timestamp,
+                ..Default::default()
+            })
+        };
+        let (base, drop) = (tool("base_tool"), tool("drop_tool"));
+        let (late_x, late_y) = (
+            tool_described("late_tool", "x"),
+            tool_described("late_tool", "y"),
+        );
+        let messages = [
+            system("base prompt", vec![base.clone(), drop.clone()], &[], 0),
+            system("", vec![], &["drop_tool"], 1),
+            system("", vec![drop.clone()], &[], 2),
+            system("", vec![late_x], &[], 3),
+            system("", vec![late_y.clone()], &[], 4),
+        ];
+        let resolved =
+            |count: usize, support| resolve_transcript_tools(&messages[..count], support);
+        assert_eq!(
+            resolved(2, TranscriptToolSupport::Additions),
+            TranscriptTools {
+                request_tools: vec![base.clone()],
+                folded_system_messages: 2
+            }
+        );
+        // Kimi K3 ignores a removed tool that a later tool message declares
+        // again, so the re-added drop_tool moves the boundary.
+        assert_eq!(
+            resolved(4, TranscriptToolSupport::Additions),
+            TranscriptTools {
+                request_tools: vec![base.clone(), drop.clone()],
+                folded_system_messages: 3
+            }
+        );
+        let all = TranscriptTools {
+            request_tools: vec![base, drop, late_y],
+            folded_system_messages: 5,
+        };
+        assert_eq!(resolved(5, TranscriptToolSupport::Additions), all);
+        assert_eq!(
+            resolved(5, TranscriptToolSupport::Changes),
+            TranscriptTools {
+                request_tools: vec![],
+                folded_system_messages: 0
+            }
+        );
+        assert_eq!(resolved(5, TranscriptToolSupport::None), all);
+
+        // A name one message lists twice is redeclared there.
+        let (late_x, late_y) = (
+            tool_described("late_tool", "x"),
+            tool_described("late_tool", "y"),
+        );
+        let twice = [
+            system("base prompt", vec![tool("base_tool")], &[], 0),
+            system("", vec![late_x, late_y.clone()], &[], 1),
+        ];
+        assert_eq!(
+            resolve_transcript_tools(&twice, TranscriptToolSupport::Additions),
+            TranscriptTools {
+                request_tools: vec![tool("base_tool"), late_y],
+                folded_system_messages: 2
+            }
+        );
     }
 
     #[test]

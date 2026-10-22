@@ -13,7 +13,7 @@ use crate::api::constrained_sampling::{
     get_json_schema_tool_parameters, resolve_json_schema_strict_sampling,
 };
 use crate::api::transform_messages::transform_messages;
-use crate::api::{count, non_empty_str, sanitize_id_chars, truncate_units, truthy};
+use crate::api::{count, js_blank, non_empty_str, sanitize_id_chars, truncate_units, truthy};
 use crate::models::calculate_cost;
 use crate::types::{
     AssistantContentBlock, AssistantMessage, AssistantMessageEvent, Message, Model, StopReason,
@@ -71,7 +71,9 @@ fn convert_tool_result_output(model: &Model, content: &[UserContentBlock]) -> Va
         })
         .collect();
     if images.is_empty() || !model.accepts_images() {
-        let text = if !text.is_empty() {
+        // Whitespace-only output is sent as the placeholder, which some
+        // providers would otherwise reject (Pi v1.4.0, #8720).
+        let text = if !js_blank(&text) {
             text
         } else if !images.is_empty() {
             "(see attached image)".to_owned()
@@ -81,7 +83,7 @@ fn convert_tool_result_output(model: &Model, content: &[UserContentBlock]) -> Va
         return json!(text);
     }
     let mut output = Vec::new();
-    if !text.is_empty() {
+    if !js_blank(&text) {
         output.push(json!({ "type": "input_text", "text": text }));
     }
     for image in images {

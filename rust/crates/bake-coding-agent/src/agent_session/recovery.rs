@@ -21,7 +21,9 @@ use bake_agent::{
 };
 use bake_ai::utils::overflow::{is_context_overflow, is_recoverable_length};
 use bake_ai::utils::retry::{RetryEvent, is_retryable_assistant_error, retry_delay_ms};
-use bake_ai::{AbortController, AbortSignal, AssistantMessage, Model, StopReason};
+use bake_ai::{
+    AbortController, AbortSignal, AssistantContentBlock, AssistantMessage, Model, StopReason,
+};
 use serde_json::Value;
 use tokio::sync::watch;
 
@@ -37,6 +39,38 @@ use crate::session::{
     AgentMessage, GroupEntry, SessionEntry, SessionError, SessionManager, SessionProjection,
     get_latest_compaction_entry,
 };
+
+/// The entries of `attempt`'s tool results in `projection`: the results
+/// for `call_ids` that follow it before the next assistant message, as Pi
+/// finds them in the agent's context.
+fn attempt_tool_results(
+    projection: &SessionProjection,
+    attempt: &str,
+    call_ids: &[String],
+) -> Vec<String> {
+    projection
+        .entries
+        .iter()
+        .skip_while(|entry| entry.source_entry.id() != attempt)
+        .skip(1)
+        .flat_map(|entry| {
+            entry
+                .messages
+                .iter()
+                .map(move |message| (entry.source_entry.id(), message))
+        })
+        .take_while(|(_, message)| message.role() != Some("assistant"))
+        .filter(|(_, message)| {
+            message.role() == Some("toolResult")
+                && message
+                    .as_json()
+                    .get("toolCallId")
+                    .and_then(Value::as_str)
+                    .is_some_and(|id| call_ids.iter().any(|call| call == id))
+        })
+        .map(|(id, _)| id.to_owned())
+        .collect()
+}
 
 /// A recovery omission whose write failed, with the projection of the
 /// known synced prefix when part of it was written.
@@ -319,10 +353,6 @@ pub(super) struct RunState {
     pub overflow_recovery_attempted: bool,
     /// `_lastAssistantMessage` and its entry.
     pub last_assistant: Option<(AssistantMessage, Option<String>)>,
-    /// Entries of the tool results since the last assistant message.
-    pub turn_tool_results: Vec<Option<String>>,
-    /// `_lastAssistantToolResults`' entries, set at `turn_end`.
-    pub last_tool_results: Vec<Option<String>>,
     /// `_retryAbortController`.
     pub retry_abort: Option<AbortController>,
     /// `_compactionAbortController`.
@@ -660,9 +690,12 @@ impl Core {
     }
 
     /// Pi's `_omitRecoveryAttempt`: context edits omit the failed attempt
-    /// and its tool results from model context; the raw history keeps them.
-    /// Each target is its entry and whether the transcript holds it; one in
-    /// the transcript without an entry cannot be omitted.
+    /// `message`, whose entry is `entry_id`, and its tool results from model
+    /// context; the raw history keeps them. The results are found in the
+    /// session projection, so the pair stays together whether the attempt
+    /// comes from this run or a resumed session: an unpaired result fails
+    /// the next request (Pi v1.4.0, #11227). An attempt in the transcript
+    /// without an entry cannot be omitted.
     ///
     /// The edits are one group ([`SessionManager::append_group`]), the
     /// attempt's last, written through the session's write boundary ([`super::write_session`]), and
@@ -676,28 +709,22 @@ impl Core {
     /// written ([`crate::session::GroupWriteError`]).
     pub(super) async fn omit_recovery_attempt(
         &self,
-        targets: Vec<(Option<String>, bool)>,
+        message: &AssistantMessage,
+        entry_id: Option<String>,
     ) -> Result<(), String> {
-        if targets
-            .iter()
-            .any(|(id, projected)| id.is_none() && *projected)
-        {
+        if entry_id.is_none() && self.in_transcript(message) {
             return Err(
                 "Cannot persist recovery omission because a projected message has no source entry"
                     .to_owned(),
             );
         }
-        // Pi writes the attempt's edit first. Here its tool results' edits
-        // come first: a crash after any line then leaves no tool result in
-        // context whose call is omitted, which a provider would refuse,
-        // while a call whose result is omitted gets Pi's synthetic result
-        // in the request. The written group projects as Pi's order does.
-        let mut targets = targets;
-        targets.rotate_left(1);
-        let edits: Vec<GroupEntry> = targets
-            .into_iter()
-            .filter_map(|(id, _)| id)
-            .map(|id| GroupEntry::context_edit(id, None))
+        let call_ids: Vec<String> = message
+            .content
+            .iter()
+            .filter_map(|block| match block {
+                AssistantContentBlock::ToolCall(call) => Some(call.id.clone()),
+                _ => None,
+            })
             .collect();
         let Some(permit) = self.work.enter() else {
             return Err("The session is shut down".to_owned());
@@ -708,6 +735,20 @@ impl Core {
         let gap = Arc::clone(&self.gap);
         let write = permit.spawn_blocking(move || {
             super::write_session(&session, &gap, |session| {
+                // Pi writes the attempt's edit first. Here its tool results'
+                // edits come first: a crash after any line then leaves no
+                // tool result in context whose call is omitted, which a
+                // provider would refuse, while a call whose result is
+                // omitted gets Pi's synthetic result in the request. The
+                // written group projects as Pi's order does.
+                let mut targets = entry_id.as_deref().map_or_else(Vec::new, |id| {
+                    attempt_tool_results(&session.build_session_projection(), id, &call_ids)
+                });
+                targets.extend(entry_id);
+                let edits: Vec<GroupEntry> = targets
+                    .into_iter()
+                    .map(|id| GroupEntry::context_edit(id, None))
+                    .collect();
                 match session.append_group(edits) {
                     Ok(_) => Ok(session.build_session_projection()),
                     Err(error) => {
@@ -1142,7 +1183,6 @@ impl Core {
         assistant: &AssistantMessage,
         entry_id: Option<String>,
         skip_aborted_check: bool,
-        tool_results: Vec<Option<String>>,
     ) -> Result<bool, String> {
         self.mask_context(None).await?;
         let allow_background = !matches!(
@@ -1205,9 +1245,7 @@ impl Core {
                 will_retry: true,
             } => {
                 self.state().overflow_recovery_attempted = true;
-                let mut targets = vec![(entry_id, self.in_transcript(assistant))];
-                targets.extend(tool_results.into_iter().map(|id| (id, true)));
-                self.omit_recovery_attempt(targets).await?;
+                self.omit_recovery_attempt(assistant, entry_id).await?;
                 self.run_auto_compaction(reason, true, None).await
             }
             Decision::Run { reason, .. } => self.run_auto_compaction(reason, false, None).await,
@@ -1330,9 +1368,7 @@ impl Core {
             Some(id) => Some(id),
             None => self.assistant_entry_id(message).await?,
         };
-        let projected = self.in_transcript(message);
-        self.omit_recovery_attempt(vec![(entry_id, projected)])
-            .await?;
+        self.omit_recovery_attempt(message, entry_id).await?;
         let signal = controller.signal();
         let aborted = signal.aborted()
             || tokio::select! {

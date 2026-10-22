@@ -207,32 +207,36 @@ fn completions_batch_tool_result_images_after_the_tool_results() {
     assert_eq!(images, Some(2));
 }
 
-// "uses '(no tool output)' placeholder for empty tool results without images"
+// "uses '(no tool output)' placeholder for tool result text %j without
+// images", whitespace-only text included (#8720)
 #[test]
 fn completions_send_a_placeholder_for_empty_tool_results() {
     let model = gpt_4o_mini("openai-completions");
-    let context = context(
-        None,
-        vec![
-            user("Run the command"),
-            assistant(
-                json!([{ "type": "toolCall", "id": "tool-1", "name": "bash", "arguments": { "command": "true" } }]),
-                "openai-completions",
-                "openai",
-                "gpt-4o-mini",
-                "toolUse",
-            ),
-            tool_result("tool-1", "bash", json!([{ "type": "text", "text": "" }])),
-        ],
-        None,
-    );
-    let compat = openai_completions::get_compat(&model);
-    let converted = openai_completions::convert_messages(&model, &context, &compat).unwrap();
-    let tool = converted.iter().find(|message| message["role"] == "tool");
-    assert_eq!(
-        tool.map(|message| &message["content"]),
-        Some(&json!("(no tool output)"))
-    );
+    for text in ["", "\r\n", " \n\t"] {
+        let context = context(
+            None,
+            vec![
+                user("Run the command"),
+                assistant(
+                    json!([{ "type": "toolCall", "id": "tool-1", "name": "bash", "arguments": { "command": "true" } }]),
+                    "openai-completions",
+                    "openai",
+                    "gpt-4o-mini",
+                    "toolUse",
+                ),
+                tool_result("tool-1", "bash", json!([{ "type": "text", "text": text }])),
+            ],
+            None,
+        );
+        let compat = openai_completions::get_compat(&model);
+        let converted = openai_completions::convert_messages(&model, &context, &compat).unwrap();
+        let tool = converted.iter().find(|message| message["role"] == "tool");
+        assert_eq!(
+            tool.map(|message| &message["content"]),
+            Some(&json!("(no tool output)")),
+            "{text:?}"
+        );
+    }
 }
 
 // ---- openai-completions: openai-completions-empty-tools.test.ts ----
@@ -317,6 +321,80 @@ fn completions_keep_an_empty_tools_list_with_tool_history() {
         completions_params(&model, &context, None)["tools"],
         json!([])
     );
+}
+
+// transcript-tool-changes.test.ts (v1.4.0): "keeps the Kimi prefix across
+// loads after a removal", on a model with Kimi K3's two mid-conversation
+// flags: after the removal the top-level list stays the state it left, and
+// each later load is declared in place, so every request extends the last.
+#[test]
+fn completions_keep_the_kimi_prefix_across_loads_after_a_removal() {
+    let mut model = gpt_4o_mini("openai-completions");
+    model.compat = Some(
+        serde_json::from_value(json!({
+            "supportsMidConvoSystemMessages": true,
+            "supportsMidConvoToolAdditions": true
+        }))
+        .expect("compat"),
+    );
+    let declared = |name: &str| json!({ "name": name, "description": format!("{name} tool"), "parameters": { "type": "object", "properties": {} } });
+    let steps = [
+        vec![json!({ "role": "user", "content": "first", "timestamp": 1 })],
+        vec![
+            json!({ "role": "system", "content": "", "toolsRemoved": [{ "name": "drop_tool" }], "timestamp": 2 }),
+            json!({ "role": "user", "content": "after removal", "timestamp": 3 }),
+        ],
+        vec![
+            json!({ "role": "system", "content": "", "toolsAdded": [declared("late_tool")], "timestamp": 4 }),
+            json!({ "role": "user", "content": "after first load", "timestamp": 5 }),
+        ],
+        vec![
+            json!({ "role": "system", "content": "", "toolsAdded": [declared("later_tool")], "timestamp": 6 }),
+            json!({ "role": "user", "content": "after second load", "timestamp": 7 }),
+        ],
+    ];
+    let mut transcript = vec![json!({
+        "role": "system", "content": "base prompt",
+        "toolsAdded": [declared("base_tool"), declared("drop_tool")], "timestamp": 0
+    })];
+    let mut payloads = Vec::new();
+    for step in steps {
+        transcript.extend(step);
+        payloads.push(completions_params(
+            &model,
+            &context(None, transcript.clone(), None),
+            None,
+        ));
+    }
+    let names = |tools: &Value| -> Vec<String> {
+        tools
+            .as_array()
+            .map(|tools| {
+                tools
+                    .iter()
+                    .filter_map(|tool| tool["function"]["name"].as_str().map(str::to_owned))
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let (before_removal, after_removal) = payloads.split_first().expect("payloads");
+    assert_eq!(names(&before_removal["tools"]), ["base_tool", "drop_tool"]);
+    for payload in after_removal {
+        assert_eq!(names(&payload["tools"]), ["base_tool"], "{payload}");
+    }
+    for pair in after_removal.windows(2) {
+        let previous = pair[0]["messages"].as_array().expect("messages");
+        let next = pair[1]["messages"].as_array().expect("messages");
+        assert_eq!(&next[..previous.len()], previous.as_slice());
+    }
+    let last = after_removal.last().expect("last")["messages"]
+        .as_array()
+        .expect("messages")
+        .iter()
+        .filter(|message| message.get("tools").is_some())
+        .map(|message| names(&message["tools"]).remove(0))
+        .collect::<Vec<_>>();
+    assert_eq!(last, ["late_tool", "later_tool"]);
 }
 
 // ---- openai-completions: response shaping over loopback ----
@@ -528,31 +606,34 @@ fn responses_number_fallback_message_ids() {
 }
 
 // openai-responses-empty-tool-result.test.ts: "uses '(no tool output)'
-// placeholder for empty tool results without images"
+// placeholder for tool result text %j without images", whitespace-only
+// text included (#8720)
 #[test]
 fn responses_send_a_placeholder_for_empty_tool_results() {
     let model = gpt_4o_mini("openai-responses");
-    let context = context(
-        None,
-        vec![
-            user("Run the command"),
-            assistant(
-                json!([{ "type": "toolCall", "id": "tool-1", "name": "bash", "arguments": { "command": "true" } }]),
-                "openai-responses",
-                "openai",
-                "gpt-4o-mini",
-                "toolUse",
-            ),
-            tool_result("tool-1", "bash", json!([{ "type": "text", "text": "" }])),
-        ],
-        None,
-    );
-    let input = responses_input(&model, &context);
-    let output = input
-        .iter()
-        .find(|item| item["type"] == "function_call_output")
-        .map(|item| &item["output"]);
-    assert_eq!(output, Some(&json!("(no tool output)")));
+    for text in ["", "\r\n", " \n\t"] {
+        let context = context(
+            None,
+            vec![
+                user("Run the command"),
+                assistant(
+                    json!([{ "type": "toolCall", "id": "tool-1", "name": "bash", "arguments": { "command": "true" } }]),
+                    "openai-responses",
+                    "openai",
+                    "gpt-4o-mini",
+                    "toolUse",
+                ),
+                tool_result("tool-1", "bash", json!([{ "type": "text", "text": text }])),
+            ],
+            None,
+        );
+        let input = responses_input(&model, &context);
+        let output = input
+            .iter()
+            .find(|item| item["type"] == "function_call_output")
+            .map(|item| &item["output"]);
+        assert_eq!(output, Some(&json!("(no tool output)")), "{text:?}");
+    }
 }
 
 async fn responses_error(reply: Reply) -> String {
@@ -620,6 +701,30 @@ async fn responses_link_chatgpt_usage_on_usage_limits() {
     assert!(
         failed.contains("Check your ChatGPT usage: https://chatgpt.com/settings/usage"),
         "{failed}"
+    );
+}
+
+// Pi v1.4.0's workspace limit hint, which Pi's tests do not cover: a
+// ChatGPT Business user's per-user limit names the workspace admin.
+#[tokio::test]
+async fn responses_name_the_workspace_admin_on_workspace_limits() {
+    let rejected = responses_error(Reply::error(
+        429,
+        json!({ "error": {
+            "code": "subscription_sharing_workplace_individual_usage_limit_exceeded",
+            "message": "Usage limit reached.",
+            "type": "rate_limit_error"
+        } })
+        .to_string(),
+    ))
+    .await;
+    assert!(
+        rejected.ends_with("\nYou've reached your ChatGPT workspace's usage limit. Ask your workspace admin to increase it at admin.openai.com → Workspace → Usage limits."),
+        "{rejected}"
+    );
+    assert!(
+        !rejected.contains("chatgpt.com/settings/usage"),
+        "{rejected}"
     );
 }
 

@@ -654,14 +654,14 @@ impl std::fmt::Debug for SummarizationOptions {
     }
 }
 
-/// Pi's `createSummarizationOptions`.
+/// Pi's `createSummarizationOptions`. No output cap is set, so the request
+/// uses the model's output limit and long reasoning cannot crowd out the
+/// summary (Pi v1.4.0, #9512).
 fn create_summarization_options(
     model: &Model,
-    max_tokens: u64,
     options: &SummarizationOptions,
 ) -> SimpleStreamOptions {
     let mut request = SimpleStreamOptions::default();
-    request.base.max_tokens = Some(max_tokens);
     request.base.signal = options.signal.clone();
     request.base.api_key = options.api_key.clone();
     request.base.headers = options.headers.clone();
@@ -671,16 +671,6 @@ fn create_summarization_options(
         request.reasoning = options.thinking_level.and_then(ModelThinkingLevel::level);
     }
     request
-}
-
-/// `Math.min(Math.floor(fraction * reserveTokens), maxTokens || Infinity)`.
-fn summary_max_tokens(model: &Model, fraction: f64, reserve_tokens: u64) -> u64 {
-    let budget = (fraction * reserve_tokens as f64).floor() as u64;
-    if model.max_tokens > 0 {
-        budget.min(model.max_tokens)
-    } else {
-        budget
-    }
 }
 
 /// Pi's `completeSummarization`: one summarization request with retry of
@@ -897,13 +887,11 @@ pub struct SummaryText {
 pub async fn generate_summary_with_usage(
     current_messages: &[AgentMessage],
     model: &Model,
-    reserve_tokens: u64,
     custom_instructions: Option<&str>,
     previous_summary: Option<&str>,
     stream_fn: &StreamFn,
     options: &SummarizationOptions,
 ) -> Result<SummaryText, String> {
-    let max_tokens = summary_max_tokens(model, 0.8, reserve_tokens);
     let previous_summary = previous_summary.filter(|summary| !summary.is_empty());
     let mut base_prompt = if previous_summary.is_some() {
         UPDATE_SUMMARIZATION_PROMPT.to_owned()
@@ -924,7 +912,7 @@ pub async fn generate_summary_with_usage(
     let response = complete_summarization_with_run(
         model,
         &build_summarization_context(prompt),
-        create_summarization_options(model, max_tokens, options),
+        create_summarization_options(model, options),
         stream_fn,
         options.retry,
         options.on_retry.as_ref(),
@@ -947,7 +935,6 @@ pub async fn generate_summary_with_usage(
 pub async fn generate_summary(
     current_messages: &[AgentMessage],
     model: &Model,
-    reserve_tokens: u64,
     custom_instructions: Option<&str>,
     previous_summary: Option<&str>,
     stream_fn: &StreamFn,
@@ -956,7 +943,6 @@ pub async fn generate_summary(
     generate_summary_with_usage(
         current_messages,
         model,
-        reserve_tokens,
         custom_instructions,
         previous_summary,
         stream_fn,
@@ -1254,23 +1240,26 @@ pub fn combine_usage(first: &Usage, second: &Usage) -> Usage {
 }
 
 /// Pi's `generateTurnPrefixSummary`: a checkpoint of the split turn's
-/// earlier messages, with half the reserve.
+/// earlier messages, with the `/compact` instructions as its focus (Pi
+/// v1.4.0, #11058).
 async fn generate_turn_prefix_summary(
     messages: &[AgentMessage],
     model: &Model,
-    reserve_tokens: u64,
+    custom_instructions: Option<&str>,
     stream_fn: &StreamFn,
     options: &SummarizationOptions,
 ) -> Result<SummaryText, String> {
-    let max_tokens = summary_max_tokens(model, 0.5, reserve_tokens);
     let conversation = serialize_conversation(&llm_messages(messages));
-    let prompt = format!(
+    let mut prompt = format!(
         "# Conversation\n{conversation}\n\n# Instructions\n{TURN_PREFIX_SUMMARIZATION_PROMPT}"
     );
+    if let Some(focus) = custom_instructions.filter(|focus| !focus.is_empty()) {
+        prompt.push_str(&format!("\n\nAdditional focus: {focus}"));
+    }
     let response = complete_summarization_with_run(
         model,
         &build_summarization_context(prompt),
-        create_summarization_options(model, max_tokens, options),
+        create_summarization_options(model, options),
         stream_fn,
         options.retry,
         options.on_retry.as_ref(),
@@ -1298,7 +1287,6 @@ pub async fn compact(
     stream_fn: &StreamFn,
     options: &SummarizationOptions,
 ) -> Result<CompactionResult, String> {
-    let reserve = preparation.settings.reserve_tokens;
     let (mut summary, usage) =
         if preparation.is_split_turn && !preparation.turn_prefix_messages.is_empty() {
             let mut history_text = preparation
@@ -1310,7 +1298,6 @@ pub async fn compact(
                 let history = generate_summary_with_usage(
                     &preparation.messages_to_summarize,
                     model,
-                    reserve,
                     custom_instructions,
                     preparation.previous_summary.as_deref(),
                     stream_fn,
@@ -1323,7 +1310,7 @@ pub async fn compact(
             let prefix = generate_turn_prefix_summary(
                 &preparation.turn_prefix_messages,
                 model,
-                reserve,
+                custom_instructions,
                 stream_fn,
                 options,
             )
@@ -1343,7 +1330,6 @@ pub async fn compact(
             let result = generate_summary_with_usage(
                 &preparation.messages_to_summarize,
                 model,
-                reserve,
                 custom_instructions,
                 preparation.previous_summary.as_deref(),
                 stream_fn,

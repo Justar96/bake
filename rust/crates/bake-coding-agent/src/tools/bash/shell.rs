@@ -1,4 +1,7 @@
-//! Pi's `src/utils/shell.ts`: shell resolution and the shell environment.
+//! Pi's `src/utils/shell.ts`: shell resolution and the shell environment,
+//! with v1.4.0's legacy WSL detection under `%SystemRoot%` and existence
+//! checks that accept Microsoft Store aliases. Pi's `getPowerShellConfig`
+//! is not ported, as its `powershell` tool is not.
 //!
 //! Pi finds executables on `PATH` by running `which` (Unix) or `where`
 //! (Windows); this port searches `PATH` itself, so resolution starts no
@@ -29,19 +32,73 @@ pub struct ShellConfig {
     pub command_transport: CommandTransport,
 }
 
-/// Pi's `isLegacyWslBashPath`: `C:\Windows\System32\bash.exe` (or
-/// `Sysnative`) in any case and with either slash.
+/// Pi's `isLegacyWslBashPath` with this process's `%SystemRoot%`; see
+/// [`is_legacy_wsl_bash_path_under`].
 pub fn is_legacy_wsl_bash_path(path: &Path) -> bool {
-    let normalized = path
-        .to_string_lossy()
-        .replace('/', "\\")
-        .to_ascii_lowercase();
-    let bytes = normalized.as_bytes();
-    if bytes.len() < 3 || !bytes[0].is_ascii_lowercase() || &bytes[1..3] != b":\\" {
+    is_legacy_wsl_bash_path_under(path, std::env::var("SystemRoot").ok().as_deref())
+}
+
+/// Pi's `isLegacyWslBashPath`: `System32\bash.exe` or `Sysnative\bash.exe`
+/// under the Windows directory `system_root`, in any case and with either
+/// slash. A `system_root` that is not drive-absolute matches nothing;
+/// without one, `X:\Windows` on any drive is assumed.
+pub fn is_legacy_wsl_bash_path_under(path: &Path, system_root: Option<&str>) -> bool {
+    let normalized = normalize_windows_path(&path.to_string_lossy()).to_lowercase();
+    if let Some(root) = system_root.filter(|root| !root.is_empty()) {
+        if !is_drive_absolute(root) {
+            return false;
+        }
+        return ["System32", "Sysnative"].iter().any(|directory| {
+            normalized
+                == normalize_windows_path(&format!("{root}\\{directory}\\bash.exe")).to_lowercase()
+        });
+    }
+    if !is_drive_absolute(&normalized) {
         return false;
     }
     let rest = &normalized[3..];
     rest == "windows\\system32\\bash.exe" || rest == "windows\\sysnative\\bash.exe"
+}
+
+/// Whether `path` opens with a drive letter, a colon, and a separator.
+fn is_drive_absolute(path: &str) -> bool {
+    matches!(path.as_bytes(), [drive, b':', b'\\' | b'/', ..] if drive.is_ascii_alphabetic())
+}
+
+/// Node's `path.win32.normalize` for a drive-absolute path: forward
+/// slashes become backslashes, repeated separators collapse, and `.` and
+/// `..` segments resolve. Any other path is returned with its slashes
+/// turned, which no drive-absolute path then equals.
+fn normalize_windows_path(path: &str) -> String {
+    let path = path.replace('/', "\\");
+    if !is_drive_absolute(&path) {
+        return path;
+    }
+    let mut parts: Vec<&str> = Vec::new();
+    for part in path[3..].split('\\') {
+        match part {
+            "" | "." => {}
+            ".." => {
+                parts.pop();
+            }
+            part => parts.push(part),
+        }
+    }
+    format!("{}{}", &path[..3], parts.join("\\"))
+}
+
+/// Pi's `shellPathExists`, `access(F_OK)`. On Windows, `Path::exists`
+/// follows reparse points and so rejects runnable Microsoft Store aliases;
+/// the alias itself is accepted there.
+pub fn shell_path_exists(path: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        path.exists() || std::fs::symlink_metadata(path).is_ok()
+    }
+    #[cfg(not(windows))]
+    {
+        path.exists()
+    }
 }
 
 /// Pi's `getBashShellConfig`: the legacy WSL launcher reads the command
@@ -68,7 +125,7 @@ pub fn bash_shell_config(shell: PathBuf) -> ShellConfig {
 /// `sh`. `Err` holds Pi's message.
 pub fn get_shell_config(custom_shell_path: Option<&Path>) -> Result<ShellConfig, String> {
     if let Some(path) = custom_shell_path.filter(|path| !path.as_os_str().is_empty()) {
-        if path.exists() {
+        if shell_path_exists(path) {
             return Ok(bash_shell_config(path.to_path_buf()));
         }
         return Err(format!("Custom shell path not found: {}", path.display()));
@@ -78,14 +135,14 @@ pub fn get_shell_config(custom_shell_path: Option<&Path>) -> Result<ShellConfig,
         windows_shell_config(
             std::env::var("ProgramFiles").ok().as_deref(),
             std::env::var("ProgramFiles(x86)").ok().as_deref(),
-            |path| path.exists(),
+            shell_path_exists,
             || find_executable_on_path("bash.exe"),
         )
     }
     #[cfg(not(windows))]
     {
         let bin_bash = Path::new("/bin/bash");
-        if bin_bash.exists() {
+        if shell_path_exists(bin_bash) {
             return Ok(bash_shell_config(bin_bash.to_path_buf()));
         }
         if let Some(bash) = find_executable_on_path("bash") {
@@ -137,17 +194,20 @@ pub fn find_executable_on_path(executable: &str) -> Option<PathBuf> {
 }
 
 fn is_executable_file(path: &Path) -> bool {
-    let Ok(metadata) = std::fs::metadata(path) else {
-        return false;
-    };
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        metadata.is_file() && metadata.permissions().mode() & 0o111 != 0
+        std::fs::metadata(path)
+            .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
     }
     #[cfg(not(unix))]
     {
-        metadata.is_file()
+        // A Microsoft Store alias is a reparse point `metadata` cannot
+        // follow; Pi accepts it from `where` through `shellPathExists`.
+        match std::fs::metadata(path) {
+            Ok(metadata) => metadata.is_file(),
+            Err(_) => std::fs::symlink_metadata(path).is_ok_and(|metadata| !metadata.is_dir()),
+        }
     }
 }
 

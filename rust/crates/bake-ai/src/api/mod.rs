@@ -128,6 +128,13 @@ pub(crate) fn truthy(value: Option<&Value>) -> bool {
     }
 }
 
+/// Whether JavaScript's `text.trim()` would be empty: Unicode white space
+/// other than U+0085, and U+FEFF.
+pub(crate) fn js_blank(text: &str) -> bool {
+    text.chars()
+        .all(|ch| (ch.is_whitespace() && ch != '\u{85}') || ch == '\u{feff}')
+}
+
 /// A non-empty string member.
 pub(crate) fn non_empty_str(value: Option<&Value>) -> Option<&str> {
     value

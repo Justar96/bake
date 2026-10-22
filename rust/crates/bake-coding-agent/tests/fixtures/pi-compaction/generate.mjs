@@ -1,4 +1,4 @@
-// Record Pi v1.1.0 (abe508e1b89912adde45528136c3221eb69acdd7) compaction as the oracle:
+// Record Pi v1.4.0 (4a080252f06caf63a525d7873c5d94d3c23887e0) compaction as the oracle:
 // the summarization prompts and request options, the summaries `compact()` and
 // `generateBranchSummary()` build, the serialized conversation, token estimates,
 // cut points, `prepareCompaction()`, and the summary messages `convertToLlm()` sends.
@@ -15,9 +15,9 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const root = resolve(process.argv[2]);
-const revision = "abe508e1b89912adde45528136c3221eb69acdd7";
+const revision = "4a080252f06caf63a525d7873c5d94d3c23887e0";
 if (execFileSync("git", ["-C", root, "rev-parse", "HEAD"], { encoding: "utf8" }).trim() !== revision) {
-	throw new Error("Use Pi v1.1.0 at the recorded revision");
+	throw new Error("Use Pi v1.4.0 at the recorded revision");
 }
 const here = dirname(fileURLToPath(import.meta.url));
 const load = (path) => import(pathToFileURL(`${root}/packages/coding-agent/src/${path}`));

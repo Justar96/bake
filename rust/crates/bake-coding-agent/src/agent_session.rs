@@ -1260,21 +1260,15 @@ type ApprovalHook = Arc<dyn Fn(&crate::permissions::ApprovalEntry) + Send + Sync
 type ApprovalAdmittedHook =
     Arc<dyn Fn(&crate::permissions::ApprovalEntry, &mut SessionManager) + Send + Sync>;
 
-/// Pi's bookkeeping after persisting: the last assistant message and the
-/// turn's tool results, overflow recovery, and the end of a successful
-/// retry.
+/// Pi's bookkeeping after persisting: the last assistant message, overflow
+/// recovery, and the end of a successful retry.
 fn track_message(core: &Core, message: &LiveMessage, entry_id: Option<String>) {
-    if message.as_tool_result().is_some() {
-        core.state().turn_tool_results.push(entry_id);
-        return;
-    }
     let Some(assistant) = message.as_assistant() else {
         return;
     };
     let finished_retry = {
         let mut state = core.state();
         state.last_assistant = Some((assistant.clone(), entry_id));
-        state.turn_tool_results.clear();
         if !matches!(
             assistant.stop_reason,
             bake_ai::StopReason::Error | bake_ai::StopReason::Length
@@ -1857,79 +1851,72 @@ impl AgentSession {
                         queue.announce(&core);
                     }
                 }
-                match event {
-                    AgentEvent::MessageEnd { message } => {
-                        let entry_id = persist_message(&core, &persist_error, message).await;
-                        if matches!(entry_id, Ok(Some(_)))
-                            && let Some(id) = job_notices::observation_id(message)
+                if let AgentEvent::MessageEnd { message } = event {
+                    let entry_id = persist_message(&core, &persist_error, message).await;
+                    if matches!(entry_id, Ok(Some(_)))
+                        && let Some(id) = job_notices::observation_id(message)
+                    {
+                        #[cfg(test)]
                         {
-                            #[cfg(test)]
-                            {
-                                let hook = core.hooks().after_job_observation.take();
-                                if let Some(hook) = hook {
-                                    hook();
-                                }
+                            let hook = core.hooks().after_job_observation.take();
+                            if let Some(hook) = hook {
+                                hook();
                             }
-                            jobs.acknowledge(id);
-                            pending_notices
-                                .lock()
-                                .unwrap_or_else(PoisonError::into_inner)
-                                .retain(|notice| {
-                                    job_notices::notice_id(notice.details.as_ref()) != Some(id)
-                                });
                         }
-                        // A posted notice waiting for a prompt is delivered
-                        // once: its durable entry takes it off the list.
-                        if matches!(entry_id, Ok(Some(_)))
-                            && let bake_agent::AgentMessage::Custom(custom) = message
-                            && let Some(custom) = custom.as_any().downcast_ref::<CustomMessage>()
-                            && custom.custom_type != job_notices::NOTICE_TYPE
-                        {
-                            pending_notices
-                                .lock()
-                                .unwrap_or_else(PoisonError::into_inner)
-                                .retain(|notice| {
-                                    notice.custom_type != custom.custom_type
-                                        || notice.details != custom.details
-                                });
-                        }
-                        if entry_id.is_err() {
-                            let failed = persist_error
-                                .lock()
-                                .unwrap_or_else(PoisonError::into_inner)
-                                .clone();
-                            write_failure
-                                .lock()
-                                .unwrap_or_else(PoisonError::into_inner)
-                                .get_or_insert(failed.unwrap_or_default());
-                            if let Some(agent) = agent.upgrade() {
-                                agent.abort();
-                            }
-                            return;
-                        }
-                        let entry_id = entry_id.unwrap_or_default();
-                        if let Some(journal) = run_journal::current(&executions)
-                            && let Err(error) = journal.message(message, entry_id.clone()).await
-                        {
-                            persist_error
-                                .lock()
-                                .unwrap_or_else(PoisonError::into_inner)
-                                .get_or_insert(error.clone());
-                            if let Some(control) = core.control() {
-                                control.fail(error);
-                            }
-                            if let Some(agent) = agent.upgrade() {
-                                agent.abort();
-                            }
-                            return;
-                        }
-                        track_message(&core, message, entry_id);
+                        jobs.acknowledge(id);
+                        pending_notices
+                            .lock()
+                            .unwrap_or_else(PoisonError::into_inner)
+                            .retain(|notice| {
+                                job_notices::notice_id(notice.details.as_ref()) != Some(id)
+                            });
                     }
-                    AgentEvent::TurnEnd { .. } => {
-                        let mut state = core.state();
-                        state.last_tool_results = std::mem::take(&mut state.turn_tool_results);
+                    // A posted notice waiting for a prompt is delivered
+                    // once: its durable entry takes it off the list.
+                    if matches!(entry_id, Ok(Some(_)))
+                        && let bake_agent::AgentMessage::Custom(custom) = message
+                        && let Some(custom) = custom.as_any().downcast_ref::<CustomMessage>()
+                        && custom.custom_type != job_notices::NOTICE_TYPE
+                    {
+                        pending_notices
+                            .lock()
+                            .unwrap_or_else(PoisonError::into_inner)
+                            .retain(|notice| {
+                                notice.custom_type != custom.custom_type
+                                    || notice.details != custom.details
+                            });
                     }
-                    _ => {}
+                    if entry_id.is_err() {
+                        let failed = persist_error
+                            .lock()
+                            .unwrap_or_else(PoisonError::into_inner)
+                            .clone();
+                        write_failure
+                            .lock()
+                            .unwrap_or_else(PoisonError::into_inner)
+                            .get_or_insert(failed.unwrap_or_default());
+                        if let Some(agent) = agent.upgrade() {
+                            agent.abort();
+                        }
+                        return;
+                    }
+                    let entry_id = entry_id.unwrap_or_default();
+                    if let Some(journal) = run_journal::current(&executions)
+                        && let Err(error) = journal.message(message, entry_id.clone()).await
+                    {
+                        persist_error
+                            .lock()
+                            .unwrap_or_else(PoisonError::into_inner)
+                            .get_or_insert(error.clone());
+                        if let Some(control) = core.control() {
+                            control.fail(error);
+                        }
+                        if let Some(agent) = agent.upgrade() {
+                            agent.abort();
+                        }
+                        return;
+                    }
+                    track_message(&core, message, entry_id);
                 }
                 match event {
                     AgentEvent::AgentEnd { messages } => {

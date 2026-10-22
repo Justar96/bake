@@ -829,9 +829,7 @@ impl PromptExecution {
             .rev()
             .find_map(|message| message.as_assistant().cloned());
         if let Some(last) = last {
-            self.core
-                .check_compaction(&last, None, false, Vec::new())
-                .await?;
+            self.core.check_compaction(&last, None, false).await?;
         }
         if let Some(outcome) = control.stopped() {
             return Ok(outcome);
@@ -923,8 +921,6 @@ impl PromptExecution {
         {
             let mut state = core.state();
             state.last_assistant = None;
-            state.last_tool_results.clear();
-            state.turn_tool_results.clear();
         }
         let installed = self.hooks.get().cloned();
         if let Some(installed) = &installed {
@@ -1039,13 +1035,7 @@ impl PromptExecution {
     /// Pi's `_handlePostAgentRun`: whether to continue the agent.
     async fn handle_post_agent_run(&self) -> Result<bool, String> {
         let core = &self.core;
-        let (last, tool_results) = {
-            let mut state = core.state();
-            (
-                state.last_assistant.take(),
-                std::mem::take(&mut state.last_tool_results),
-            )
-        };
+        let last = core.state().last_assistant.take();
         if core.aborted() {
             core.finish_cancelled_retry();
             return Ok(false);
@@ -1075,10 +1065,7 @@ impl PromptExecution {
                 });
             }
         }
-        if core
-            .check_compaction(&message, entry_id, true, tool_results)
-            .await?
-        {
+        if core.check_compaction(&message, entry_id, true).await? {
             return Ok(!core.aborted());
         }
         // The loop drains both queues before `agent_end`; messages queued

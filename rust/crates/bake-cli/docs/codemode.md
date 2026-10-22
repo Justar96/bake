@@ -70,7 +70,7 @@ The store is for small state such as IDs, cursors, or summaries. One value may h
 ## Limits
 
 - A script's VM has 256 MB of memory. Running out throws `InternalError: out of memory`; filter or aggregate large data instead of accumulating it.
-- At most two scripts run at once in one bake process. A cancelled script occupies its slot until its engine stops. At capacity, new scripts fail immediately; retry after an earlier one ends.
+- At most two scripts run at once in one bake process; set `BAKE_CODEMODE_MAX_WORKERS` (or `DSH_CODEMODE_MAX_WORKERS`) to a positive integer before bake starts to allow more. A cancelled script occupies its slot until its engine stops. At capacity, a new script waits for a slot in arrival order. The wait counts toward its `timeout_ms`, and after 60 seconds, or once `timeout_ms` passes, it fails without starting; Esc also stops it before it starts.
 - A script may have at most 1024 calls waiting for an answer, whose arguments together take at most 64 MiB. Passing either fails the script; await calls before making more, or batch them.
 - A script that waits on a promise that can never settle (no tool call pending) fails immediately, since there are no timers.
 - Scripts cannot start other `codemode` scripts.

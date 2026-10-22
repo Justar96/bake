@@ -87,7 +87,7 @@ The model surface follows Pi v1.3.0 exactly, adapted only where Bake lacks a fea
   - VM heap: 256 MiB.
   - Output: 16 Mi characters and 100000 output calls.
   - Store: 256 Ki characters per value and 1 Mi in total.
-  - At most two scripts run at once per process; at capacity a new script fails at once.
+  - At most two scripts run at once per process, or `BAKE_CODEMODE_MAX_WORKERS` (then `DSH_CODEMODE_MAX_WORKERS`), read once. At capacity a new script waits in arrival order for at most 60 seconds, as Pi v1.4.0 (#11184); the wait counts toward `timeout_ms`.
   - No deadline unless `timeout_ms` sets one; Esc and session shutdown abort the script.
 
 ## Architecture
@@ -323,5 +323,6 @@ Slices 1 and 2 touch nothing the model sees. Slice 3 changes no request while no
 - Slice 4 notes: `max_concurrent_read_tools` does not cap read-only nested calls.
 - Slices 4 and 5 (2026-10-19): the tool follows Pi's `extensions/codemode` byte for byte in what the model sees, with these deviations: no `models` namespace or grammar (D42); every Bake tool is direct, so in `on` mode the description lists no tools, as Pi's would; MCP namespaces keep `-` (`mcp__my-server`); output budgets count characters, not UTF-16 units; namespaces sort by code point; at most 16 nested calls run at once; calls still queued when a script stops are listed as cancelled with the id `<call>/?`; a failed store write appends a note instead of failing the result. The hidden declarations of `only` mode are derived from the log: `only` is in effect exactly when the recorded `codemode` declaration contains `Nested tools:`. Reviews found and the slices fixed: scripts seeing descriptions with the `Codemode:` paragraph, nested ids in start order, Esc reporting calls as errors, and in the terminal an approval head that clipped its queue count. The terminal's block replaces 0.3's `run_code` script row.
 - The measurement program compiled with `cargo +1.99.0 build --release --offline` against the workspace's cached Wasmtime 49.0.3 sources. Slice 1 turns it into the engine's first tests instead of committing it.
+- Pi v1.4.0 (2026-10-22, `4a080252f06caf63a525d7873c5d94d3c23887e0`) changed only `extensions/codemode/execute.ts` here: a script at capacity waits for a slot instead of failing (#11184). `tools::codemode` holds the slots in a fair Tokio semaphore whose permit moves into the script's `ExitHook`, so a slot stays taken until the thread exits, and reads the limit once per process through the public `max_codemode_workers` from `BAKE_CODEMODE_MAX_WORKERS`, then `DSH_CODEMODE_MAX_WORKERS`, where Pi reads `PI_CODEMODE_MAX_WORKERS` on every call. A script takes its slot before the engine and the store load, so it reads the store as it stands once it starts. Pi's case for a launch that resumes after its result timed out has no counterpart: nothing settles a Bake script while it loads. `packages/codemode` and the `quickjs-wasi` pin are unchanged.
 
 </details>

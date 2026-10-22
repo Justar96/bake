@@ -10,6 +10,14 @@ classification, provider retry, error bodies, hashing, text and transcript
 helpers, token estimates, message transforms, simple options, JSON-schema
 constrained sampling, the faux provider, and the openai-completions,
 openai-responses, and anthropic-messages protocols.
+From release v1.4.0, revision 4a080252f06caf63a525d7873c5d94d3c23887e0: the
+retry and overflow classifiers of src/utils/retry.ts and overflow.ts, the
+top-level tool boundary of resolveTranscriptTools in src/utils/transcript.ts,
+the blank tool-result placeholders of src/api/openai-completions.ts and
+openai-responses-shared.ts, and the ChatGPT workspace limit hint of
+src/api/openai-responses.ts, with the cases of test/retry.test.ts,
+test/overflow.test.ts, test/transcript-tool-changes.test.ts, and
+test/openai-responses-empty-tool-result.test.ts that the Rust tests name.
 --------------------------------------------------------------------------------
 MIT License
 

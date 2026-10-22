@@ -463,15 +463,11 @@ async fn overflow_recovery_runs_once() {
     let (events, _subscription) = record(&session);
     let core = &session.core;
     assert_eq!(
-        core.check_compaction(&overflow, None, true, Vec::new())
-            .await,
+        core.check_compaction(&overflow, None, true).await,
         Ok(false)
     );
     assert!(core.state().overflow_recovery_attempted);
-    assert_eq!(
-        core.check_compaction(&later, None, true, Vec::new()).await,
-        Ok(false)
-    );
+    assert_eq!(core.check_compaction(&later, None, true).await, Ok(false));
     assert_eq!(
         of_type(&events, &["compaction_start", "compaction_end"]),
         [json!({
@@ -1411,9 +1407,9 @@ fn llm_of_stored(messages: &[StoredMessage]) -> Vec<Message> {
 }
 
 /// A written session whose last turn called two tools and has both
-/// results, as an overflowing tool turn leaves it, and the ids of the
-/// attempt and its results.
-fn tool_turn(dir: &TempDir) -> (SessionManager, String, Vec<String>) {
+/// results, as an overflowing tool turn leaves it, the attempt, and the ids
+/// of the attempt and its results.
+fn tool_turn(dir: &TempDir) -> (SessionManager, AssistantMessage, String, Vec<String>) {
     let mut manager = file_session(dir);
     let stored =
         |value: Value| StoredMessage::from_json(value.as_object().expect("object").clone());
@@ -1422,14 +1418,18 @@ fn tool_turn(dir: &TempDir) -> (SessionManager, String, Vec<String>) {
             json!({"role": "user", "content": "go", "timestamp": 1}),
         ))
         .expect("user");
-    let attempt = manager
-        .append_message(stored(json!({"role": "assistant", "content": [
-            {"type": "toolCall", "id": "c1", "name": "read", "arguments": {}},
-            {"type": "toolCall", "id": "c2", "name": "read", "arguments": {}},
-        ], "api": "faux", "provider": "faux", "model": "faux-1",
-            "usage": serde_json::to_value(usage(10, 1)).expect("usage"),
-            "stopReason": "toolUse", "timestamp": 2})))
-        .expect("attempt");
+    let message = stored(json!({"role": "assistant", "content": [
+        {"type": "toolCall", "id": "c1", "name": "read", "arguments": {}},
+        {"type": "toolCall", "id": "c2", "name": "read", "arguments": {}},
+    ], "api": "faux", "provider": "faux", "model": "faux-1",
+        "usage": serde_json::to_value(usage(10, 1)).expect("usage"),
+        "stopReason": "toolUse", "timestamp": 2}));
+    let assistant = message
+        .to_agent()
+        .as_assistant()
+        .cloned()
+        .expect("assistant");
+    let attempt = manager.append_message(message).expect("attempt");
     let results = ["c1", "c2"]
         .iter()
         .map(|call| {
@@ -1440,7 +1440,7 @@ fn tool_turn(dir: &TempDir) -> (SessionManager, String, Vec<String>) {
                 .expect("result")
         })
         .collect();
-    (manager, attempt, results)
+    (manager, assistant, attempt, results)
 }
 
 // Pi `_omitRecoveryAttempt` with Bake's group: the attempt and its results
@@ -1450,7 +1450,7 @@ fn tool_turn(dir: &TempDir) -> (SessionManager, String, Vec<String>) {
 async fn a_recovery_omission_is_one_group_projecting_as_pi() {
     let dir = TempDir::new("omission-group");
     let h = harness(200_000);
-    let (manager, attempt, results) = tool_turn(&dir);
+    let (manager, assistant, attempt, results) = tool_turn(&dir);
     let file = manager.session_file().expect("file").to_path_buf();
     // Pi's edits on a copy of the same entries.
     let mut pi = SessionManager::in_memory(
@@ -1466,11 +1466,9 @@ async fn a_recovery_omission_is_one_group_projecting_as_pi() {
         .await
         .expect("session");
     let before = read_entries(&file).len();
-    let mut targets = vec![(Some(attempt.clone()), true)];
-    targets.extend(results.iter().map(|id| (Some(id.clone()), true)));
     session
         .core
-        .omit_recovery_attempt(targets)
+        .omit_recovery_attempt(&assistant, Some(attempt.clone()))
         .await
         .expect("omitted");
     let read = read_entries(&file);
@@ -1499,7 +1497,7 @@ async fn a_partly_written_omission_stops_and_shows_what_the_file_holds() {
     use crate::session::{Fault, FaultKind};
     let dir = TempDir::new("omission-partial");
     let h = harness(200_000);
-    let (manager, attempt, results) = tool_turn(&dir);
+    let (manager, assistant, attempt, results) = tool_turn(&dir);
     let file = manager.session_file().expect("file").to_path_buf();
     let session = AgentSession::create(options(&h, manager, Settings::default()))
         .await
@@ -1509,11 +1507,9 @@ async fn a_partly_written_omission_stops_and_shows_what_the_file_holds() {
         line: 1,
         kind: FaultKind::Tear(9),
     });
-    let mut targets = vec![(Some(attempt.clone()), true)];
-    targets.extend(results.iter().map(|id| (Some(id.clone()), true)));
     let error = session
         .core
-        .omit_recovery_attempt(targets)
+        .omit_recovery_attempt(&assistant, Some(attempt))
         .await
         .expect_err("fails");
     assert!(error.contains("1 of 3 grouped entries written"), "{error}");
@@ -1559,7 +1555,7 @@ async fn a_failed_overflow_omission_publishes_its_prefix_and_requests_nothing() 
     ] {
         let dir = TempDir::new(&format!("omission-overflow-{name}"));
         let h = harness(200_000);
-        let (manager, attempt, results) = tool_turn(&dir);
+        let (manager, assistant, attempt, results) = tool_turn(&dir);
         let file = manager.session_file().expect("file").to_path_buf();
         let session = AgentSession::create(options(&h, manager, Settings::default()))
             .await
@@ -1567,15 +1563,12 @@ async fn a_failed_overflow_omission_publishes_its_prefix_and_requests_nothing() 
         let (events, _subscription) = record(&session);
         let before = read_entries(&file).len();
         lock(&session.session).arm_group_fault(Fault { line: 1, kind });
-        let overflow = error_response("prompt is too long", bake_ai::now_ms());
+        // The stored attempt as an overflow: its calls find its results.
+        let mut overflow = error_response("prompt is too long", bake_ai::now_ms());
+        overflow.content = assistant.content.clone();
         let error = session
             .core
-            .check_compaction(
-                &overflow,
-                Some(attempt.clone()),
-                true,
-                results.iter().cloned().map(Some).collect(),
-            )
+            .check_compaction(&overflow, Some(attempt.clone()), true)
             .await
             .expect_err("fails");
         assert!(
@@ -1615,6 +1608,70 @@ async fn a_failed_overflow_omission_publishes_its_prefix_and_requests_nothing() 
         session.shutdown().await;
         assert_eq!(std::fs::read(&file).expect("read"), bytes);
     }
+}
+
+// Pi v1.4.0 `test/suite/regressions/11227-recovery-omits-tool-results.test.ts`:
+// "pre-prompt recovery of a resumed length stop omits the truncated call and
+// its result". The result is found in the session, not in the run that
+// recorded it, so an unpaired result never reaches the provider.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn pre_prompt_recovery_of_a_resumed_length_stop_omits_its_tool_results() {
+    let dir = TempDir::new("recovery-11227");
+    let h = harness(100_000);
+    let mut manager = file_session(&dir);
+    let stored =
+        |value: Value| StoredMessage::from_json(value.as_object().expect("object").clone());
+    let now = bake_ai::now_ms();
+    manager
+        .append_message(stored(
+            json!({"role": "user", "content": "check status", "timestamp": now - 1000}),
+        ))
+        .expect("user");
+    manager
+        .append_message(stored(json!({"role": "assistant", "content": [
+            {"type": "toolCall", "id": "call_truncated", "name": "bash", "arguments": {"command": "echo"}},
+        ], "api": "faux", "provider": "faux", "model": "faux-1",
+            "usage": serde_json::to_value(usage(100, 16)).expect("usage"),
+            "stopReason": "length", "timestamp": now - 500})))
+        .expect("truncated");
+    manager
+        .append_message(stored(
+            json!({"role": "toolResult", "toolCallId": "call_truncated",
+            "toolName": "bash", "isError": true,
+            "content": [{"type": "text", "text": "Not executed: output token limit reached."}],
+            "timestamp": now - 400}),
+        ))
+        .expect("result");
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    h.faux.set_responses(vec![
+        capture(&seen, faux_assistant_message("## Goal\nsummary")),
+        capture(&seen, faux_assistant_message("done")),
+    ]);
+    let session = AgentSession::create(options(&h, manager, keep_one()))
+        .await
+        .expect("session");
+    session
+        .prompt("continue", Vec::new())
+        .await
+        .expect("prompt");
+    let contexts = seen.lock().unwrap_or_else(PoisonError::into_inner).clone();
+    let request = contexts
+        .iter()
+        .rfind(|context| user_texts(context).iter().any(|text| text == "continue"))
+        .expect("the prompt's request");
+    assert!(
+        !request
+            .messages()
+            .iter()
+            .any(|message| matches!(message, Message::ToolResult(_))),
+        "{:?}",
+        request.messages()
+    );
+    assert!(!request.messages().iter().any(|message| matches!(
+        message,
+        Message::Assistant(assistant) if assistant.stop_reason == StopReason::Length
+    )));
+    session.shutdown().await;
 }
 
 // Bake: a retry whose omission cannot be written makes no further request:

@@ -17,8 +17,8 @@ use std::time::{Duration, Instant};
 use bake_agent::{AgentTool, AgentToolResult, AgentToolUpdateCallback, BoxFuture};
 use bake_ai::{AbortController, UserContentBlock};
 use bake_coding_agent::tools::bash::shell::{
-    CommandTransport, ShellConfig, bash_shell_config, get_shell_config, is_legacy_wsl_bash_path,
-    windows_shell_config,
+    CommandTransport, ShellConfig, bash_shell_config, get_shell_config,
+    is_legacy_wsl_bash_path_under, windows_shell_config,
 };
 use bake_coding_agent::tools::bash::{
     BashExecError, BashExecOptions, BashModel, BashOperations, BashToolContext, BashToolOptions,
@@ -453,11 +453,15 @@ fn legacy_wsl_bash_reads_the_command_from_stdin() {
             command_transport: CommandTransport::Stdin,
         }
     );
+    // Without `%SystemRoot%`, `X:\Windows` on any drive.
     for path in [
         "c:/windows/sysnative/BASH.EXE",
         "D:\\Windows\\System32\\bash.exe",
     ] {
-        assert!(is_legacy_wsl_bash_path(Path::new(path)), "{path}");
+        assert!(
+            is_legacy_wsl_bash_path_under(Path::new(path), None),
+            "{path}"
+        );
     }
     for path in [
         "C:\\Program Files\\Git\\bin\\bash.exe",
@@ -466,7 +470,30 @@ fn legacy_wsl_bash_reads_the_command_from_stdin() {
         "/bin/bash",
         "",
     ] {
-        assert!(!is_legacy_wsl_bash_path(Path::new(path)), "{path}");
+        assert!(
+            !is_legacy_wsl_bash_path_under(Path::new(path), None),
+            "{path}"
+        );
+    }
+}
+
+/// Pi v1.4.0 `test/windows-shell-config.test.ts`, "legacy WSL bash
+/// detection" (#9490): launchers under the actual Windows directory.
+#[test]
+fn legacy_wsl_bash_is_found_under_the_windows_directory() {
+    for (system_root, shell, stdin) in [
+        (Some("D:\\WinNT\\"), "d:/WINNT/System32/BASH.EXE", true),
+        (Some("D:\\WinNT"), "D:\\WinNT\\Sysnative\\bash.exe", true),
+        (None, "E:\\Windows\\System32\\bash.exe", true),
+        (Some("D:\\WinNT"), "D:\\Git\\bin\\bash.exe", false),
+        (Some("D:\\WinNT"), "E:\\Windows\\System32\\bash.exe", false),
+        (Some("WinNT"), "C:\\Windows\\System32\\bash.exe", false),
+    ] {
+        assert_eq!(
+            is_legacy_wsl_bash_path_under(Path::new(shell), system_root),
+            stdin,
+            "{system_root:?} / {shell}"
+        );
     }
 }
 

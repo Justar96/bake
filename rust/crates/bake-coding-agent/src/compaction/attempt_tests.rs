@@ -40,7 +40,6 @@ async fn local_cancel_during_debit_completion_prevents_dispatch_in_the_same_poll
     let result = generate_summary(
         &summarize_this(),
         &test_model(false, 8192),
-        2000,
         None,
         None,
         &stream_fn,
@@ -98,7 +97,6 @@ async fn retries_retain_attempt_usage_and_identity_when_the_next_dispatch_fails(
     let result = generate_summary(
         &summarize_this(),
         &test_model(false, 8192),
-        2000,
         None,
         None,
         &stream_fn,
@@ -173,7 +171,6 @@ async fn absent_provider_usage_is_not_reported_as_a_zero_cost_attempt() {
     generate_summary(
         &summarize_this(),
         &test_model(false, 8192),
-        2000,
         None,
         None,
         &stream_fn,

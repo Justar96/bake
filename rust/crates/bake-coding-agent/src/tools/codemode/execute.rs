@@ -1,13 +1,13 @@
 //! Runs one codemode script, Pi v1.3.0's
 //! `src/extensions/codemode/execute.ts` (MIT; see the crate's `NOTICE`)
-//! without the `models` globals.
+//! without the `models` globals, with v1.4.0's queue for a free script
+//! slot.
 
 use std::collections::{HashMap, VecDeque};
 use std::io::Write;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use bake_agent::{
     AgentTool, AgentToolCallOutcome, AgentToolResult, AgentToolUpdateCallback, BoxFuture,
@@ -21,6 +21,7 @@ use bake_codemode::{
     to_codemode_identifier,
 };
 use serde_json::{Value, json};
+use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 
 use super::{
@@ -38,10 +39,19 @@ const CHARS_PER_TOKEN: usize = 4;
 const ARGS_PREVIEW_CHARS: usize = 200;
 /// Characters of a nested call's error in its record.
 const ERROR_PREVIEW_CHARS: usize = 500;
-/// Scripts that may run at once in one process, Pi's
-/// `MAX_CONCURRENT_CODEMODE_WORKERS`: a script holds its slot until its
-/// thread has exited.
+/// Scripts that may run at once in one process by default, Pi's
+/// `DEFAULT_MAX_CODEMODE_WORKERS`: a script holds its slot until its thread
+/// has exited.
 pub const MAX_CONCURRENT_CODEMODE_SCRIPTS: usize = 2;
+/// Where Pi reads `PI_CODEMODE_MAX_WORKERS`, Bake reads this, then
+/// [`DSH_CODEMODE_MAX_WORKERS_ENV`].
+pub const BAKE_CODEMODE_MAX_WORKERS_ENV: &str = "BAKE_CODEMODE_MAX_WORKERS";
+/// Read when [`BAKE_CODEMODE_MAX_WORKERS_ENV`] is unset or blank.
+pub const DSH_CODEMODE_MAX_WORKERS_ENV: &str = "DSH_CODEMODE_MAX_WORKERS";
+/// How long a script waits for a free slot before failing, Pi's
+/// `CODEMODE_WORKER_WAIT_MS`. It bounds the wait when every slot is held by
+/// a script that waits on another script, such as a subagent's.
+const CODEMODE_WORKER_WAIT: Duration = Duration::from_secs(60);
 /// A script's tool calls that run at once; the rest wait in the order the
 /// script made them, so a `Promise.all` over a thousand items does not start
 /// a thousand processes. Pi has no limit.
@@ -52,50 +62,111 @@ pub const CODEMODE_ABORT_MESSAGE: &str = "This operation was aborted";
 /// The prefix of the files output is saved to.
 const OUTPUT_PREFIX: &str = "bake-codemode";
 
-/// Scripts alive in the process, Pi's `activeCodemodeWorkers`.
-#[cfg(not(test))]
-static ACTIVE_SCRIPTS: AtomicUsize = AtomicUsize::new(0);
+/// Pi's `maxCodemodeWorkers`: the slot limit an environment setting gives
+/// when it is a positive integer, as JavaScript's `Number` reads it, else
+/// [`MAX_CONCURRENT_CODEMODE_SCRIPTS`]. A blank setting counts as unset.
+/// Pi reads it on every call; Bake reads it once, when the process's first
+/// script asks for a slot.
+pub fn max_codemode_workers(env: impl Fn(&str) -> Option<std::ffi::OsString>) -> usize {
+    [BAKE_CODEMODE_MAX_WORKERS_ENV, DSH_CODEMODE_MAX_WORKERS_ENV]
+        .into_iter()
+        .filter_map(env)
+        .map(|value| value.to_string_lossy().trim().to_owned())
+        .find(|value| !value.is_empty())
+        .and_then(|value| value.parse::<f64>().ok())
+        .filter(|value| *value >= 1.0 && value.fract() == 0.0)
+        .map_or(MAX_CONCURRENT_CODEMODE_SCRIPTS, |value| {
+            if value >= Semaphore::MAX_PERMITS as f64 {
+                Semaphore::MAX_PERMITS
+            } else {
+                value as usize
+            }
+        })
+}
 
-/// A count of live scripts that admits at most
-/// [`MAX_CONCURRENT_CODEMODE_SCRIPTS`].
-#[derive(Clone, Copy)]
-pub(super) struct Admission(&'static AtomicUsize);
+/// Script slots: at most a limit of scripts alive, the rest waiting in
+/// arrival order (`tokio`'s semaphore is fair), Pi's
+/// `activeCodemodeWorkers` and `codemodeWorkerWaiters`.
+#[derive(Clone)]
+pub(super) struct Admission {
+    slots: Arc<Semaphore>,
+    limit: usize,
+}
+
+/// Why [`Admission::reserve`] gave no slot.
+enum Refusal {
+    Aborted,
+    TimedOut,
+}
 
 impl Admission {
-    /// The process's count.
+    /// The process's slots.
     #[cfg(not(test))]
     pub(super) fn process() -> Self {
-        Self(&ACTIVE_SCRIPTS)
+        static SLOTS: std::sync::LazyLock<Admission> = std::sync::LazyLock::new(|| {
+            Admission::new(max_codemode_workers(|name| std::env::var_os(name)))
+        });
+        SLOTS.clone()
     }
 
     /// Unit tests run in parallel on their own threads, so each test
-    /// thread counts its own scripts; the admission cases use their own
-    /// counts.
+    /// thread has its own slots; the admission cases use their own.
     #[cfg(test)]
     pub(super) fn process() -> Self {
         thread_local! {
-            static COUNT: &'static AtomicUsize = Box::leak(Box::new(AtomicUsize::new(0)));
+            static SLOTS: Admission = Admission::new(MAX_CONCURRENT_CODEMODE_SCRIPTS);
         }
-        Self(COUNT.with(|count| *count))
+        SLOTS.with(Admission::clone)
     }
 
+    /// `limit` slots of their own.
+    pub(super) fn new(limit: usize) -> Self {
+        Self {
+            slots: Arc::new(Semaphore::new(limit)),
+            limit,
+        }
+    }
+
+    /// The slots, for tests that hold some.
     #[cfg(test)]
-    pub(super) fn new(count: &'static AtomicUsize) -> Self {
-        Self(count)
+    pub(super) fn slots(&self) -> &Arc<Semaphore> {
+        &self.slots
     }
 
-    /// A slot, released by the returned hook once the script's thread has
-    /// exited; `None` at capacity.
-    fn acquire(self) -> Option<ExitHook> {
-        self.0
-            .try_update(Ordering::SeqCst, Ordering::SeqCst, |active| {
-                (active < MAX_CONCURRENT_CODEMODE_SCRIPTS).then_some(active + 1)
-            })
-            .ok()?;
-        let count = self.0;
-        Some(ExitHook::new(move || {
-            count.fetch_sub(1, Ordering::SeqCst);
-        }))
+    fn limit(&self) -> usize {
+        self.limit
+    }
+
+    /// Pi's `reserveCodemodeWorker`: a slot, waiting in arrival order for
+    /// at most `wait` while all are taken. The returned hook releases it
+    /// once the script's thread has exited; dropped unused, it releases
+    /// it at once.
+    async fn reserve(
+        &self,
+        signal: Option<&AbortSignal>,
+        wait: Duration,
+    ) -> Result<ExitHook, Refusal> {
+        if signal.is_some_and(AbortSignal::aborted) {
+            return Err(Refusal::Aborted);
+        }
+        let cancelled = async {
+            match signal {
+                Some(signal) => signal.cancelled().await,
+                None => std::future::pending().await,
+            }
+        };
+        // An aborted script never starts, even when a slot came free in the
+        // same poll; dropping the acquire returns a slot it was given.
+        tokio::select! {
+            biased;
+            () = cancelled => Err(Refusal::Aborted),
+            permit = Arc::clone(&self.slots).acquire_owned() => match permit {
+                Ok(permit) => Ok(ExitHook::new(move || drop(permit))),
+                // The semaphore is never closed.
+                Err(_) => Err(Refusal::TimedOut),
+            },
+            () = tokio::time::sleep(wait) => Err(Refusal::TimedOut),
+        }
     }
 }
 
@@ -699,43 +770,76 @@ struct Ran {
     output: Vec<OutputItem>,
 }
 
-/// Starts the script and serves its calls until it ends.
+/// Why a script never started: no slot came free, or it was aborted while
+/// waiting for one.
+struct NotStarted(String);
+
+/// Pi's wait for a slot: it counts toward the script's `timeout_ms`, so the
+/// script then has what remains, at least a millisecond.
+async fn reserve_slot(
+    admission: &Admission,
+    signal: Option<&AbortSignal>,
+    deadline_ms: Option<u64>,
+) -> Result<(ExitHook, Option<u64>), NotStarted> {
+    let wait = deadline_ms.map_or(CODEMODE_WORKER_WAIT, |deadline| {
+        CODEMODE_WORKER_WAIT.min(Duration::from_millis(deadline))
+    });
+    let waiting = Instant::now();
+    let reserved = admission.reserve(signal, wait).await;
+    let waited_ms = waiting.elapsed().as_secs_f64() * 1000.0;
+    match reserved {
+        Ok(on_exit) => Ok((
+            on_exit,
+            deadline_ms.map(|deadline| ((deadline as f64 - waited_ms).round() as u64).max(1)),
+        )),
+        Err(Refusal::Aborted) => Err(NotStarted(format!(
+            "Script aborted: {CODEMODE_ABORT_MESSAGE}"
+        ))),
+        Err(Refusal::TimedOut) => Err(NotStarted(match deadline_ms {
+            Some(deadline) if Duration::from_millis(deadline) <= CODEMODE_WORKER_WAIT => format!(
+                "Script timed out: Execution timed out after {deadline} ms while waiting for a free codemode worker"
+            ),
+            _ => format!(
+                "No codemode worker became free within {} seconds. All {} workers, shared by every session in this process, are held by other scripts. Retry after they finish.",
+                CODEMODE_WORKER_WAIT.as_secs(),
+                admission.limit()
+            ),
+        })),
+    }
+}
+
+/// Starts the script once a slot is free and serves its calls until it
+/// ends.
 async fn run_script(
-    source: Source,
+    mut source: Source,
     catalog: &Catalog,
     signal: Option<&AbortSignal>,
     nested: &NestedToolExecutor,
     records: &Records,
     admission: Admission,
-) -> Ran {
-    let failed = |failure| Ran {
-        result: Err(failure),
-        output: Vec::new(),
+) -> Result<Ran, NotStarted> {
+    let failed = |failure| {
+        Ok(Ran {
+            result: Err(failure),
+            output: Vec::new(),
+        })
     };
-    let aborted = || Failure::Aborted {
-        message: CODEMODE_ABORT_MESSAGE.to_owned(),
-    };
+    // Held from here; dropped on an early return, it frees the slot.
+    let (on_exit, timeout_ms) = reserve_slot(&admission, signal, source.options.timeout_ms).await?;
+    source.options.timeout_ms = timeout_ms;
     let work = catalog.host.as_ref().and_then(|host| host.work());
     let engine = match engine(work.as_ref()).await {
         Ok(engine) => engine,
         Err(message) => return failed(Failure::Protocol { message }),
     };
+    // Read once the script has its slot, so it sees what scripts that ran
+    // while it waited wrote.
     let store = match &catalog.host {
         Some(host) => match host.load_store().await {
             Ok(store) => store,
             Err(message) => return failed(Failure::Protocol { message }),
         },
         None => Default::default(),
-    };
-    if signal.is_some_and(AbortSignal::aborted) {
-        return failed(aborted());
-    }
-    let Some(on_exit) = admission.acquire() else {
-        return failed(Failure::Protocol {
-            message: format!(
-                "Codemode worker limit reached ({MAX_CONCURRENT_CODEMODE_SCRIPTS} workers are still running or shutting down). Retry after they exit."
-            ),
-        });
     };
     let mut request = ExecuteRequest::new("");
     request.source = source;
@@ -857,10 +961,10 @@ async fn run_script(
     }
     while running.join_next().await.is_some() {}
     drop(run);
-    Ran {
+    Ok(Ran {
         result: outcome.result.clone(),
         output,
-    }
+    })
 }
 
 /// Pi's `executeCodemode`: runs one script. Without a session (a detached
@@ -886,7 +990,7 @@ pub(super) async fn execute_codemode(
     .await
 }
 
-/// [`execute_codemode`] with the given admission count.
+/// [`execute_codemode`] with the given slots.
 pub(super) async fn execute_with(
     tool_call_id: String,
     params: Value,
@@ -952,7 +1056,7 @@ pub(super) async fn execute_with(
         host,
     };
 
-    let ran = run_script(
+    let ran = match run_script(
         source,
         &catalog,
         signal.as_ref(),
@@ -960,7 +1064,28 @@ pub(super) async fn execute_with(
         &records,
         admission,
     )
-    .await;
+    .await
+    {
+        Ok(ran) => ran,
+        // Pi's result for a script that never got a worker: no output and
+        // no calls to summarize.
+        Err(NotStarted(error)) => {
+            return Ok(AgentToolResult {
+                content: vec![
+                    UserContentBlock::Text(TextContent::new(format!(
+                        "Script failed\nWall time {:.1} seconds\nOutput:\n",
+                        started.elapsed().as_secs_f64()
+                    ))),
+                    UserContentBlock::Text(TextContent::new(format!(
+                        "Script error:\n{error}\n\nThe script did not start."
+                    ))),
+                ],
+                details: Some(codemode_details(&records.snapshot(), None)),
+                is_error: true,
+                ..AgentToolResult::default()
+            });
+        }
+    };
     let mut calls = records.snapshot();
     for call in &mut calls {
         if call.status == CodemodeNestedCallStatus::Running {

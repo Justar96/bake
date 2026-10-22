@@ -280,10 +280,11 @@ pub(crate) fn failed(error: String) -> McpConfig {
     }
 }
 
-/// Parses one configuration file's text; `source` names it in errors.
+/// Parses one configuration file's text, after any UTF-8 BOM (Pi v1.4.0,
+/// #11191); `source` names it in errors.
 pub fn parse_mcp_config(text: &str, source: &Path) -> McpConfig {
     let shown = source.display();
-    let parsed: Value = match serde_json::from_str(text) {
+    let parsed: Value = match serde_json::from_str(crate::auth_storage::strip_bom(text)) {
         Ok(value) => value,
         Err(error) => return failed(format!("{shown}: {error}")),
     };
@@ -488,6 +489,23 @@ mod tests {
 
     fn parse(value: Value) -> McpConfig {
         parse_mcp_config(&value.to_string(), &PathBuf::from("/home/u/.bake/mcp.json"))
+    }
+
+    // Pi v1.4.0: "reads and edits mcp.json files that start with a UTF-8
+    // BOM" (#11191), reading only: Bake does not edit the file.
+    #[test]
+    fn reads_a_file_that_starts_with_a_bom() {
+        let config = parse_mcp_config(
+            "\u{feff}{\"mcpServers\":{\"demo\":{\"command\":\"echo\",\"enabled\":false}}}\n",
+            &PathBuf::from("/home/u/.bake/mcp.json"),
+        );
+        assert_eq!(config.errors, Vec::<String>::new());
+        let names: Vec<_> = config
+            .servers
+            .iter()
+            .map(|server| server.name.as_str())
+            .collect();
+        assert_eq!(names, ["demo"]);
     }
 
     // Pi: "merges global and trusted project servers and validates

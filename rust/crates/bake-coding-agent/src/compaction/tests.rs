@@ -676,7 +676,6 @@ async fn reasoning_models_use_the_thinking_level() {
     let result = generate_summary_with_usage(
         &summarize_this(),
         &test_model(true, 8192),
-        2000,
         None,
         None,
         &mock.stream_fn(),
@@ -702,7 +701,6 @@ async fn summaries_route_fresh_sessions_without_caching() {
         let text = generate_summary(
             &summarize_this(),
             &test_model(false, 8192),
-            2000,
             None,
             None,
             &stream_fn,
@@ -791,7 +789,6 @@ async fn tool_calls_are_rejected() {
     let result = generate_summary_with_usage(
         &summarize_this(),
         &test_model(false, 8192),
-        2000,
         None,
         None,
         &mock.stream_fn(),
@@ -824,7 +821,6 @@ async fn length_stops_are_rejected() {
     let result = generate_summary_with_usage(
         &summarize_this(),
         &test_model(false, 8192),
-        2000,
         None,
         None,
         &mock.stream_fn(),
@@ -860,7 +856,6 @@ async fn reasoning_is_left_unset_when_off_or_unsupported() {
         let text = generate_summary(
             &summarize_this(),
             &test_model(reasoning, 8192),
-            2000,
             None,
             None,
             &mock.stream_fn(),
@@ -875,11 +870,12 @@ async fn reasoning_is_left_unset_when_off_or_unsupported() {
     }
 }
 
-// Pi: "clamps compaction summary maxTokens to the model output cap".
+// Pi v1.4.0: "combines usage from split-turn summaries". Neither request
+// sets an output cap, so both use the model's limit (#9512).
 #[tokio::test]
-async fn summary_max_tokens_are_clamped_to_the_model() {
+async fn split_turn_summaries_combine_usage_without_an_output_cap() {
     let mock = Mock::new();
-    let mut preparation = split_preparation(None, 500_000, true);
+    let mut preparation = split_preparation(None, 16384, true);
     preparation.tokens_before = 600_000;
     let result = compact(
         &preparation,
@@ -900,7 +896,31 @@ async fn summary_max_tokens_are_clamped_to_the_model() {
         })
     );
     let caps: Vec<Option<u64>> = mock.options().iter().map(|o| o.base.max_tokens).collect();
-    assert_eq!(caps, [Some(128_000), Some(128_000)]);
+    assert_eq!(caps, [None, None]);
+}
+
+// Pi v1.4.0: "applies custom instructions to the turn prefix summary of a
+// split turn" (#11058).
+#[tokio::test]
+async fn a_split_turn_prefix_summary_takes_the_custom_instructions() {
+    let mock = Mock::new();
+    compact(
+        &split_preparation(Some("previous checkpoint"), 2000, false),
+        &test_model(false, 8192),
+        Some("keep migration decisions"),
+        &mock.stream_fn(),
+        &key(),
+    )
+    .await
+    .unwrap_or_else(|error| panic!("{error}"));
+    let calls = mock
+        .calls
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone();
+    assert_eq!(calls.len(), 1);
+    let prompt = serde_json::to_string(&calls[0].0.messages()).unwrap_or_default();
+    assert!(prompt.contains("Additional focus: keep migration decisions"));
 }
 
 #[tokio::test]
@@ -909,7 +929,6 @@ async fn a_stream_function_that_fails_to_start_is_an_error() {
     let result = generate_summary(
         &summarize_this(),
         &test_model(false, 8192),
-        2000,
         None,
         None,
         &stream_fn,
@@ -955,7 +974,6 @@ async fn a_stream_function_failing_after_a_retry_reports_no_finish() {
     let result = generate_summary(
         &summarize_this(),
         &test_model(false, 8192),
-        2000,
         None,
         None,
         &stream_fn,
@@ -998,7 +1016,6 @@ async fn transient_summary_errors_retry_under_the_policy() {
     let text = generate_summary(
         &summarize_this(),
         &test_model(false, 8192),
-        2000,
         None,
         None,
         &mock.stream_fn(),
@@ -1070,7 +1087,6 @@ async fn run_control_charges_each_summary_retry() {
     let result = generate_summary(
         &summarize_this(),
         &test_model(false, 8192),
-        2000,
         None,
         None,
         &mock.stream_fn(),

@@ -1,10 +1,11 @@
 //! The self-contained HTML export `/share` uploads, adapted from Pi v1.3.0
 //! `packages/coding-agent/src/core/export-html/index.ts` (`generateHtml`,
-//! `generateThemeVars`, `deriveExportColors`, and the session data of
-//! `exportSessionToHtml`).
+//! with v1.4.0's CJK emphasis script, `generateThemeVars`,
+//! `deriveExportColors`, and the session data of `exportSessionToHtml`).
 //!
 //! The page is Pi's: `template.html`, `template.css`, and `template.js` are
-//! Pi's files, and `vendor/marked.min.js` (MIT) and
+//! Pi v1.4.0's files, and `vendor/marked.min.js`,
+//! `vendor/marked-cjk-friendly.min.js` (both MIT), and
 //! `vendor/highlight.min.js` (BSD-3-Clause) are the copies Pi vendors, all
 //! embedded verbatim; the crate's `NOTICE` reproduces their licenses. The
 //! session travels base64-encoded as JSON, and the page's own script renders
@@ -26,6 +27,7 @@ const TEMPLATE_HTML: &str = include_str!("template.html");
 const TEMPLATE_CSS: &str = include_str!("template.css");
 const TEMPLATE_JS: &str = include_str!("template.js");
 const MARKED_JS: &str = include_str!("vendor/marked.min.js");
+const MARKED_CJK_FRIENDLY_JS: &str = include_str!("vendor/marked-cjk-friendly.min.js");
 const HIGHLIGHT_JS: &str = include_str!("vendor/highlight.min.js");
 
 /// Pi's `dark` theme tokens as `getResolvedThemeColors("dark")` gives them:
@@ -176,6 +178,7 @@ pub fn generate_html(data: &SessionData) -> String {
         .replacen("{{JS}}", TEMPLATE_JS, 1)
         .replacen("{{SESSION_DATA}}", &encoded, 1)
         .replacen("{{MARKED_JS}}", MARKED_JS, 1)
+        .replacen("{{MARKED_CJK_FRIENDLY_JS}}", MARKED_CJK_FRIENDLY_JS, 1)
         .replacen("{{HIGHLIGHT_JS}}", HIGHLIGHT_JS, 1)
 }
 
@@ -212,6 +215,7 @@ mod tests {
             "{{JS}}",
             "{{SESSION_DATA}}",
             "{{MARKED_JS}}",
+            "{{MARKED_CJK_FRIENDLY_JS}}",
             "{{HIGHLIGHT_JS}}",
             "{{THEME_VARS}}",
             "{{BODY_BG}}",
@@ -225,7 +229,8 @@ mod tests {
         assert!(!html.contains("<script>alert(1)</script>"));
         assert!(html.contains("--userMessageBg: #213b49;"));
         assert!(html.contains("--body-bg: #21252c;"));
-        assert!(html.contains("marked v18.0.5"));
+        assert!(html.contains("marked v18.0.11"));
+        assert!(html.contains("marked-cjk-friendly v0.1.2"));
         assert!(html.contains("Highlight.js v11.9.0"));
         // highlight.js's `$&` stays as written (Pi's `replace` rewrites it).
         assert!(html.contains("[-+*\\/?!$&|:<=>@^~]"));
@@ -268,5 +273,82 @@ mod tests {
         assert!(TEMPLATE_JS.contains("replace(/[\\x00-\\x1f\\x7f]/g, '')"));
         assert!(TEMPLATE_JS.contains("escapeHtml(href)"));
         assert!(!TEMPLATE_JS.contains("${img.mimeType}"));
+    }
+
+    /// Pi v1.4.0's `test/export-html-cjk.test.ts` (#10154): the page's own
+    /// scripts, run by Node as Pi's test runs them, render emphasis next to
+    /// CJK punctuation and keep CommonMark's rules for other text. Skipped
+    /// without `node`.
+    #[test]
+    fn renders_emphasis_next_to_cjk_punctuation() {
+        let Some(node) = crate::tools::process::find_executable(&["node"]) else {
+            eprintln!("skipped: node is not on PATH");
+            return;
+        };
+        let dir = crate::test_support::TempDir::new("export-cjk");
+        let page = dir.join("out.html");
+        let data = SessionData {
+            header: Some(json!({"type": "session", "id": "cjk-test"})),
+            entries: Vec::new(),
+            leaf_id: None,
+            system_prompt: None,
+            tools: None,
+        };
+        std::fs::write(&page, generate_html(&data)).expect("write page");
+        let cases = [
+            (
+                "**这是测试。**后面",
+                "<p><strong>这是测试。</strong>后面</p>\n",
+            ),
+            (
+                "**一句话说清：**一台机器",
+                "<p><strong>一句话说清：</strong>一台机器</p>\n",
+            ),
+            (
+                "**要点到此为止。**20 小时",
+                "<p><strong>要点到此为止。</strong>20 小时</p>\n",
+            ),
+            ("字**「引用」**字", "<p>字<strong>「引用」</strong>字</p>\n"),
+            ("*斜体。*后面", "<p><em>斜体。</em>后面</p>\n"),
+            ("**end.**Then next", "<p>**end.**Then next</p>\n"),
+        ];
+        // Pi's `loadMarkdownParser`: every script but the viewer runs in a
+        // bare context, and the viewer returns its parser before it renders.
+        let script = r#"
+const { readFileSync } = require("node:fs");
+const { createContext, runInContext } = require("node:vm");
+const html = readFileSync(process.argv[1], "utf8");
+const sessionData = html.match(/<script id="session-data" type="application\/json">([^<]+)<\/script>/)?.[1];
+const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1]);
+const viewer = scripts.pop();
+const context = createContext({
+  atob,
+  TextDecoder,
+  URLSearchParams,
+  document: { getElementById: () => ({ textContent: sessionData }), querySelector: () => null },
+  window: { location: { search: "" } },
+});
+for (const script of scripts) runInContext(script, context);
+const parse = runInContext(
+  viewer.replace("function safeMarkedParse(", "return safeMarkedParse; function safeMarkedParse("),
+  context,
+);
+process.stdout.write(JSON.stringify(JSON.parse(process.argv[2]).map((text) => parse(text))));
+"#;
+        let inputs = serde_json::to_string(&cases.map(|(input, _)| input)).expect("inputs");
+        let output = std::process::Command::new(node)
+            .arg("-e")
+            .arg(script)
+            .arg(&page)
+            .arg(inputs)
+            .output()
+            .expect("node");
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let rendered: Vec<String> = serde_json::from_slice(&output.stdout).expect("rendered");
+        assert_eq!(rendered, cases.map(|(_, html)| html));
     }
 }

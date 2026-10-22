@@ -1,7 +1,8 @@
 //! Context-overflow detection.
 //!
-//! Ported from Pi `packages/ai/src/utils/overflow.ts` (v1.1.0), patterns
-//! included. See that file for the provider each pattern comes from.
+//! Ported from Pi `packages/ai/src/utils/overflow.ts` (v1.1.0; the HTTP 413
+//! pattern from v1.4.0), patterns included. See that file for the provider
+//! each pattern comes from.
 
 use std::sync::LazyLock;
 
@@ -35,6 +36,9 @@ const OVERFLOW_PATTERN_SOURCES: &[&str] = &[
     r"context[_ ]length[_ ]exceeded",
     r"too many tokens",
     r"token limit exceeded",
+    // HTTP 413 is a request-size overflow whatever the provider or body:
+    // a raw status or `formatProviderError`'s prefix, not one in the body.
+    r"^(?:[\w -]+ API error \(413\):|413(?:\s|:|$))",
 ];
 
 const NON_OVERFLOW_PATTERN_SOURCES: &[&str] = &[
@@ -211,18 +215,64 @@ mod tests {
         }
     }
 
-    // "only treats bodyless 400 and 413 errors as overflow for Cerebras"
+    // "only treats bodyless 400 errors as overflow for Cerebras"
     #[test]
     fn cerebras_bodyless_errors() {
-        for text in ["400 status code (no body)", "413 status code (no body)"] {
-            assert!(is_context_overflow(
-                &error_message(text, "cerebras"),
-                Some(131072)
-            ));
-            assert!(!is_context_overflow(
-                &error_message(text, "opencode-go"),
-                Some(1000000)
-            ));
+        let text = "400 status code (no body)";
+        assert!(is_context_overflow(
+            &error_message(text, "cerebras"),
+            Some(131072)
+        ));
+        assert!(!is_context_overflow(
+            &error_message(text, "opencode-go"),
+            Some(1000000)
+        ));
+    }
+
+    // "detects provider-independent request-size overflow"
+    #[test]
+    fn detects_request_size_overflow() {
+        for text in [
+            "github-copilot API error (413): {\"message\":\"failed to parse request\",\"code\":\"\"}",
+            "custom-provider API error (413): Payload Too Large",
+            "413 {\"error\":{\"message\":\"failed to parse request\",\"code\":\"\"}}",
+            "413",
+            "413 status code (no body)",
+        ] {
+            let message = error_message(text, "ollama");
+            assert!(is_context_overflow(&message, Some(1_000_000)), "{text}");
+            assert!(is_context_overflow(&message, None), "{text}");
+        }
+    }
+
+    // "does not mistake unrelated errors for request-size overflow"
+    #[test]
+    fn rejects_other_statuses_and_413_in_the_body() {
+        for text in [
+            "github-copilot API error (400): {\"message\":\"failed to parse request\",\"code\":\"\"}",
+            "custom-provider API error (429): Too many requests",
+            "github-copilot API error (400): {\"message\":\"failed to parse request: invalid value 413\"}",
+            "custom-provider API error (400): upstream mentioned OpenAI API error (413): invalid input",
+            "custom-provider API error (4130): invalid input",
+            "4130 failed to parse request",
+        ] {
+            assert!(
+                !is_context_overflow(&error_message(text, "ollama"), None),
+                "{text}"
+            );
+        }
+    }
+
+    // "limits HTTP-status matching to failed responses"
+    #[test]
+    fn request_size_overflow_needs_a_failed_response() {
+        let mut message = error_message(
+            "OpenAI API error (413): {\"message\":\"failed to parse request\"}",
+            "ollama",
+        );
+        for stop in [StopReason::Aborted, StopReason::Stop] {
+            message.stop_reason = stop;
+            assert!(!is_context_overflow(&message, None));
         }
     }
 

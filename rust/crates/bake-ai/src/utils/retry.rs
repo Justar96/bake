@@ -1,9 +1,9 @@
 //! Agent-level retry of transient provider failures.
 //!
-//! Ported from Pi `packages/ai/src/utils/retry.ts` (v1.1.0): the retryable
-//! and non-retryable classifiers, the backoff, and `retryAssistantCall`.
-//! Pi's callbacks may be asynchronous; here one synchronous observer receives
-//! each [`RetryEvent`].
+//! Ported from Pi `packages/ai/src/utils/retry.ts` (v1.1.0; classifiers from
+//! v1.4.0): the retryable and non-retryable classifiers, the backoff, and
+//! `retryAssistantCall`. Pi's callbacks may be asynchronous; here one
+//! synchronous observer receives each [`RetryEvent`].
 
 use std::future::Future;
 use std::sync::LazyLock;
@@ -24,6 +24,7 @@ const NON_RETRYABLE_PROVIDER_LIMIT_ERRORS: &[&str] = &[
     "quota exceeded",
     "billing",
     "subscription_sharing_usage_limit_exceeded",
+    "subscription_sharing_workplace_individual_usage_limit_exceeded",
 ];
 
 const RETRYABLE_PROVIDER_ERRORS: &[&str] = &[
@@ -34,24 +35,26 @@ const RETRYABLE_PROVIDER_ERRORS: &[&str] = &[
     "model is at capacity",
     "rate.?limit",
     "too many requests",
-    "429",
-    "500",
-    "502",
-    "503",
-    "504",
-    "520",
-    "524",
-    "service.?unavailable",
+    // Pi's `(?<![a-z0-9])...(?![a-z0-9])`: the regex crate has no
+    // lookaround, and only whether it matches is read.
+    "(?:^|[^a-z0-9])(?:429|500|502|503|504|520|524)(?:[^a-z0-9]|$)",
+    "service.?(?:is.?)?(?:temporarily.?)?unavailable",
     "server.?error",
     "internal.?error",
-    "provider.?returned.?error",
+    "provider.?returned.?(?:an.?)?error",
     "exceeded request buffer limit while retrying upstream",
+    "unable to forward upstream",
+    "upstream.?request.?failed",
+    "upstream_stream_read_error",
+    "stream was interrupted",
+    "http/?2 stream failed",
     "network.?error",
     "connection.?error",
     "connection.?refused",
     "connection.?lost",
     "other side closed",
     "fetch failed",
+    "request to \\S+ failed, reason:",
     "getaddrinfo",
     "ENOTFOUND",
     "EAI_AGAIN",
@@ -69,6 +72,7 @@ const RETRYABLE_PROVIDER_ERRORS: &[&str] = &[
     "stream ended before a terminal response event",
     "whitespace characters after the arguments of tool call",
     "http2 request did not get a response",
+    "stream disconnected before completion",
     "pending stream has been canceled",
     "retry delay",
     "you can retry your request",
@@ -328,12 +332,33 @@ mod tests {
             "overloaded_error",
             "520 status code (no body)",
             "524 status code (no body)",
+            // #10965
+            "The service is temporarily unavailable. Please retry later.",
+            "Service unavailable: The service is temporarily unavailable.",
+            // #10842
+            "The upstream provider returned an error",
+            // #10996
+            "request to https://oauth2.googleapis.com/token failed, reason:",
+            "request to https://oauth2.googleapis.com/token failed, reason: connect ECONNREFUSED 127.0.0.1:9",
+            // #10920
+            "unknown: Unable to forward upstream stream",
+            "upstream_error: Upstream request failed",
+            "upstream_stream_read_error: Upstream response stream was interrupted",
+            "Upstream HTTP/2 stream failed",
+            // #11057
+            "stream disconnected before completion: stream closed before response.completed",
+            "503",
+            "HTTP 503: unavailable",
         ] {
             assert!(is_retryable_assistant_error(&error(text)), "{text}");
         }
         for text in [
             "429 quota exceeded",
             "OpenAI API error (429): {\"code\":\"subscription_sharing_usage_limit_exceeded\",\"message\":\"Usage limit reached.\"}",
+            "OpenAI API error (429): {\"code\":\"subscription_sharing_workplace_individual_usage_limit_exceeded\",\"message\":\"Usage limit reached.\"}",
+            // #11057: status codes inside ids or longer numbers.
+            "401 {\"type\":\"error\",\"error\":{\"type\":\"authentication_error\",\"message\":\"invalid x-api-key\"},\"request_id\":\"req_011CU503xyz\"}",
+            "400 image exceeds 5 MB maximum: 5316784 bytes > 5242880 bytes",
         ] {
             assert!(!is_retryable_assistant_error(&error(text)), "{text}");
         }

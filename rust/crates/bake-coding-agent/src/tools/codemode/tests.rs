@@ -1,11 +1,13 @@
 //! Pi v1.3.0's codemode cases that need no session: the description
 //! catalog of `test/tool-search.test.ts`, the loadout and option cases of
 //! `test/suite/agent-session-codemode.test.ts`, `readCodemodeStore`, the
-//! result layout, and `test/codemode-worker-admission.test.ts`, whose
-//! workers are Bake's script threads. The session cases are in
+//! result layout, and v1.4.0's `test/codemode-worker-admission.test.ts`,
+//! whose workers are Bake's script threads. Its case for a launch that
+//! resumes after its result timed out has no counterpart: Bake's script
+//! takes its slot before it loads the engine, and nothing settles it
+//! meanwhile. The session cases are in
 //! `agent_session/codemode_tests.rs`.
 
-use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, Mutex};
 
 use bake_agent::{AgentTool, AgentToolResult, AgentToolUpdateCallback, ToolContext};
@@ -853,7 +855,6 @@ async fn discovery_without_tools_finds_nothing() {
 async fn publishes_the_running_script_before_its_first_call() {
     let updates: Arc<Mutex<Vec<AgentToolResult>>> = Arc::default();
     let seen = Arc::clone(&updates);
-    static COUNT: AtomicUsize = AtomicUsize::new(0);
     let result = execute_with(
         "c".to_owned(),
         json!({ "code": "return 1" }),
@@ -861,7 +862,7 @@ async fn publishes_the_running_script_before_its_first_call() {
         AgentToolUpdateCallback::new(move |partial| seen.lock().unwrap().push(partial)),
         ToolContext::detached(),
         None,
-        Admission::new(&COUNT),
+        Admission::new(MAX_CONCURRENT_CODEMODE_SCRIPTS),
     )
     .await
     .expect("result");
@@ -872,84 +873,176 @@ async fn publishes_the_running_script_before_its_first_call() {
     assert_eq!(updates[0].details, Some(json!({ "calls": [] })));
 }
 
-/// Pi's `codemode-worker-admission.test.ts`, with Bake's script threads as
-/// the workers: an already-aborted script takes no slot, and a slot is
-/// released when the thread exits, not when the result returns.
-#[tokio::test]
-async fn admits_two_scripts_and_releases_a_slot_when_its_thread_exits() {
-    static COUNT: AtomicUsize = AtomicUsize::new(0);
-    let run = |code: &'static str, signal: Option<bake_ai::AbortSignal>| {
-        execute_with(
-            "worker-admission".to_owned(),
-            json!({ "code": code }),
-            signal,
-            AgentToolUpdateCallback::ignore(),
-            ToolContext::detached(),
-            None,
-            Admission::new(&COUNT),
-        )
-    };
-    // Two slots held, as by scripts whose threads are still exiting.
-    COUNT.store(
-        MAX_CONCURRENT_CODEMODE_SCRIPTS,
-        std::sync::atomic::Ordering::SeqCst,
-    );
-    let blocked = run("return 3", None).await.expect("result");
-    assert!(blocked.is_error);
-    assert_eq!(blocked.details, Some(json!({ "calls": [] })));
-    assert!(result_text(&blocked).contains(
-        "Script sandbox failed: Codemode worker limit reached (2 workers are still running or shutting down). Retry after they exit."
-    ));
-    let controller = bake_ai::AbortController::new();
-    controller.abort();
-    let aborted = run("while (true) {}", Some(controller.signal()))
-        .await
-        .expect("result");
-    assert!(result_text(&aborted).contains("Script aborted: This operation was aborted"));
-    assert_eq!(COUNT.load(std::sync::atomic::Ordering::SeqCst), 2);
+fn run_admitted(
+    code: &str,
+    signal: Option<bake_ai::AbortSignal>,
+    admission: &Admission,
+) -> impl Future<Output = Result<AgentToolResult, String>> + Send + 'static {
+    execute_with(
+        "worker-admission".to_owned(),
+        json!({ "code": code }),
+        signal,
+        AgentToolUpdateCallback::ignore(),
+        ToolContext::detached(),
+        None,
+        admission.clone(),
+    )
+}
 
-    // Releasing one slot permits exactly one script, whose slot is free
-    // again once its thread has exited.
-    COUNT.store(1, std::sync::atomic::Ordering::SeqCst);
-    let admitted = run("return 42", None).await.expect("result");
-    assert!(!admitted.is_error);
+/// Waits until `free` slots are free, as when the scripts that held the
+/// others have exited.
+async fn wait_for_free_slots(admission: &Admission, free: usize) {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    while COUNT.load(std::sync::atomic::Ordering::SeqCst) != 1 {
+    while admission.slots().available_permits() != free {
         assert!(
             std::time::Instant::now() < deadline,
-            "the slot was not released"
+            "{free} slots never came free"
         );
         tokio::time::sleep(std::time::Duration::from_millis(5)).await;
     }
 }
 
-/// Pi's "admits only two workers from a concurrent burst".
+/// Pi v1.4.0's `codemode-worker-admission.test.ts` "bounds surviving
+/// workers", with Bake's script threads as the workers and the slots the
+/// test holds as threads still exiting: at capacity a script waits instead
+/// of failing (#11184), one aborted or timed out while waiting never
+/// starts, and an admitted script's slot comes free again. The slot goes to
+/// the script's `ExitHook`, which `bake-codemode`'s `tests/codemode/lifetime.rs`
+/// shows runs when the thread exits; this test cannot tell that from the
+/// result returning.
+#[tokio::test]
+async fn a_script_waits_for_a_slot_and_starts_when_one_comes_free() {
+    let admission = Admission::new(MAX_CONCURRENT_CODEMODE_SCRIPTS);
+    let held_one = Arc::clone(admission.slots())
+        .try_acquire_owned()
+        .expect("slot");
+    let held_two = Arc::clone(admission.slots())
+        .try_acquire_owned()
+        .expect("slot");
+
+    let waiting = tokio::spawn(run_admitted("return 3", None, &admission));
+    let controller = bake_ai::AbortController::new();
+    let aborted = tokio::spawn(run_admitted(
+        "while (true) {}",
+        Some(controller.signal()),
+        &admission,
+    ));
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    controller.abort();
+    let aborted = aborted.await.expect("task").expect("result");
+    assert!(aborted.is_error);
+    assert_eq!(aborted.details, Some(json!({ "calls": [] })));
+    assert_eq!(
+        result_text(&aborted),
+        "Script error:\nScript aborted: This operation was aborted\n\nThe script did not start."
+    );
+
+    let timed_out = run_admitted(
+        "// @options: {\"timeout_ms\": 50}\nreturn 1",
+        None,
+        &admission,
+    )
+    .await
+    .expect("result");
+    assert!(timed_out.is_error);
+    assert_eq!(
+        result_text(&timed_out),
+        "Script error:\nScript timed out: Execution timed out after 50 ms while waiting for a free codemode worker\n\nThe script did not start."
+    );
+
+    assert!(!waiting.is_finished());
+    assert_eq!(admission.slots().available_permits(), 0);
+
+    // Freeing one slot admits exactly the waiting script, whose slot is
+    // free again once it has finished.
+    drop(held_one);
+    let admitted = waiting.await.expect("task").expect("result");
+    assert!(!admitted.is_error);
+    assert_eq!(result_text(&admitted), "3");
+    wait_for_free_slots(&admission, 1).await;
+    drop(held_two);
+}
+
+/// An already-aborted script takes no slot and reports that it did not
+/// start, even with a slot free.
+#[tokio::test]
+async fn an_aborted_script_takes_no_slot() {
+    let admission = Admission::new(MAX_CONCURRENT_CODEMODE_SCRIPTS);
+    let controller = bake_ai::AbortController::new();
+    controller.abort();
+    let aborted = run_admitted("return 1", Some(controller.signal()), &admission)
+        .await
+        .expect("result");
+    assert!(aborted.is_error);
+    assert!(
+        result_text(&aborted)
+            .ends_with("Script aborted: This operation was aborted\n\nThe script did not start.")
+    );
+    assert_eq!(
+        admission.slots().available_permits(),
+        MAX_CONCURRENT_CODEMODE_SCRIPTS
+    );
+}
+
+/// Pi's "queues a concurrent burst behind two workers": two scripts of a
+/// burst start and the rest wait, so aborting them all stops two running
+/// scripts and four that never started.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn admits_only_two_scripts_from_a_concurrent_burst() {
-    static COUNT: AtomicUsize = AtomicUsize::new(0);
+async fn queues_a_concurrent_burst_behind_two_scripts() {
+    let admission = Admission::new(MAX_CONCURRENT_CODEMODE_SCRIPTS);
+    let controller = bake_ai::AbortController::new();
     let runs: Vec<_> = (0..6)
         .map(|_| {
-            tokio::spawn(execute_with(
-                "burst".to_owned(),
-                json!({ "code": "// @options: {\"timeout_ms\": 300}\nwhile (true) {}" }),
-                None,
-                AgentToolUpdateCallback::ignore(),
-                ToolContext::detached(),
-                None,
-                Admission::new(&COUNT),
+            tokio::spawn(run_admitted(
+                "while (true) {}",
+                Some(controller.signal()),
+                &admission,
             ))
         })
         .collect();
-    let mut limited = 0;
-    let mut timed_out = 0;
+    wait_for_free_slots(&admission, 0).await;
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    assert!(runs.iter().all(|run| !run.is_finished()));
+    controller.abort();
+    let (mut stopped, mut never_started) = (0, 0);
     for run in runs {
-        let result = run.await.expect("task").expect("result");
-        let text = result_text(&result);
-        if text.contains("Codemode worker limit reached") {
-            limited += 1;
-        } else if text.contains("Script timed out") {
-            timed_out += 1;
+        let text = result_text(&run.await.expect("task").expect("result"));
+        if text.ends_with("The script did not start.") {
+            never_started += 1;
+        } else if text.contains("Script aborted: This operation was aborted") {
+            stopped += 1;
         }
     }
-    assert_eq!((timed_out, limited), (2, 4));
+    assert_eq!((stopped, never_started), (2, 4));
+    wait_for_free_slots(&admission, MAX_CONCURRENT_CODEMODE_SCRIPTS).await;
+}
+
+/// Pi's "reads the limit from PI_CODEMODE_MAX_WORKERS" and "ignores an
+/// invalid PI_CODEMODE_MAX_WORKERS", for Bake's two spellings of the
+/// setting.
+#[test]
+fn reads_the_slot_limit_from_the_environment() {
+    let limit = |bake: Option<&str>, dsh: Option<&str>| {
+        max_codemode_workers(|name| {
+            match name {
+                BAKE_CODEMODE_MAX_WORKERS_ENV => bake,
+                DSH_CODEMODE_MAX_WORKERS_ENV => dsh,
+                _ => None,
+            }
+            .map(Into::into)
+        })
+    };
+    assert_eq!(limit(None, None), 2);
+    assert_eq!(limit(Some("3"), None), 3);
+    assert_eq!(limit(Some(" 4 "), Some("5")), 4);
+    assert_eq!(limit(None, Some("5")), 5);
+    assert_eq!(limit(Some(""), Some("5")), 5);
+    assert_eq!(limit(Some("1e1"), None), 10);
+    for invalid in ["0", "-1", "1.5", "two", "Infinity", "NaN"] {
+        assert_eq!(limit(Some(invalid), Some("5")), 2, "{invalid}");
+    }
+    assert_eq!(
+        limit(Some("1e300"), None),
+        tokio::sync::Semaphore::MAX_PERMITS
+    );
 }

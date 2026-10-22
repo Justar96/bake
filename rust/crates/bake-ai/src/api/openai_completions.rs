@@ -19,8 +19,8 @@ use crate::api::simple_options::{
 };
 use crate::api::transform_messages::transform_messages;
 use crate::api::{
-    count, error_message, non_empty_str, sanitize_id_chars, spawn_http_stream, spawn_stream,
-    truncate_units, truthy,
+    count, error_message, js_blank, non_empty_str, sanitize_id_chars, spawn_http_stream,
+    spawn_stream, truncate_units, truthy,
 };
 use crate::http::{
     HttpRequest, SdkErrorShape, header_layer, join_url, merge_headers, send, user_agent,
@@ -43,7 +43,9 @@ use crate::utils::hash::short_hash;
 use crate::utils::json_parse::{parse_json_strict, parse_streaming_json_object};
 use crate::utils::text::{get_system_message_text, render_system_message_update};
 use crate::utils::tool_argument_guard::{ArgumentScan, DEFAULT_MAX_TOOL_ARGUMENT_WHITESPACE};
-use crate::utils::transcript::{resolve_transcript, resolve_transcript_tools};
+use crate::utils::transcript::{
+    TranscriptToolSupport, resolve_transcript, resolve_transcript_tools,
+};
 
 /// Options of the completions protocol.
 #[derive(Debug, Clone, Default)]
@@ -479,6 +481,16 @@ fn image_url(mime_type: &str, data: &str) -> Value {
     json!({ "type": "image_url", "image_url": { "url": format!("data:{mime_type};base64,{data}") } })
 }
 
+/// Tool messages anchor additions only where mid-conversation system
+/// messages and tool additions are both supported.
+fn tool_support(compat: &ResolvedCompletionsCompat) -> TranscriptToolSupport {
+    if compat.supports_mid_convo_system_messages && compat.supports_mid_convo_tool_additions {
+        TranscriptToolSupport::Additions
+    } else {
+        TranscriptToolSupport::None
+    }
+}
+
 /// Pi's `convertMessages`: the transcript as Chat Completions messages.
 pub fn convert_messages(
     model: &Model,
@@ -489,10 +501,8 @@ pub fn convert_messages(
     let normalize =
         |id: &str, _: &Model, _: &AssistantMessage| normalize_completions_tool_call_id(model, id);
     let transformed = transform_messages(normalized.messages(), model, Some(&normalize));
-    let (_, anchors_additions) = resolve_transcript_tools(
-        normalized.messages(),
-        compat.supports_mid_convo_system_messages && compat.supports_mid_convo_tool_additions,
-    );
+    let folded = resolve_transcript_tools(normalized.messages(), tool_support(compat))
+        .folded_system_messages;
     let instruction_role = if model.reasoning && compat.supports_developer_role {
         "developer"
     } else {
@@ -501,6 +511,9 @@ pub fn convert_messages(
     let mut params: Vec<Value> = Vec::new();
     let mut last_role: Option<&str> = None;
     let mut index = 0;
+    // `transform_messages` keeps system messages in order, so their
+    // position matches the transcript's.
+    let mut system_index = 0;
     while let Some(message) = transformed.get(index) {
         if compat.requires_assistant_after_tool_result
             && last_role == Some("toolResult")
@@ -512,11 +525,12 @@ pub fn convert_messages(
         }
         match message {
             Message::System(system) => {
-                let added = if index > 0 && anchors_additions {
+                let added = if system_index >= folded {
                     system.tools_added.clone().unwrap_or_default()
                 } else {
                     Vec::new()
                 };
+                system_index += 1;
                 if !added.is_empty() {
                     params
                         .push(json!({ "role": "system", "tools": convert_tools(&added, compat)? }));
@@ -573,7 +587,9 @@ pub fn convert_messages(
                         .content
                         .iter()
                         .any(|block| matches!(block, UserContentBlock::Image(_)));
-                    let text = if !text.is_empty() {
+                    // Whitespace-only output is sent as the placeholder,
+                    // which some providers reject (Pi v1.4.0, #8720).
+                    let text = if !js_blank(&text) {
                         text
                     } else if has_images {
                         "(see attached image)".to_owned()
@@ -828,10 +844,8 @@ pub fn build_params(
     compat: &ResolvedCompletionsCompat,
     retention: CacheRetention,
 ) -> Result<Value, String> {
-    let (request_tools, _) = resolve_transcript_tools(
-        context.messages(),
-        compat.supports_mid_convo_system_messages && compat.supports_mid_convo_tool_additions,
-    );
+    let request_tools =
+        resolve_transcript_tools(context.messages(), tool_support(compat)).request_tools;
     let mut messages = convert_messages(model, context, compat)?;
     let control = cache_control(compat, retention);
     let mut params = Map::new();
