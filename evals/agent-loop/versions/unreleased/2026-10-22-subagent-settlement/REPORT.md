@@ -9,7 +9,7 @@ Token changes are the candidate's summed total over the base's, over pairs where
 
 ## Regressions
 
-None under the rule in [evals/README.md](../../../../../../eval-candidate/evals/README.md#regressions).
+None under the rule in [evals/README.md](../../../../README.md#regressions).
 
 ## Against `develop+d55ab04388`
 
