@@ -107,7 +107,7 @@ test('rejects an invalid release version', () => {
 })
 
 test('rejects a manifest signed by a key it was not told to trust', () => {
-  // The service's image build sets no key of its own, so a throwaway one fails there.
+  // The service's deploy sets no key of its own, so a throwaway one fails there.
   expect(verify(fixture().root, false, null).stderr).toContain('Release manifest signature does not verify')
 })
 

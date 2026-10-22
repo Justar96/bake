@@ -8,7 +8,7 @@
  * an archive the same way, so a 0.3 updater is kept off this manifest by its
  * route and its signature, not by the shape of its artifact names. `bake`
  * parses these members; `distribution/host/verify-native-manifest.mjs`
- * applies the same rules in the download service's image build.
+ * applies the same rules in the download service's deploy.
  */
 
 import { archiveName, isNativeVersion, isRustTarget, RUST_TARGETS, type RustTarget } from './pack-rust.ts'

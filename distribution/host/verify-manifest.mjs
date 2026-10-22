@@ -4,7 +4,7 @@ import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs'
 const publicRoot = new URL('./public/', import.meta.url)
 const bytes = readFileSync(new URL('latest.json', publicRoot))
 // The committed release key, plus one a local check names in the environment.
-// The service's image build sets no environment, so it accepts only the real key.
+// The service's deploy removes it from the environment, so it accepts only the real key.
 const keys = [readFileSync(new URL('release-key.pub', import.meta.url), 'utf8').trim(), process.env.BAKE_RELEASE_PUBLIC_KEY?.trim()]
   .filter(key => key !== undefined && key !== '')
 let signature
@@ -24,7 +24,7 @@ for (const target of available) {
   if (!supported.includes(target)) throw new Error(`Unsupported release target: ${target}`)
 }
 const targets = process.argv.includes('--complete') ? supported : available
-// The service image holds no archives; its server redirects to the GitHub release.
+// The service holds no archives; it redirects each to the GitHub release.
 const allowMissing = process.argv.includes('--allow-missing-archives')
 const missing = []
 for (const target of targets) {

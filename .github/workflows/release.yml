@@ -220,9 +220,9 @@ jobs:
             ( umask 077; printf '%s\n' "$BAKE_NATIVE_RELEASE_SIGNING_KEY" > "$key" )
             BAKE_NATIVE_RELEASE_SIGNING_KEY_FILE="$key" bun run release:assemble:rust "$VERSION" --complete
           fi
-      # The image build's own gate, run first: the committed native key only.
+      # The deploy's own gate, run first: the committed native key only.
       - run: node distribution/host/verify-native-manifest.mjs --complete --required
-      # The service image refuses to build without a signed latest.json, and
+      # The deploy refuses to stage a site without a signed latest.json, and
       # 0.3 installs keep updating from it, so the served copy goes forward
       # unchanged, checked against the committed 0.3 key.
       - name: Carry the frozen 0.3 route forward
@@ -255,22 +255,17 @@ jobs:
       # The download service redirects every archive to this release, so it
       # is published first.
       - run: gh release edit "$GITHUB_REF_NAME" --draft=false --latest
-      # The archives are left out: the service redirects them to the release.
+      # The Worker stages its site from distribution/host and public/, leaving
+      # the archives out: it redirects each one to the release.
       - name: Deploy the download service
+        working-directory: distribution/host
         env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           REPOSITORY_VISIBILITY: ${{ github.event.repository.visibility }}
         run: |
-          [ -n "$RAILWAY_TOKEN" ] || { echo 'The release environment has no RAILWAY_TOKEN secret' >&2; exit 1; }
+          [ -n "$CLOUDFLARE_API_TOKEN" ] || { echo 'The release environment has no CLOUDFLARE_API_TOKEN secret' >&2; exit 1; }
           [ "$REPOSITORY_VISIBILITY" = public ] || { echo 'The download service redirects to GitHub release assets, which need a public repository' >&2; exit 1; }
-          host="$RUNNER_TEMP/bake-downloads"
-          cp -R distribution/host "$host"
-          rm -rf "$host/public/releases" "$host/public/native/releases"
-          npm install --global @railway/cli@5.62.1
-          railway up "$host" --path-as-root --no-gitignore --ci \
-            --project 28ff3000-7240-4c57-81d1-7bd05445c1ee \
-            --environment production --service bake-downloads \
-            -m "Bake $VERSION ($GITHUB_SHA)"
+          npm run deploy -- --message "Bake $VERSION ($GITHUB_SHA)"
       # A successful deploy is not a release until the public host serves it,
       # with the 0.3 route intact.
       - run: bun run release:verify-live "$VERSION" --complete

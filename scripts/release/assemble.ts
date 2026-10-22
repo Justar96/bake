@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Copy verified platform archives into the Railway download service payload,
+ * Copy verified platform archives into the download service payload,
  * and sign the manifest that lists them.
  *
  * The signing key is Ed25519 PKCS#8 PEM, read from the file

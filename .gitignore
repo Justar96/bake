@@ -27,6 +27,8 @@ dist-exe/
 packages/**/__pycache__/
 .artifacts/
 distribution/host/public/
+distribution/host/site/
+distribution/host/.wrangler/
 .dsh-build/
 .playwright-mcp/
 .orig

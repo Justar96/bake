@@ -3,5 +3,8 @@
   "private": true,
   "type": "module",
   "engines": { "node": ">=24" },
-  "scripts": { "start": "node server.mjs" }
+  "scripts": {
+    "start": "node server.mjs",
+    "deploy": "npx --yes wrangler@4.148.0 deploy"
+  }
 }

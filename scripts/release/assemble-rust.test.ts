@@ -283,13 +283,13 @@ describe('a round trip through the host', () => {
   test('packs, assembles, verifies, serves, and is read back', async () => {
     const { root, sourceDir, publicRoot } = fixture()
     const host = join(root, 'distribution/host')
-    for (const file of ['server.mjs', 'verify-native-manifest.mjs']) copyFileSync(join(ROOT, 'distribution/host', file), join(host, file))
+    for (const file of ['server.mjs', 'handler.mjs', 'verify-native-manifest.mjs']) copyFileSync(join(ROOT, 'distribution/host', file), join(host, file))
     copyFileSync(join(ROOT, NATIVE_KEY_FILE), join(host, 'native-release-key.pub'))
     const signingKey = nativeSigningKey({ root, ephemeral: true, sourceDir })
     const ephemeralKey = readFileSync(join(sourceDir, EPHEMERAL_PUBLIC_KEY), 'utf8').trim()
     const result = await assembleNativeRelease(options({ root, sourceDir, publicRoot, signingKey }))
 
-    // The image build's gate, told to trust the throwaway key as a local check does.
+    // The deploy's gate, told to trust the throwaway key as a local check does.
     const gate = Bun.spawnSync(['node', join(host, 'verify-native-manifest.mjs')], {
       cwd: host, stdout: 'pipe', stderr: 'pipe', timeout: 20_000,
       env: { ...process.env, BAKE_NATIVE_RELEASE_PUBLIC_KEY: ephemeralKey },

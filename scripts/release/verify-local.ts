@@ -104,7 +104,7 @@ async function publishNewer(archive: string, target: string): Promise<{ base: st
   }
   const host = join(temporary, 'newer-host')
   mkdirSync(join(host, 'public/releases', version), { recursive: true })
-  for (const file of ['server.mjs', 'index.html']) cpSync(join(ROOT, 'distribution/host', file), join(host, file))
+  for (const file of ['server.mjs', 'handler.mjs', 'index.html']) cpSync(join(ROOT, 'distribution/host', file), join(host, file))
   for (const file of ['install.sh', 'install.ps1']) cpSync(join(LEGACY_INSTALLERS, file), join(host, file))
   const file = `bake-v${version}-${target}.tar.gz`
   const newer = join(host, 'public/releases', version, file)

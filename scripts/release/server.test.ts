@@ -20,7 +20,7 @@ afterEach(async () => {
 async function serve(redirect?: string, extra: Record<string, string> = {}): Promise<{ base: string; root: string }> {
   const root = mkdtempSync(join(tmpdir(), 'bake-server-test-'))
   roots.push(root)
-  copyFileSync(resolve(import.meta.dir, '../../distribution/host/server.mjs'), join(root, 'server.mjs'))
+  for (const file of ['server.mjs', 'handler.mjs']) copyFileSync(resolve(import.meta.dir, '../../distribution/host', file), join(root, file))
   mkdirSync(join(root, 'public/releases/0.1.1'), { recursive: true })
   mkdirSync(join(root, 'public/native/releases/0.4.0'), { recursive: true })
   writeFileSync(join(root, 'public/latest.json'), '{}')
@@ -65,7 +65,7 @@ test('answers 404 for a missing archive without a redirect host', async () => {
   expect((await fetch(`${base}/releases/0.1.1/bake-v0.1.1-win32-x64.tar.gz`, { redirect: 'manual' })).status).toBe(404)
   expect((await fetch(`${base}/native/releases/0.4.0/bake-v0.4.0-win32-x64.tar.gz`, { redirect: 'manual' })).status).toBe(404)
   // Both routes name an archive alike, and each serves only its own directory,
-  // so the native archive this image holds is not on the 0.3 route.
+  // so the native archive this server holds is not on the 0.3 route.
   expect((await fetch(`${base}/releases/0.4.0/bake-v0.4.0-linux-x64.tar.gz`, { redirect: 'manual' })).status).toBe(404)
 })
 

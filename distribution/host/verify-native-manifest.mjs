@@ -1,6 +1,6 @@
-// The native release gate of the download service's image build: the native
+// The native release gate of the download service's deploy: the native
 // manifest must be signed by the committed native key and describe the
-// archives this image holds. It mirrors verify-manifest.mjs for the native
+// archives the service holds. It mirrors verify-manifest.mjs for the native
 // route, which no 0.3 updater reads, and trusts the native key alone. The
 // grammar names all five platforms so a 0.4.x release can add one; Bake 0.4.0
 // publishes Linux alone (D47), so a manifest naming any other platform is
@@ -24,7 +24,7 @@ if (existsSync(new URL('native-release-key.placeholder', import.meta.url))) {
 }
 const bytes = readFileSync(manifestFile)
 // The committed native key, plus one a local check names in the environment.
-// The service's image build sets no environment, so it accepts only the real key.
+// The service's deploy removes it from the environment, so it accepts only the real key.
 const keys = [readFileSync(new URL('native-release-key.pub', import.meta.url), 'utf8').trim(), process.env.BAKE_NATIVE_RELEASE_PUBLIC_KEY?.trim()]
   .filter(key => key !== undefined && key !== '')
 let signature
@@ -65,7 +65,7 @@ for (const target of available) {
   if (!releaseTargets.includes(target)) throw new Error(`Bake 0.4.0 releases linux-arm64 and linux-x64 only; native ${target} releases arrive in Bake 0.4.x`)
 }
 const targets = complete ? releaseTargets : available
-// The service image holds no archives; its server redirects to the GitHub release.
+// The service holds no archives; it redirects each to the GitHub release.
 const allowMissing = process.argv.includes('--allow-missing-archives')
 const held = []
 for (const target of targets) {

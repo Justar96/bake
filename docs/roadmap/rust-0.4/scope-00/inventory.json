@@ -1334,6 +1334,7 @@
     {"path":"scripts/release/prepare.test.ts","lane":"bun-scripts","owner":"scripts:release","scopes":["16"],"disposition":"replace-tooling","basis":"scripts:release"},
     {"path":"scripts/release/server.test.ts","lane":"bun-scripts","owner":"scripts:release","scopes":["16"],"disposition":"replace-tooling","basis":"scripts:release"},
     {"path":"scripts/release/verify-live.test.ts","lane":"bun-scripts","owner":"scripts:release","scopes":["16"],"disposition":"replace-tooling","basis":"scripts:release"},
+    {"path":"scripts/release/worker.test.ts","lane":"bun-scripts","owner":"scripts:release","scopes":["16"],"disposition":"replace-tooling","basis":"scripts:release"},
     {"path":"scripts/render-persistence-schema.test.ts","lane":"bun-scripts","owner":"scripts:persistence","scopes":["02","03"],"disposition":"reuse-oracle","basis":"scripts:persistence"},
     {"path":"scripts/repo-files.spec.ts","lane":"vitest-runtime","owner":"scripts:workspace","scopes":["01"],"disposition":"replace-tooling","basis":"scripts:workspace"},
     {"path":"scripts/rescope-vendor.test.ts","lane":"bun-scripts","owner":"scripts:workspace","scopes":["01"],"disposition":"replace-tooling","basis":"scripts:workspace"},

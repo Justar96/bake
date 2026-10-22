@@ -165,7 +165,7 @@ describe('the host gate', () => {
     expect(verify(fixture([...releaseTargets, 'win32-x64']).root, ['--complete']).stderr).toContain('native win32-x64 releases arrive in Bake 0.4.x')
   })
 
-  test('a macOS or Windows archive is refused by name whatever the flags, as the image build runs the gate too', () => {
+  test('a macOS or Windows archive is refused by name whatever the flags, as the deploy runs the gate too', () => {
     for (const target of ['darwin-arm64', 'darwin-x64', 'win32-x64']) {
       for (const flags of [[], ['--allow-missing-archives'], ['--required']]) {
         const refused = verify(fixture([...releaseTargets, target]).root, flags)
@@ -202,7 +202,7 @@ describe('the host gate', () => {
   })
 
   test('refuses a manifest signed by a key it was not told to trust, changed after signing, or unsigned', () => {
-    // The service's image build sets no key of its own, so a throwaway one fails there.
+    // The service's deploy sets no key of its own, so a throwaway one fails there.
     expect(verify(fixture().root, [], null).stderr).toContain('Native release manifest signature does not verify')
     const { root } = fixture()
     writeFileSync(join(root, 'public/native/stable.json'), readFileSync(join(root, 'public/native/stable.json'), 'utf8').replace('0.4.0', '0.4.1'))
