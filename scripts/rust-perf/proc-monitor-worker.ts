@@ -1,14 +1,15 @@
-/** The worker behind `TreeMonitor`: reads a process tree's RSS on a fixed period until told to stop. */
-import { hasChildrenFiles, sampleTree, type MonitorRequest, type MonitorResult } from './proc-tree.ts'
+/** The worker behind `TreeMonitor`: reads a process tree's memory on a fixed period until told to stop. */
+import { hasChildrenFiles, identity, sampleTree, type MonitorRequest, type MonitorResult, type ProcStat } from './proc-tree.ts'
 
 declare const self: Worker
 
 let timer: ReturnType<typeof setInterval> | undefined
-let peakRssKiB = 0
+let sampledPeakRssKiB = 0
 let ticks = 0
 let maxGapMs = 0
 let last: number | undefined
-const pids = new Set<number>()
+/** Every process seen, by identity, with its largest `VmHWM` read. */
+const seen = new Map<string, { member: ProcStat; hwmKiB: number }>()
 
 self.addEventListener('message', (event: MessageEvent<MonitorRequest>) => {
   const request = event.data
@@ -21,15 +22,24 @@ self.addEventListener('message', (event: MessageEvent<MonitorRequest>) => {
         last = now
         const sample = sampleTree(request.root, request.procRoot, childrenFiles)
         ticks++
-        peakRssKiB = Math.max(peakRssKiB, sample.rssKiB)
-        for (const member of sample.members) pids.add(member.pid)
+        sampledPeakRssKiB = Math.max(sampledPeakRssKiB, sample.rssKiB)
+        for (const member of sample.members) {
+          const key = identity(member)
+          const hwmKiB = sample.hwmKiB.get(key) ?? 0
+          const entry = seen.get(key)
+          if (entry === undefined) seen.set(key, { member, hwmKiB })
+          else entry.hwmKiB = Math.max(entry.hwmKiB, hwmKiB)
+        }
       }
       read()
       timer = setInterval(read, request.intervalMs)
       self.postMessage({ kind: 'started' })
     } else {
       if (timer !== undefined) clearInterval(timer)
-      const result: MonitorResult = { peakRssKiB, ticks, maxGapMs, pids: [...pids] }
+      let peakHwmKiB = 0
+      for (const entry of seen.values()) peakHwmKiB += entry.hwmKiB
+      const members = [...seen.values()].map(entry => entry.member)
+      const result: MonitorResult = { sampledPeakRssKiB, peakHwmKiB, ticks, maxGapMs, members }
       self.postMessage({ kind: 'result', result })
     }
   } catch (error) {

@@ -14,9 +14,9 @@
  * imported here.
  */
 import { createHash } from 'node:crypto'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
-import { basename, dirname, join, resolve } from 'node:path'
+import { basename, dirname, join, resolve, sep } from 'node:path'
 import { seedPi, PERF_MODEL, PERF_PROVIDER, PI_SESSION_ID } from './seed-pi.ts'
 import { seedSession03, SESSION03_ID } from './seed-session03.ts'
 import { STREAM_DONE } from './model.ts'
@@ -57,6 +57,11 @@ export interface Launch {
 export interface SampleDirs {
   /** The sample's private root. */
   readonly root: string
+  /**
+   * `BAKE_HOME`: a new empty directory for a cold sample, a copy of the
+   * arm's prepared home for a warm one.
+   */
+  readonly home: string
   /** Process caches (`TMPDIR`): private to a cold sample, shared by an arm's warm samples. */
   readonly cache: string
 }
@@ -78,14 +83,36 @@ function baseEnv(dirs: SampleDirs, home: string, user: string): Record<string, s
   return { PATH: process.env.PATH ?? '/usr/bin:/bin', TERM: 'xterm-256color', LANG: 'C.UTF-8', HOME: user, TMPDIR: dirs.cache, BAKE_HOME: home }
 }
 
+/**
+ * The Cargo profile of a binary, from its path under a target directory:
+ * `target/<profile>/bake`, `target/<triple>/<profile>/bake`, or a
+ * `deps` or `examples` directory below either.
+ * @returns null when the path has no `target` directory in that shape.
+ */
+export function cargoProfile(binary: string): string | null {
+  const parts = binary.split(sep)
+  const target = parts.lastIndexOf('target')
+  if (target < 0) return null
+  const below = parts.slice(target + 1, -1).filter((part, index, all) => !(index === all.length - 1 && (part === 'deps' || part === 'examples')))
+  return below.length === 1 || below.length === 2 ? below.at(-1) ?? null : null
+}
+
+/** How a native binary's profile is checked before a run. */
+export interface ArmOptions {
+  /** The Node executable a `ts` arm runs. */
+  readonly node?: string
+  /** Measure a native binary that is not a release build, for a run that proposes and checks no budget. */
+  readonly allowNonRelease?: boolean
+}
+
 /** One arm: how to identify its build, start a sample, and see a turn settle. */
 export interface Arm {
   readonly spec: ArmSpec
-  /** Fail early when the build is missing. */
+  /** Fail early when the build is missing, or a native build is not a release build and that was not allowed. */
   check(): void
   build(): ArmBuild
   /**
-   * Seed `workload` under `dirs.root` and return the command that resumes it.
+   * Seed `workload` under `dirs.home` and `dirs.root` and return the command that resumes it.
    * @param modelUrl - the faux model's base URL.
    */
   prepare(workload: WorkloadSpec, dirs: SampleDirs, modelUrl: string): Promise<Launch>
@@ -93,19 +120,35 @@ export interface Arm {
   settled(sinceSubmit: string): boolean
 }
 
+const RELEASE_HINT = 'build one with: cd rust && cargo build --locked --release -p bake-cli'
+
 class NativeArm implements Arm {
-  constructor(readonly spec: ArmSpec) {}
+  constructor(readonly spec: ArmSpec, private readonly allowNonRelease: boolean) {}
+
+  /** The Cargo profile, from the binary's resolved path; null when the path does not show one. */
+  get profile(): string | null {
+    return existsSync(this.spec.path) ? cargoProfile(realpathSync(this.spec.path)) : null
+  }
 
   check(): void {
-    if (!existsSync(this.spec.path)) throw new Error(`native arm: no binary at ${this.spec.path}; build it with: cd rust && cargo build --locked -p bake-cli`)
+    if (!existsSync(this.spec.path)) throw new Error(`native arm: no binary at ${this.spec.path}; ${RELEASE_HINT}`)
+    const profile = this.profile
+    if (profile === 'release' || this.allowNonRelease) return
+    const found = profile === null ? 'its Cargo profile cannot be determined from its path (expected target/[<triple>/]<profile>/bake)' : `it is a ${profile} build`
+    throw new Error(`native arm: ${this.spec.path}: ${found}; D18 budgets compare release builds, so ${RELEASE_HINT}, or pass --allow-non-release for a run that sets no budget`)
   }
 
   build(): ArmBuild {
-    return { binary: this.spec.path, sha256: sha256(this.spec.path), bytes: Bun.file(this.spec.path).size, version: run([this.spec.path, '--version']) ?? null, screen: 'inline' }
+    const profile = this.profile
+    return {
+      binary: this.spec.path, sha256: sha256(this.spec.path), bytes: Bun.file(this.spec.path).size, version: run([this.spec.path, '--version']) ?? null, screen: 'inline',
+      profile, profileSource: profile === null ? 'unknown: the path shows no target/<profile>/ directory' : 'the binary\'s resolved path under target/<profile>/',
+      budgetEligible: profile === 'release',
+    }
   }
 
   async prepare(workload: WorkloadSpec, dirs: SampleDirs, modelUrl: string): Promise<Launch> {
-    const home = join(dirs.root, 'home')
+    const home = dirs.home
     const user = join(dirs.root, 'user')
     const cwd = join(dirs.root, 'workspace')
     for (const dir of [home, user, cwd]) await mkdir(dir, { recursive: true })
@@ -161,7 +204,7 @@ class TsArm implements Arm {
   }
 
   async prepare(workload: WorkloadSpec, dirs: SampleDirs, modelUrl: string): Promise<Launch> {
-    const home = join(dirs.root, 'home')
+    const home = dirs.home
     const user = join(dirs.root, 'user')
     const cwd = join(dirs.root, 'workspace')
     for (const dir of [home, user, cwd]) await mkdir(dir, { recursive: true })
@@ -198,12 +241,9 @@ class TsArm implements Arm {
   }
 }
 
-/**
- * The arm for `spec`.
- * @param node - the Node executable a `ts` arm runs.
- */
-export function createArm(spec: ArmSpec, node = 'node'): Arm {
-  return spec.kind === 'native' ? new NativeArm(spec) : new TsArm(spec, node)
+/** The arm for `spec`. */
+export function createArm(spec: ArmSpec, options: ArmOptions = {}): Arm {
+  return spec.kind === 'native' ? new NativeArm(spec, options.allowNonRelease ?? false) : new TsArm(spec, options.node ?? 'node')
 }
 
 /** A short file-system-safe name for an arm. */

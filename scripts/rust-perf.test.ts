@@ -1,15 +1,15 @@
 import { afterEach, describe, expect, it } from 'bun:test'
 import { createHash } from 'node:crypto'
-import { existsSync, readFileSync } from 'node:fs'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs'
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { parseArm } from './rust-perf/arms.ts'
+import { cargoProfile, parseArm, type Arm } from './rust-perf/arms.ts'
 import { proposeBudgets, refuseDocsPath, type BudgetProposal } from './rust-perf/budgets.ts'
 import { answerEvents, DELTA_COUNT, STREAM_DONE, STREAM_START } from './rust-perf/model.ts'
-import { cpuTicksBetween, processTree, readProcStat, sampleTree, survivors, TreeMonitor, type ProcStat } from './rust-perf/proc-tree.ts'
+import { cpuTicksBetween, processTree, readProcStat, sampleTree, sessionMembers, survivors, TreeMonitor, type ProcStat } from './rust-perf/proc-tree.ts'
 import { REPORT_SCHEMA, summarize, type Report } from './rust-perf/report.ts'
-import type { SampleRecord } from './rust-perf/sample.ts'
+import { PREPARE_ITERATION, runSample, type SampleKey, type SampleRecord, type SampleSettings, type WarmState } from './rust-perf/sample.ts'
 import { seedPi } from './rust-perf/seed-pi.ts'
 import { projectKey03, seedSession03 } from './rust-perf/seed-session03.ts'
 import { bootstrapInterval, distribution, mad, median, p95, seededRandom } from './rust-perf/stats.ts'
@@ -27,6 +27,24 @@ async function temporary(prefix: string): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), prefix))
   cleanups.push(() => rm(dir, { recursive: true, force: true }))
   return dir
+}
+
+/** Poll `condition` every 5 ms for at most `ms`. */
+async function until(condition: () => boolean, ms = 10_000): Promise<void> {
+  const deadline = performance.now() + ms
+  while (!condition() && performance.now() < deadline) await Bun.sleep(5)
+}
+
+/** Strip string chunks through `stripper`, as a PTY would deliver their bytes. */
+function strip(stripper: AnsiStripper, chunks: readonly string[]): string {
+  const decoder = new TextDecoder()
+  let text = ''
+  for (const chunk of chunks) {
+    const bytes = new TextEncoder().encode(chunk)
+    const out = new Uint8Array(bytes.length)
+    text += decoder.decode(out.subarray(0, stripper.strip(bytes, out, 0)), { stream: true })
+  }
+  return text
 }
 
 describe('rust-perf statistics', () => {
@@ -57,10 +75,13 @@ describe('rust-perf statistics', () => {
     expect(first.medianCi!.high).toBeGreaterThanOrEqual(first.median!)
     expect(first.p95Ci!.high).toBeLessThanOrEqual(first.max!)
     expect(first.p95Ci!.low).toBeGreaterThanOrEqual(first.min!)
-    // Another seed gives another, still valid, interval.
-    const middle = (sortedValues: readonly number[]): number => sortedValues[sortedValues.length >> 1] ?? 0
-    const other = bootstrapInterval(values, middle, { resamples: 2000, confidence: 0.95, seed: 8 })
-    expect(other.low).toBeLessThanOrEqual(other.high)
+    // The seed drives the resampling: the same seed repeats an interval, and another moves it.
+    const mean = (sortedValues: readonly number[]): number => sortedValues.reduce((sum, value) => sum + value, 0) / sortedValues.length
+    const options = { resamples: 200, confidence: 0.9, seed: 8 }
+    const other = bootstrapInterval(values, mean, options)
+    expect(bootstrapInterval(values, mean, options)).toEqual(other)
+    expect(bootstrapInterval(values, mean, { ...options, seed: 9 })).not.toEqual(other)
+    expect(other.low).toBeLessThan(other.high)
     expect(distribution([5, 5, 5]).medianCi).toEqual({ low: 5, high: 5 })
   })
 
@@ -164,31 +185,45 @@ describe('rust-perf faux model', () => {
   })
 })
 
-/** A fake `/proc` entry: its `stat` line, `VmRSS`, and per-task children. */
-interface FakeProcess { pid: number; ppid: number; comm: string; rssKiB?: number; ticks: number; start: number; children?: number[] }
+/** A fake `/proc` entry: its `stat` line, `VmRSS` and `VmHWM`, and per-task children. */
+interface FakeProcess {
+  pid: number
+  ppid: number
+  comm: string
+  rssKiB?: number
+  hwmKiB?: number
+  ticks: number
+  start: number
+  session?: number
+  children?: number[]
+}
 
 async function fakeProc(processes: FakeProcess[], childrenFiles: boolean): Promise<string> {
   const root = await temporary('rust-perf-proc-')
   for (const entry of processes) {
     const dir = join(root, String(entry.pid))
     await mkdir(join(dir, 'task', String(entry.pid)), { recursive: true })
-    // Fields 3-22 of proc(5): state, ppid, ..., utime (14), stime (15), ..., starttime (22).
-    const fields = ['S', entry.ppid, 0, 0, 0, 0, 0, 0, 0, 0, 0, entry.ticks, 1, 0, 0, 20, 0, 1, 0, entry.start]
+    // Fields 3-22 of proc(5): state, ppid, pgrp, session, ..., utime (14), stime (15), ..., starttime (22).
+    const fields = ['S', entry.ppid, 0, entry.session ?? 0, 0, 0, 0, 0, 0, 0, 0, entry.ticks, 1, 0, 0, 20, 0, 1, 0, entry.start]
     await writeFile(join(dir, 'stat'), `${entry.pid} (${entry.comm}) ${fields.join(' ')} 0 0\n`)
-    await writeFile(join(dir, 'status'), `Name:\t${entry.comm}\n${entry.rssKiB === undefined ? '' : `VmRSS:\t  ${entry.rssKiB} kB\n`}Threads:\t1\n`)
+    const memory = entry.rssKiB === undefined ? '' : `VmHWM:\t  ${entry.hwmKiB ?? entry.rssKiB} kB\nVmRSS:\t  ${entry.rssKiB} kB\n`
+    await writeFile(join(dir, 'status'), `Name:\t${entry.comm}\n${memory}Threads:\t1\n`)
     if (childrenFiles) await writeFile(join(dir, 'task', String(entry.pid), 'children'), (entry.children ?? []).map(child => `${child} `).join(''))
   }
   return root
 }
 
 const FAKE_TREE: FakeProcess[] = [
-  { pid: 100, ppid: 1, comm: 'bake', rssKiB: 1000, ticks: 10, start: 500, children: [101, 102] },
-  { pid: 101, ppid: 100, comm: 'sh -c (x) y', rssKiB: 200, ticks: 3, start: 510, children: [103] },
+  { pid: 100, ppid: 1, comm: 'bake', rssKiB: 1000, hwmKiB: 4000, ticks: 10, start: 500, session: 100, children: [101, 102] },
+  { pid: 101, ppid: 100, comm: 'sh -c (x) y', rssKiB: 200, ticks: 3, start: 510, session: 100, children: [103] },
   { pid: 102, ppid: 100, comm: 'kworker', ticks: 1, start: 520 },
-  { pid: 103, ppid: 101, comm: 'sleep', rssKiB: 30, ticks: 0, start: 530 },
+  { pid: 103, ppid: 101, comm: 'sleep', rssKiB: 30, ticks: 0, start: 530, session: 100 },
   // A stale child listing whose pid now belongs to another parent.
   { pid: 104, ppid: 1, comm: 'other', rssKiB: 9999, ticks: 0, start: 540 },
-  { pid: 1, ppid: 0, comm: 'init', rssKiB: 5000, ticks: 0, start: 1, children: [100, 104] },
+  // A double-forked daemon that kept the session, and an older process in a session of a reused pid.
+  { pid: 105, ppid: 1, comm: 'daemon', rssKiB: 10, ticks: 0, start: 550, session: 100 },
+  { pid: 106, ppid: 1, comm: 'older', rssKiB: 10, ticks: 0, start: 400, session: 100 },
+  { pid: 1, ppid: 0, comm: 'init', rssKiB: 5000, ticks: 0, start: 1, children: [100, 104, 105, 106] },
 ]
 
 describe('rust-perf /proc sampler', () => {
@@ -200,13 +235,18 @@ describe('rust-perf /proc sampler', () => {
       expect(sample.members.map(member => member.pid)).toEqual([100, 101, 102, 103])
       // The kernel thread has no VmRSS and counts 0; the stale 104 is not a member.
       expect(sample.rssKiB).toBe(1230)
-      expect(readProcStat(101, proc)).toEqual({ pid: 101, ppid: 100, cpuTicks: 4, startTime: 510 })
+      expect(sample.hwmKiB).toEqual(new Map([['100:500', 4000], ['101:510', 200], ['102:520', 0], ['103:530', 30]]))
+      expect(readProcStat(101, proc)).toEqual({ pid: 101, ppid: 100, cpuTicks: 4, startTime: 510, state: 'S', session: 100 })
       expect(processTree(999, proc, childrenFiles)).toEqual([])
+      // The session holds the tree's members and the daemon, not a process older than the session leader.
+      expect(sessionMembers({ pid: 100, startTime: 500 }, proc).map(member => member.pid).sort()).toEqual([101, 103, 105])
+      // A live pid 100 with another start time is a reused pid, whose session is another program's.
+      expect(sessionMembers({ pid: 100, startTime: 499 }, proc)).toEqual([])
     }
   })
 
   it('counts CPU ticks per process identity, a restarted pid in full', () => {
-    const stat = (pid: number, cpuTicks: number, startTime = pid): ProcStat => ({ pid, ppid: 1, cpuTicks, startTime })
+    const stat = (pid: number, cpuTicks: number, startTime = pid): ProcStat => ({ pid, ppid: 1, cpuTicks, startTime, state: 'S', session: 1 })
     expect(cpuTicksBetween([stat(1, 10), stat(2, 5)], [stat(1, 14), stat(2, 5), stat(3, 2)])).toBe(6)
     expect(cpuTicksBetween([stat(2, 5)], [stat(2, 7, 99)])).toBe(7)
   })
@@ -233,8 +273,10 @@ describe('rust-perf /proc sampler', () => {
     await Bun.sleep(50)
     const observed = await monitor.stop()
     expect(observed.ticks).toBeGreaterThan(2)
-    expect(observed.peakRssKiB).toBeGreaterThan(0)
-    expect([...observed.pids].sort()).toEqual(members.map(member => member.pid).sort())
+    expect(observed.sampledPeakRssKiB).toBeGreaterThan(0)
+    // Each member's high-water mark is at least what any one reading of it showed.
+    expect(observed.peakHwmKiB).toBeGreaterThanOrEqual(observed.sampledPeakRssKiB)
+    expect(observed.members.map(member => member.pid).sort()).toEqual(members.map(member => member.pid).sort())
     // Killing only the shell leaves its two sleeps alive under the same identity.
     child.kill('SIGKILL')
     await child.exited
@@ -245,13 +287,28 @@ describe('rust-perf /proc sampler', () => {
 
 describe('rust-perf terminal observation', () => {
   it('strips control sequences split across chunks', () => {
-    const stripper = new AnsiStripper()
-    const chunks = ['a\x1b[3', '8;5;8mb\x1b]0;ti', 'tle\x07c\x1b]8;;x\x1b', '\\d\x1b(Be\r\nf\tg\x1b', 'Mh']
-    expect(chunks.map(chunk => stripper.push(chunk)).join('')).toBe('abcde\n\nf gh')
+    expect(strip(new AnsiStripper(), ['a\x1b[3', '8;5;8mb\x1b]0;ti', 'tle\x07c\x1b]8;;x\x1b', '\\d\x1b(Be\r\nf\tg\x1b', 'Mh ✓'])).toBe('abcde\n\nf gh ✓')
+  })
+
+  it('tracks DEC private modes across chunks and parameter lists', () => {
+    const changes: string[] = []
+    const stripper = new AnsiStripper((mode, set) => changes.push(`${mode}${set ? 'h' : 'l'}`))
+    strip(stripper, ['\x1b[?10', '00;1006h\x1b[?7l\x1b', '[?2004h\x1b[?25l'])
+    expect(changes).toEqual(['1000h', '1006h', '7l', '2004h', '25l'])
+    expect(stripper.changedModes()).toEqual(['?7l', '?25l', '?1000h', '?1006h', '?2004h'])
+    // Untracked modes, ANSI (non-private) modes, subparameters, and intermediates change nothing.
+    strip(stripper, ['\x1b[?1h\x1b[4h\x1b[?1000:1l\x1b[?1006$l'])
+    expect(stripper.changedModes()).toEqual(['?7l', '?25l', '?1000h', '?1006h', '?2004h'])
+    strip(stripper, ['\x1b[?1006;1000l\x1b[?7;25h\x1b[?2004l'])
+    expect(stripper.changedModes()).toEqual([])
+    // A full reset returns every mode named so far to its initial state.
+    strip(stripper, ['\x1b[?1049h\x1b[?7l', '\x1bc'])
+    expect(stripper.changedModes()).toEqual([])
+    expect(stripper.modes.get(1049)).toBe(false)
   })
 
   it('sees bracketed paste, raw mode, split markers once, and a watched echo in a real PTY', async () => {
-    const script = 'saved=$(stty -g); stty raw -echo; printf "\\033[?2004h"; printf "H000"; sleep 0.1; printf "01_E"; sleep 0.1; printf "ND H00002_END\\n"; read -r line; printf "got:%s" "$line"; stty "$saved"; exit 0'
+    const script = 'saved=$(stty -g); stty raw -echo; printf "\\033[?2004h"; printf "H000"; sleep 0.1; printf "01_E"; sleep 0.1; printf "ND H00002_END\\n"; read -r line; printf "got:%s\\033[?2004l" "$line"; stty "$saved"; exit 0'
     const terminal = new Terminal(['sh', '-c', script], tmpdir(), { PATH: process.env.PATH ?? '/usr/bin:/bin' })
     cleanups.push(() => terminal.close())
     await terminal.wait('raw', () => terminal.bracketedPasteAt !== undefined && terminal.modesChanged, 10_000)
@@ -262,9 +319,26 @@ describe('rust-perf terminal observation', () => {
     terminal.send('probe\n')
     const at = await terminal.seen(echo, 'echo', 10_000)
     expect(at).toBeGreaterThan(terminal.startedAt)
+    // The markers still in the search carry are not counted again with later output.
+    expect(terminal.markerOccurrences).toBe(2)
     const exit = await terminal.exited
     expect(exit).toMatchObject({ code: 0, signal: null })
+    await until(() => terminal.restored)
     expect(terminal.restored).toBe(true)
+    // Stamped at the arrival of the output that enabled bracketed paste, after raw mode was set.
+    expect(terminal.inputReadyAt).toBe(terminal.bracketedPasteAt)
+    expect(terminal.termiosChangedAt).toBeLessThanOrEqual(terminal.bracketedPasteAt!)
+  })
+
+  it('reports a DEC private mode the program left changed as not restored', async () => {
+    const script = 'printf "\\033[?2004h\\033[?10"; sleep 0.05; printf "00;1006h\\033[?25l"; printf "\\033[?2004l\\033[?25h"; exit 0'
+    const terminal = new Terminal(['sh', '-c', script], tmpdir(), { PATH: process.env.PATH ?? '/usr/bin:/bin' })
+    cleanups.push(() => terminal.close())
+    await terminal.exited
+    // The last output may be read after the exit is observed.
+    await until(() => terminal.unrestored().length === 2)
+    expect(terminal.unrestored()).toEqual(['?1000h left in effect', '?1006h left in effect'])
+    expect(terminal.restored).toBe(false)
   })
 })
 
@@ -274,10 +348,10 @@ function syntheticRecord(arm: string, workload: WorkloadName, iteration: number,
     metrics: {
       inputReadyMs: 5, startupMs, markersAtFirstInput: 0, replayMs: null, readyMs: startupMs,
       firstDeltaMs: 20, streamInputMs: 2, streamMs: 1000,
-      idleCpuMs: 10, idleCpuPercent: 0.2, shutdownMs: 40, peakRssMiB,
+      idleCpuMs: 10, idleCpuPercent: 0.2, shutdownMs: 40, peakRssMiB, sampledPeakRssMiB: peakRssMiB,
     },
     exit: { code: 0, signal: null }, terminalRestored: true, leakedProcesses: [], markerOccurrences: 0, outputBytes: 1, modelRequests: 1,
-    rssSampling: { ticks: 10, maxGapMs: 10, pids: 1 },
+    rssSampling: { ticks: 10, maxGapMs: 10, processes: 1 },
   }
 }
 
@@ -285,7 +359,7 @@ function syntheticReport(samples: SampleRecord[]): Report {
   const arms = [...new Set(samples.map(sample => sample.arm))]
   return {
     schema: REPORT_SCHEMA, createdAt: '2026-10-21T00:00:00.000Z', command: [], interrupted: false, host: {}, harness: {},
-    method: { samplesPerCell: 20, order: '', viewport: { columns: 120, rows: 40 }, paceMs: 10, idleMs: 5000, rssIntervalMs: 10, timeoutMs: 1, maxLoad: 1, cache: { cold: '', warm: '' }, endpoints: '' },
+    method: { samplesPerCell: 20, order: '', viewport: { columns: 120, rows: 40 }, paceMs: 10, idleMs: 5000, rssIntervalMs: 10, timeoutMs: 1, shutdownTimeoutMs: 1, maxLoad: 1, cache: { cold: '', warm: '' }, endpoints: '' },
     arms: arms.map(label => ({ label, kind: 'ts', build: {} })), workloads: ['fresh'], modes: ['cold'], summary: summarize(samples), samples,
   }
 }
@@ -293,10 +367,11 @@ function syntheticReport(samples: SampleRecord[]): Report {
 describe('rust-perf budgets', () => {
   it('proposes 10% over the baseline median and p95 and no leaks or failures', () => {
     const samples = Array.from({ length: 20 }, (_, index) => syntheticRecord('ts:/b', 'fresh', index, 100 + index, 200 + index))
-    samples.push({ arm: 'ts:/b', workload: 'fresh', mode: 'cold', iteration: 20, warmup: false, loadAverage1m: 0, dimensions: undefined, ok: false, error: 'timed out' })
+    samples.push({ arm: 'ts:/b', workload: 'fresh', mode: 'cold', iteration: 20, warmup: false, loadAverage1m: 0, dimensions: undefined, leakedProcesses: ['sleep 9'], ok: false, error: 'timed out' })
     samples.push({ ...syntheticRecord('ts:/b', 'fresh', -1, 9999, 9999), warmup: true })
     const report = syntheticReport(samples)
-    expect(report.summary[0]).toMatchObject({ completed: 20, failed: 1 })
+    // A failed sample's leak still counts.
+    expect(report.summary[0]).toMatchObject({ completed: 20, failed: 1, leakedProcesses: 1 })
     const proposal = proposeBudgets(report, new TextEncoder().encode('{}'), '/r.json')
     expect(proposal.status).toBe('proposed')
     expect(proposal.approval.approvedBy).toBeNull()
@@ -306,7 +381,7 @@ describe('rust-perf budgets', () => {
     expect(cell.metrics.replayMs).toBeUndefined()
     expect(cell.observed.idleCpuMs?.median).toBe(10)
     expect(cell).toMatchObject({ maxLeakedProcesses: 0, maxFailedSamples: 0 })
-    expect(proposal.warnings).toEqual(['fresh/cold: 1 baseline sample(s) failed; investigate before approving'])
+    expect(proposal.warnings).toEqual(['fresh/cold: 1 baseline sample(s) failed; investigate before approving', 'fresh/cold: the baseline itself leaked 1 process(es)'])
   })
 
   it('needs the baseline arm named when a report has several, and never writes docs', () => {
@@ -325,38 +400,247 @@ describe('rust-perf budgets', () => {
     expect(parseArm('ts:/w', '/r')).toMatchObject({ kind: 'ts', path: '/w' })
     expect(() => parseArm('node:/x')).toThrow()
   })
+
+  it('reads a native binary\'s Cargo profile from its path and warns about a non-release baseline', () => {
+    expect(cargoProfile('/r/rust/target/release/bake')).toBe('release')
+    expect(cargoProfile('/r/rust/target/debug/bake')).toBe('debug')
+    expect(cargoProfile('/r/rust/target/x86_64-unknown-linux-gnu/release/bake')).toBe('release')
+    expect(cargoProfile('/r/rust/target/debug/deps/bake-0123abcd')).toBe('debug')
+    expect(cargoProfile('/usr/local/bin/bake')).toBeNull()
+    expect(cargoProfile('/target/a/b/c/bake')).toBeNull()
+    const report = syntheticReport([syntheticRecord('native:/n', 'fresh', 0, 1, 1)])
+    const native = { ...report, arms: [{ label: 'native:/n', kind: 'native', build: { profile: 'debug' } }] }
+    expect(proposeBudgets(native, new Uint8Array(), '/r.json').warnings).toContain('the baseline is a native debug build; D18 budgets compare release builds')
+    const release = { ...report, arms: [{ label: 'native:/n', kind: 'native', build: { profile: 'release' } }] }
+    expect(proposeBudgets(release, new Uint8Array(), '/r.json').warnings.join('\n')).not.toContain('release builds')
+  })
 })
 
-const nativeBinary = join(repository, 'rust/target/debug/bake')
+/** Live processes whose command line holds `token`, a sleep duration unique to one test. */
+function processesWith(token: string): number[] {
+  return readdirSync('/proc').filter(entry => /^\d+$/u.test(entry)).flatMap((entry) => {
+    try {
+      return readFileSync(`/proc/${entry}/cmdline`, 'utf8').split('\0').includes(token) && readProcStat(Number(entry))?.state !== 'Z' ? [Number(entry)] : []
+    } catch {
+      return []
+    }
+  })
+}
+
+/**
+ * A bash program that plays one sample: raw mode and bracketed paste, the
+ * echo of each probe, a streamed answer, then `ending`.
+ */
+function fakeProgram(ending: string, opening = ''): string {
+  return [
+    'saved=$(stty -g); stty raw -echo', opening,
+    'printf "\\033[?2004h"',
+    'x=$(head -c 10); printf "%s" "$x"',
+    'head -c 1 >/dev/null',
+    'printf "PERF_STREAM_START\\n"',
+    'y=$(head -c 15); printf "%s" "$y"',
+    'printf "\\nPERF_STREAM_DONE\\nSETTLED\\n"',
+    ending,
+  ].join('\n')
+}
+
+/** Ends on SIGTERM as a well-behaved arm does: restores the terminal and exits 143. */
+const CLEAN_ENDING = 'sleep 1000 </dev/null >/dev/null 2>&1 & idle=$!\ntrap \'kill -9 $idle; wait $idle 2>/dev/null; printf "\\033[?2004l"; stty "$saved"; exit 143\' TERM\nwait $idle'
+
+function fakeArm(script: string, log?: string): Arm {
+  return {
+    spec: { label: 'fake', kind: 'native', path: '/bin/bash' },
+    check: () => {},
+    build: () => ({}),
+    prepare: async (_workload, dirs) => {
+      await mkdir(dirs.home, { recursive: true })
+      return {
+        argv: ['bash', '-c', script], cwd: dirs.root, dimensions: { ...history(WORKLOADS.fresh).dimensions, fileBytes: 0 },
+        env: { PATH: process.env.PATH ?? '/usr/bin:/bin', BAKE_HOME: dirs.home, ...log === undefined ? {} : { PERF_LOG: log } },
+      }
+    },
+    settled: text => text.includes('SETTLED'),
+  }
+}
+
+const KEY: SampleKey = { arm: 'fake', workload: 'fresh', mode: 'cold', iteration: 0, warmup: false }
+
+describe('rust-perf samples', () => {
+  async function setup(): Promise<{ settings: SampleSettings; warm: WarmState; samples: string }> {
+    const dir = await temporary('rust-perf-sample-')
+    const samples = join(dir, 'samples')
+    await mkdir(samples)
+    const warm = { cache: join(dir, 'cache'), home: join(dir, 'warm.home'), template: join(dir, 'warm.template') }
+    return { settings: { idleMs: 100, timeoutMs: 10_000, shutdownTimeoutMs: 400, clockTicks: 100, tempRoot: samples }, warm, samples }
+  }
+  const model = { baseUrl: 'http://127.0.0.1:9/v1', requests: 0 }
+  /** Kill what a failed assertion would otherwise leave behind. */
+  function reap(...tokens: string[]): void {
+    cleanups.push(async () => {
+      for (const token of tokens) for (const pid of processesWith(token)) process.kill(pid, 'SIGKILL')
+    })
+  }
+
+  it('measures a well-behaved program and removes its temporary root', async () => {
+    const { settings, warm, samples } = await setup()
+    const record = await runSample(fakeArm(fakeProgram(CLEAN_ENDING)), KEY, model, warm, settings)
+    if (!record.ok) throw new Error(record.error)
+    expect(record.exit).toEqual({ code: 143, signal: null })
+    expect(record.leakedProcesses).toEqual([])
+    for (const value of Object.values(record.metrics)) if (value !== null) expect(value).toBeGreaterThanOrEqual(0)
+    expect(record.metrics.peakRssMiB).toBeGreaterThan(0)
+    expect(await readdir(samples)).toEqual([])
+  }, 20_000)
+
+  it('fails a program that ignores SIGTERM at the shutdown deadline and kills its tree', async () => {
+    const { settings, warm, samples } = await setup()
+    reap('1001.5')
+    const started = performance.now()
+    const record = await runSample(fakeArm(fakeProgram('trap "" TERM\nnohup sleep 1001.5 </dev/null >/dev/null 2>&1 &\nwait')), KEY, model, warm, settings)
+    expect(record.ok).toBe(false)
+    if (record.ok) return
+    expect(record.error).toContain('did not exit within 400 ms of SIGTERM')
+    expect(performance.now() - started).toBeLessThan(8000)
+    // The program was killed first, so its child outlived it: reported, then killed.
+    expect(record.leakedProcesses).toEqual(['sleep 1001.5'])
+    expect(processesWith('1001.5')).toEqual([])
+    expect(await readdir(samples)).toEqual([])
+  }, 20_000)
+
+  it('fails a program that exits on its own before SIGTERM', async () => {
+    const { settings, warm, samples } = await setup()
+    const record = await runSample(fakeArm(fakeProgram('sleep 0.02; printf "\\033[?2004l"; stty "$saved"; exit 0')), KEY, model, warm, { ...settings, idleMs: 1500 })
+    expect(record.ok).toBe(false)
+    if (record.ok) return
+    expect(record.error).toContain('exited before SIGTERM')
+    expect(await readdir(samples)).toEqual([])
+  }, 20_000)
+
+  it('reports and kills every process left alive after the program exits, wherever it went', async () => {
+    const { settings, warm, samples } = await setup()
+    reap('1002.5', '1003.5', '1004.5')
+    // A child, a double-forked one that leaves the tree at once, and one started during shutdown;
+    // each ignores the SIGHUP that ends the terminal's foreground jobs when the program exits.
+    const opening = 'nohup sleep 1002.5 </dev/null >/dev/null 2>&1 &\n(nohup sleep 1003.5 </dev/null >/dev/null 2>&1 &)'
+    const ending = CLEAN_ENDING.replace('kill -9 $idle;', 'kill -9 $idle; nohup sleep 1004.5 </dev/null >/dev/null 2>&1 &')
+    const record = await runSample(fakeArm(fakeProgram(ending, opening)), KEY, model, warm, settings)
+    if (!record.ok) throw new Error(record.error)
+    expect([...record.leakedProcesses].sort()).toEqual(['sleep 1002.5', 'sleep 1003.5', 'sleep 1004.5'])
+    for (const token of ['1002.5', '1003.5', '1004.5']) expect(processesWith(token)).toEqual([])
+    expect(await readdir(samples)).toEqual([])
+  }, 20_000)
+
+  it('kills a failed sample\'s orphans even when the program is already gone', async () => {
+    const { settings, warm } = await setup()
+    reap('1005.5')
+    const record = await runSample(fakeArm(fakeProgram('', 'nohup sleep 1005.5 </dev/null >/dev/null 2>&1 &\nsleep 0.2; exit 3')), KEY, model, warm, settings)
+    expect(record.ok).toBe(false)
+    expect(record.leakedProcesses).toEqual(['sleep 1005.5'])
+    expect(processesWith('1005.5')).toEqual([])
+  }, 20_000)
+
+  it('fails a program that leaves a DEC private mode set', async () => {
+    const { settings, warm } = await setup()
+    const record = await runSample(fakeArm(fakeProgram(CLEAN_ENDING, 'printf "\\033[?1000;1006h"')), KEY, model, warm, settings)
+    expect(record.ok).toBe(false)
+    if (record.ok) return
+    expect(record.error).toBe('the terminal was not restored at exit: ?1000h left in effect, ?1006h left in effect')
+  }, 20_000)
+
+  it('stops at once when interrupted, after killing the program and removing its root', async () => {
+    const { settings, warm, samples } = await setup()
+    reap('1006.5')
+    const aborter = new AbortController()
+    const pending = runSample(fakeArm(fakeProgram('trap "" TERM\nnohup sleep 1006.5 </dev/null >/dev/null 2>&1 &\nwait')), KEY, model, warm, { ...settings, shutdownTimeoutMs: 60_000, signal: aborter.signal })
+    await until(() => processesWith('1006.5').length > 0)
+    await Bun.sleep(300)
+    const abortedAt = performance.now()
+    aborter.abort(new Error('interrupted'))
+    expect(pending).rejects.toThrow('interrupted')
+    await pending.catch(() => undefined)
+    expect(performance.now() - abortedAt).toBeLessThan(5000)
+    expect(processesWith('1006.5')).toEqual([])
+    expect(await readdir(samples)).toEqual([])
+  }, 20_000)
+
+  it('starts warm samples from a prepared home without its sessions, at one path', async () => {
+    const { settings, warm, samples } = await setup()
+    const log = join(await temporary('rust-perf-log-'), 'log')
+    // Report what the home held at start, then leave a preparation and a session behind.
+    const opening = 'printf "%s|%s\\n" "$(ls -A "$BAKE_HOME" | tr "\\n" " ")" "$BAKE_HOME" >> "$PERF_LOG"; touch "$BAKE_HOME/prepared"; mkdir -p "$BAKE_HOME/sessions"; touch "$BAKE_HOME/sessions/s"'
+    const arm = fakeArm(fakeProgram(CLEAN_ENDING, opening), log)
+    const warmKey = { ...KEY, mode: 'warm' as const }
+    const prepared = await runSample(arm, { ...warmKey, iteration: PREPARE_ITERATION, warmup: true }, model, warm, settings, true)
+    if (!prepared.ok) throw new Error(prepared.error)
+    expect(readdirSync(warm.template).sort()).toEqual(['prepared'])
+    expect(existsSync(warm.home)).toBe(false)
+    for (let index = 0; index < 2; index++) {
+      const record = await runSample(arm, warmKey, model, warm, settings)
+      if (!record.ok) throw new Error(record.error)
+    }
+    const cold = await runSample(arm, KEY, model, warm, settings)
+    if (!cold.ok) throw new Error(cold.error)
+    const lines = readFileSync(log, 'utf8').trimEnd().split('\n')
+    expect(lines.slice(0, 3)).toEqual([`|${warm.home}`, `prepared |${warm.home}`, `prepared |${warm.home}`])
+    // A cold sample starts from an empty home of its own.
+    expect(lines[3]).toStartWith(`|${realpathSync(samples)}/`)
+    expect(readdirSync(warm.template)).toEqual(['prepared'])
+    expect(await readdir(samples)).toEqual([])
+  }, 30_000)
+})
+
+/**
+ * The native smoke measures `BAKE_PERF_NATIVE`, a `bake` binary the caller
+ * names, because the scripts-unit gate runs before any build and a binary
+ * already under rust/target may be older than the sources. Unset, it is
+ * skipped and says so.
+ */
+const nativeBinary = process.env.BAKE_PERF_NATIVE === undefined || process.env.BAKE_PERF_NATIVE === '' ? undefined : resolve(process.env.BAKE_PERF_NATIVE)
+if (nativeBinary === undefined) console.log('rust-perf native smoke skipped: set BAKE_PERF_NATIVE=<bake binary> to measure one, such as rust/target/release/bake after cargo build --locked --release -p bake-cli')
 
 describe('rust-perf native smoke', () => {
-  it.skipIf(!existsSync(nativeBinary))('measures one fresh sample of rust/target/debug/bake and proposes budgets from it', async () => {
+  it.skipIf(nativeBinary === undefined)('measures fresh and Pi-seeded samples of BAKE_PERF_NATIVE cold and warm, and proposes budgets from them', async () => {
+    if (nativeBinary === undefined || !statSync(nativeBinary).isFile()) throw new Error(`BAKE_PERF_NATIVE names no file: ${nativeBinary}`)
     const dir = await temporary('rust-perf-smoke-')
     const out = join(dir, 'report.json')
-    const run = Bun.spawn(['bun', join(repository, 'scripts/rust-perf.ts'), '--arm', `native:${nativeBinary}`, '--workload', 'fresh', '--samples', '1', '--mode', 'cold',
-      '--idle-ms', '200', '--timeout-ms', '20000', '--max-load', '100000', '--out', out], { cwd: repository, stdout: 'pipe', stderr: 'pipe' })
+    const run = Bun.spawn(['bun', join(repository, 'scripts/rust-perf.ts'), '--arm', `native:${nativeBinary}`, '--workload', 'fresh', '--workload', 'small', '--samples', '1', '--mode', 'both',
+      '--idle-ms', '200', '--timeout-ms', '20000', '--max-load', '100000', '--allow-non-release', '--out', out], { cwd: repository, stdout: 'pipe', stderr: 'pipe' })
     const [code, stdout, stderr] = await Promise.all([run.exited, new Response(run.stdout).text(), new Response(run.stderr).text()])
     expect({ code, stderr }).toEqual({ code: 0, stderr: '' })
-    expect(stdout).toContain('1 sample(s), 0 failed')
+    // One preparation, two warm-ups, and four measured samples.
+    expect(stdout).toContain('7 sample(s), 0 failed')
     const report = JSON.parse(readFileSync(out, 'utf8')) as Report
     expect(report.schema).toBe(REPORT_SCHEMA)
     expect(report.interrupted).toBe(false)
-    expect(report.arms[0]!.build).toMatchObject({ sha256: sha256(readFileSync(nativeBinary)) })
-    const [sample] = report.samples
-    if (sample === undefined || !sample.ok) throw new Error(`the smoke sample failed: ${JSON.stringify(sample)}`)
-    expect(sample.terminalRestored).toBe(true)
-    expect(sample.leakedProcesses).toEqual([])
-    expect(sample.modelRequests).toBe(1)
-    for (const metric of ['inputReadyMs', 'startupMs', 'readyMs', 'firstDeltaMs', 'streamInputMs', 'streamMs', 'shutdownMs', 'peakRssMiB'] as const) expect(sample.metrics[metric]).toBeGreaterThan(0)
-    expect(sample.metrics.replayMs).toBeNull()
-    expect(report.summary[0]!.metrics.startupMs.samples).toBe(1)
+    const build = { sha256: sha256(readFileSync(nativeBinary)), profile: cargoProfile(realpathSync(nativeBinary)) }
+    expect(report.arms[0]!.build).toMatchObject(build)
+    const measured = report.samples.filter(sample => !sample.warmup)
+    expect(measured.map(sample => `${sample.workload}/${sample.mode}`).sort()).toEqual(['fresh/cold', 'fresh/warm', 'small/cold', 'small/warm'])
+    for (const sample of measured) {
+      if (!sample.ok) throw new Error(`the smoke sample failed: ${JSON.stringify(sample)}`)
+      expect(sample.terminalRestored).toBe(true)
+      expect(sample.leakedProcesses).toEqual([])
+      expect(sample.modelRequests).toBe(1)
+      for (const metric of ['inputReadyMs', 'startupMs', 'readyMs', 'firstDeltaMs', 'streamInputMs', 'streamMs', 'shutdownMs', 'peakRssMiB', 'sampledPeakRssMiB'] as const) expect(sample.metrics[metric]).toBeGreaterThan(0)
+      expect(sample.metrics.peakRssMiB).toBeGreaterThanOrEqual(sample.metrics.sampledPeakRssMiB)
+      if (sample.workload === 'fresh') {
+        expect(sample.metrics.replayMs).toBeNull()
+      } else {
+        // The Pi seed's 50 answers were each shown once.
+        expect(sample.markerOccurrences).toBe(50)
+        expect(sample.metrics.replayMs).toBeGreaterThan(0)
+      }
+    }
+    expect(report.summary.find(row => row.workload === 'small' && row.mode === 'cold')!.metrics.startupMs.samples).toBe(1)
     const proposalPath = join(dir, 'budgets.json')
     const budgets = Bun.spawnSync(['bun', join(repository, 'scripts/rust-perf.ts'), 'budgets', '--baseline', out, '--out', proposalPath], { cwd: repository, stdout: 'pipe', stderr: 'pipe' })
     expect(budgets.exitCode).toBe(0)
     const proposal = JSON.parse(await readFile(proposalPath, 'utf8')) as BudgetProposal
-    expect(proposal.cells[0]!.metrics.startupMs!.maxMedian).toBeGreaterThan(sample.metrics.startupMs)
+    const fresh = measured.find(sample => sample.workload === 'fresh' && sample.mode === 'cold')
+    if (fresh === undefined || !fresh.ok) throw new Error('no fresh cold sample')
+    expect(proposal.cells.find(cell => cell.workload === 'fresh' && cell.mode === 'cold')!.metrics.startupMs!.maxMedian).toBeGreaterThan(fresh.metrics.startupMs)
     const refused = Bun.spawnSync(['bun', join(repository, 'scripts/rust-perf.ts'), 'budgets', '--baseline', out, '--out', join(repository, 'docs/rust-perf-budgets.json')], { cwd: repository, stdout: 'pipe', stderr: 'pipe' })
     expect(refused.exitCode).toBe(2)
     expect(existsSync(join(repository, 'docs/rust-perf-budgets.json'))).toBe(false)
-  }, 60_000)
+  }, 120_000)
 })

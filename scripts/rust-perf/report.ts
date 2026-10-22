@@ -14,7 +14,7 @@ import type { WorkloadName } from './workloads.ts'
 export const REPORT_SCHEMA = 'bake-rust-perf-report/1'
 
 /** Metrics summarized as distributions; `markersAtFirstInput` is a count, kept per sample only. */
-export const SUMMARY_METRICS = ['inputReadyMs', 'startupMs', 'replayMs', 'readyMs', 'firstDeltaMs', 'streamInputMs', 'streamMs', 'idleCpuMs', 'shutdownMs', 'peakRssMiB'] as const satisfies readonly (keyof SampleMetrics)[]
+export const SUMMARY_METRICS = ['inputReadyMs', 'startupMs', 'replayMs', 'readyMs', 'firstDeltaMs', 'streamInputMs', 'streamMs', 'idleCpuMs', 'shutdownMs', 'peakRssMiB', 'sampledPeakRssMiB'] as const satisfies readonly (keyof SampleMetrics)[]
 export type SummaryMetric = typeof SUMMARY_METRICS[number]
 
 /** One arm, workload, and cache mode. */
@@ -24,7 +24,7 @@ export interface SummaryRow {
   readonly mode: CacheMode
   readonly completed: number
   readonly failed: number
-  /** Leaked descendants over every completed sample. */
+  /** Leaked processes over every sample, failed ones included. */
   readonly leakedProcesses: number
   readonly metrics: Record<SummaryMetric, Distribution>
 }
@@ -38,6 +38,7 @@ export interface Method {
   readonly idleMs: number
   readonly rssIntervalMs: number
   readonly timeoutMs: number
+  readonly shutdownTimeoutMs: number
   readonly maxLoad: number
   readonly cache: Record<CacheMode, string>
   readonly endpoints: string
@@ -82,7 +83,7 @@ export function summarize(samples: readonly SampleRecord[]): SummaryRow[] {
     const metrics = Object.fromEntries(SUMMARY_METRICS.map(metric => [metric, distribution(values(metric))]))
     return [{
       arm, workload, mode, completed: completed.length, failed: cell.length - completed.length,
-      leakedProcesses: completed.reduce((total, sample) => total + sample.leakedProcesses.length, 0),
+      leakedProcesses: cell.reduce((total, sample) => total + sample.leakedProcesses.length, 0),
       metrics: metrics as Record<SummaryMetric, Distribution>,
     }]
   })

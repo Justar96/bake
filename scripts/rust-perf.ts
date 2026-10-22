@@ -17,10 +17,17 @@
  *   --idle-ms <ms>       idle CPU window after the streamed turn (default 5000)
  *   --pace-ms <ms>       interval between the faux model's deltas (default 10)
  *   --timeout-ms <ms>    deadline of each wait in a sample (default 120000)
+ *   --shutdown-timeout-ms <ms>  deadline of the exit after SIGTERM, after which the tree is killed and the sample fails (default 10000)
  *   --node <path>        Node executable for ts arms (default node)
+ *   --allow-non-release  measure a native binary that is not under target/release/, for a run that sets no budget
+ *
+ * The first SIGINT or SIGTERM stops the run after the current sample's
+ * cleanup and writes the report; a second one kills every in-flight process,
+ * removes the temporary directories, and exits at once.
  *
  * See scripts/rust-perf/README.md for the method.
  */
+import { rmSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { cpus, tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
@@ -30,7 +37,7 @@ import { proposeBudgets, refuseDocsPath } from './rust-perf/budgets.ts'
 import { DEFAULT_PACE_MS, PacedModel } from './rust-perf/model.ts'
 import { clockTicksPerSecond } from './rust-perf/proc-tree.ts'
 import { harnessMetadata, hostMetadata, REPORT_SCHEMA, summarize, type Method, type Report } from './rust-perf/report.ts'
-import { CACHE_MODES, loadAverage, runSample, type CacheMode, type SampleRecord } from './rust-perf/sample.ts'
+import { abandonSamples, CACHE_MODES, loadAverage, PREPARE_ITERATION, runSample, WARMUP_ITERATION, type CacheMode, type SampleRecord, type WarmState } from './rust-perf/sample.ts'
 import { COLUMNS, ROWS } from './rust-perf/terminal.ts'
 import { isWorkloadName, WORKLOADS, type WorkloadName } from './rust-perf/workloads.ts'
 
@@ -68,7 +75,8 @@ async function measure(argv: string[]): Promise<number> {
     options: {
       arm: { type: 'string', multiple: true }, workload: { type: 'string', multiple: true }, samples: { type: 'string', default: '20' },
       mode: { type: 'string', default: 'both' }, out: { type: 'string' }, 'max-load': { type: 'string' }, 'idle-ms': { type: 'string', default: '5000' },
-      'pace-ms': { type: 'string', default: String(DEFAULT_PACE_MS) }, 'timeout-ms': { type: 'string', default: '120000' }, node: { type: 'string', default: 'node' },
+      'pace-ms': { type: 'string', default: String(DEFAULT_PACE_MS) }, 'timeout-ms': { type: 'string', default: '120000' }, 'shutdown-timeout-ms': { type: 'string', default: '10000' },
+      node: { type: 'string', default: 'node' }, 'allow-non-release': { type: 'boolean', default: false },
     },
   })
   if (process.platform !== 'linux') throw new Error('rust-perf reads /proc and runs on Linux only')
@@ -84,11 +92,12 @@ async function measure(argv: string[]): Promise<number> {
   const idleMs = positiveInteger('--idle-ms', values['idle-ms'])
   const paceMs = positiveInteger('--pace-ms', values['pace-ms'])
   const timeoutMs = positiveInteger('--timeout-ms', values['timeout-ms'])
+  const shutdownTimeoutMs = positiveInteger('--shutdown-timeout-ms', values['shutdown-timeout-ms'])
   const maxLoad = values['max-load'] === undefined ? Math.max(1, cpus().length / 4) : Number(values['max-load'])
   if (!(maxLoad > 0)) throw new Error('--max-load must be a positive number')
   const out = resolve(values.out ?? join(repository, '.preflight/perf', `${new Date().toISOString().replace(/[:.]/gu, '-')}.json`))
   refuseDocsPath(out, repository)
-  const arms: Arm[] = specs.map(spec => createArm(spec, values.node))
+  const arms: Arm[] = specs.map(spec => createArm(spec, { node: values.node, allowNonRelease: values['allow-non-release'] }))
   for (const arm of arms) arm.check()
   const startLoad = loadAverage()
   if (startLoad > maxLoad) {
@@ -98,22 +107,34 @@ async function measure(argv: string[]): Promise<number> {
   const clockTicks = clockTicksPerSecond()
   const method: Method = {
     samplesPerCell: samples,
-    order: 'Iterations are outermost; within one, each workload and cache mode runs every arm once, the arm order reversed on odd iterations. Every sample is a fresh process with a private home and session copy.',
-    viewport: { columns: COLUMNS, rows: ROWS }, paceMs, idleMs, rssIntervalMs: 10, timeoutMs, maxLoad,
+    order: 'Iterations are outermost; within one, each workload and cache mode runs every arm once, the arm order reversed on odd iterations. Every sample is a fresh process with a freshly seeded session.',
+    viewport: { columns: COLUMNS, rows: ROWS }, paceMs, idleMs, rssIntervalMs: 10, timeoutMs, shutdownTimeoutMs, maxLoad,
     cache: {
-      cold: 'Fresh session copy and home, and an empty private TMPDIR (Node\'s compile cache lives there) per sample. The kernel page cache is not dropped: that needs privileges, so the seeded files and the binary may still be cached.',
-      warm: 'Fresh session copy and home per sample, with one TMPDIR shared by the arm\'s warm samples, after one discarded warm-up launch per arm and workload.',
+      cold: 'A new empty BAKE_HOME, user home, and private TMPDIR (Node\'s compile cache lives there) per sample, so the arm sets up its home on every launch. The kernel page cache is not dropped: that needs privileges, so the seeded files and the binary may still be cached.',
+      warm: 'Per arm, one unmeasured launch of the fresh workload prepares a BAKE_HOME, kept without its sessions. Every warm sample starts from a copy of it at the same path, with its own seeded session, a new user home, and the TMPDIR the arm\'s warm samples share, after one discarded warm-up launch per arm and workload.',
     },
     endpoints: 'Times are from the monotonic clock at output arrival in the PTY, not terminal paint. Spawn is the handshake that lets the shell exec the program. See scripts/rust-perf/README.md.',
   }
   const builds = arms.map(arm => ({ label: arm.spec.label, kind: arm.spec.kind, build: arm.build() }))
+  for (const { label, build } of builds) {
+    if (build.budgetEligible === false) console.log(`warning: ${label} is a ${typeof build.profile === 'string' ? `${build.profile} build` : 'build of unknown profile'}; this report sets no D18 budget`)
+  }
   const records: SampleRecord[] = []
   const aborter = new AbortController()
-  const interrupt = (): void => { aborter.abort(new Error('rust-perf interrupted')) }
+  const sharedCaches = await mkdtemp(join(tmpdir(), 'bake-perf-warm-'))
+  const interrupt = (): void => {
+    if (!aborter.signal.aborted) {
+      console.error('rust-perf: interrupted; cleaning up the current sample (interrupt again to exit at once)')
+      aborter.abort(new Error('rust-perf interrupted'))
+      return
+    }
+    abandonSamples()
+    rmSync(sharedCaches, { recursive: true, force: true })
+    process.exit(130)
+  }
   process.on('SIGINT', interrupt)
   process.on('SIGTERM', interrupt)
   const model = new PacedModel(paceMs)
-  const sharedCaches = await mkdtemp(join(tmpdir(), 'bake-perf-warm-'))
   const save = async (): Promise<void> => {
     const report: Report = {
       schema: REPORT_SCHEMA, createdAt: new Date().toISOString(), command: process.argv.slice(1), interrupted: aborter.signal.aborted,
@@ -122,20 +143,33 @@ async function measure(argv: string[]): Promise<number> {
     }
     await writeAtomically(out, `${JSON.stringify(report, null, 2)}\n`)
   }
-  const settings = { idleMs, timeoutMs, clockTicks, signal: aborter.signal }
-  const sample = async (index: number, workload: WorkloadName, mode: CacheMode, iteration: number, warmup: boolean): Promise<void> => {
+  const settings = { idleMs, timeoutMs, shutdownTimeoutMs, clockTicks, signal: aborter.signal }
+  const warmStates: WarmState[] = arms.map((arm, index) => {
+    const slug = join(sharedCaches, armSlug(arm.spec, index))
+    return { cache: slug, home: `${slug}.home`, template: `${slug}.template` }
+  })
+  type Sample = (index: number, workload: WorkloadName, mode: CacheMode, iteration: number, warmup: boolean) => Promise<SampleRecord>
+  const sample: Sample = async (index, workload, mode, iteration, warmup) => {
     const arm = arms[index]
-    if (arm === undefined) throw new Error(`no arm ${index}`)
+    const warm = warmStates[index]
+    if (arm === undefined || warm === undefined) throw new Error(`no arm ${index}`)
     const key = { arm: arm.spec.label, workload, mode, iteration, warmup }
-    const record = await runSample(arm, key, model, join(sharedCaches, armSlug(arm.spec, index)), settings)
+    const record = await runSample(arm, key, model, warm, settings, iteration === PREPARE_ITERATION)
     records.push(record)
     const summary = record.ok ? Object.entries(record.metrics).map(([name, value]) => `${name}=${value === null ? '-' : Number(value.toFixed(2))}`).join(' ') : `FAILED ${record.error.split('\n')[0]}`
-    console.log(`${warmup ? 'warm-up ' : ''}${arm.spec.label} ${workload} ${mode} #${iteration}: ${summary}`)
+    const phase = iteration === PREPARE_ITERATION ? 'warm-home preparation ' : warmup ? 'warm-up ' : ''
+    const leaks = record.leakedProcesses.length > 0 ? ` leaked: ${record.leakedProcesses.join(', ')}` : ''
+    console.log(`${phase}${arm.spec.label} ${workload} ${mode} #${iteration}: ${summary}${leaks}`)
     await save()
+    return record
   }
   try {
     if (modes.includes('warm')) {
-      for (const workload of workloads) for (let index = 0; index < arms.length; index++) await sample(index, workload, 'warm', -1, true)
+      for (let index = 0; index < arms.length; index++) {
+        const prepared = await sample(index, 'fresh', 'warm', PREPARE_ITERATION, true)
+        if (!prepared.ok) throw new Error(`could not prepare the warm home of ${prepared.arm}: ${prepared.error.split('\n')[0]}`)
+      }
+      for (const workload of workloads) for (let index = 0; index < arms.length; index++) await sample(index, workload, 'warm', WARMUP_ITERATION, true)
     }
     for (let iteration = 0; iteration < samples; iteration++) {
       for (const workload of workloads) {

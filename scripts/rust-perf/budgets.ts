@@ -17,9 +17,9 @@ export const DEGRADATION = 0.10
 /** The sample count verification.md proposes for each cell. */
 export const PROPOSED_SAMPLES = 20
 
-/** Metrics that get a bound: latencies and peak memory. Idle CPU is reported without one. */
+/** Metrics that get a bound: latencies and high-water-mark peak memory. Idle CPU and the sampled RSS peak are reported without one. */
 export const BUDGETED_METRICS = ['inputReadyMs', 'startupMs', 'replayMs', 'readyMs', 'firstDeltaMs', 'streamInputMs', 'streamMs', 'shutdownMs', 'peakRssMiB'] as const satisfies readonly SummaryMetric[]
-export const OBSERVED_METRICS = ['idleCpuMs'] as const satisfies readonly SummaryMetric[]
+export const OBSERVED_METRICS = ['idleCpuMs', 'sampledPeakRssMiB'] as const satisfies readonly SummaryMetric[]
 
 /** One metric's proposed bounds and the baseline they come from. */
 export interface MetricBudget {
@@ -76,6 +76,8 @@ export function proposeBudgets(report: Report, reportBytes: Uint8Array, reportPa
   if (armEntry === undefined) throw new Error(`the report has no arm ${baseline}; it has ${labels.join(', ')}`)
   const warnings: string[] = []
   if (report.interrupted) warnings.push('the baseline run was interrupted, so some cells may be incomplete')
+  const profile = armEntry.build.profile
+  if (armEntry.kind === 'native' && profile !== 'release') warnings.push(`the baseline is a native ${typeof profile === 'string' ? `${profile} build` : 'build of unknown profile'}; D18 budgets compare release builds`)
   const cells: CellBudget[] = []
   for (const row of report.summary.filter(entry => entry.arm === baseline)) {
     const cell = `${row.workload}/${row.mode}`

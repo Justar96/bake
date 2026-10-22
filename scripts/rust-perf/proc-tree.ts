@@ -1,13 +1,14 @@
 /**
  * Linux `/proc` readings of a measured process and every descendant: resident
- * memory (`VmRSS`), CPU time (`utime` + `stime`), and identities that survive
- * pid reuse (`starttime`).
+ * memory (`VmRSS`) and its high-water mark (`VmHWM`), CPU time (`utime` +
+ * `stime`), and identities that survive pid reuse (`starttime`).
  *
  * Descendants are found through each task's `children` file when the kernel
  * provides it (`CONFIG_PROC_CHILDREN`), and otherwise by a parent scan of
- * every process. A process that daemonizes away from the tree is not counted.
- * The process-tree RSS is the sum of members' `VmRSS`, so pages that members
- * share are counted once per member.
+ * every process. A process that daemonizes away from the tree is not a
+ * member; {@link sessionMembers} finds one that kept the terminal's session.
+ * Tree memory sums members, so pages that members share are counted once per
+ * member.
  */
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -20,6 +21,10 @@ export interface ProcStat {
   readonly cpuTicks: number
   /** Start time after boot, in clock ticks; with the pid, a stable identity. */
   readonly startTime: number
+  /** The one-letter state; `Z` is a zombie, exited but not yet reaped. */
+  readonly state: string
+  /** The session id, which descendants keep unless they call `setsid`. */
+  readonly session: number
 }
 
 /** One reading of a tree. */
@@ -27,6 +32,13 @@ export interface TreeSample {
   readonly members: readonly ProcStat[]
   /** Sum of members' resident set sizes, in KiB. */
   readonly rssKiB: number
+  /** Each member's `VmHWM`, its largest resident size so far, in KiB, keyed by {@link identity}. */
+  readonly hwmKiB: ReadonlyMap<string, number>
+}
+
+/** A process's pid and start time, which pid reuse cannot repeat. */
+export function identity(stat: Pick<ProcStat, 'pid' | 'startTime'>): string {
+  return `${stat.pid}:${stat.startTime}`
 }
 
 function readText(path: string): string | undefined {
@@ -52,15 +64,22 @@ export function readProcStat(pid: number, procRoot = '/proc'): ProcStat | undefi
   // Fields after the command, numbered from 3 (`state`) as proc(5) does.
   const fields = text.slice(close + 2).trim().split(/\s+/u)
   const field = (n: number): number => Number(fields[n - 3])
-  const stat = { pid, ppid: field(4), cpuTicks: field(14) + field(15), startTime: field(22) }
-  return Number.isSafeInteger(stat.ppid) && Number.isSafeInteger(stat.cpuTicks) && Number.isSafeInteger(stat.startTime) ? stat : undefined
+  const stat = { pid, ppid: field(4), cpuTicks: field(14) + field(15), startTime: field(22), state: fields[0] ?? '', session: field(6) }
+  const counters = [stat.ppid, stat.cpuTicks, stat.startTime, stat.session]
+  return counters.every(Number.isSafeInteger) && stat.state !== '' ? stat : undefined
 }
 
-/** `VmRSS` of one process in KiB: 0 for a kernel thread or a process already gone. */
-export function readVmRssKiB(pid: number, procRoot = '/proc'): number {
+/**
+ * `VmRSS` and `VmHWM` of one process in KiB: 0 for a kernel thread, a
+ * zombie, or a process already gone, whose memory the kernel no longer reports.
+ */
+export function readMemoryKiB(pid: number, procRoot = '/proc'): { rss: number; hwm: number } {
   const text = readText(join(procRoot, String(pid), 'status'))
-  const match = text === undefined ? null : /^VmRSS:\s+(\d+)\s+kB$/mu.exec(text)
-  return match === null ? 0 : Number(match[1])
+  const value = (pattern: RegExp): number => {
+    const match = text === undefined ? null : pattern.exec(text)
+    return match === null ? 0 : Number(match[1])
+  }
+  return { rss: value(/^VmRSS:\s+(\d+)\s+kB$/mu), hwm: value(/^VmHWM:\s+(\d+)\s+kB$/mu) }
 }
 
 function childrenFromTasks(pid: number, procRoot: string): number[] | undefined {
@@ -123,12 +142,35 @@ export function processTree(root: number, procRoot = '/proc', childrenFiles = ha
   return members
 }
 
-/** Read the tree's members and the sum of their resident sizes. */
+/** Read the tree's members, the sum of their resident sizes, and each one's high-water mark. */
 export function sampleTree(root: number, procRoot = '/proc', childrenFiles = hasChildrenFiles(root, procRoot)): TreeSample {
   const members = processTree(root, procRoot, childrenFiles)
   let rssKiB = 0
-  for (const member of members) rssKiB += readVmRssKiB(member.pid, procRoot)
-  return { members, rssKiB }
+  const hwmKiB = new Map<string, number>()
+  for (const member of members) {
+    const memory = readMemoryKiB(member.pid, procRoot)
+    rssKiB += memory.rss
+    hwmKiB.set(identity(member), memory.hwm)
+  }
+  return { members, rssKiB, hwmKiB }
+}
+
+/**
+ * Live processes in session `root.pid` other than `root`: descendants that
+ * left the tree by double-forking but kept the terminal's session. Empty
+ * when a live process with `root`'s pid has another start time, since a
+ * reused pid's session is another program's.
+ */
+export function sessionMembers(root: Pick<ProcStat, 'pid' | 'startTime'>, procRoot = '/proc'): ProcStat[] {
+  const now = readProcStat(root.pid, procRoot)
+  if (now !== undefined && now.startTime !== root.startTime) return []
+  const members: ProcStat[] = []
+  for (const entry of readdirSync(procRoot)) {
+    if (!/^\d+$/u.test(entry)) continue
+    const stat = readProcStat(Number(entry), procRoot)
+    if (stat !== undefined && stat.session === root.pid && stat.pid !== root.pid && stat.startTime >= root.startTime) members.push(stat)
+  }
+  return members
 }
 
 /**
@@ -142,9 +184,13 @@ export function cpuTicksBetween(before: readonly ProcStat[], after: readonly Pro
   return ticks
 }
 
-/** Members of `members` still alive under the same identity, excluding `except`. */
+/** Members of `members` still alive (zombies excluded) under the same identity, excluding `except`. */
 export function survivors(members: readonly ProcStat[], except: number, procRoot = '/proc'): ProcStat[] {
-  return members.filter(member => member.pid !== except && readProcStat(member.pid, procRoot)?.startTime === member.startTime)
+  return members.filter((member) => {
+    if (member.pid === except) return false
+    const now = readProcStat(member.pid, procRoot)
+    return now !== undefined && now.startTime === member.startTime && now.state !== 'Z'
+  })
 }
 
 /** The kernel's `USER_HZ`, the unit of `/proc` CPU times. */
@@ -169,20 +215,28 @@ async function withDeadline<T>(promise: Promise<T>, timeoutMs: number, message: 
 
 /** What a monitor observed between its start and stop. */
 export interface MonitorResult {
-  /** The largest tree RSS read, in KiB. */
-  readonly peakRssKiB: number
+  /** The largest sum of members' `VmRSS` in one reading, in KiB: a sampled peak that can miss a spike between readings. */
+  readonly sampledPeakRssKiB: number
+  /**
+   * The sum over every process the tree ever held of its largest `VmHWM`
+   * read, in KiB. The kernel keeps the high-water mark, so no spike between
+   * readings is missed; growth after a process's last reading before it
+   * exits is. Members that peaked at different times are summed, so this
+   * bounds the simultaneous tree peak from above.
+   */
+  readonly peakHwmKiB: number
   /** Readings taken. */
   readonly ticks: number
   /** The longest interval between two readings, in milliseconds. */
   readonly maxGapMs: number
-  /** Every pid seen in the tree. */
-  readonly pids: readonly number[]
+  /** Every process seen in the tree, at its first reading. */
+  readonly members: readonly ProcStat[]
 }
 
 /** Messages a monitor worker accepts. */
 export type MonitorRequest = { readonly kind: 'start'; readonly root: number; readonly intervalMs: number; readonly procRoot: string } | { readonly kind: 'stop' }
 
-/** A running tree-RSS monitor in its own worker thread, so harness work never delays a reading. */
+/** A running tree-memory monitor in its own worker thread, so harness work never delays a reading. */
 export class TreeMonitor {
   private readonly worker: Worker
   private readonly result: Promise<MonitorResult>
