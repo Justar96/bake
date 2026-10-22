@@ -289,6 +289,9 @@
     "scripts:release": {
       "reason": "Release packing, installers, and manifest tooling; scope 16 changes the archive layout for native artifacts."
     },
+    "scripts:rust-perf": {
+      "reason": "The D18 performance harness: one external method for the 0.3.8 baseline and the native bake, its workload seeds, and the budget proposal; measurement tooling, not a TypeScript contract."
+    },
     "scripts:rust-pty": {
       "reason": "The Rust PTY driver's Windows ConPTY client; native terminal qualification tooling for bake, not a TypeScript contract."
     },
@@ -1342,6 +1345,7 @@
     {"path":"scripts/rust-migration-inventory.test.ts","lane":"bun-scripts","owner":"scripts:migration","scopes":["00"],"disposition":"replace-tooling","basis":"scripts:migration"},
     {"path":"scripts/rust-migration-ledger.test.ts","lane":"bun-scripts","owner":"scripts:qualification-ledger","scopes":["01","17"],"disposition":"reuse-oracle","basis":"scripts:qualification-ledger"},
     {"path":"scripts/rust-mutants.test.ts","lane":"bun-scripts","owner":"scripts:rust-quality","scopes":["01"],"disposition":"replace-tooling","basis":"scripts:rust-quality"},
+    {"path":"scripts/rust-perf.test.ts","lane":"bun-scripts","owner":"scripts:rust-perf","scopes":["00","17"],"disposition":"replace-tooling","basis":"scripts:rust-perf"},
     {"path":"scripts/rust-pty-conpty.test.ts","lane":"bun-scripts","owner":"scripts:rust-pty","scopes":["14","15"],"disposition":"replace-tooling","basis":"scripts:rust-pty"},
     {"path":"scripts/rust-scope.test.ts","lane":"bun-scripts","owner":"scripts:rust-tests","scopes":["01"],"disposition":"replace-tooling","basis":"scripts:rust-tests"},
     {"path":"scripts/rust-test.test.ts","lane":"bun-scripts","owner":"scripts:rust-tests","scopes":["01"],"disposition":"replace-tooling","basis":"scripts:rust-tests"},
