@@ -17,11 +17,12 @@
 <body>
   <h1>Bake</h1>
   <p>A terminal coding agent. It is one native binary: no Node.js, no runtime to install first.</p>
-  <h2>macOS and Linux</h2>
+  <h2>Linux (x86_64 and arm64)</h2>
   <pre><code>curl -fsSL https://bake.justar.dev/install.sh | sh</code></pre>
-  <h2>Windows PowerShell</h2>
-  <pre><code>irm https://bake.justar.dev/install.ps1 | iex</code></pre>
-  <p>Each installer verifies the release manifest's signature and the archive's SHA-256, then installs <code>bake</code>
-    under your home directory. See the <a href="/native/stable.json">release manifest</a> for the platforms published.</p>
+  <p>The installer verifies the release manifest's signature and the archive's SHA-256, then installs <code>bake</code>
+    under your home directory. It needs glibc 2.34 or newer. See the <a href="/native/stable.json">release manifest</a>
+    for the platforms published.</p>
+  <h2>macOS and Windows</h2>
+  <p>Support is coming in a later 0.4 release. On Windows, you can install Bake inside WSL with the Linux command above.</p>
 </body>
 </html>
