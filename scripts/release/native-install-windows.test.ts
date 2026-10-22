@@ -466,7 +466,7 @@ foreach ($case in $cases) {
 })
 
 describe.skipIf(PWSH === undefined)('the shipped Windows installer', () => {
-  const REFUSAL = 'Bake install: Bake 0.4.0 releases linux-arm64 and linux-x64 only; native win32-x64 releases arrive in Bake 0.4.x'
+  const REFUSAL = 'Bake install: Bake 0.4.0 runs on Linux only; Windows support is coming in a later 0.4 release. Until then, use WSL.'
 
   /** A host that records requests and serves nothing, and the environment that points the installer at it. */
   function world(label: string): { root: string; binDir: string; host: ReleaseHost; env: Record<string, string> } {

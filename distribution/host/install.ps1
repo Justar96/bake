@@ -15,7 +15,7 @@ $ErrorActionPreference = 'Stop'
 # BEGIN 0.4.0 PLATFORM REFUSAL
 # Thrown, not `exit`: under `irm | iex` an exit would close the user's shell.
 # The tests run the installer below through a copy without this block.
-throw 'Bake install: Bake 0.4.0 releases linux-arm64 and linux-x64 only; native win32-x64 releases arrive in Bake 0.4.x'
+throw 'Bake install: Bake 0.4.0 runs on Linux only; Windows support is coming in a later 0.4 release. Until then, use WSL.'
 # END 0.4.0 PLATFORM REFUSAL
 
 # The native release key (distribution/host/native-release-key.pub), base64

@@ -582,16 +582,16 @@ function runShipped(world: Scenario, system: string, machine: string, args: read
 }
 
 posix.each([
-  ['Darwin', 'arm64', 'darwin-arm64'],
-  ['Darwin', 'x86_64', 'darwin-x64'],
-])('the shipped installer refuses %s %s with a 0.4.x message before it downloads anything', async (system, machine, target) => {
+  ['Darwin', 'arm64'],
+  ['Darwin', 'x86_64'],
+])('the shipped installer refuses %s %s, saying macOS support is coming, before it downloads anything', async (system, machine) => {
   const world = scenario()
   setup(world.directory)
   world.publish('0.4.0')
   const result = await runShipped(world, system, machine)
   expect(result.status).toBe(1)
   expect(result.stdout).toBe('')
-  expect(result.stderr).toBe(`Bake install: Bake 0.4.0 releases linux-arm64 and linux-x64 only; native ${target} releases arrive in Bake 0.4.x\n`)
+  expect(result.stderr).toBe('Bake install: Bake 0.4.0 runs on Linux only; macOS support is coming in a later 0.4 release.\n')
   expect(world.host.requests).toEqual([])
   // Refused before its temporary directory, its lock, or its root exist.
   expect(readdirSync(join(world.directory, 'tmp'))).toEqual([])

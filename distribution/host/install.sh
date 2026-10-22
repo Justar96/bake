@@ -517,7 +517,7 @@ set_platform() {
   # The tests run the install path on macOS through a copy without this block.
   case $target in
     linux-*) ;;
-    *) fail "Bake 0.4.0 releases linux-arm64 and linux-x64 only; native $target releases arrive in Bake 0.4.x" ;;
+    *) fail "Bake 0.4.0 runs on Linux only; macOS support is coming in a later 0.4 release." ;;
   esac
   # END 0.4.0 PLATFORM REFUSAL
 }
