@@ -257,9 +257,9 @@ The Rust `bake-coding-agent` crate ports Pi's coding-agent package, and the line
 
 | Crate | Version | License |
 | --- | --- | --- |
-| [`serde-saphyr`](https://github.com/bourumir-wyngs/serde-saphyr) | 1.3.0 | MIT OR Apache-2.0 |
-| [`granit-parser`](https://github.com/bourumir-wyngs/granit-parser) | 1.3.0 | MIT OR Apache-2.0 |
-| [`annotate-snippets`](https://github.com/rust-lang/annotate-snippets-rs) | 0.12.16 | MIT OR Apache-2.0 |
+| [`serde-saphyr`](https://github.com/bourumir-wyngs/serde-saphyr) | 2.0.0 | MIT OR Apache-2.0 |
+| [`granit-parser`](https://github.com/bourumir-wyngs/granit-parser) | 2.0.0 | MIT OR Apache-2.0 |
+| [`annotate-snippets`](https://github.com/rust-lang/annotate-snippets-rs) | 0.12.17 | MIT OR Apache-2.0 |
 | [`anstyle`](https://github.com/rust-cli/anstyle) | 1.0.14 | MIT OR Apache-2.0 |
 | [`arraydeque`](https://github.com/andylokandy/arraydeque) | 0.5.1 | MIT OR Apache-2.0 |
 | [`encoding_rs_io`](https://github.com/BurntSushi/encoding_rs_io) | 0.1.8 | MIT OR Apache-2.0 |
@@ -305,51 +305,45 @@ The `read` tool decodes, orients, resizes, and re-encodes images with the `image
 
 ## Rust WebAssembly plugin host (`rust/crates/bake-coding-agent`)
 
-`bake-coding-agent` checks, compiles, and runs third-party plugin components with Wasmtime 49.0.3 in Bake's plugin helper process (`plugins::wasm`). These crates entered [`rust/Cargo.lock`](rust/Cargo.lock) with it, as normal, build, or procedural-macro dependencies of `bake` on at least one target (`wit-component` and `wit-parser` 0.258.3 run only inside Wasmtime's `bindgen!` macro), and keep their own licenses; most Bytecode Alliance crates are `Apache-2.0 WITH LLVM-exception`. The `wasmtime-internal-fiber` and `wasmtime` crates compile small C files with the target's C compiler. The guest SDK and the test tooling are not part of `bake`: `wit-bindgen` 0.63.0 with the 0.262.0 releases of `wasm-encoder`, `wasmparser`, `wit-parser`, `wit-component`, and `wasm-metadata`, and `wat` and `wast` 258.
+`bake-coding-agent` checks, compiles, and runs third-party plugin components with Wasmtime 50.0.0 in Bake's plugin helper process (`plugins::wasm`). These crates entered [`rust/Cargo.lock`](rust/Cargo.lock) with it, as normal, build, or procedural-macro dependencies of `bake` on at least one target (`wit-component` and `wit-parser` 0.261.0 run only inside Wasmtime's `bindgen!` macro), and keep their own licenses; most Bytecode Alliance crates are `Apache-2.0 WITH LLVM-exception`. The `wasmtime-internal-fiber` and `wasmtime` crates compile small C files with the target's C compiler. The guest SDK and the test tooling are not part of `bake`: `wit-bindgen` 0.63.0 with the 0.262.0 releases of `wasm-encoder`, `wasmparser`, `wit-parser`, `wit-component`, and `wasm-metadata`, and `wat` and `wast` 261.
 
 | Crate | Version | License |
 | --- | --- | --- |
-| [`ambient-authority`](https://github.com/sunfishcode/ambient-authority) | 0.0.2 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |
 | [`anyhow`](https://github.com/dtolnay/anyhow) | 1.0.104 | MIT OR Apache-2.0 |
 | [`arbitrary`](https://github.com/rust-fuzz/arbitrary/) | 1.5.0 | MIT OR Apache-2.0 |
 | [`async-trait`](https://github.com/dtolnay/async-trait) | 0.1.92 | MIT OR Apache-2.0 |
 | [`block-buffer`](https://github.com/RustCrypto/utils) | 0.10.4 | MIT OR Apache-2.0 |
-| [`cap-primitives`](https://github.com/bytecodealliance/cap-std) | 4.0.3 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |
 | [`cobs`](https://github.com/jamesmunns/cobs.rs) | 0.3.0 | MIT OR Apache-2.0 |
 | [`cpufeatures`](https://github.com/RustCrypto/utils) | 0.2.17 | MIT OR Apache-2.0 |
-| `cranelift-assembler-x64` | 0.136.3 | Apache-2.0 WITH LLVM-exception |
-| `cranelift-assembler-x64-meta` | 0.136.3 | Apache-2.0 WITH LLVM-exception |
-| [`cranelift-bforest`](https://github.com/bytecodealliance/wasmtime) | 0.136.3 | Apache-2.0 WITH LLVM-exception |
-| [`cranelift-bitset`](https://github.com/bytecodealliance/wasmtime) | 0.136.3 | Apache-2.0 WITH LLVM-exception |
-| [`cranelift-codegen`](https://github.com/bytecodealliance/wasmtime) | 0.136.3 | Apache-2.0 WITH LLVM-exception |
-| [`cranelift-codegen-meta`](https://github.com/bytecodealliance/wasmtime) | 0.136.3 | Apache-2.0 WITH LLVM-exception |
-| [`cranelift-codegen-shared`](https://github.com/bytecodealliance/wasmtime) | 0.136.3 | Apache-2.0 WITH LLVM-exception |
-| [`cranelift-control`](https://github.com/bytecodealliance/wasmtime) | 0.136.3 | Apache-2.0 WITH LLVM-exception |
-| [`cranelift-entity`](https://github.com/bytecodealliance/wasmtime) | 0.136.3 | Apache-2.0 WITH LLVM-exception |
-| [`cranelift-frontend`](https://github.com/bytecodealliance/wasmtime) | 0.136.3 | Apache-2.0 WITH LLVM-exception |
-| [`cranelift-isle`](https://github.com/bytecodealliance/wasmtime/tree/main/cranelift/isle) | 0.136.3 | Apache-2.0 WITH LLVM-exception |
-| [`cranelift-native`](https://github.com/bytecodealliance/wasmtime) | 0.136.3 | Apache-2.0 WITH LLVM-exception |
-| [`cranelift-srcgen`](https://github.com/bytecodealliance/wasmtime) | 0.136.3 | Apache-2.0 WITH LLVM-exception |
+| `cranelift-assembler-x64` | 0.137.0 | Apache-2.0 WITH LLVM-exception |
+| `cranelift-assembler-x64-meta` | 0.137.0 | Apache-2.0 WITH LLVM-exception |
+| [`cranelift-bforest`](https://github.com/bytecodealliance/wasmtime) | 0.137.0 | Apache-2.0 WITH LLVM-exception |
+| [`cranelift-bitset`](https://github.com/bytecodealliance/wasmtime) | 0.137.0 | Apache-2.0 WITH LLVM-exception |
+| [`cranelift-codegen`](https://github.com/bytecodealliance/wasmtime) | 0.137.0 | Apache-2.0 WITH LLVM-exception |
+| [`cranelift-codegen-meta`](https://github.com/bytecodealliance/wasmtime) | 0.137.0 | Apache-2.0 WITH LLVM-exception |
+| [`cranelift-codegen-shared`](https://github.com/bytecodealliance/wasmtime) | 0.137.0 | Apache-2.0 WITH LLVM-exception |
+| [`cranelift-control`](https://github.com/bytecodealliance/wasmtime) | 0.137.0 | Apache-2.0 WITH LLVM-exception |
+| [`cranelift-entity`](https://github.com/bytecodealliance/wasmtime) | 0.137.0 | Apache-2.0 WITH LLVM-exception |
+| [`cranelift-frontend`](https://github.com/bytecodealliance/wasmtime) | 0.137.0 | Apache-2.0 WITH LLVM-exception |
+| [`cranelift-isle`](https://github.com/bytecodealliance/wasmtime/tree/main/cranelift/isle) | 0.137.0 | Apache-2.0 WITH LLVM-exception |
+| [`cranelift-native`](https://github.com/bytecodealliance/wasmtime) | 0.137.0 | Apache-2.0 WITH LLVM-exception |
+| [`cranelift-srcgen`](https://github.com/bytecodealliance/wasmtime) | 0.137.0 | Apache-2.0 WITH LLVM-exception |
 | [`crypto-common`](https://github.com/RustCrypto/traits) | 0.1.7 | MIT OR Apache-2.0 |
 | [`digest`](https://github.com/RustCrypto/traits) | 0.10.7 | MIT OR Apache-2.0 |
 | [`fnv`](https://github.com/servo/rust-fnv) | 1.0.7 | Apache-2.0 OR MIT |
-| [`fs-set-times`](https://github.com/bytecodealliance/fs-set-times) | 0.20.3 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |
 | [`futures`](https://github.com/rust-lang/futures-rs) | 0.3.34 | MIT OR Apache-2.0 |
 | [`futures-io`](https://github.com/rust-lang/futures-rs) | 0.3.34 | MIT OR Apache-2.0 |
 | [`futures-sink`](https://github.com/rust-lang/futures-rs) | 0.3.34 | MIT OR Apache-2.0 |
 | [`generic-array`](https://github.com/fizyk20/generic-array.git) | 0.14.7 | MIT |
 | [`gimli`](https://github.com/gimli-rs/gimli) | 0.33.0 | MIT OR Apache-2.0 |
 | [`id-arena`](https://github.com/fitzgen/id-arena) | 2.3.0 | MIT OR Apache-2.0 |
-| [`io-extras`](https://github.com/sunfishcode/io-extras) | 0.19.0 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |
-| [`io-lifetimes`](https://github.com/sunfishcode/io-lifetimes) | 2.0.4, 3.0.1 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |
 | [`leb128fmt`](https://github.com/bluk/leb128fmt) | 0.1.0 | MIT OR Apache-2.0 |
 | [`mach2`](https://github.com/JohnTitor/mach2) | 0.6.0 | BSD-2-Clause OR MIT OR Apache-2.0 |
-| [`maybe-owned`](https://github.com/rustonaut/maybe-owned) | 0.3.4 | MIT OR Apache-2.0 |
 | [`memfd`](https://github.com/lucab/memfd-rs) | 0.6.6 | MIT OR Apache-2.0 |
 | [`object`](https://github.com/gimli-rs/object) | 0.40.0 | Apache-2.0 OR MIT |
 | [`postcard`](https://github.com/jamesmunns/postcard) | 1.1.3 | MIT OR Apache-2.0 |
-| [`pulley-interpreter`](https://github.com/bytecodealliance/wasmtime/tree/main/pulley) | 49.0.3 | Apache-2.0 WITH LLVM-exception |
-| [`pulley-macros`](https://github.com/bytecodealliance/wasmtime/tree/main/pulley/macros) | 49.0.3 | Apache-2.0 WITH LLVM-exception |
+| [`pulley-interpreter`](https://github.com/bytecodealliance/wasmtime/tree/main/pulley) | 50.0.0 | Apache-2.0 WITH LLVM-exception |
+| [`pulley-macros`](https://github.com/bytecodealliance/wasmtime/tree/main/pulley/macros) | 50.0.0 | Apache-2.0 WITH LLVM-exception |
 | [`regalloc2`](https://github.com/bytecodealliance/regalloc2) | 0.15.2 | Apache-2.0 WITH LLVM-exception |
 | [`rustix-linux-procfs`](https://github.com/sunfishcode/rustix-linux-procfs) | 0.1.1 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |
 | [`sha2`](https://github.com/RustCrypto/hashes) | 0.10.9 | MIT OR Apache-2.0 |
@@ -358,26 +352,25 @@ The `read` tool decodes, orients, resizes, and re-encodes images with the `image
 | [`tracing-attributes`](https://github.com/tokio-rs/tracing) | 0.1.31 | MIT |
 | [`typenum`](https://github.com/paholg/typenum) | 1.20.1 | MIT OR Apache-2.0 |
 | [`version_check`](https://github.com/SergioBenitez/version_check) | 0.9.5 | MIT OR Apache-2.0 |
-| [`wasm-encoder`](https://github.com/bytecodealliance/wasm-tools/tree/main/crates/wasm-encoder) | 0.258.3 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |
-| [`wasm-metadata`](https://github.com/bytecodealliance/wasm-tools/tree/main/crates/wasm-metadata) | 0.258.3 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |
-| [`wasmparser`](https://github.com/bytecodealliance/wasm-tools/tree/main/crates/wasmparser) | 0.258.3 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |
-| [`wasmprinter`](https://github.com/bytecodealliance/wasm-tools/tree/main/crates/wasmprinter) | 0.258.3 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |
-| [`wasmtime`](https://github.com/bytecodealliance/wasmtime) | 49.0.3 | Apache-2.0 WITH LLVM-exception |
-| [`wasmtime-environ`](https://github.com/bytecodealliance/wasmtime) | 49.0.3 | Apache-2.0 WITH LLVM-exception |
-| [`wasmtime-internal-component-macro`](https://github.com/bytecodealliance/wasmtime) | 49.0.3 | Apache-2.0 WITH LLVM-exception |
-| [`wasmtime-internal-component-util`](https://github.com/bytecodealliance/wasmtime) | 49.0.3 | Apache-2.0 WITH LLVM-exception |
-| `wasmtime-internal-core` | 49.0.3 | Apache-2.0 WITH LLVM-exception |
-| [`wasmtime-internal-cranelift`](https://github.com/bytecodealliance/wasmtime) | 49.0.3 | Apache-2.0 WITH LLVM-exception |
-| [`wasmtime-internal-fiber`](https://github.com/bytecodealliance/wasmtime) | 49.0.3 | Apache-2.0 WITH LLVM-exception |
-| [`wasmtime-internal-jit-icache-coherence`](https://github.com/bytecodealliance/wasmtime) | 49.0.3 | Apache-2.0 WITH LLVM-exception |
-| [`wasmtime-internal-unwinder`](https://github.com/bytecodealliance/wasmtime) | 49.0.3 | Apache-2.0 WITH LLVM-exception |
-| [`wasmtime-internal-versioned-export-macros`](https://github.com/bytecodealliance/wasmtime) | 49.0.3 | Apache-2.0 WITH LLVM-exception |
-| [`wasmtime-internal-wit-bindgen`](https://github.com/bytecodealliance/wasmtime) | 49.0.3 | Apache-2.0 WITH LLVM-exception |
-| [`wasmtime-wasi`](https://github.com/bytecodealliance/wasmtime) | 49.0.3 | Apache-2.0 WITH LLVM-exception |
-| [`wasmtime-wasi-io`](https://github.com/bytecodealliance/wasmtime) | 49.0.3 | Apache-2.0 WITH LLVM-exception |
-| [`winx`](https://github.com/sunfishcode/winx) | 0.36.4 | Apache-2.0 WITH LLVM-exception |
-| [`wit-component`](https://github.com/bytecodealliance/wasm-tools/tree/main/crates/wit-component) | 0.258.3 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |
-| [`wit-parser`](https://github.com/bytecodealliance/wasm-tools/tree/main/crates/wit-parser) | 0.258.3 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |
+| [`wasm-encoder`](https://github.com/bytecodealliance/wasm-tools/tree/main/crates/wasm-encoder) | 0.261.0 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |
+| [`wasm-metadata`](https://github.com/bytecodealliance/wasm-tools/tree/main/crates/wasm-metadata) | 0.261.0 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |
+| [`wasmparser`](https://github.com/bytecodealliance/wasm-tools/tree/main/crates/wasmparser) | 0.261.0 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |
+| [`wasmprinter`](https://github.com/bytecodealliance/wasm-tools/tree/main/crates/wasmprinter) | 0.261.0 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |
+| [`wasmtime`](https://github.com/bytecodealliance/wasmtime) | 50.0.0 | Apache-2.0 WITH LLVM-exception |
+| [`wasmtime-environ`](https://github.com/bytecodealliance/wasmtime) | 50.0.0 | Apache-2.0 WITH LLVM-exception |
+| [`wasmtime-internal-component-macro`](https://github.com/bytecodealliance/wasmtime) | 50.0.0 | Apache-2.0 WITH LLVM-exception |
+| [`wasmtime-internal-component-util`](https://github.com/bytecodealliance/wasmtime) | 50.0.0 | Apache-2.0 WITH LLVM-exception |
+| `wasmtime-internal-core` | 50.0.0 | Apache-2.0 WITH LLVM-exception |
+| [`wasmtime-internal-cranelift`](https://github.com/bytecodealliance/wasmtime) | 50.0.0 | Apache-2.0 WITH LLVM-exception |
+| [`wasmtime-internal-fiber`](https://github.com/bytecodealliance/wasmtime) | 50.0.0 | Apache-2.0 WITH LLVM-exception |
+| [`wasmtime-internal-jit-icache-coherence`](https://github.com/bytecodealliance/wasmtime) | 50.0.0 | Apache-2.0 WITH LLVM-exception |
+| [`wasmtime-internal-unwinder`](https://github.com/bytecodealliance/wasmtime) | 50.0.0 | Apache-2.0 WITH LLVM-exception |
+| [`wasmtime-internal-versioned-export-macros`](https://github.com/bytecodealliance/wasmtime) | 50.0.0 | Apache-2.0 WITH LLVM-exception |
+| [`wasmtime-internal-wit-bindgen`](https://github.com/bytecodealliance/wasmtime) | 50.0.0 | Apache-2.0 WITH LLVM-exception |
+| [`wasmtime-wasi`](https://github.com/bytecodealliance/wasmtime) | 50.0.0 | Apache-2.0 WITH LLVM-exception |
+| [`wasmtime-wasi-io`](https://github.com/bytecodealliance/wasmtime) | 50.0.0 | Apache-2.0 WITH LLVM-exception |
+| [`wit-component`](https://github.com/bytecodealliance/wasm-tools/tree/main/crates/wit-component) | 0.261.0 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |
+| [`wit-parser`](https://github.com/bytecodealliance/wasm-tools/tree/main/crates/wit-parser) | 0.261.0 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |
 
 ## Ported source (`rust/plugins/guard`)
 

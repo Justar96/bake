@@ -41,7 +41,7 @@ pub(crate) fn create_with_extension(
         ));
     }
     let mut random = [0; 16];
-    getrandom::getrandom(&mut random).map_err(|error| io::Error::other(error.to_string()))?;
+    getrandom::fill(&mut random).map_err(|error| io::Error::other(error.to_string()))?;
     let id: String = random.iter().map(|byte| format!("{byte:02x}")).collect();
     let directory = parent.join(format!("{prefix}-{id}"));
     let builder = DirBuilder::new();

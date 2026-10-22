@@ -227,7 +227,6 @@ fn options(max_bytes: usize) -> Options {
     budget.max_anchors = MAX_ALIASES;
     budget.max_documents = 1;
     budget.max_total_scalar_bytes = max_bytes;
-    budget.max_total_comment_bytes = max_bytes;
     budget.max_recorded_anchor_bytes = max_bytes;
     budget.max_recorded_anchor_events = MAX_NODES;
     budget.max_merge_keys = 0;
@@ -237,7 +236,8 @@ fn options(max_bytes: usize) -> Options {
     let mut options = Options::default();
     options.budget = Some(budget);
     options.alias_limits = alias_limits;
-    options.emit_comments = false;
+    // Without serde-saphyr's `comments` feature, comments are validated but
+    // their text is never kept, so they need no budget.
     options.duplicate_keys = DuplicateKeyPolicy::Error;
     options.merge_keys = MergeKeyPolicy::AsOrdinary;
     options.strict_booleans = true;

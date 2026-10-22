@@ -340,7 +340,7 @@ pub(crate) enum Random {
 impl Random {
     fn fill(&mut self, bytes: &mut [u8]) -> GuestResult<()> {
         match self {
-            Self::Os => getrandom::getrandom(bytes).map_err(|error| {
+            Self::Os => getrandom::fill(bytes).map_err(|error| {
                 GuestError::Protocol(format!("the system random source failed: {error}"))
             }),
             Self::Seeded(state) => {

@@ -9,6 +9,8 @@ description = "The Model Context Protocol client boundary ported from Pi's `mcp`
 
 [dependencies]
 reqwest.workspace = true
+rustls.workspace = true
+webpki-roots.workspace = true
 # `stdio`'s server process and its tree: the owner the coding tools share.
 bake-process.workspace = true
 serde_json.workspace = true

@@ -221,7 +221,7 @@ pub fn pinned_client_builder(addresses: &[IpAddr]) -> reqwest::ClientBuilder {
         .iter()
         .map(|address| SocketAddr::new(*address, 0))
         .collect();
-    reqwest::Client::builder()
+    bake_ai::http::client_builder()
         .no_proxy()
         .dns_resolver(Arc::new(PinnedResolver(pinned)))
 }

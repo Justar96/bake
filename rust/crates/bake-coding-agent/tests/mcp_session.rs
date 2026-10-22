@@ -257,7 +257,7 @@ struct Case {
 impl Case {
     fn new(name: &str) -> Self {
         let mut random = [0; 8];
-        getrandom::getrandom(&mut random).expect("random");
+        getrandom::fill(&mut random).expect("random");
         let id: String = random.iter().map(|byte| format!("{byte:02x}")).collect();
         let dir = std::env::temp_dir().join(format!("bake-mcp-session-{name}-{id}"));
         std::fs::create_dir_all(dir.join("work")).expect("case directory");

@@ -45,7 +45,7 @@ fn process_gone(pid: i32) -> bool {
 #[tokio::test]
 async fn kill_tracked_detached_children_ends_running_commands() {
     let mut random = [0; 16];
-    getrandom::getrandom(&mut random).unwrap();
+    getrandom::fill(&mut random).unwrap();
     let id: String = random.iter().map(|byte| format!("{byte:02x}")).collect();
     let dir = TempDir(std::env::temp_dir().join(format!("bake-bash-shutdown-{id}")));
     fs::create_dir(&dir.0).unwrap();

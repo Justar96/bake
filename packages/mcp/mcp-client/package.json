@@ -54,7 +54,7 @@
     "@modelcontextprotocol/server-filesystem": "^2026.7.4",
     "@deepseek-ai/cordis": "workspace:^",
     "bake-http-proxy": "workspace:^",
-    "@modelcontextprotocol/server": "2.0.0",
+    "@modelcontextprotocol/server": "2.3.1",
     "@modelcontextprotocol/node": "2.0.0",
     "zod": "catalog:",
     "bake-mcp-resources": "workspace:^",

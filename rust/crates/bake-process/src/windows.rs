@@ -164,7 +164,7 @@ enum Direction {
 /// is spawned.
 async fn pipe(direction: Direction) -> io::Result<(NamedPipeServer, OwnedHandle)> {
     let mut random = [0u8; 16];
-    getrandom::getrandom(&mut random).map_err(|_| io::Error::other("no random source"))?;
+    getrandom::fill(&mut random).map_err(|_| io::Error::other("no random source"))?;
     let id: String = random.iter().map(|byte| format!("{byte:02x}")).collect();
     let name = format!(r"\\.\pipe\bake-process-{}-{id}", std::process::id());
     let server = ServerOptions::new()

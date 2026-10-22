@@ -334,7 +334,7 @@ fn private_options() -> OpenOptions {
 /// A random lowercase hex suffix for a temporary name.
 fn random_suffix() -> io::Result<String> {
     let mut random = [0u8; 8];
-    getrandom::getrandom(&mut random).map_err(|error| io::Error::other(error.to_string()))?;
+    getrandom::fill(&mut random).map_err(|error| io::Error::other(error.to_string()))?;
     Ok(random.iter().map(|byte| format!("{byte:02x}")).collect())
 }
 

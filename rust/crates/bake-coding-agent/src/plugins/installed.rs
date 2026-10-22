@@ -806,7 +806,7 @@ struct TempDir {
 impl TempDir {
     fn create(store: &Path) -> Result<Self, PluginHomeError> {
         let mut random = [0u8; 8];
-        getrandom::getrandom(&mut random)
+        getrandom::fill(&mut random)
             .map_err(|failure| error(format!("cannot name a temporary directory: {failure}")))?;
         let name: String = random.iter().map(|byte| format!("{byte:02x}")).collect();
         let path = store.join(format!(".install-{name}"));

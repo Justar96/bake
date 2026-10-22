@@ -378,7 +378,7 @@ pub(super) mod windows {
     fn pipe(child_reads: bool) -> Result<(NamedPipeServer, OwnedHandle), String> {
         static NEXT: AtomicU64 = AtomicU64::new(0);
         let mut nonce = [0u8; 8];
-        getrandom::getrandom(&mut nonce).map_err(|error| format!("getrandom failed: {error}"))?;
+        getrandom::fill(&mut nonce).map_err(|error| format!("getrandom failed: {error}"))?;
         let name = format!(
             r"\\.\pipe\bake-wasm-plugin-{}-{}-{:016x}",
             std::process::id(),

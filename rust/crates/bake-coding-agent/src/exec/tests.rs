@@ -21,7 +21,7 @@ impl Fixture {
             return fixture;
         }
         let mut random = [0; 16];
-        getrandom::getrandom(&mut random).unwrap();
+        getrandom::fill(&mut random).unwrap();
         let id: String = random.iter().map(|byte| format!("{byte:02x}")).collect();
         let dir = std::env::temp_dir().join(format!("bake-exec-{id}"));
         std::fs::create_dir(&dir).unwrap();

@@ -55,7 +55,7 @@ struct TempDir(PathBuf);
 impl TempDir {
     fn new() -> Self {
         let mut random = [0; 16];
-        getrandom::getrandom(&mut random).expect("random");
+        getrandom::fill(&mut random).expect("random");
         let id: String = random.iter().map(|byte| format!("{byte:02x}")).collect();
         let dir = std::env::temp_dir().join(format!("bake-process-windows-{id}"));
         std::fs::create_dir(&dir).expect("temp dir");

@@ -600,7 +600,7 @@ fn committed<T>(
 /// a guessable generation could match another sign-in's.
 fn new_generation() -> Result<String, String> {
     let mut random = [0u8; 16];
-    getrandom::getrandom(&mut random)
+    getrandom::fill(&mut random)
         .map_err(|error| format!("no randomness for the sign-in ({error})"))?;
     Ok(random.iter().map(|byte| format!("{byte:02x}")).collect())
 }

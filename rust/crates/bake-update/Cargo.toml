@@ -16,6 +16,8 @@ serde_json.workspace = true
 # The manifest, its signature, and the archive are fetched over the same
 # rustls reqwest the provider route uses; `tokio` bounds each request.
 reqwest.workspace = true
+rustls.workspace = true
+webpki-roots.workspace = true
 tokio = { workspace = true, features = ["time"] }
 flate2.workspace = true
 tar.workspace = true

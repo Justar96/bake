@@ -31,7 +31,7 @@ static V7: Mutex<V7State> = Mutex::new(V7State {
 
 /// Fill `bytes` from the operating system's random source.
 pub(crate) fn random_bytes(bytes: &mut [u8]) {
-    if getrandom::getrandom(bytes).is_ok() {
+    if getrandom::fill(bytes).is_ok() {
         return;
     }
     use std::collections::hash_map::RandomState;

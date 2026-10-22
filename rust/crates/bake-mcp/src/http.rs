@@ -664,6 +664,28 @@ pub enum SessionClose {
     Failed(HttpError),
 }
 
+/// A reqwest client builder over rustls with the ring provider that trusts
+/// the Mozilla roots `webpki-roots` bundles and offers HTTP/1.1 by ALPN, the
+/// config `bake_ai::http::client_builder` builds. reqwest's
+/// `rustls-no-provider` has no crypto provider of its own and would verify
+/// with the platform's trust store. Should the config not build, `build`
+/// returns an error for the unknown TLS backend.
+pub fn client_builder() -> reqwest::ClientBuilder {
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let Ok(versions) =
+        rustls::ClientConfig::builder_with_provider(provider).with_safe_default_protocol_versions()
+    else {
+        return reqwest::Client::builder().tls_backend_preconfigured(());
+    };
+    let mut tls = versions
+        .with_root_certificates(rustls::RootCertStore {
+            roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
+        })
+        .with_no_client_auth();
+    tls.alpn_protocols = vec![b"http/1.1".to_vec()];
+    reqwest::Client::builder().tls_backend_preconfigured(tls)
+}
+
 /// The owner of a Streamable HTTP connection's tasks.
 ///
 /// Call [`shutdown`](Self::shutdown) after the client's shutdown to wait
@@ -688,7 +710,7 @@ impl HttpTransport {
         options: HttpOptions,
     ) -> Result<(Self, HttpReceiver, HttpSender), HttpOptionsError> {
         let config = Config::new(&options)?;
-        let client = reqwest::Client::builder()
+        let client = client_builder()
             .no_proxy()
             .redirect(reqwest::redirect::Policy::none())
             .referer(false)

@@ -16,7 +16,7 @@ struct TempDir(PathBuf);
 impl TempDir {
     fn new() -> Self {
         let mut bytes = [0; 16];
-        getrandom::getrandom(&mut bytes).unwrap();
+        getrandom::fill(&mut bytes).unwrap();
         let id: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
         let dir = std::env::temp_dir().join(format!("bake-mutation-test-{id}"));
         fs::create_dir(&dir).unwrap();

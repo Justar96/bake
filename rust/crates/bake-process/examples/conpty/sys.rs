@@ -148,7 +148,7 @@ impl Drop for PseudoConsole {
 /// fails and it reports that. Synchronous: one thread uses each end.
 pub fn named_pipe(inbound: bool) -> io::Result<(OwnedHandle, OsString)> {
     let mut random = [0u8; 16];
-    getrandom::getrandom(&mut random).map_err(|_| io::Error::other("no random source"))?;
+    getrandom::fill(&mut random).map_err(|_| io::Error::other("no random source"))?;
     let id: String = random.iter().map(|byte| format!("{byte:02x}")).collect();
     let name = OsString::from(format!(r"\\.\pipe\bake-conpty-{}-{id}", std::process::id()));
     let access = if inbound {

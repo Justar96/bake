@@ -333,6 +333,14 @@ During coexistence, run the current Bake gates for affected TypeScript paths and
 
 ## Dev Note
 
+**Dependency update (2026-10-22).** The Rust workspace moves to Rust 1.99.1, and the fuzz workspace to `nightly-2026-10-22`, each with its lock. The pinned crates move to their latest releases:
+- Wasmtime and wasmtime-wasi 50.0.0, with wasmparser and the test tooling at 0.261.0, the wasm-tools release Wasmtime 50 uses. Wasmtime's WASI no longer brings cap-std's crates, so the plugin host's crates in `THIRD_PARTY_NOTICES.md` fall from 70 to 62. The vendored Wasmtime LICENSE is unchanged and is now pinned to the v50.0.0 tag.
+- reqwest 0.13.5 with `rustls-no-provider`. Its `rustls` features would use aws-lc-rs and the platform's trust store, so `bake_ai::http::client_builder` and `bake_mcp::http::client_builder` hand it a rustls 0.23.46 config with the ring provider, webpki-roots 1.0.10, and HTTP/1.1 ALPN. Every Bake HTTP client starts there; trust stays with the Mozilla roots, as in Node's `fetch`.
+- serde-saphyr 2.0.0, which keeps comment text only under its `comments` feature, so the CLIProxyAPI YAML reader drops its comment budget.
+- getrandom 0.4.3 (`getrandom::fill`), base64 0.23.1, Tokio 1.54.1, serde_json 1.0.154, libc 0.2.191, and icu_normalizer 2.4.0.
+
+signal-hook stays at 0.3.18, the version Crossterm 0.29 uses, so the lock carries one signal-hook.
+
 **Pi v1.4.0 port (2026-10-22).** Pi's latest official release is now v1.4.0, `4a080252f06caf63a525d7873c5d94d3c23887e0`, published 2026-10-21 ([pinned revision](pi-first-plan.md#pinned-pi-revision)). Its fixes to surfaces Bake ports are ported with Pi's tests:
 - `bake-ai`:
   - retry classification, including status codes on word boundaries and the ChatGPT Business limit, which is not retried;

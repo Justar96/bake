@@ -582,7 +582,7 @@ async fn a_supplied_client_owns_the_redirect_policy() {
     }))
     .await;
     let authorized = reqwest::Url::parse(&server.url).unwrap();
-    let client = reqwest::Client::builder()
+    let client = bake_mcp::http::client_builder()
         .redirect(reqwest::redirect::Policy::custom(move |attempt| {
             let same = attempt.url().scheme() == authorized.scheme()
                 && attempt.url().host_str() == authorized.host_str()
@@ -1234,7 +1234,12 @@ async fn the_fixture_reports_handler_panics() {
         panic!("handler assertion");
     }))
     .await;
-    let response = reqwest::Client::new().get(&server.url).send().await;
+    let response = bake_mcp::http::client_builder()
+        .build()
+        .unwrap()
+        .get(&server.url)
+        .send()
+        .await;
     assert!(response.is_err(), "the panicking handler answered");
     let report = server.stop_within(fixture::WAIT).await;
     assert!(!report.timed_out);
@@ -1285,7 +1290,14 @@ async fn a_timed_out_fixture_stop_still_aborts_and_awaits_its_server_task() {
     .await;
     let client = tokio::spawn({
         let url = server.url.clone();
-        async move { reqwest::Client::new().get(url).send().await }
+        async move {
+            bake_mcp::http::client_builder()
+                .build()
+                .unwrap()
+                .get(url)
+                .send()
+                .await
+        }
     });
     bounded("the handler to start", handler_entered)
         .await

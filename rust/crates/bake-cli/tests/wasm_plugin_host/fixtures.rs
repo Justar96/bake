@@ -332,6 +332,7 @@ pub fn componentize(core: &[u8], wit: &str, world: &str) -> Vec<u8> {
         &resolve,
         world,
         wit_component::StringEncoding::UTF8,
+        false,
     )
     .expect("metadata embeds");
     wit_component::ComponentEncoder::default()

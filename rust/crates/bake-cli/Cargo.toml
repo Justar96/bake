@@ -32,10 +32,10 @@ bake-agent.workspace = true
 # `test-util` lets the compile-deadline test hold the host's clock until the
 # helper reports that it is compiling.
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "time", "process", "io-util", "sync", "test-util"] }
-wat = { version = "=1.258.3", default-features = false }
-wasm-encoder = { version = "=0.258.3", default-features = false }
-wit-component = { version = "=0.258.3", default-features = false }
-wit-parser = { version = "=0.258.3", default-features = false }
+wat = { version = "=1.261.0", default-features = false }
+wasm-encoder = { version = "=0.261.0", default-features = false }
+wit-component = { version = "=0.261.0", default-features = false }
+wit-parser = { version = "=0.261.0", default-features = false }
 
 # The raw protocol tests compile the host's private helper launcher
 # (`bake-coding-agent`'s `plugins/wasm/process.rs`) from its source, so they

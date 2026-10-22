@@ -332,7 +332,7 @@ mod windows {
     impl Job {
         fn new() -> Result<Self, String> {
             let mut random = [0u8; 8];
-            getrandom::getrandom(&mut random).map_err(|_| "no random source".to_owned())?;
+            getrandom::fill(&mut random).map_err(|_| "no random source".to_owned())?;
             let id: String = random.iter().map(|byte| format!("{byte:02x}")).collect();
             let name = format!(r"Local\bake-process-job-probe-{}-{id}", std::process::id());
             let wide: Vec<u16> = OsStr::new(&name).encode_wide().chain(Some(0)).collect();

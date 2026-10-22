@@ -220,8 +220,7 @@ impl rand_core::TryRng for MeteredRandom {
             .store
             .fetch_add(len, Ordering::Relaxed)
             .saturating_add(len);
-        if call > RANDOM_PER_CALL || store > RANDOM_PER_STORE || getrandom::getrandom(dst).is_err()
-        {
+        if call > RANDOM_PER_CALL || store > RANDOM_PER_STORE || getrandom::fill(dst).is_err() {
             dst.fill(0);
             self.0.exceeded.store(true, Ordering::Relaxed);
         }

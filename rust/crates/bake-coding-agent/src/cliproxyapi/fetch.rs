@@ -171,7 +171,7 @@ fn client() -> Result<&'static reqwest::Client, String> {
     static CLIENT: OnceLock<Result<reqwest::Client, String>> = OnceLock::new();
     CLIENT
         .get_or_init(|| {
-            reqwest::Client::builder()
+            bake_ai::http::client_builder()
                 .no_proxy()
                 .redirect(reqwest::redirect::Policy::none())
                 .build()

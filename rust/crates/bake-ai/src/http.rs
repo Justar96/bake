@@ -37,11 +37,37 @@ pub fn user_agent() -> String {
     )
 }
 
+/// A reqwest client builder over rustls with the ring provider that trusts
+/// the Mozilla roots `webpki-roots` bundles, as Node's `fetch` does, and
+/// offers HTTP/1.1 by ALPN. reqwest's `rustls-no-provider` has no crypto
+/// provider of its own and would verify with the platform's trust store, so
+/// every client starts here; `bake-mcp` and `bake-update` build the same
+/// config.
+///
+/// The ring provider supports the safe default protocol versions, so the
+/// config always builds; were it not to, the builder would carry an unknown
+/// TLS backend and `build` would return an error.
+pub fn client_builder() -> reqwest::ClientBuilder {
+    let provider = std::sync::Arc::new(rustls::crypto::ring::default_provider());
+    let Ok(versions) =
+        rustls::ClientConfig::builder_with_provider(provider).with_safe_default_protocol_versions()
+    else {
+        return reqwest::Client::builder().tls_backend_preconfigured(());
+    };
+    let mut tls = versions
+        .with_root_certificates(rustls::RootCertStore {
+            roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
+        })
+        .with_no_client_auth();
+    tls.alpn_protocols = vec![b"http/1.1".to_vec()];
+    reqwest::Client::builder().tls_backend_preconfigured(tls)
+}
+
 fn client() -> Result<&'static reqwest::Client, ProviderError> {
     static CLIENT: OnceLock<Result<reqwest::Client, String>> = OnceLock::new();
     CLIENT
         .get_or_init(|| {
-            reqwest::Client::builder()
+            client_builder()
                 .no_proxy()
                 .build()
                 .map_err(|error| error_chain(&error))
@@ -323,6 +349,15 @@ mod tests {
                 ("user-agent".to_owned(), "custom".to_owned())
             ]
         );
+    }
+
+    #[test]
+    fn builds_a_client_over_the_preconfigured_rustls() {
+        // An unrecognized config type, such as one from a second rustls
+        // version, makes `build` fail; reqwest's own config would panic for
+        // want of a crypto provider.
+        let client = client_builder().build();
+        assert!(client.is_ok(), "{:?}", client.err());
     }
 
     #[test]

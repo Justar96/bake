@@ -186,7 +186,7 @@ mod tests {
     impl Dir {
         fn new(name: &str) -> Self {
             let mut random = [0u8; 8];
-            let _ = getrandom::getrandom(&mut random);
+            let _ = getrandom::fill(&mut random);
             let id: String = random.iter().map(|byte| format!("{byte:02x}")).collect();
             let path = std::env::temp_dir().join(format!("bake-path-utils-{name}-{id}"));
             std::fs::create_dir_all(&path).expect("temp dir");

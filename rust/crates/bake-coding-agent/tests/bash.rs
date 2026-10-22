@@ -32,7 +32,7 @@ struct TempDir(PathBuf);
 impl TempDir {
     fn new() -> Self {
         let mut random = [0; 16];
-        getrandom::getrandom(&mut random).unwrap();
+        getrandom::fill(&mut random).unwrap();
         let id: String = random.iter().map(|byte| format!("{byte:02x}")).collect();
         let path = std::env::temp_dir().join(format!("bake-bash-test-{id}"));
         fs::create_dir(&path).unwrap();
