@@ -17,9 +17,9 @@
 
 import { McpClient, type McpTransport } from '@earendil-works/pi-mcp'
 import type { Context } from '@deepseek-ai/cordis'
-import { assertNever, type JsonValue } from '@deepseek-ai/dsh-util-values'
+import { assertNever, type JsonValue } from 'bake-util-values'
 import type { ServerContext } from './server-context.ts'
-import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
+import { MAX_TIMER_DELAY_MS } from 'bake-timeout'
 import { createTransport } from './transport.ts'
 import { parseReadResourceResult, resourceListResult, resourceTemplateListResult } from './protocol.ts'
 import { syncTools } from './tools.ts'

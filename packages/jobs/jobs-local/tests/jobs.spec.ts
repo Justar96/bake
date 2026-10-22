@@ -1,16 +1,16 @@
 import { describe, expect, expectTypeOf, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { Session, SessionId } from '@deepseek-ai/dsh-session'
-import AgentRegistry from '@deepseek-ai/dsh-agent'
-import type { Agent } from '@deepseek-ai/dsh-agent'
-import { bindScopeParent, createScope, scopeOf } from '@deepseek-ai/dsh-scope'
-import type { ScopeKey } from '@deepseek-ai/dsh-scope'
-import { JobId } from '@deepseek-ai/dsh-jobs'
-import type { JobHooks, JobKind, JobOutcome, JobSnapshot, JobStart } from '@deepseek-ai/dsh-jobs'
-import LocalJobRegistry, { type Config as JobsConfig } from '@deepseek-ai/dsh-jobs-local'
-import { unsupportedInbox } from '@deepseek-ai/dsh-agent-loop-testkit'
+import { Session, SessionId } from 'bake-session'
+import AgentRegistry from 'bake-agent'
+import type { Agent } from 'bake-agent'
+import { bindScopeParent, createScope, scopeOf } from 'bake-scope'
+import type { ScopeKey } from 'bake-scope'
+import { JobId } from 'bake-jobs'
+import type { JobHooks, JobKind, JobOutcome, JobSnapshot, JobStart } from 'bake-jobs'
+import LocalJobRegistry, { type Config as JobsConfig } from 'bake-jobs-local'
+import { unsupportedInbox } from 'bake-agent-loop-testkit'
 
-declare module '@deepseek-ai/dsh-jobs' {
+declare module 'bake-jobs' {
   interface JobKindMap {
     workflow: 'workflow'
   }

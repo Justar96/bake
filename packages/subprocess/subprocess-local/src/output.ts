@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto'
 import { closeSync, mkdtempSync, openSync, rmdirSync, unlinkSync, writeSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import type { CollectedOutput } from '@deepseek-ai/dsh-subprocess'
+import type { CollectedOutput } from 'bake-subprocess'
 
 /**
  * Receives one spill failure so the owner can log it through its own logger.
@@ -63,7 +63,7 @@ process.once('exit', () => {
  * @param label - the failed stream label.
  */
 function reportSpillFailureToStderr(error: unknown, label: string): void {
-  process.stderr.write(`dsh-subprocess-local: ${label} spill failed; only the in-memory tail is retained: ${String(error)}\n`)
+  process.stderr.write(`bake-subprocess-local: ${label} spill failed; only the in-memory tail is retained: ${String(error)}\n`)
 }
 
 /**
@@ -221,7 +221,7 @@ export class OutputCollector {
       } catch (reporterFailure) {
         // The reporter runs inside the stream listener too; a failing logger
         // must not become the uncaught exception this path exists to prevent.
-        process.stderr.write(`dsh-subprocess-local: spill failure reporter threw: ${String(reporterFailure)}\n`)
+        process.stderr.write(`bake-subprocess-local: spill failure reporter threw: ${String(reporterFailure)}\n`)
       }
     }
   }

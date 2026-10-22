@@ -1,0 +1,20 @@
+{
+  "rustScope": "08",
+  "indexMtimeSeconds": 1600000000,
+  "indexedText": "module.exports = 1\n",
+  "afterText": "module.exports = 3\n",
+  "cases": [
+    {
+      "name": "clean before the command",
+      "beforeText": "module.exports = 1\n",
+      "afterMtimeSeconds": 1600000000,
+      "expectedOldText": "module.exports = 1"
+    },
+    {
+      "name": "dirty before the command",
+      "beforeText": "module.exports = 2\n",
+      "afterMtimeSeconds": 1600000001,
+      "expectedOldText": "module.exports = 2"
+    }
+  ]
+}

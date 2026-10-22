@@ -2,8 +2,8 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { Entry } from '@deepseek-ai/cordis-plugin-loader'
-import { createConfigProjector, isNativeConfigSchema, LOADER_EXPRESSION_SCHEMA, type NativeConfigSchema } from '@deepseek-ai/dsh-app-boot'
-import type { JsonValue } from '@deepseek-ai/dsh-util-values'
+import { createConfigProjector, isNativeConfigSchema, LOADER_EXPRESSION_SCHEMA, type NativeConfigSchema } from 'bake-app-boot'
+import type { JsonValue } from 'bake-util-values'
 
 /**
  * `schema`: the running plugin declares a native Schemastery Config. `absent`: it runs without one.

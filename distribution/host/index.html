@@ -16,11 +16,13 @@
 </head>
 <body>
   <h1>Bake</h1>
-  <p>A terminal coding agent. Bake 0.1.0 is available for Windows x64. Install Node.js 24 or newer, then run:</p>
-  <h2>Windows x64 PowerShell</h2>
-  <pre><code>irm https://bake.justar.dev/install.ps1 | iex</code></pre>
-  <p><a href="/releases/0.1.0/bake-v0.1.0-win32-x64.tar.gz">Download the Windows x64 bundle</a> (58 MB).</p>
-  <p>macOS and Linux bundles are not available yet.</p>
-  <p>The installer checks the archive hash before installing. See the <a href="/latest.json">release manifest</a> for available platforms and checksums.</p>
+  <p>A terminal coding agent. It is one native binary: no Node.js, no runtime to install first.</p>
+  <h2>Linux (x86_64 and arm64)</h2>
+  <pre><code>curl -fsSL https://bake.justar.dev/install.sh | sh</code></pre>
+  <p>The installer verifies the release manifest's signature and the archive's SHA-256, then installs <code>bake</code>
+    under your home directory. It needs glibc 2.34 or newer. See the <a href="/native/stable.json">release manifest</a>
+    for the platforms published.</p>
+  <h2>macOS and Windows</h2>
+  <p>Support is coming in a later 0.4 release. On Windows, you can install Bake inside WSL with the Linux command above.</p>
 </body>
 </html>

@@ -7,11 +7,11 @@
  * @module
  */
 
-import type { ScopeKey } from '@deepseek-ai/dsh-scope'
-import type { ToolSchema } from '@deepseek-ai/dsh-llm'
-import { snapshotJsonValue } from '@deepseek-ai/dsh-util-values'
-import type { PromptSection, ToolProviderResult } from '@deepseek-ai/dsh-system-prompt'
-import type { PtcRuntime } from '@deepseek-ai/dsh-ptc-runtime'
+import type { ScopeKey } from 'bake-scope'
+import type { ToolSchema } from 'bake-llm'
+import { snapshotJsonValue } from 'bake-util-values'
+import type { PromptSection, ToolProviderResult } from 'bake-system-prompt'
+import type { PtcRuntime } from 'bake-ptc-runtime'
 import type { ToolDefinition, ToolPresentationMode } from './index.ts'
 import { RUN_CODE_NAME } from './ptc.ts'
 import type { PtcSdkLanguage } from './ptc.ts'
@@ -37,7 +37,7 @@ const PTC_ONLY_INSTRUCTION = `\`${RUN_CODE_NAME}\` is the only tool you can call
  * at. The `satisfies` clause pins this table's key set to that union, which
  * the flavor table is checked against too, so any of the three left out is a
  * typecheck failure. What no check reaches is the prose that names the values
- * instead of deriving them: the seam's `dsh-ptc-runtime` README, its
+ * instead of deriving them: the seam's `bake-ptc-runtime` README, its
  * `PtcRuntime.language` JSDoc, and `docs/subsystems/ptc-runtime.md`,
  * plus this package's own README and the `Config.mode` JSDoc.
  */

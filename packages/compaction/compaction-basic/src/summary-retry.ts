@@ -2,7 +2,7 @@
  * Transient-failure classification and cancellable backoff for summary calls,
  * reusing the summarizing provider's own request-retry policy.
  *
- * @module @deepseek-ai/dsh-compaction-basic/summary-retry
+ * @module bake-compaction-basic/summary-retry
  */
 
 import {
@@ -10,8 +10,8 @@ import {
   LlmError,
   isRetryableFailureCode,
   retryDelayMs,
-} from '@deepseek-ai/dsh-llm'
-import type { ResolvedRetryPolicy } from '@deepseek-ai/dsh-llm'
+} from 'bake-llm'
+import type { ResolvedRetryPolicy } from 'bake-llm'
 
 /**
  * Most transient retries of one compaction's summary calls. The provider

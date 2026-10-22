@@ -1,6 +1,6 @@
 import { Context } from '@deepseek-ai/cordis'
 import { onTestFinished } from 'vitest'
-import type { PtcBindingFunction, PtcBindingNamespace, PtcRunRequest } from '@deepseek-ai/dsh-ptc-runtime'
+import type { PtcBindingFunction, PtcBindingNamespace, PtcRunRequest } from 'bake-ptc-runtime'
 import CodemodePtcRuntime from '../src/index.ts'
 import type { Config } from '../src/index.ts'
 

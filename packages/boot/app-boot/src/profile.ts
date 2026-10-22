@@ -1,43 +1,44 @@
 /**
  * Profile discovery, initialization, and patch-layer composition for the
- * `dsh --profile` launcher family.
+ * `bake --profile` launcher family.
  *
- * A profile is a directory under `$DSH_HOME/profiles/<name>` holding a
+ * A profile is a directory under `$BAKE_HOME/profiles/<name>` holding a
  * `package.json` (out-of-tree plugin dependencies plus the profile manifest
- * `dsh.profile` with its ordered `bundles` list) and a `cordis.patch.yml`
+ * `bake.profile` with its ordered `bundles` list) and a `cordis.patch.yml`
  * (the user's own patch layer, applied after every bundle layer). Bundles are
  * npm packages whose manifest declares
  * `"dsh": { "bundle": { "patch": "./cordis.patch.yml" } }` (one file, or an
  * ordered list of files); the tree is composed by applying each bundle's patch
- * lists in `dsh.profile.bundles` order over an empty entry list, then the
+ * lists in `bake.profile.bundles` order over an empty entry list, then the
  * profile's own patches, then any launcher layers (`--patch` files and
  * flag-derived patches).
  *
  * Module resolution is two-anchor by construction: a bundle name resolves
- * first from the dsh installation (the launcher's own package), then from the
+ * first from the Bake installation (the launcher's own package), then from the
  * profile directory. Pnpm-managed entries in the profile's `node_modules`
  * resolve first. Dsh-owned links add packages carried only by selected
- * bundles, while `$DSH_HOME/profiles/node_modules` supplies the installation
+ * bundles, while `$BAKE_HOME/profiles/node_modules` supplies the installation
  * dependency closure through Node's ordinary parent-walk. Plain Node uses
  * symlinks for that shared fallback; packaged executables use ESM proxies so
  * external plugins retain the installation's module instances.
- * @module @deepseek-ai/dsh-app-boot/profile
+ * @module bake-app-boot/profile
  */
 
 import { createRequire } from 'node:module'
 import {
-  existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, rmSync, statSync,
-  symlinkSync, unlinkSync, writeFileSync,
+  constants as fsConstants, copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync,
+  rmSync, statSync, symlinkSync, unlinkSync, writeFileSync,
 } from 'node:fs'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { withFileLock } from '@deepseek-ai/dsh-atomic-write'
+import { withFileLock, writeFileAtomic } from 'bake-atomic-write'
 import type { EntryOptions } from '@deepseek-ai/cordis-plugin-loader'
 import { applyEntryPatches, type PatchOptions } from '@deepseek-ai/cordis-plugin-include'
-import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
-import type { DshBundleManifest, DshPackageManifest } from '@deepseek-ai/dsh-package-manifest'
+import { resolveDshHome } from 'bake-home-paths'
+import type { DshBundleManifest, DshPackageManifest } from 'bake-package-manifest'
 import { resolve as resolvePackage, type Package as ResolvePackageManifest } from 'resolve.exports'
 import { loadOverlayPatches } from './index.ts'
+import { currentPackageName, LEGACY_PACKAGE_NAMES } from './legacy-package-names.ts'
 import {
   canonicalLinkPath,
   isPackagedExecutable,
@@ -61,6 +62,33 @@ export interface ProfileTemplate {
 
 /** Package metadata accepted by the profile reader; local profiles need no published identity. */
 export type ProfileManifest = Partial<DshPackageManifest>
+
+/**
+ * A profile manifest's ordered bundle list: `bake.profile.bundles`, or, in a
+ * manifest written before `bake.profile`, `dsh.profile.bundles`.
+ * @param manifest - the profile manifest.
+ * @returns the declared bundle names, empty when none are declared.
+ */
+export function profileBundles(manifest: ProfileManifest): string[] {
+  const profile = manifest.bake?.profile ?? manifest.dsh?.profile
+  return profile?.bundles ?? []
+}
+
+/**
+ * Return a copy of a profile manifest whose bundle list is `bundles`, kept
+ * under `bake.profile`. Without a `bake.profile`, the new one starts from the
+ * fields of `dsh.profile`. A `dsh.profile` block is never changed or removed:
+ * releases from before `bake.profile` read only that block, so after
+ * `bake update --rollback` they still boot the profile with the bundle list
+ * and legacy names it last held.
+ * @param manifest - the profile manifest.
+ * @param bundles - the bundle list to declare.
+ * @returns the updated manifest; `manifest` itself is not changed.
+ */
+export function withProfileBundles(manifest: ProfileManifest, bundles: readonly string[]): ProfileManifest {
+  const previous = manifest.bake?.profile ?? manifest.dsh?.profile
+  return { ...manifest, bake: { ...manifest.bake, profile: { ...previous, bundles: [...bundles] } } }
+}
 
 /**
  * The patch files a bundle declares, as written: one file for a string
@@ -90,7 +118,7 @@ export function bundlePatchPaths(packageDir: string, bundle: DshBundleManifest):
 
 /** One resolved bundle layer of a profile. */
 export interface ProfileLayer {
-  /** The bundle's package name, as listed in `dsh.profile.bundles`. */
+  /** The bundle's package name, as listed in `bake.profile.bundles`. */
   packageName: string
   /** Absolute directory of the resolved bundle package. */
   packageDir: string
@@ -106,7 +134,7 @@ export interface Profile {
   name: string
   /** Absolute profile directory. */
   dir: string
-  /** Bundle layers in `dsh.profile.bundles` order. */
+  /** Bundle layers in `bake.profile.bundles` order. */
   layers: ProfileLayer[]
   /** Absolute path of the profile's own patch file. */
   patchPath: string
@@ -126,6 +154,11 @@ export interface ProfileResolutionEntry {
   readonly declarer: string
   /** Whether every profile or only the active profile receives this fallback. */
   readonly scope: 'installation' | 'profile'
+  /**
+   * Current package name when `name` is a deprecated legacy name: the entry
+   * aliases that package, and requests for `name` resolve as requests for it.
+   */
+  readonly renamedTo?: string
 }
 
 /** Complete immutable fallback table for one profile launch. */
@@ -145,7 +178,7 @@ export type ProfileResolutionMode = 'link' | 'dual' | 'runtime'
 
 /**
  * Resolve a profile's directory under the Harness home.
- * @param name - the profile name (`dsh --profile <name>`).
+ * @param name - the profile name (`bake --profile <name>`).
  * @param home - the Harness home; defaults to {@link resolveDshHome}.
  * @returns the absolute profile directory (which may not exist yet).
  */
@@ -161,20 +194,20 @@ export function resolveProfileDir(name: string, home: string = resolveDshHome())
 /** The shipped profile templates auto-initialized on first use, by name. */
 export const PROFILE_TEMPLATES: Record<string, ProfileTemplate> = {
   tui: {
-    bundles: ['@deepseek-ai/dsh-base', '@dsh-tui/app'],
+    bundles: ['bake-base', 'bake-tui-app'],
   },
   headless: {
-    bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-headless'],
+    bundles: ['bake-base', 'bake-headless'],
   },
   desktop: {
-    bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-desktop'],
+    bundles: ['bake-base', 'bake-desktop'],
   },
 }
 
-/** The bundle list a `dsh plugin` init uses for a name with no shipped template. */
-export const DEFAULT_PROFILE_BUNDLES: readonly string[] = ['@deepseek-ai/dsh-base']
+/** The bundle list a `bake plugin` init uses for a name with no shipped template. */
+export const DEFAULT_PROFILE_BUNDLES: readonly string[] = ['bake-base']
 
-const PROFILE_PATCH_TEMPLATE = `# Your patch layer for this dsh profile, applied after every bundle layer:
+const PROFILE_PATCH_TEMPLATE = `# Your patch layer for this Bake profile, applied after every bundle layer:
 # a top-level YAML array of loader patch entries (id-targeted config
 # overrides, disables, and insert lists; \`!!js\` expressions allowed).
 []
@@ -197,7 +230,7 @@ autoInstallPeers: false
  * pnpm settings out-of-tree plugins need. Existing files are never touched,
  * so re-running is a no-op on an initialized profile.
  * @param dir - the profile directory from {@link resolveProfileDir}.
- * @param bundles - the initial `dsh.profile.bundles` layer list.
+ * @param bundles - the initial `bake.profile.bundles` layer list.
  */
 export function initProfile(
   dir: string,
@@ -207,10 +240,10 @@ export function initProfile(
   const manifestPath = join(dir, 'package.json')
   if (!existsSync(manifestPath)) {
     const manifest: ProfileManifest & { private: boolean } = {
-      name: `dsh-profile-${basename(dir)}`,
+      name: `bake-profile-${basename(dir)}`,
       private: true,
       dependencies: {},
-      dsh: { profile: { bundles: [...bundles] } },
+      bake: { profile: { bundles: [...bundles] } },
     }
     writeFileSync(manifestPath, JSON.stringify(manifest, undefined, 2) + '\n')
   }
@@ -480,6 +513,7 @@ function resolveModuleFallbackEntries(
   packageDirs: ReadonlyMap<string, string>
   declarers: ReadonlyMap<string, string>
   versions: ReadonlyMap<string, string | undefined>
+  renamed: ReadonlyMap<string, string>
 } {
   const appManifest = readModuleFallbackManifest(installAnchor)
   const links = new Map<string, string>()
@@ -495,8 +529,8 @@ function resolveModuleFallbackEntries(
   // map itself (first resolution wins, matching Node's own nearest-wins).
   const queue: { anchor: string; manifest: ProfileManifest }[] = [{ anchor: installAnchor, manifest: appManifest }]
   for (let next = queue.shift(); next !== undefined; next = queue.shift()) {
-    // Peer dependencies participate: Service Definition packages (dsh-subprocess,
-    // dsh-compaction, ...) are peers of their implementations, never plain
+    // Peer dependencies participate: Service Definition packages (bake-subprocess,
+    // bake-compaction, ...) are peers of their implementations, never plain
     // dependencies, yet out-of-tree plugins import them directly.
     /* v8 ignore next -- a real app manifest always declares dependencies */
     for (const dep of profileDependencyNames(next.manifest)) {
@@ -513,6 +547,17 @@ function resolveModuleFallbackEntries(
       queue.push({ anchor: manifestPath, manifest })
     }
   }
+  // Deprecated legacy names alias the installed package that replaced them,
+  // so out-of-tree plugins that still import an old name share its instance.
+  const renamed = new Map<string, string>()
+  for (const [legacy, current] of LEGACY_PACKAGE_NAMES) {
+    const dir = links.get(current)
+    if (dir === undefined || links.has(legacy)) continue
+    renamed.set(legacy, current)
+    links.set(legacy, dir)
+    declarers.set(legacy, declarers.get(current) as string)
+    versions.set(legacy, versions.get(current))
+  }
   const entries = !materialize
     ? []
     : !isPackagedExecutable()
@@ -523,7 +568,7 @@ function resolveModuleFallbackEntries(
           ? []
           : [{ kind: 'proxy' as const, packageName, version: source.version, targets: source.targets }]
       })
-  return { entries, packageNames: new Set(links.keys()), packageDirs: links, declarers, versions }
+  return { entries, packageNames: new Set(links.keys()), packageDirs: links, declarers, versions, renamed }
 }
 
 /** Return whether one existing fallback entry already matches its resolved installation generation. */
@@ -551,7 +596,7 @@ function moduleFallbackCurrent(modulesDir: string, entries: readonly ModuleFallb
 
 /** Inputs for {@link healProfilesModuleFallback}. */
 export interface ProfileModuleFallbackOptions {
-  /** Absolute package.json path of the running dsh installation. */
+  /** Absolute package.json path of the running Bake installation. */
   installAnchor: string
   /** Loaded profile whose selected bundles may carry profile-local plugins. */
   profile?: Profile
@@ -563,13 +608,16 @@ export interface ProfileModuleFallbackOptions {
 
 /**
  * Maintain module fallbacks for one profile launch. The shared
- * `$DSH_HOME/profiles/node_modules` mirrors the dsh installation dependency
+ * `$BAKE_HOME/profiles/node_modules` mirrors the Bake installation dependency
  * closure. Plain Node writes symlinks; a packaged executable writes ESM
  * proxies under a cross-process lock because operating-system links cannot
  * enter pkg's virtual filesystem. Missing packages carried only by selected
  * bundles are linked through a profile-owned directory into that profile's
  * `node_modules`; pnpm-managed entries remain authoritative, and another
- * profile's links cannot change its resolution.
+ * profile's links cannot change its resolution. Each deprecated legacy name
+ * of an installed renamed package gets its own entry, linked to the current
+ * package, so an out-of-tree plugin importing the old name loads the same
+ * module instance.
  * @param options - installation anchor, optional loaded profile, and Harness home.
  * @returns the computed fallback generation after optional materialization.
  */
@@ -580,7 +628,7 @@ export async function healProfilesModuleFallback(
   const profilesDir = join(home, PROFILES_DIR)
   const modulesDir = join(profilesDir, 'node_modules')
   if (materialize) mkdirSync(modulesDir, { recursive: true })
-  const { entries, packageNames, packageDirs, declarers, versions } = resolveModuleFallbackEntries(installAnchor, materialize)
+  const { entries, packageNames, packageDirs, declarers, versions, renamed } = resolveModuleFallbackEntries(installAnchor, materialize)
   if (materialize && !moduleFallbackCurrent(modulesDir, entries)) {
     await withFileLock(modulesDir, () => {
       if (!moduleFallbackCurrent(modulesDir, entries)) healProfilesModuleFallbackLocked(entries, modulesDir)
@@ -598,10 +646,14 @@ export async function healProfilesModuleFallback(
     profileDir: profile?.dir,
     localPackageNames: Object.freeze(localPackageNames),
     entries: Object.freeze([
-      ...[...packageDirs].map(([name, packageDir]) => Object.freeze({
-        name, packageDir, version: versions.get(name),
-        declarer: declarers.get(name) as string, scope: 'installation' as const,
-      })),
+      ...[...packageDirs].map(([name, packageDir]) => {
+        const renamedTo = renamed.get(name)
+        return Object.freeze({
+          name, packageDir, version: versions.get(name),
+          declarer: declarers.get(name) as string, scope: 'installation' as const,
+          ...renamedTo === undefined ? {} : { renamedTo },
+        })
+      }),
       ...[...profilePackages].map(([name, packageDir]) => Object.freeze({
         name, packageDir, version: profileVersions.get(name),
         declarer: profileDeclarers.get(name) as string, scope: 'profile' as const,
@@ -782,6 +834,93 @@ export function writeProfileManifest(dir: string, manifest: ProfileManifest): vo
   writeFileSync(join(dir, 'package.json'), JSON.stringify(manifest, undefined, 2) + '\n')
 }
 
+/** Suffix of the copy {@link migrateProfileManifest} keeps of a manifest it rewrites. */
+export const PROFILE_MANIFEST_BACKUP_SUFFIX = '.bak'
+
+/** Profile manifests whose legacy bundle names were already reported, so a reload does not repeat the warning. */
+const reportedLegacyManifests = new Set<string>()
+
+function writeStderrLine(line: string): void {
+  process.stderr.write(`${line}\n`)
+}
+
+/**
+ * Bring a released profile manifest up to date, once: write its bundle list
+ * under `bake.profile`, with renamed package names rewritten to their current
+ * names. A `dsh.profile` block stays as it was, legacy names included, so a
+ * release from before `bake.profile` still boots the profile after
+ * `bake update --rollback`; current readers prefer `bake.profile`
+ * ({@link profileBundles}). The read-modify-write runs under the same
+ * `package.json` writer lock as the plugin manager, so a concurrent
+ * `bake plugin` change is neither lost nor overwritten. The original manifest
+ * is copied beside it with {@link PROFILE_MANIFEST_BACKUP_SUFFIX} (an existing
+ * copy is kept), the new manifest replaces it atomically with the original's
+ * permission bits, and one line names the changes. A current profile is left
+ * untouched. A failed rewrite, including a lock wait that times out, is
+ * reported and leaves the file as it was; the profile loader still reads
+ * `dsh.profile` and maps the legacy names for that launch.
+ * @param binName - the diagnostic prefix on the reported line.
+ * @param dir - the profile directory.
+ * @param log - sink for the one-line report; defaults to stderr.
+ * @returns whether the manifest was rewritten.
+ */
+export async function migrateProfileManifest(
+  binName: string, dir: string, log: (line: string) => void = writeStderrLine,
+): Promise<boolean> {
+  const path = join(dir, 'package.json')
+  // A current or unreadable manifest needs no lock; most boots stop here.
+  let pending = planProfileMigration(binName, dir)
+  if (pending === undefined) return false
+  try {
+    return await withFileLock(path, async () => {
+      // Plan again from the locked read: a plugin change may have landed since the first one.
+      pending = planProfileMigration(binName, dir)
+      if (pending === undefined) return false
+      const backup = path + PROFILE_MANIFEST_BACKUP_SUFFIX
+      try {
+        copyFileSync(path, backup, fsConstants.COPYFILE_EXCL)
+      } catch (error) {
+        // An earlier copy is the older, more original one; keep it.
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+      }
+      const content = JSON.stringify(pending.manifest, undefined, 2) + '\n'
+      await writeFileAtomic(path, content, { mode: statSync(path).mode & 0o777 })
+      log(`${binName}: migrated profile ${basename(dir)}: ${pending.renames}; the previous manifest is ${backup}`)
+      return true
+    })
+  } catch (error) {
+    log(`${binName}: warning: could not migrate profile manifest ${path} (${pending.renames}): ${String(error)}`)
+    return false
+  }
+}
+
+/** The rewrite {@link migrateProfileManifest} would make, and the changes it names. */
+interface ProfileMigration {
+  readonly manifest: ProfileManifest
+  readonly renames: string
+}
+
+/** Read a profile manifest and plan its migration; undefined when it is current, missing, or unreadable. */
+function planProfileMigration(binName: string, dir: string): ProfileMigration | undefined {
+  let manifest: ProfileManifest
+  try {
+    manifest = readProfileManifest(binName, dir)
+  } catch {
+    // The loader reports a missing or unreadable manifest with its own diagnostic.
+    return undefined
+  }
+  const bundles = profileBundles(manifest)
+  if (!Array.isArray(bundles)) return undefined
+  const moved = manifest.bake?.profile === undefined && manifest.dsh?.profile !== undefined
+  const renamed = bundles.filter(name => LEGACY_PACKAGE_NAMES.has(name))
+  if (!moved && renamed.length === 0) return undefined
+  const renames = [
+    ...moved ? ['dsh.profile -> bake.profile'] : [],
+    ...renamed.map(name => `${name} -> ${currentPackageName(name)}`),
+  ].join(', ')
+  return { manifest: withProfileBundles(manifest, bundles.map(currentPackageName)), renames }
+}
+
 /**
  * Resolve a package's root directory from one anchor without depending on the
  * package exporting `./package.json` (`require.resolve` would need that):
@@ -806,12 +945,12 @@ function packageDirFromAnchor(
 /**
  * Resolve one bundle package's directory: installation anchor first, then the
  * profile directory. The installation-first order is the contract that
- * `@deepseek-ai/dsh-base` (and every other in-box bundle) always comes from
- * the same installation as the running dsh, never from a profile-local copy.
+ * `bake-base` (and every other in-box bundle) always comes from
+ * the same installation as the running Bake, never from a profile-local copy.
  * Resolution does not require the package to export `./package.json`.
  * @param binName - the diagnostic prefix on the thrown error.
- * @param packageName - the bundle's package name from `dsh.profile.bundles`.
- * @param installAnchor - absolute path of a file inside the dsh app package (its package.json).
+ * @param packageName - the bundle's package name from `bake.profile.bundles`.
+ * @param installAnchor - absolute path of a file inside the Bake app package (its package.json).
  * @param profileDir - the profile directory (second anchor).
  * @returns the bundle package's absolute directory.
  */
@@ -831,21 +970,39 @@ export function resolveBundleDir(
 /**
  * Load an already initialized profile directory without resolving it through
  * the shared Harness home. This is used by application-owned profiles whose
- * package project and lifecycle belong to that application.
+ * package project and lifecycle belong to that application. Renamed bundle
+ * names resolve to their current packages with one deprecation line; the
+ * manifest itself is not rewritten.
  * @param binName - the diagnostic prefix on thrown errors.
  * @param dir - absolute profile package directory.
- * @param installAnchor - absolute path of the owning dsh app's package.json.
- * @param options - `userLayer: false` skips reading `cordis.patch.yml`.
+ * @param installAnchor - absolute path of the owning Bake app's package.json.
+ * @param options - `userLayer: false` skips reading `cordis.patch.yml`;
+ * `warn` receives the deprecation line instead of stderr.
  * @returns the resolved bundle layers and optional user patch layer.
  */
 export function loadProfileDirectory(
   binName: string,
   dir: string,
   installAnchor: string,
-  options: { userLayer?: boolean } = {},
+  options: { userLayer?: boolean; warn?: (line: string) => void } = {},
 ): Profile {
   const manifest = readProfileManifest(binName, dir)
-  const bundles = manifest.dsh?.profile?.bundles ?? []
+  const declared = profileBundles(manifest)
+  const legacy = declared.filter(name => LEGACY_PACKAGE_NAMES.has(name))
+  const legacyKey = manifest.bake?.profile === undefined && manifest.dsh?.profile !== undefined
+  const manifestPath = join(dir, 'package.json')
+  if ((legacy.length > 0 || legacyKey) && !reportedLegacyManifests.has(manifestPath)) {
+    reportedLegacyManifests.add(manifestPath)
+    const renames = [
+      ...legacyKey ? ['dsh.profile -> bake.profile'] : [],
+      ...legacy.map(name => `${name} -> ${currentPackageName(name)}`),
+    ].join(', ')
+    ;(options.warn ?? writeStderrLine)(
+      `${binName}: warning: profile ${manifestPath} uses renamed names (${renames}); `
+      + 'the old names are deprecated and will stop working in a later release',
+    )
+  }
+  const bundles = declared.map(currentPackageName)
   const layers = bundles.map((packageName): ProfileLayer => {
     const packageDir = resolveBundleDir(binName, packageName, installAnchor, dir)
     const bundleManifest = JSON.parse(readFileSync(join(packageDir, 'package.json'), 'utf8')) as ProfileManifest
@@ -854,42 +1011,49 @@ export function loadProfileDirectory(
       throw new Error(`${binName}: profile bundle ${JSON.stringify(packageName)} declares no dsh.bundle in its package.json`)
     }
     const patchPaths = bundlePatchPaths(packageDir, bundle)
-    return { packageName, packageDir, patchPaths, patches: patchPaths.flatMap(file => loadOverlayPatches(binName, file)) }
+    return {
+      packageName, packageDir, patchPaths, patches: patchPaths.flatMap(file => loadOverlayPatches(binName, file, options.warn)),
+    }
   })
   const patchPath = join(dir, PROFILE_PATCH_FILENAME)
   const patches = options.userLayer !== false && existsSync(patchPath)
-    ? loadOverlayPatches(binName, patchPath)
+    ? loadOverlayPatches(binName, patchPath, options.warn)
     : []
   return { name: basename(dir), dir, layers, patchPath, patches }
 }
 
 /**
- * Load a profile: resolve every `dsh.profile.bundles` entry to its patch
+ * Load a profile: resolve every `bake.profile.bundles` entry to its patch
  * layer and parse the profile's own patch file. A listed bundle without a
  * `dsh.bundle` manifest fails loud — naming a bundle-less package as a layer
- * is a misconfiguration, not "no patches".
+ * is a misconfiguration, not "no patches". An existing manifest that still
+ * lists renamed bundles is migrated first ({@link migrateProfileManifest}),
+ * under the profile's `package.json` writer lock.
  * @param binName - the diagnostic prefix on thrown errors.
  * @param name - the profile name.
- * @param installAnchor - absolute path of the dsh app's package.json (first resolution anchor).
+ * @param installAnchor - absolute path of the Bake app's package.json (first resolution anchor).
  * @param home - the Harness home; defaults to {@link resolveDshHome}.
  * @param options - `userLayer: false` skips reading `cordis.patch.yml`, so a
  * bundles-only consumer (`--dump-default-config`, a recovery diagnostic)
- * cannot fail on a broken user layer.
+ * cannot fail on a broken user layer; `warn` receives migration and
+ * deprecation lines instead of stderr.
  * @returns the loaded profile (empty `patches` when the user layer is skipped).
  */
-export function loadProfile(
+export async function loadProfile(
   binName: string, name: string, installAnchor: string, home: string = resolveDshHome(),
-  options: { userLayer?: boolean } = {},
-): Profile {
+  options: { userLayer?: boolean; warn?: (line: string) => void } = {},
+): Promise<Profile> {
   const dir = resolveProfileDir(name, home)
   if (!existsSync(join(dir, 'package.json'))) {
     const template = PROFILE_TEMPLATES[name]
     if (template === undefined) {
       throw new Error(
-        `${binName}: profile ${JSON.stringify(name)} does not exist; create it with 'dsh plugin --profile ${name} add <package>'`,
+        `${binName}: profile ${JSON.stringify(name)} does not exist; create it with 'bake plugin --profile ${name} add <package>'`,
       )
     }
     initProfile(dir, template.bundles)
+  } else {
+    await migrateProfileManifest(binName, dir, options.warn)
   }
   return loadProfileDirectory(binName, dir, installAnchor, options)
 }

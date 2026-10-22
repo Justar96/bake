@@ -26,7 +26,7 @@ The identity group provides one anonymous id per harness home that the installat
 ## Related documentation
 
 - [Session telemetry subsystem](../../docs/subsystems/session-telemetry.md) — the telemetry feature that carries the id on exports.
-- [dsh-command-feedback](../feedback/command-feedback/README.md) — the feedback command that names the anonymous installation in its acknowledgement.
+- [bake-command-feedback](../feedback/command-feedback/README.md) — the feedback command that names the anonymous installation in its acknowledgement.
 
 <a id="dev-note"></a>
 ## Dev Note

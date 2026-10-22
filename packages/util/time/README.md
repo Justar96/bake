@@ -3,7 +3,7 @@ description: "IANA time-zone validation and canonicalization for maintainers acc
 kind: "package-library"
 ---
 
-# dsh-util-time
+# bake-util-time
 
 ## Summary
 
@@ -34,7 +34,7 @@ Call it at the boundary that receives the zone, before the value reaches anythin
 ## API
 
 ```ts
-import { canonicalClientTimeZone } from '@deepseek-ai/dsh-util-time'
+import { canonicalClientTimeZone } from 'bake-util-time'
 ```
 
 | Export | Role |
@@ -44,7 +44,7 @@ import { canonicalClientTimeZone } from '@deepseek-ai/dsh-util-time'
 <a id="model-experience"></a>
 ## Model Experience
 
-None directly. `dsh-subagent` canonicalizes a client zone with it before recording that zone on a child Session; no shipped plugin renders the zone into model-visible text.
+None directly. `bake-subagent` canonicalizes a client zone with it before recording that zone on a child Session; no shipped plugin renders the zone into model-visible text.
 
 #### KV Cache effect
 

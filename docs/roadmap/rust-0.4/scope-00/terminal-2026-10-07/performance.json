@@ -1,0 +1,2690 @@
+{
+  "metadata": {
+    "revision": "c45b16127d3803cc2f656fce2be052225c86d058",
+    "dirty": false,
+    "bundleSha256": "4bf75fe2188845cef8b566dabb36337c286a3cb5db301b6065eb90cd12d57389",
+    "bundleBytes": 1379,
+    "mode": "production",
+    "node": "v26.10.0",
+    "artifacts": {
+      "index.js": "4bf75fe2188845cef8b566dabb36337c286a3cb5db301b6065eb90cd12d57389",
+      "startup.js": "dde4aa49156b7c972cff01f18d197922ae998a0b00243115629a7f453b8061ac",
+      "runner-loader.js": "c9257b2f6adf475e644995701f708412b07e274e0e559df12612afdbfe40a64e",
+      "ui-loader.js": "362e47df4db819b43c2a381e7300edda19244d8108591c3fc4deda78c630d1ae",
+      "syntax-loader.js": "19f8e4d302a098de8629332773240100da95b6e7567f69dc24036106b110cce5",
+      "seed.js": "0fce5b0b428ff4f54940208e358a7900339db20a57a0591d76b0bda3871b82b5",
+      "metrics.mjs": "04dbc557eb5253e3d8b86f97b908bbfa89a0b14cfc74f48dcbb681d74033c35e"
+    },
+    "compositionSha256": "66f47c3247a87af1b37328b432192b2041cc3a26b7cd2840d4a710e835530b19",
+    "applicationSource": {
+      "kind": "checkout"
+    },
+    "sourceSha256": "18dfa851aafc7801f6ffea9ab8fc6d133c01a1e1fef777718c9fa50b1e13b671",
+    "lockSha256": "444d7f35dd59ae136c4d60acc23d178a5f5e97aaea5b7c0c1537f774c765b082",
+    "platform": "linux",
+    "arch": "x64",
+    "viewport": {
+      "columns": 120,
+      "rows": 40
+    },
+    "terminalDriver": "Bun.Terminal",
+    "bun": "1.4.2",
+    "samples": 3,
+    "workloads": [
+      "fresh",
+      "small",
+      "typical",
+      "tail",
+      "tools",
+      "large-output"
+    ],
+    "workloadSpecifications": {
+      "fresh": {
+        "turns": 0
+      },
+      "small": {
+        "turns": 50
+      },
+      "typical": {
+        "turns": 500
+      },
+      "tail": {
+        "turns": 2000
+      },
+      "tools": {
+        "turns": 500,
+        "toolEvery": 1,
+        "toolsPerTurn": 4
+      },
+      "large-output": {
+        "turns": 12,
+        "assistantTextBytes": 65536
+      }
+    },
+    "heapLimitMiB": 1024,
+    "cpuProfile": false,
+    "clock": "fresh process; warm filesystem cache; no model/network latency",
+    "memory": "main Node process; forced GC at ready and after streaming; RSS includes worker threads"
+  },
+  "interrupted": false,
+  "summary": [
+    {
+      "workload": "fresh",
+      "completed": 3,
+      "failed": 0,
+      "initialInputMs": 55.866909999997006,
+      "firstInputMs": 524.8412989999997,
+      "readyMs": 524.8430369999987,
+      "maxIdleInputMs": 37.20591300000001,
+      "liveInputMs": 39.22093799999857,
+      "firstDeltaMs": 88.927969999997,
+      "streamMs": 1327.7260820000001,
+      "shutdownMs": 47.433108999997785,
+      "retainedHeapMiB": 52.38111877441406,
+      "settledRetainedHeapMiB": 55.939247131347656,
+      "peakRssMiB": 225.33984375,
+      "initialBytes": 2869,
+      "idleBytes": 880,
+      "streamBytes": 33341,
+      "distributions": {
+        "initialInputMs": {
+          "samples": 3,
+          "min": 54.588945999999964,
+          "median": 55.866909999997006,
+          "p95": 55.89527100000123,
+          "max": 55.89527100000123,
+          "mad": 0.02836100000422448
+        },
+        "firstInputMs": {
+          "samples": 3,
+          "min": 519.0572140000004,
+          "median": 524.8412989999997,
+          "p95": 653.863427,
+          "max": 653.863427,
+          "mad": 5.7840849999993225
+        },
+        "readyMs": {
+          "samples": 3,
+          "min": 519.0741730000009,
+          "median": 524.8430369999987,
+          "p95": 653.9364370000001,
+          "max": 653.9364370000001,
+          "mad": 5.768863999997848
+        },
+        "maxIdleInputMs": {
+          "samples": 3,
+          "min": 37.14991699999882,
+          "median": 37.20591300000001,
+          "p95": 37.72583399999712,
+          "max": 37.72583399999712,
+          "mad": 0.055996000001186985
+        },
+        "liveInputMs": {
+          "samples": 3,
+          "min": 37.17706800000451,
+          "median": 39.22093799999857,
+          "p95": 39.32953999999995,
+          "max": 39.32953999999995,
+          "mad": 0.1086020000013832
+        },
+        "firstDeltaMs": {
+          "samples": 3,
+          "min": 87.0227879999984,
+          "median": 88.927969999997,
+          "p95": 89.72984799999995,
+          "max": 89.72984799999995,
+          "mad": 0.8018780000029437
+        },
+        "streamMs": {
+          "samples": 3,
+          "min": 1305.665065000001,
+          "median": 1327.7260820000001,
+          "p95": 1375.9662009999956,
+          "max": 1375.9662009999956,
+          "mad": 22.061016999999083
+        },
+        "shutdownMs": {
+          "samples": 3,
+          "min": 45.10188200000266,
+          "median": 47.433108999997785,
+          "p95": 49.56736799999999,
+          "max": 49.56736799999999,
+          "mad": 2.134259000002203
+        }
+      }
+    },
+    {
+      "workload": "small",
+      "completed": 3,
+      "failed": 0,
+      "initialInputMs": 55.75302500000544,
+      "firstInputMs": 632.2426459999988,
+      "readyMs": 632.2439809999996,
+      "maxIdleInputMs": 37.141553999999815,
+      "liveInputMs": 35.19221099999777,
+      "firstDeltaMs": 81.07443899999998,
+      "streamMs": 1290.1022910000029,
+      "shutdownMs": 49.745695000000524,
+      "retainedHeapMiB": 55.10480499267578,
+      "settledRetainedHeapMiB": 57.371429443359375,
+      "peakRssMiB": 232.96875,
+      "initialBytes": 86605,
+      "idleBytes": 880,
+      "streamBytes": 33338,
+      "distributions": {
+        "initialInputMs": {
+          "samples": 3,
+          "min": 53.64380799999708,
+          "median": 55.75302500000544,
+          "p95": 55.94462500000009,
+          "max": 55.94462500000009,
+          "mad": 0.19159999999465072
+        },
+        "firstInputMs": {
+          "samples": 3,
+          "min": 626.1873489999998,
+          "median": 632.2426459999988,
+          "p95": 644.9666990000001,
+          "max": 644.9666990000001,
+          "mad": 6.055296999998973
+        },
+        "readyMs": {
+          "samples": 3,
+          "min": 626.1976850000028,
+          "median": 632.2439809999996,
+          "p95": 644.983581,
+          "max": 644.983581,
+          "mad": 6.046295999996801
+        },
+        "maxIdleInputMs": {
+          "samples": 3,
+          "min": 35.09276300000056,
+          "median": 37.141553999999815,
+          "p95": 37.14208300000246,
+          "max": 37.14208300000246,
+          "mad": 0.0005290000026434427
+        },
+        "liveInputMs": {
+          "samples": 3,
+          "min": 35.014059000001,
+          "median": 35.19221099999777,
+          "p95": 37.25367099999994,
+          "max": 37.25367099999994,
+          "mad": 0.17815199999677134
+        },
+        "firstDeltaMs": {
+          "samples": 3,
+          "min": 80.43528900000092,
+          "median": 81.07443899999998,
+          "p95": 82.9012160000002,
+          "max": 82.9012160000002,
+          "mad": 0.6391499999990629
+        },
+        "streamMs": {
+          "samples": 3,
+          "min": 1285.48589,
+          "median": 1290.1022910000029,
+          "p95": 1304.3558840000005,
+          "max": 1304.3558840000005,
+          "mad": 4.616401000002952
+        },
+        "shutdownMs": {
+          "samples": 3,
+          "min": 48.11115400000199,
+          "median": 49.745695000000524,
+          "p95": 52.98957299999893,
+          "max": 52.98957299999893,
+          "mad": 1.634540999998535
+        }
+      }
+    },
+    {
+      "workload": "typical",
+      "completed": 3,
+      "failed": 0,
+      "initialInputMs": 89.33282799999961,
+      "firstInputMs": 703.1237729999993,
+      "readyMs": 1242.7489679999999,
+      "maxIdleInputMs": 37.309056000000055,
+      "liveInputMs": 37.19080499999836,
+      "firstDeltaMs": 82.84774900000048,
+      "streamMs": 1296.4321539999983,
+      "shutdownMs": 54.380121999998664,
+      "retainedHeapMiB": 62.615570068359375,
+      "settledRetainedHeapMiB": 64.435546875,
+      "peakRssMiB": 303.4296875,
+      "initialBytes": 882556,
+      "idleBytes": 880,
+      "streamBytes": 32659,
+      "distributions": {
+        "initialInputMs": {
+          "samples": 3,
+          "min": 89.1045529999974,
+          "median": 89.33282799999961,
+          "p95": 89.36841000000277,
+          "max": 89.36841000000277,
+          "mad": 0.03558200000315992
+        },
+        "firstInputMs": {
+          "samples": 3,
+          "min": 694.7980500000003,
+          "median": 703.1237729999993,
+          "p95": 704.3007749999961,
+          "max": 704.3007749999961,
+          "mad": 1.177001999996719
+        },
+        "readyMs": {
+          "samples": 3,
+          "min": 1241.0647710000003,
+          "median": 1242.7489679999999,
+          "p95": 1246.8355069999961,
+          "max": 1246.8355069999961,
+          "mad": 1.6841969999995854
+        },
+        "maxIdleInputMs": {
+          "samples": 3,
+          "min": 37.27187599999888,
+          "median": 37.309056000000055,
+          "p95": 37.445732000000135,
+          "max": 37.445732000000135,
+          "mad": 0.03718000000117172
+        },
+        "liveInputMs": {
+          "samples": 3,
+          "min": 35.1870600000002,
+          "median": 37.19080499999836,
+          "p95": 37.27354999999989,
+          "max": 37.27354999999989,
+          "mad": 0.0827450000015233
+        },
+        "firstDeltaMs": {
+          "samples": 3,
+          "min": 82.70263200000045,
+          "median": 82.84774900000048,
+          "p95": 88.95269899999766,
+          "max": 88.95269899999766,
+          "mad": 0.14511700000002747
+        },
+        "streamMs": {
+          "samples": 3,
+          "min": 1282.3769950000005,
+          "median": 1296.4321539999983,
+          "p95": 1455.3967219999977,
+          "max": 1455.3967219999977,
+          "mad": 14.05515899999773
+        },
+        "shutdownMs": {
+          "samples": 3,
+          "min": 54.23656899999969,
+          "median": 54.380121999998664,
+          "p95": 55.58375299999898,
+          "max": 55.58375299999898,
+          "mad": 0.14355299999897397
+        }
+      }
+    },
+    {
+      "workload": "tail",
+      "completed": 3,
+      "failed": 0,
+      "initialInputMs": 86.56662400000278,
+      "firstInputMs": 845.9585260000003,
+      "readyMs": 3176.863666000001,
+      "maxIdleInputMs": 37.24409600000217,
+      "liveInputMs": 39.54960299999948,
+      "firstDeltaMs": 99.51991899999848,
+      "streamMs": 1320.270953000001,
+      "shutdownMs": 59.8989619999993,
+      "retainedHeapMiB": 80.79413604736328,
+      "settledRetainedHeapMiB": 82.61512756347656,
+      "peakRssMiB": 374.421875,
+      "initialBytes": 3536409,
+      "idleBytes": 880,
+      "streamBytes": 33345,
+      "distributions": {
+        "initialInputMs": {
+          "samples": 3,
+          "min": 82.85553600000094,
+          "median": 86.56662400000278,
+          "p95": 130.45071299999836,
+          "max": 130.45071299999836,
+          "mad": 3.711088000001837
+        },
+        "firstInputMs": {
+          "samples": 3,
+          "min": 833.1527960000021,
+          "median": 845.9585260000003,
+          "p95": 1095.972732000002,
+          "max": 1095.972732000002,
+          "mad": 12.80572999999822
+        },
+        "readyMs": {
+          "samples": 3,
+          "min": 3166.969386999999,
+          "median": 3176.863666000001,
+          "p95": 4430.844989000005,
+          "max": 4430.844989000005,
+          "mad": 9.894279000001916
+        },
+        "maxIdleInputMs": {
+          "samples": 3,
+          "min": 37.23854100000062,
+          "median": 37.24409600000217,
+          "p95": 39.74968000000081,
+          "max": 39.74968000000081,
+          "mad": 0.00555500000155007
+        },
+        "liveInputMs": {
+          "samples": 3,
+          "min": 35.23585999999705,
+          "median": 39.54960299999948,
+          "p95": 43.91293600000063,
+          "max": 43.91293600000063,
+          "mad": 4.313743000002432
+        },
+        "firstDeltaMs": {
+          "samples": 3,
+          "min": 97.3388159999995,
+          "median": 99.51991899999848,
+          "p95": 170.51896000000124,
+          "max": 170.51896000000124,
+          "mad": 2.181102999998984
+        },
+        "streamMs": {
+          "samples": 3,
+          "min": 1295.028355999999,
+          "median": 1320.270953000001,
+          "p95": 1666.4949260000067,
+          "max": 1666.4949260000067,
+          "mad": 25.242597000002206
+        },
+        "shutdownMs": {
+          "samples": 3,
+          "min": 57.07980800000223,
+          "median": 59.8989619999993,
+          "p95": 82.92331899999408,
+          "max": 82.92331899999408,
+          "mad": 2.81915399999707
+        }
+      }
+    },
+    {
+      "workload": "tools",
+      "completed": 3,
+      "failed": 0,
+      "initialInputMs": 82.54548799999611,
+      "firstInputMs": 813.4809970000006,
+      "readyMs": 2705.7413730000007,
+      "maxIdleInputMs": 37.24341699999786,
+      "liveInputMs": 35.159476999993785,
+      "firstDeltaMs": 99.4727189999976,
+      "streamMs": 1300.982222999999,
+      "shutdownMs": 57.50242199999775,
+      "retainedHeapMiB": 81.04502868652344,
+      "settledRetainedHeapMiB": 82.91014862060547,
+      "peakRssMiB": 374.64453125,
+      "initialBytes": 1628115,
+      "idleBytes": 880,
+      "streamBytes": 32006,
+      "distributions": {
+        "initialInputMs": {
+          "samples": 3,
+          "min": 80.70521899999949,
+          "median": 82.54548799999611,
+          "p95": 188.2815200000041,
+          "max": 188.2815200000041,
+          "mad": 1.8402689999966242
+        },
+        "firstInputMs": {
+          "samples": 3,
+          "min": 800.813694000004,
+          "median": 813.4809970000006,
+          "p95": 1573.1027100000065,
+          "max": 1573.1027100000065,
+          "mad": 12.667302999996537
+        },
+        "readyMs": {
+          "samples": 3,
+          "min": 2668.3400540000002,
+          "median": 2705.7413730000007,
+          "p95": 5282.121864000001,
+          "max": 5282.121864000001,
+          "mad": 37.40131900000051
+        },
+        "maxIdleInputMs": {
+          "samples": 3,
+          "min": 37.14122599999973,
+          "median": 37.24341699999786,
+          "p95": 38.16980200000398,
+          "max": 38.16980200000398,
+          "mad": 0.10219099999812897
+        },
+        "liveInputMs": {
+          "samples": 3,
+          "min": 35.13147200000094,
+          "median": 35.159476999993785,
+          "p95": 42.080958999998984,
+          "max": 42.080958999998984,
+          "mad": 0.028004999992845114
+        },
+        "firstDeltaMs": {
+          "samples": 3,
+          "min": 74.78151000000071,
+          "median": 99.4727189999976,
+          "p95": 171.703797999995,
+          "max": 171.703797999995,
+          "mad": 24.69120899999689
+        },
+        "streamMs": {
+          "samples": 3,
+          "min": 1292.0649410000005,
+          "median": 1300.982222999999,
+          "p95": 1707.834544999998,
+          "max": 1707.834544999998,
+          "mad": 8.917281999998522
+        },
+        "shutdownMs": {
+          "samples": 3,
+          "min": 57.45753699999841,
+          "median": 57.50242199999775,
+          "p95": 57.557895999998436,
+          "max": 57.557895999998436,
+          "mad": 0.044884999999339925
+        }
+      }
+    },
+    {
+      "workload": "large-output",
+      "completed": 3,
+      "failed": 0,
+      "initialInputMs": 52.042278000000806,
+      "firstInputMs": 599.7636170000005,
+      "readyMs": 771.3312480000022,
+      "maxIdleInputMs": 37.17305599999963,
+      "liveInputMs": 35.31135599999834,
+      "firstDeltaMs": 80.44483399999808,
+      "streamMs": 1306.8214640000006,
+      "shutdownMs": 49.94129899999825,
+      "retainedHeapMiB": 59.501548767089844,
+      "settledRetainedHeapMiB": 61.53832244873047,
+      "peakRssMiB": 239.8046875,
+      "initialBytes": 848726,
+      "idleBytes": 880,
+      "streamBytes": 32643,
+      "distributions": {
+        "initialInputMs": {
+          "samples": 3,
+          "min": 52.02917000000161,
+          "median": 52.042278000000806,
+          "p95": 52.56634099999792,
+          "max": 52.56634099999792,
+          "mad": 0.013107999999192543
+        },
+        "firstInputMs": {
+          "samples": 3,
+          "min": 595.0672340000019,
+          "median": 599.7636170000005,
+          "p95": 614.3733619999985,
+          "max": 614.3733619999985,
+          "mad": 4.696382999998605
+        },
+        "readyMs": {
+          "samples": 3,
+          "min": 769.4659570000003,
+          "median": 771.3312480000022,
+          "p95": 786.4704090000014,
+          "max": 786.4704090000014,
+          "mad": 1.8652910000018892
+        },
+        "maxIdleInputMs": {
+          "samples": 3,
+          "min": 35.09320199999638,
+          "median": 37.17305599999963,
+          "p95": 37.18572999999742,
+          "max": 37.18572999999742,
+          "mad": 0.012673999997787178
+        },
+        "liveInputMs": {
+          "samples": 3,
+          "min": 35.134878000000754,
+          "median": 35.31135599999834,
+          "p95": 37.21949699999823,
+          "max": 37.21949699999823,
+          "mad": 0.17647799999758718
+        },
+        "firstDeltaMs": {
+          "samples": 3,
+          "min": 78.64713699999993,
+          "median": 80.44483399999808,
+          "p95": 80.56555899999512,
+          "max": 80.56555899999512,
+          "mad": 0.12072499999703723
+        },
+        "streamMs": {
+          "samples": 3,
+          "min": 1293.601541,
+          "median": 1306.8214640000006,
+          "p95": 1321.4682590000011,
+          "max": 1321.4682590000011,
+          "mad": 13.219923000000563
+        },
+        "shutdownMs": {
+          "samples": 3,
+          "min": 48.99960999999894,
+          "median": 49.94129899999825,
+          "p95": 49.96067900000344,
+          "max": 49.96067900000344,
+          "mad": 0.01938000000518514
+        }
+      }
+    }
+  ],
+  "results": [
+    {
+      "workload": "fresh",
+      "iteration": 0,
+      "dimensions": {
+        "turns": 0,
+        "events": 0,
+        "deltaCount": 0,
+        "compactRecordCount": 0,
+        "toolCount": 0,
+        "assistantMarkerCount": 0,
+        "historyMarkerCount": 0,
+        "userTextBytes": 0,
+        "assistantTextBytes": 0,
+        "reasoningBytes": 0,
+        "toolOutputBytes": 0,
+        "maxAssistantTextBytes": 0,
+        "fileBytes": 0,
+        "sessionId": "tui-perf-session"
+      },
+      "initialInputMs": 54.588945999999964,
+      "firstInputMs": 653.863427,
+      "historyMarkersAtFirstInput": 0,
+      "readyMs": 653.9364370000001,
+      "idleInputMs": [
+        2.1424970000000485,
+        37.20591300000001,
+        2.0640990000001693,
+        35.0684940000001,
+        2.128738999999996
+      ],
+      "idleBytes": 880,
+      "initialBytes": 2869,
+      "firstDeltaMs": 89.72984799999995,
+      "liveInputMs": 39.32953999999995,
+      "streamMs": 1327.7260820000001,
+      "streamBytes": 33373,
+      "shutdownMs": 49.56736799999999,
+      "historyMarkerOccurrences": 0,
+      "readyMemory": {
+        "sequence": 1,
+        "beforeGc": {
+          "rss": 194412544,
+          "heapTotal": 101056512,
+          "heapUsed": 62345552,
+          "external": 4963011,
+          "arrayBuffers": 493290
+        },
+        "afterGc": {
+          "rss": 195047424,
+          "heapTotal": 100810752,
+          "heapUsed": 54923288,
+          "external": 4963051,
+          "arrayBuffers": 409242
+        },
+        "resources": {
+          "userCPUTime": 762264,
+          "systemCPUTime": 91129,
+          "maxRSS": 190880,
+          "sharedMemorySize": 0,
+          "unsharedDataSize": 0,
+          "unsharedStackSize": 0,
+          "minorPageFault": 45032,
+          "majorPageFault": 0,
+          "swappedOut": 0,
+          "fsRead": 0,
+          "fsWrite": 0,
+          "ipcSent": 0,
+          "ipcReceived": 0,
+          "signalsCount": 0,
+          "voluntaryContextSwitches": 2057,
+          "involuntaryContextSwitches": 21
+        },
+        "cpu": {
+          "user": 762298,
+          "system": 91133
+        }
+      },
+      "settledMemory": {
+        "sequence": 2,
+        "beforeGc": {
+          "rss": 232796160,
+          "heapTotal": 136986624,
+          "heapUsed": 75260600,
+          "external": 4879163,
+          "arrayBuffers": 409402
+        },
+        "afterGc": {
+          "rss": 232755200,
+          "heapTotal": 134627328,
+          "heapUsed": 58656552,
+          "external": 4879163,
+          "arrayBuffers": 409258
+        },
+        "resources": {
+          "userCPUTime": 1334915,
+          "systemCPUTime": 111305,
+          "maxRSS": 227596,
+          "sharedMemorySize": 0,
+          "unsharedDataSize": 0,
+          "unsharedStackSize": 0,
+          "minorPageFault": 56099,
+          "majorPageFault": 0,
+          "swappedOut": 0,
+          "fsRead": 0,
+          "fsWrite": 0,
+          "ipcSent": 0,
+          "ipcReceived": 0,
+          "signalsCount": 0,
+          "voluntaryContextSwitches": 3593,
+          "involuntaryContextSwitches": 43
+        },
+        "cpu": {
+          "user": 1334947,
+          "system": 111308
+        }
+      }
+    },
+    {
+      "workload": "small",
+      "iteration": 0,
+      "dimensions": {
+        "turns": 50,
+        "events": 325,
+        "deltaCount": 2050,
+        "compactRecordCount": 374,
+        "toolCount": 12,
+        "assistantMarkerCount": 50,
+        "historyMarkerCount": 50,
+        "userTextBytes": 11041,
+        "assistantTextBytes": 33550,
+        "reasoningBytes": 15600,
+        "toolOutputBytes": 95232,
+        "maxAssistantTextBytes": 671,
+        "fileBytes": 351213,
+        "sessionId": "tui-perf-session"
+      },
+      "initialInputMs": 55.94462500000009,
+      "firstInputMs": 644.9666990000001,
+      "historyMarkersAtFirstInput": 50,
+      "readyMs": 644.983581,
+      "idleInputMs": [
+        4.162765000000036,
+        37.141553999999815,
+        2.0627299999996467,
+        37.125804000000244,
+        2.064397000000099
+      ],
+      "idleBytes": 880,
+      "initialBytes": 86605,
+      "firstDeltaMs": 82.9012160000002,
+      "liveInputMs": 37.25367099999994,
+      "streamMs": 1304.3558840000005,
+      "streamBytes": 33338,
+      "shutdownMs": 49.745695000000524,
+      "historyMarkerOccurrences": 50,
+      "readyMemory": {
+        "sequence": 1,
+        "beforeGc": {
+          "rss": 234438656,
+          "heapTotal": 136593408,
+          "heapUsed": 88190144,
+          "external": 4963089,
+          "arrayBuffers": 497444
+        },
+        "afterGc": {
+          "rss": 233963520,
+          "heapTotal": 134103040,
+          "heapUsed": 57782256,
+          "external": 4963129,
+          "arrayBuffers": 343642
+        },
+        "resources": {
+          "userCPUTime": 890062,
+          "systemCPUTime": 87449,
+          "maxRSS": 231716,
+          "sharedMemorySize": 0,
+          "unsharedDataSize": 0,
+          "unsharedStackSize": 0,
+          "minorPageFault": 54271,
+          "majorPageFault": 0,
+          "swappedOut": 0,
+          "fsRead": 0,
+          "fsWrite": 0,
+          "ipcSent": 0,
+          "ipcReceived": 0,
+          "signalsCount": 0,
+          "voluntaryContextSwitches": 2689,
+          "involuntaryContextSwitches": 52
+        },
+        "cpu": {
+          "user": 890114,
+          "system": 87454
+        }
+      },
+      "settledMemory": {
+        "sequence": 2,
+        "beforeGc": {
+          "rss": 242352128,
+          "heapTotal": 141967360,
+          "heapUsed": 98951032,
+          "external": 4809503,
+          "arrayBuffers": 343818
+        },
+        "afterGc": {
+          "rss": 242352128,
+          "heapTotal": 140656640,
+          "heapUsed": 60163864,
+          "external": 4809503,
+          "arrayBuffers": 343658
+        },
+        "resources": {
+          "userCPUTime": 1392712,
+          "systemCPUTime": 98828,
+          "maxRSS": 236672,
+          "sharedMemorySize": 0,
+          "unsharedDataSize": 0,
+          "unsharedStackSize": 0,
+          "minorPageFault": 57516,
+          "majorPageFault": 0,
+          "swappedOut": 0,
+          "fsRead": 0,
+          "fsWrite": 0,
+          "ipcSent": 0,
+          "ipcReceived": 0,
+          "signalsCount": 0,
+          "voluntaryContextSwitches": 4013,
+          "involuntaryContextSwitches": 65
+        },
+        "cpu": {
+          "user": 1392753,
+          "system": 98828
+        }
+      }
+    },
+    {
+      "workload": "typical",
+      "iteration": 0,
+      "dimensions": {
+        "turns": 500,
+        "events": 3251,
+        "deltaCount": 20500,
+        "compactRecordCount": 3750,
+        "toolCount": 125,
+        "assistantMarkerCount": 500,
+        "historyMarkerCount": 501,
+        "userTextBytes": 110892,
+        "assistantTextBytes": 335500,
+        "reasoningBytes": 156000,
+        "toolOutputBytes": 992011,
+        "maxAssistantTextBytes": 671,
+        "fileBytes": 3561460,
+        "sessionId": "tui-perf-session"
+      },
+      "initialInputMs": 89.33282799999961,
+      "firstInputMs": 694.7980500000003,
+      "historyMarkersAtFirstInput": 105,
+      "readyMs": 1241.0647710000003,
+      "idleInputMs": [
+        34.96496500000012,
+        2.085587999999916,
+        37.309056000000055,
+        2.084928000000218,
+        35.14574700000048
+      ],
+      "idleBytes": 880,
+      "initialBytes": 882556,
+      "firstDeltaMs": 82.84774900000048,
+      "liveInputMs": 37.27354999999989,
+      "streamMs": 1282.3769950000005,
+      "streamBytes": 32659,
+      "shutdownMs": 54.23656899999969,
+      "historyMarkerOccurrences": 501,
+      "readyMemory": {
+        "sequence": 1,
+        "beforeGc": {
+          "rss": 316768256,
+          "heapTotal": 181129216,
+          "heapUsed": 66934456,
+          "external": 4961483,
+          "arrayBuffers": 345370
+        },
+        "afterGc": {
+          "rss": 316411904,
+          "heapTotal": 138637312,
+          "heapUsed": 65664576,
+          "external": 4811055,
+          "arrayBuffers": 343642
+        },
+        "resources": {
+          "userCPUTime": 1882493,
+          "systemCPUTime": 137985,
+          "maxRSS": 310712,
+          "sharedMemorySize": 0,
+          "unsharedDataSize": 0,
+          "unsharedStackSize": 0,
+          "minorPageFault": 79114,
+          "majorPageFault": 0,
+          "swappedOut": 0,
+          "fsRead": 0,
+          "fsWrite": 0,
+          "ipcSent": 0,
+          "ipcReceived": 0,
+          "signalsCount": 0,
+          "voluntaryContextSwitches": 4001,
+          "involuntaryContextSwitches": 35
+        },
+        "cpu": {
+          "user": 1882527,
+          "system": 137988
+        }
+      },
+      "settledMemory": {
+        "sequence": 2,
+        "beforeGc": {
+          "rss": 317722624,
+          "heapTotal": 153366528,
+          "heapUsed": 84455928,
+          "external": 5017636,
+          "arrayBuffers": 551951
+        },
+        "afterGc": {
+          "rss": 317722624,
+          "heapTotal": 148860928,
+          "heapUsed": 67565568,
+          "external": 5017636,
+          "arrayBuffers": 343658
+        },
+        "resources": {
+          "userCPUTime": 2356198,
+          "systemCPUTime": 149453,
+          "maxRSS": 310712,
+          "sharedMemorySize": 0,
+          "unsharedDataSize": 0,
+          "unsharedStackSize": 0,
+          "minorPageFault": 79715,
+          "majorPageFault": 0,
+          "swappedOut": 0,
+          "fsRead": 0,
+          "fsWrite": 0,
+          "ipcSent": 0,
+          "ipcReceived": 0,
+          "signalsCount": 0,
+          "voluntaryContextSwitches": 5281,
+          "involuntaryContextSwitches": 43
+        },
+        "cpu": {
+          "user": 2356231,
+          "system": 149455
+        }
+      }
+    },
+    {
+      "workload": "tail",
+      "iteration": 0,
+      "dimensions": {
+        "turns": 2000,
+        "events": 13001,
+        "deltaCount": 82000,
+        "compactRecordCount": 15000,
+        "toolCount": 500,
+        "assistantMarkerCount": 2000,
+        "historyMarkerCount": 2001,
+        "userTextBytes": 444893,
+        "assistantTextBytes": 1342000,
+        "reasoningBytes": 624000,
+        "toolOutputBytes": 3968011,
+        "maxAssistantTextBytes": 671,
+        "fileBytes": 14264343,
+        "sessionId": "tui-perf-session"
+      },
+      "initialInputMs": 82.85553600000094,
+      "firstInputMs": 845.9585260000003,
+      "historyMarkersAtFirstInput": 105,
+      "readyMs": 3166.969386999999,
+      "idleInputMs": [
+        2.078776000000289,
+        35.28411700000106,
+        2.070549000000028,
+        37.23854100000062,
+        2.0753590000003896
+      ],
+      "idleBytes": 880,
+      "initialBytes": 3536409,
+      "firstDeltaMs": 97.3388159999995,
+      "liveInputMs": 39.54960299999948,
+      "streamMs": 1320.270953000001,
+      "streamBytes": 33345,
+      "shutdownMs": 59.8989619999993,
+      "historyMarkerOccurrences": 2001,
+      "readyMemory": {
+        "sequence": 1,
+        "beforeGc": {
+          "rss": 387416064,
+          "heapTotal": 224063488,
+          "heapUsed": 146101920,
+          "external": 4799096,
+          "arrayBuffers": 343642
+        },
+        "afterGc": {
+          "rss": 387104768,
+          "heapTotal": 197988352,
+          "heapUsed": 84718792,
+          "external": 4799070,
+          "arrayBuffers": 343642
+        },
+        "resources": {
+          "userCPUTime": 4233950,
+          "systemCPUTime": 155507,
+          "maxRSS": 378344,
+          "sharedMemorySize": 0,
+          "unsharedDataSize": 0,
+          "unsharedStackSize": 0,
+          "minorPageFault": 106171,
+          "majorPageFault": 0,
+          "swappedOut": 0,
+          "fsRead": 0,
+          "fsWrite": 0,
+          "ipcSent": 0,
+          "ipcReceived": 0,
+          "signalsCount": 0,
+          "voluntaryContextSwitches": 5768,
+          "involuntaryContextSwitches": 135
+        },
+        "cpu": {
+          "user": 4234013,
+          "system": 155509
+        }
+      },
+      "settledMemory": {
+        "sequence": 2,
+        "beforeGc": {
+          "rss": 392609792,
+          "heapTotal": 202383360,
+          "heapUsed": 130827920,
+          "external": 5425981,
+          "arrayBuffers": 970553
+        },
+        "afterGc": {
+          "rss": 392609792,
+          "heapTotal": 170860544,
+          "heapUsed": 86628240,
+          "external": 5425981,
+          "arrayBuffers": 343658
+        },
+        "resources": {
+          "userCPUTime": 4776136,
+          "systemCPUTime": 160209,
+          "maxRSS": 383408,
+          "sharedMemorySize": 0,
+          "unsharedDataSize": 0,
+          "unsharedStackSize": 0,
+          "minorPageFault": 109381,
+          "majorPageFault": 0,
+          "swappedOut": 0,
+          "fsRead": 0,
+          "fsWrite": 0,
+          "ipcSent": 0,
+          "ipcReceived": 0,
+          "signalsCount": 0,
+          "voluntaryContextSwitches": 7040,
+          "involuntaryContextSwitches": 156
+        },
+        "cpu": {
+          "user": 4776172,
+          "system": 160210
+        }
+      }
+    },
+    {
+      "workload": "tools",
+      "iteration": 0,
+      "dimensions": {
+        "turns": 500,
+        "events": 7001,
+        "deltaCount": 20500,
+        "compactRecordCount": 7500,
+        "toolCount": 2000,
+        "assistantMarkerCount": 500,
+        "historyMarkerCount": 501,
+        "userTextBytes": 110892,
+        "assistantTextBytes": 335500,
+        "reasoningBytes": 156000,
+        "toolOutputBytes": 15872011,
+        "maxAssistantTextBytes": 671,
+        "fileBytes": 20444187,
+        "sessionId": "tui-perf-session"
+      },
+      "initialInputMs": 80.70521899999949,
+      "firstInputMs": 813.4809970000006,
+      "historyMarkersAtFirstInput": 30,
+      "readyMs": 2705.7413730000007,
+      "idleInputMs": [
+        37.08008900000095,
+        2.0590920000013284,
+        37.14122599999973,
+        2.0609739999999874,
+        37.121838999999454
+      ],
+      "idleBytes": 880,
+      "initialBytes": 1628115,
+      "firstDeltaMs": 74.78151000000071,
+      "liveInputMs": 35.13147200000094,
+      "streamMs": 1292.0649410000005,
+      "streamBytes": 31221,
+      "shutdownMs": 57.45753699999841,
+      "historyMarkerOccurrences": 501,
+      "readyMemory": {
+        "sequence": 1,
+        "beforeGc": {
+          "rss": 390221824,
+          "heapTotal": 247877632,
+          "heapUsed": 171189168,
+          "external": 4809287,
+          "arrayBuffers": 343642
+        },
+        "afterGc": {
+          "rss": 390221824,
+          "heapTotal": 210915328,
+          "heapUsed": 84981872,
+          "external": 4799136,
+          "arrayBuffers": 343642
+        },
+        "resources": {
+          "userCPUTime": 3634407,
+          "systemCPUTime": 157310,
+          "maxRSS": 381868,
+          "sharedMemorySize": 0,
+          "unsharedDataSize": 0,
+          "unsharedStackSize": 0,
+          "minorPageFault": 101437,
+          "majorPageFault": 0,
+          "swappedOut": 0,
+          "fsRead": 0,
+          "fsWrite": 0,
+          "ipcSent": 0,
+          "ipcReceived": 0,
+          "signalsCount": 0,
+          "voluntaryContextSwitches": 5016,
+          "involuntaryContextSwitches": 83
+        },
+        "cpu": {
+          "user": 3634470,
+          "system": 157313
+        }
+      },
+      "settledMemory": {
+        "sequence": 2,
+        "beforeGc": {
+          "rss": 392843264,
+          "heapTotal": 213909504,
+          "heapUsed": 112645704,
+          "external": 5241875,
+          "arrayBuffers": 786381
+        },
+        "afterGc": {
+          "rss": 392843264,
+          "heapTotal": 172253184,
+          "heapUsed": 86937592,
+          "external": 5241875,
+          "arrayBuffers": 343658
+        },
+        "resources": {
+          "userCPUTime": 4104778,
+          "systemCPUTime": 172094,
+          "maxRSS": 383636,
+          "sharedMemorySize": 0,
+          "unsharedDataSize": 0,
+          "unsharedStackSize": 0,
+          "minorPageFault": 108255,
+          "majorPageFault": 0,
+          "swappedOut": 0,
+          "fsRead": 0,
+          "fsWrite": 0,
+          "ipcSent": 0,
+          "ipcReceived": 0,
+          "signalsCount": 0,
+          "voluntaryContextSwitches": 6247,
+          "involuntaryContextSwitches": 96
+        },
+        "cpu": {
+          "user": 4104813,
+          "system": 172096
+        }
+      }
+    },
+    {
+      "workload": "large-output",
+      "iteration": 0,
+      "dimensions": {
+        "turns": 12,
+        "events": 79,
+        "deltaCount": 32928,
+        "compactRecordCount": 90,
+        "toolCount": 3,
+        "assistantMarkerCount": 192,
+        "historyMarkerCount": 193,
+        "userTextBytes": 2643,
+        "assistantTextBytes": 786432,
+        "reasoningBytes": 3744,
+        "toolOutputBytes": 23819,
+        "maxAssistantTextBytes": 65536,
+        "fileBytes": 2584005,
+        "sessionId": "tui-perf-session"
+      },
+      "initialInputMs": 52.02917000000161,
+      "firstInputMs": 599.7636170000005,
+      "historyMarkersAtFirstInput": 52,
+      "readyMs": 771.3312480000022,
+      "idleInputMs": [
+        37.10042799999792,
+        2.0635000000002037,
+        37.18572999999742,
+        2.088321999999607,
+        37.17666499999905
+      ],
+      "idleBytes": 880,
+      "initialBytes": 848726,
+      "firstDeltaMs": 80.44483399999808,
+      "liveInputMs": 35.134878000000754,
+      "streamMs": 1293.601541,
+      "streamBytes": 32643,
+      "shutdownMs": 48.99960999999894,
+      "historyMarkerOccurrences": 193,
+      "readyMemory": {
+        "sequence": 1,
+        "beforeGc": {
+          "rss": 246697984,
+          "heapTotal": 139083776,
+          "heapUsed": 72980592,
+          "external": 4952855,
+          "arrayBuffers": 487210
+        },
+        "afterGc": {
+          "rss": 245977088,
+          "heapTotal": 138534912,
+          "heapUsed": 62400184,
+          "external": 4952895,
+          "arrayBuffers": 343642
+        },
+        "resources": {
+          "userCPUTime": 1103212,
+          "systemCPUTime": 91843,
+          "maxRSS": 240916,
+          "sharedMemorySize": 0,
+          "unsharedDataSize": 0,
+          "unsharedStackSize": 0,
+          "minorPageFault": 60179,
+          "majorPageFault": 0,
+          "swappedOut": 0,
+          "fsRead": 0,
+          "fsWrite": 0,
+          "ipcSent": 0,
+          "ipcReceived": 0,
+          "signalsCount": 0,
+          "voluntaryContextSwitches": 3092,
+          "involuntaryContextSwitches": 39
+        },
+        "cpu": {
+          "user": 1103245,
+          "system": 91846
+        }
+      },
+      "settledMemory": {
+        "sequence": 2,
+        "beforeGc": {
+          "rss": 254627840,
+          "heapTotal": 144302080,
+          "heapUsed": 70383552,
+          "external": 4809487,
+          "arrayBuffers": 343802
+        },
+        "afterGc": {
+          "rss": 254627840,
+          "heapTotal": 136437760,
+          "heapUsed": 64527608,
+          "external": 4809487,
+          "arrayBuffers": 343658
+        },
+        "resources": {
+          "userCPUTime": 1604213,
+          "systemCPUTime": 103475,
+          "maxRSS": 248660,
+          "sharedMemorySize": 0,
+          "unsharedDataSize": 0,
+          "unsharedStackSize": 0,
+          "minorPageFault": 62493,
+          "majorPageFault": 0,
+          "swappedOut": 0,
+          "fsRead": 0,
+          "fsWrite": 0,
+          "ipcSent": 0,
+          "ipcReceived": 0,
+          "signalsCount": 0,
+          "voluntaryContextSwitches": 4463,
+          "involuntaryContextSwitches": 45
+        },
+        "cpu": {
+          "user": 1604246,
+          "system": 103477
+        }
+      }
+    },
+    {
+      "workload": "fresh",
+      "iteration": 1,
+      "dimensions": {
+        "turns": 0,
+        "events": 0,
+        "deltaCount": 0,
+        "compactRecordCount": 0,
+        "toolCount": 0,
+        "assistantMarkerCount": 0,
+        "historyMarkerCount": 0,
+        "userTextBytes": 0,
+        "assistantTextBytes": 0,
+        "reasoningBytes": 0,
+        "toolOutputBytes": 0,
+        "maxAssistantTextBytes": 0,
+        "fileBytes": 0,
+        "sessionId": "tui-perf-session"
+      },
+      "initialInputMs": 55.89527100000123,
+      "firstInputMs": 519.0572140000004,
+      "historyMarkersAtFirstInput": 0,
+      "readyMs": 519.0741730000009,
+      "idleInputMs": [
+        2.0685929999999644,
+        34.995702000000165,
+        2.0617850000016915,
+        37.14991699999882,
+        2.0680869999996503
+      ],
+      "idleBytes": 880,
+      "initialBytes": 2869,
+      "firstDeltaMs": 87.0227879999984,
+      "liveInputMs": 39.22093799999857,
+      "streamMs": 1305.665065000001,
+      "streamBytes": 33341,
+      "shutdownMs": 47.433108999997785,
+      "historyMarkerOccurrences": 0,
+      "readyMemory": {
+        "sequence": 1,
+        "beforeGc": {
+          "rss": 198045696,
+          "heapTotal": 100270080,
+          "heapUsed": 62378320,
+          "external": 4962867,
+          "arrayBuffers": 493146
+        },
+        "afterGc": {
+          "rss": 198266880,
+          "heapTotal": 100548608,
+          "heapUsed": 54938256,
+          "external": 4962907,
+          "arrayBuffers": 409242
+        },
+        "resources": {
+          "userCPUTime": 636838,
+          "systemCPUTime": 67074,
+          "maxRSS": 193916,
+          "sharedMemorySize": 0,
+          "unsharedDataSize": 0,
+          "unsharedStackSize": 0,
+          "minorPageFault": 43731,
+          "majorPageFault": 0,
+          "swappedOut": 0,
+          "fsRead": 0,
+          "fsWrite": 0,
+          "ipcSent": 0,
+          "ipcReceived": 0,
+          "signalsCount": 0,
+          "voluntaryContextSwitches": 2204,
+          "involuntaryContextSwitches": 26
+        },
+        "cpu": {
+          "user": 636875,
+          "system": 67074
+        }
+      },
+      "settledMemory": {
+        "sequence": 2,
+        "beforeGc": {
+          "rss": 236285952,
+          "heapTotal": 137248768,
+          "heapUsed": 75287912,
+          "external": 4879163,
+          "arrayBuffers": 409402
+        },
+        "afterGc": {
+          "rss": 236285952,
+          "heapTotal": 133578752,
+          "heapUsed": 58670920,
+          "external": 4879163,
+          "arrayBuffers": 409258
+        },
+        "resources": {
+          "userCPUTime": 1185560,
+          "systemCPUTime": 86120,
+          "maxRSS": 230748,
+          "sharedMemorySize": 0,
+          "unsharedDataSize": 0,
+          "unsharedStackSize": 0,
+          "minorPageFault": 55028,
+          "majorPageFault": 0,
+          "swappedOut": 0,
+          "fsRead": 0,
+          "fsWrite": 0,
+          "ipcSent": 0,
+          "ipcReceived": 0,
+          "signalsCount": 0,
+          "voluntaryContextSwitches": 3755,
+          "involuntaryContextSwitches": 34
+        },
+        "cpu": {
+          "user": 1185595,
+          "system": 86120
+        }
+      }
+    },
+    {
+      "workload": "small",
+      "iteration": 1,
+      "dimensions": {
+        "turns": 50,
+        "events": 325,
+        "deltaCount": 2050,
+        "compactRecordCount": 374,
+        "toolCount": 12,
+        "assistantMarkerCount": 50,
+        "historyMarkerCount": 50,
+        "userTextBytes": 11041,
+        "assistantTextBytes": 33550,
+        "reasoningBytes": 15600,
+        "toolOutputBytes": 95232,
+        "maxAssistantTextBytes": 671,
+        "fileBytes": 351213,
+        "sessionId": "tui-perf-session"
+      },
+      "initialInputMs": 53.64380799999708,
+      "firstInputMs": 626.1873489999998,
+      "historyMarkersAtFirstInput": 50,
+      "readyMs": 626.1976850000028,
+      "idleInputMs": [
+        2.0700680000009015,
+        37.08954299999823,
+        2.0719000000026426,
+        37.14208300000246,
+        2.0575150000004214
+      ],
+      "idleBytes": 880,
+      "initialBytes": 86605,
+      "firstDeltaMs": 81.07443899999998,
+      "liveInputMs": 35.19221099999777,
+      "streamMs": 1285.48589,
+      "streamBytes": 31602,
+      "shutdownMs": 48.11115400000199,
+      "historyMarkerOccurrences": 50,
+      "readyMemory": {
+        "sequence": 1,
+        "beforeGc": {
+          "rss": 237510656,
+          "heapTotal": 136593408,
+          "heapUsed": 88345472,
+          "external": 4962225,
+          "arrayBuffers": 496580
+        },
+        "afterGc": {
+          "rss": 236945408,
+          "heapTotal": 134889472,
+          "heapUsed": 57781576,
+          "external": 4962265,
+          "arrayBuffers": 343642
+        },
+        "resources": {
+          "userCPUTime": 846968,
+          "systemCPUTime": 82940,
+          "maxRSS": 234588,
+          "sharedMemorySize": 0,
+          "unsharedDataSize": 0,
+          "unsharedStackSize": 0,
+          "minorPageFault": 55030,
+          "majorPageFault": 0,
+          "swappedOut": 0,
+          "fsRead": 0,
+          "fsWrite": 0,
+          "ipcSent": 0,
+          "ipcReceived": 0,
+          "signalsCount": 0,
+          "voluntaryContextSwitches": 2681,
+          "involuntaryContextSwitches": 29
+        },
+        "cpu": {
+          "user": 847004,
+          "system": 82940
+        }
+      },
+      "settledMemory": {
+        "sequence": 2,
+        "beforeGc": {
+          "rss": 244285440,
+          "heapTotal": 143015936,
+          "heapUsed": 75069584,
+          "external": 4809487,
+          "arrayBuffers": 343802
+        },
+        "afterGc": {
+          "rss": 244285440,
+          "heapTotal": 141180928,
+          "heapUsed": 60158304,
+          "external": 4809487,
+          "arrayBuffers": 343658
+        },
+        "resources": {
+          "userCPUTime": 1316251,
+          "systemCPUTime": 93710,
+          "maxRSS": 238560,
+          "sharedMemorySize": 0,
+          "unsharedDataSize": 0,
+          "unsharedStackSize": 0,
+          "minorPageFault": 58340,
+          "majorPageFault": 0,
+          "swappedOut": 0,
+          "fsRead": 0,
+          "fsWrite": 0,
+          "ipcSent": 0,
+          "ipcReceived": 0,
+          "signalsCount": 0,
+          "voluntaryContextSwitches": 3993,
+          "involuntaryContextSwitches": 35
+        },
+        "cpu": {
+          "user": 1316282,
+          "system": 93712
+        }
+      }
+    },
+    {
+      "workload": "typical",
+      "iteration": 1,
+      "dimensions": {
+        "turns": 500,
+        "events": 3251,
+        "deltaCount": 20500,
+        "compactRecordCount": 3750,
+        "toolCount": 125,
+        "assistantMarkerCount": 500,
+        "historyMarkerCount": 501,
+        "userTextBytes": 110892,
+        "assistantTextBytes": 335500,
+        "reasoningBytes": 156000,
+        "toolOutputBytes": 992011,
+        "maxAssistantTextBytes": 671,
+        "fileBytes": 3561460,
+        "sessionId": "tui-perf-session"
+      },
+      "initialInputMs": 89.36841000000277,
+      "firstInputMs": 703.1237729999993,
+      "historyMarkersAtFirstInput": 105,
+      "readyMs": 1242.7489679999999,
+      "idleInputMs": [
+        37.175342999998975,
+        2.063253000000259,
+        37.12676499999725,
+        2.111164000001736,
+        37.27187599999888
+      ],
+      "idleBytes": 880,
+      "initialBytes": 882556,
+      "firstDeltaMs": 88.95269899999766,
+      "liveInputMs": 35.1870600000002,
+      "streamMs": 1296.4321539999983,
+      "streamBytes": 32659,
+      "shutdownMs": 54.380121999998664,
+      "historyMarkerOccurrences": 501,
+      "readyMemory": {
+        "sequence": 1,
+        "beforeGc": {
+          "rss": 316055552,
+          "heapTotal": 177983488,
+          "heapUsed": 66937408,
+          "external": 4961483,
+          "arrayBuffers": 345370
+        },
+        "afterGc": {
+          "rss": 315777024,
+          "heapTotal": 138375168,
+          "heapUsed": 65652840,
+          "external": 4811055,
+          "arrayBuffers": 343642
+        },
+        "resources": {
+          "userCPUTime": 1904862,
+          "systemCPUTime": 107472,
+          "maxRSS": 309820,
+          "sharedMemorySize": 0,
+          "unsharedDataSize": 0,
+          "unsharedStackSize": 0,
+          "minorPageFault": 79285,
+          "majorPageFault": 0,
+          "swappedOut": 0,
+          "fsRead": 0,
+          "fsWrite": 0,
+          "ipcSent": 0,
+          "ipcReceived": 0,
+          "signalsCount": 0,
+          "voluntaryContextSwitches": 3897,
+          "involuntaryContextSwitches": 65
+        },
+        "cpu": {
+          "user": 1904898,
+          "system": 107474
+        }
+      },
+      "settledMemory": {
+        "sequence": 2,
+        "beforeGc": {
+          "rss": 318660608,
+          "heapTotal": 152842240,
+          "heapUsed": 84417728,
+          "external": 5017636,
+          "arrayBuffers": 551951
+        },
+        "afterGc": {
+          "rss": 318660608,
+          "heapTotal": 149123072,
+          "heapUsed": 67556176,
+          "external": 5017636,
+          "arrayBuffers": 343658
+        },
+        "resources": {
+          "userCPUTime": 2387182,
+          "systemCPUTime": 113012,
+          "maxRSS": 311192,
+          "sharedMemorySize": 0,
+          "unsharedDataSize": 0,
+          "unsharedStackSize": 0,
+          "minorPageFault": 80055,
+          "majorPageFault": 0,
+          "swappedOut": 0,
+          "fsRead": 0,
+          "fsWrite": 0,
+          "ipcSent": 0,
+          "ipcReceived": 0,
+          "signalsCount": 0,
+          "voluntaryContextSwitches": 5142,
+          "involuntaryContextSwitches": 76
+        },
+        "cpu": {
+          "user": 2387215,
+          "system": 113014
+        }
+      }
+    },
+    {
+      "workload": "tail",
+      "iteration": 1,
+      "dimensions": {
+        "turns": 2000,
+        "events": 13001,
+        "deltaCount": 82000,
+        "compactRecordCount": 15000,
+        "toolCount": 500,
+        "assistantMarkerCount": 2000,
+        "historyMarkerCount": 2001,
+        "userTextBytes": 444893,
+        "assistantTextBytes": 1342000,
+        "reasoningBytes": 624000,
+        "toolOutputBytes": 3968011,
+        "maxAssistantTextBytes": 671,
+        "fileBytes": 14264343,
+        "sessionId": "tui-perf-session"
+      },
+      "initialInputMs": 86.56662400000278,
+      "firstInputMs": 833.1527960000021,
+      "historyMarkersAtFirstInput": 105,
+      "readyMs": 3176.863666000001,
+      "idleInputMs": [
+        2.0270509999973,
+        37.24409600000217,
+        2.0563179999990098,
+        35.07391800000187,
+        2.0570259999985865
+      ],
+      "idleBytes": 880,
+      "initialBytes": 3536409,
+      "firstDeltaMs": 99.51991899999848,
+      "liveInputMs": 35.23585999999705,
+      "streamMs": 1295.028355999999,
+      "streamBytes": 31733,
+      "shutdownMs": 57.07980800000223,
+      "historyMarkerOccurrences": 2001,
+      "readyMemory": {
+        "sequence": 1,
+        "beforeGc": {
+          "rss": 386740224,
+          "heapTotal": 225112064,
+          "heapUsed": 145285720,
+          "external": 4799096,
+          "arrayBuffers": 343642
+        },
+        "afterGc": {
+          "rss": 386367488,
+          "heapTotal": 197201920,
+          "heapUsed": 84722152,
+          "external": 4799070,
+          "arrayBuffers": 343642
+        },
+        "resources": {
+          "userCPUTime": 4212743,
+          "systemCPUTime": 171081,
+          "maxRSS": 378772,
+          "sharedMemorySize": 0,
+          "unsharedDataSize": 0,
+          "unsharedStackSize": 0,
+          "minorPageFault": 106175,
+          "majorPageFault": 0,
+          "swappedOut": 0,
+          "fsRead": 0,
+          "fsWrite": 0,
+          "ipcSent": 0,
+          "ipcReceived": 0,
+          "signalsCount": 0,
+          "voluntaryContextSwitches": 5911,
+          "involuntaryContextSwitches": 79
+        },
+        "cpu": {
+          "user": 4212806,
+          "system": 171083
+        }
+      },
+      "settledMemory": {
+        "sequence": 2,
+        "beforeGc": {
+          "rss": 392658944,
+          "heapTotal": 201596928,
+          "heapUsed": 121600792,
+          "external": 5425965,
+          "arrayBuffers": 970537
+        },
+        "afterGc": {
+          "rss": 392658944,
+          "heapTotal": 170860544,
+          "heapUsed": 86641736,
+          "external": 5425965,
+          "arrayBuffers": 343658
+        },
+        "resources": {
+          "userCPUTime": 4715204,
+          "systemCPUTime": 188277,
+          "maxRSS": 383456,
+          "sharedMemorySize": 0,
+          "unsharedDataSize": 0,
+          "unsharedStackSize": 0,
+          "minorPageFault": 109406,
+          "majorPageFault": 0,
+          "swappedOut": 0,
+          "fsRead": 0,
+          "fsWrite": 0,
+          "ipcSent": 0,
+          "ipcReceived": 0,
+          "signalsCount": 0,
+          "voluntaryContextSwitches": 7213,
+          "involuntaryContextSwitches": 91
+        },
+        "cpu": {
+          "user": 4715238,
+          "system": 188278
+        }
+      }
+    },
+    {
+      "workload": "tools",
+      "iteration": 1,
+      "dimensions": {
+        "turns": 500,
+        "events": 7001,
+        "deltaCount": 20500,
+        "compactRecordCount": 7500,
+        "toolCount": 2000,
+        "assistantMarkerCount": 500,
+        "historyMarkerCount": 501,
+        "userTextBytes": 110892,
+        "assistantTextBytes": 335500,
+        "reasoningBytes": 156000,
+        "toolOutputBytes": 15872011,
+        "maxAssistantTextBytes": 671,
+        "fileBytes": 20444187,
+        "sessionId": "tui-perf-session"
+      },
+      "initialInputMs": 82.54548799999611,
+      "firstInputMs": 800.813694000004,
+      "historyMarkersAtFirstInput": 30,
+      "readyMs": 2668.3400540000002,
+      "idleInputMs": [
+        37.2304909999948,
+        2.060244000000239,
+        37.11593399999401,
+        2.0794649999952526,
+        37.24341699999786
+      ],
+      "idleBytes": 880,
+      "initialBytes": 1628115,
+      "firstDeltaMs": 99.4727189999976,
+      "liveInputMs": 35.159476999993785,
+      "streamMs": 1300.982222999999,
+      "streamBytes": 32659,
+      "shutdownMs": 57.557895999998436,
+      "historyMarkerOccurrences": 501,
+      "readyMemory": {
+        "sequence": 1,
+        "beforeGc": {
+          "rss": 391217152,
+          "heapTotal": 243159040,
+          "heapUsed": 171108064,
+          "external": 4809287,
+          "arrayBuffers": 343642
+        },
+        "afterGc": {
+          "rss": 391217152,
+          "heapTotal": 214323200,
+          "heapUsed": 84977192,
+          "external": 4799136,
+          "arrayBuffers": 343642
+        },
+        "resources": {
+          "userCPUTime": 3575854,
+          "systemCPUTime": 161614,
+          "maxRSS": 382788,
+          "sharedMemorySize": 0,
+          "unsharedDataSize": 0,
+          "unsharedStackSize": 0,
+          "minorPageFault": 101069,
+          "majorPageFault": 0,
+          "swappedOut": 0,
+          "fsRead": 0,
+          "fsWrite": 0,
+          "ipcSent": 0,
+          "ipcReceived": 0,
+          "signalsCount": 0,
+          "voluntaryContextSwitches": 4878,
+          "involuntaryContextSwitches": 61
+        },
+        "cpu": {
+          "user": 3575915,
+          "system": 161617
+        }
+      },
+      "settledMemory": {
+        "sequence": 2,
+        "beforeGc": {
+          "rss": 394129408,
+          "heapTotal": 217317376,
+          "heapUsed": 113144968,
+          "external": 5241875,
+          "arrayBuffers": 786381
+        },
+        "afterGc": {
+          "rss": 394129408,
+          "heapTotal": 173826048,
+          "heapUsed": 86929632,
+          "external": 5241875,
+          "arrayBuffers": 343658
+        },
+        "resources": {
+          "userCPUTime": 4057221,
+          "systemCPUTime": 173438,
+          "maxRSS": 384892,
+          "sharedMemorySize": 0,
+          "unsharedDataSize": 0,
+          "unsharedStackSize": 0,
+          "minorPageFault": 107966,
+          "majorPageFault": 0,
+          "swappedOut": 0,
+          "fsRead": 0,
+          "fsWrite": 0,
+          "ipcSent": 0,
+          "ipcReceived": 0,
+          "signalsCount": 0,
+          "voluntaryContextSwitches": 6164,
+          "involuntaryContextSwitches": 70
+        },
+        "cpu": {
+          "user": 4057255,
+          "system": 173440
+        }
+      }
+    },
+    {
+      "workload": "large-output",
+      "iteration": 1,
+      "dimensions": {
+        "turns": 12,
+        "events": 79,
+        "deltaCount": 32928,
+        "compactRecordCount": 90,
+        "toolCount": 3,
+        "assistantMarkerCount": 192,
+        "historyMarkerCount": 193,
+        "userTextBytes": 2643,
+        "assistantTextBytes": 786432,
+        "reasoningBytes": 3744,
+        "toolOutputBytes": 23819,
+        "maxAssistantTextBytes": 65536,
+        "fileBytes": 2584005,
+        "sessionId": "tui-perf-session"
+      },
+      "initialInputMs": 52.042278000000806,
+      "firstInputMs": 595.0672340000019,
+      "historyMarkersAtFirstInput": 52,
+      "readyMs": 769.4659570000003,
+      "idleInputMs": [
+        35.09320199999638,
+        2.0648719999953755,
+        35.07548199999292,
+        2.066140999995696,
+        35.0809769999978
+      ],
+      "idleBytes": 880,
+      "initialBytes": 848726,
+      "firstDeltaMs": 80.56555899999512,
+      "liveInputMs": 35.31135599999834,
+      "streamMs": 1321.4682590000011,
+      "streamBytes": 32643,
+      "shutdownMs": 49.96067900000344,
+      "historyMarkerOccurrences": 193,
+      "readyMemory": {
+        "sequence": 1,
+        "beforeGc": {
+          "rss": 244912128,
+          "heapTotal": 140132352,
+          "heapUsed": 73118848,
+          "external": 4952855,
+          "arrayBuffers": 487210
+        },
+        "afterGc": {
+          "rss": 244375552,
+          "heapTotal": 138797056,
+          "heapUsed": 62391896,
+          "external": 4952895,
+          "arrayBuffers": 343642
+        },
+        "resources": {
+          "userCPUTime": 1076186,
+          "systemCPUTime": 91137,
+          "maxRSS": 239172,
+          "sharedMemorySize": 0,
+          "unsharedDataSize": 0,
+          "unsharedStackSize": 0,
+          "minorPageFault": 57376,
+          "majorPageFault": 0,
+          "swappedOut": 0,
+          "fsRead": 0,
+          "fsWrite": 0,
+          "ipcSent": 0,
+          "ipcReceived": 0,
+          "signalsCount": 0,
+          "voluntaryContextSwitches": 3022,
+          "involuntaryContextSwitches": 25
+        },
+        "cpu": {
+          "user": 1076219,
+          "system": 91140
+        }
+      },
+      "settledMemory": {
+        "sequence": 2,
+        "beforeGc": {
+          "rss": 251453440,
+          "heapTotal": 144302080,
+          "heapUsed": 91930488,
+          "external": 4809503,
+          "arrayBuffers": 343818
+        },
+        "afterGc": {
+          "rss": 251084800,
+          "heapTotal": 137486336,
+          "heapUsed": 64609768,
+          "external": 4809503,
+          "arrayBuffers": 343658
+        },
+        "resources": {
+          "userCPUTime": 1631587,
+          "systemCPUTime": 109239,
+          "maxRSS": 245560,
+          "sharedMemorySize": 0,
+          "unsharedDataSize": 0,
+          "unsharedStackSize": 0,
+          "minorPageFault": 59662,
+          "majorPageFault": 0,
+          "swappedOut": 0,
+          "fsRead": 0,
+          "fsWrite": 0,
+          "ipcSent": 0,
+          "ipcReceived": 0,
+          "signalsCount": 0,
+          "voluntaryContextSwitches": 4420,
+          "involuntaryContextSwitches": 37
+        },
+        "cpu": {
+          "user": 1631621,
+          "system": 109241
+        }
+      }
+    },
+    {
+      "workload": "fresh",
+      "iteration": 2,
+      "dimensions": {
+        "turns": 0,
+        "events": 0,
+        "deltaCount": 0,
+        "compactRecordCount": 0,
+        "toolCount": 0,
+        "assistantMarkerCount": 0,
+        "historyMarkerCount": 0,
+        "userTextBytes": 0,
+        "assistantTextBytes": 0,
+        "reasoningBytes": 0,
+        "toolOutputBytes": 0,
+        "maxAssistantTextBytes": 0,
+        "fileBytes": 0,
+        "sessionId": "tui-perf-session"
+      },
+      "initialInputMs": 55.866909999997006,
+      "firstInputMs": 524.8412989999997,
+      "historyMarkersAtFirstInput": 0,
+      "readyMs": 524.8430369999987,
+      "idleInputMs": [
+        2.075587999999698,
+        35.09874200000195,
+        2.0619779999979073,
+        37.72583399999712,
+        2.0609279999989667
+      ],
+      "idleBytes": 880,
+      "initialBytes": 2869,
+      "firstDeltaMs": 88.927969999997,
+      "liveInputMs": 37.17706800000451,
+      "streamMs": 1375.9662009999956,
+      "streamBytes": 31812,
+      "shutdownMs": 45.10188200000266,
+      "historyMarkerOccurrences": 0,
+      "readyMemory": {
+        "sequence": 1,
+        "beforeGc": {
+          "rss": 198455296,
+          "heapTotal": 100794368,
+          "heapUsed": 62337744,
+          "external": 4962867,
+          "arrayBuffers": 493146
+        },
+        "afterGc": {
+          "rss": 198979584,
+          "heapTotal": 100548608,
+          "heapUsed": 54925584,
+          "external": 4962907,
+          "arrayBuffers": 409242
+        },
+        "resources": {
+          "userCPUTime": 675370,
+          "systemCPUTime": 75001,
+          "maxRSS": 194316,
+          "sharedMemorySize": 0,
+          "unsharedDataSize": 0,
+          "unsharedStackSize": 0,
+          "minorPageFault": 44393,
+          "majorPageFault": 0,
+          "swappedOut": 0,
+          "fsRead": 0,
+          "fsWrite": 0,
+          "ipcSent": 0,
+          "ipcReceived": 0,
+          "signalsCount": 0,
+          "voluntaryContextSwitches": 2158,
+          "involuntaryContextSwitches": 29
+        },
+        "cpu": {
+          "user": 675403,
+          "system": 75005
+        }
+      },
+      "settledMemory": {
+        "sequence": 2,
+        "beforeGc": {
+          "rss": 237776896,
+          "heapTotal": 136986624,
+          "heapUsed": 78594240,
+          "external": 4879163,
+          "arrayBuffers": 409402
+        },
+        "afterGc": {
+          "rss": 237776896,
+          "heapTotal": 133840896,
+          "heapUsed": 58656544,
+          "external": 4879163,
+          "arrayBuffers": 409258
+        },
+        "resources": {
+          "userCPUTime": 1302604,
+          "systemCPUTime": 97946,
+          "maxRSS": 232204,
+          "sharedMemorySize": 0,
+          "unsharedDataSize": 0,
+          "unsharedStackSize": 0,
+          "minorPageFault": 56148,
+          "majorPageFault": 0,
+          "swappedOut": 0,
+          "fsRead": 0,
+          "fsWrite": 0,
+          "ipcSent": 0,
+          "ipcReceived": 0,
+          "signalsCount": 0,
+          "voluntaryContextSwitches": 3702,
+          "involuntaryContextSwitches": 63
+        },
+        "cpu": {
+          "user": 1302638,
+          "system": 97946
+        }
+      }
+    },
+    {
+      "workload": "small",
+      "iteration": 2,
+      "dimensions": {
+        "turns": 50,
+        "events": 325,
+        "deltaCount": 2050,
+        "compactRecordCount": 374,
+        "toolCount": 12,
+        "assistantMarkerCount": 50,
+        "historyMarkerCount": 50,
+        "userTextBytes": 11041,
+        "assistantTextBytes": 33550,
+        "reasoningBytes": 15600,
+        "toolOutputBytes": 95232,
+        "maxAssistantTextBytes": 671,
+        "fileBytes": 351213,
+        "sessionId": "tui-perf-session"
+      },
+      "initialInputMs": 55.75302500000544,
+      "firstInputMs": 632.2426459999988,
+      "historyMarkersAtFirstInput": 50,
+      "readyMs": 632.2439809999996,
+      "idleInputMs": [
+        2.070844000001671,
+        35.06270699999732,
+        2.056810999994923,
+        35.09276300000056,
+        2.0614019999993616
+      ],
+      "idleBytes": 880,
+      "initialBytes": 86605,
+      "firstDeltaMs": 80.43528900000092,
+      "liveInputMs": 35.014059000001,
+      "streamMs": 1290.1022910000029,
+      "streamBytes": 33338,
+      "shutdownMs": 52.98957299999893,
+      "historyMarkerOccurrences": 50,
+      "readyMemory": {
+        "sequence": 1,
+        "beforeGc": {
+          "rss": 238374912,
+          "heapTotal": 136855552,
+          "heapUsed": 88349496,
+          "external": 4961937,
+          "arrayBuffers": 496292
+        },
+        "afterGc": {
+          "rss": 237920256,
+          "heapTotal": 134365184,
+          "heapUsed": 57774064,
+          "external": 4961977,
+          "arrayBuffers": 343642
+        },
+        "resources": {
+          "userCPUTime": 860469,
+          "systemCPUTime": 87976,
+          "maxRSS": 232788,
+          "sharedMemorySize": 0,
+          "unsharedDataSize": 0,
+          "unsharedStackSize": 0,
+          "minorPageFault": 55716,
+          "majorPageFault": 0,
+          "swappedOut": 0,
+          "fsRead": 0,
+          "fsWrite": 0,
+          "ipcSent": 0,
+          "ipcReceived": 0,
+          "signalsCount": 0,
+          "voluntaryContextSwitches": 2659,
+          "involuntaryContextSwitches": 42
+        },
+        "cpu": {
+          "user": 860502,
+          "system": 87979
+        }
+      },
+      "settledMemory": {
+        "sequence": 2,
+        "beforeGc": {
+          "rss": 245784576,
+          "heapTotal": 142229504,
+          "heapUsed": 98958840,
+          "external": 4809503,
+          "arrayBuffers": 343818
+        },
+        "afterGc": {
+          "rss": 245784576,
+          "heapTotal": 141705216,
+          "heapUsed": 60151600,
+          "external": 4809503,
+          "arrayBuffers": 343658
+        },
+        "resources": {
+          "userCPUTime": 1343707,
+          "systemCPUTime": 95787,
+          "maxRSS": 240024,
+          "sharedMemorySize": 0,
+          "unsharedDataSize": 0,
+          "unsharedStackSize": 0,
+          "minorPageFault": 59026,
+          "majorPageFault": 0,
+          "swappedOut": 0,
+          "fsRead": 0,
+          "fsWrite": 0,
+          "ipcSent": 0,
+          "ipcReceived": 0,
+          "signalsCount": 0,
+          "voluntaryContextSwitches": 3915,
+          "involuntaryContextSwitches": 58
+        },
+        "cpu": {
+          "user": 1345289,
+          "system": 95787
+        }
+      }
+    },
+    {
+      "workload": "typical",
+      "iteration": 2,
+      "dimensions": {
+        "turns": 500,
+        "events": 3251,
+        "deltaCount": 20500,
+        "compactRecordCount": 3750,
+        "toolCount": 125,
+        "assistantMarkerCount": 500,
+        "historyMarkerCount": 501,
+        "userTextBytes": 110892,
+        "assistantTextBytes": 335500,
+        "reasoningBytes": 156000,
+        "toolOutputBytes": 992011,
+        "maxAssistantTextBytes": 671,
+        "fileBytes": 3561460,
+        "sessionId": "tui-perf-session"
+      },
+      "initialInputMs": 89.1045529999974,
+      "firstInputMs": 704.3007749999961,
+      "historyMarkersAtFirstInput": 105,
+      "readyMs": 1246.8355069999961,
+      "idleInputMs": [
+        37.445732000000135,
+        2.062158000000636,
+        35.0183079999988,
+        2.0596850000001723,
+        35.05999599999632
+      ],
+      "idleBytes": 880,
+      "initialBytes": 882556,
+      "firstDeltaMs": 82.70263200000045,
+      "liveInputMs": 37.19080499999836,
+      "streamMs": 1455.3967219999977,
+      "streamBytes": 31318,
+      "shutdownMs": 55.58375299999898,
+      "historyMarkerOccurrences": 501,
+      "readyMemory": {
+        "sequence": 1,
+        "beforeGc": {
+          "rss": 314740736,
+          "heapTotal": 181129216,
+          "heapUsed": 66937040,
+          "external": 4961483,
+          "arrayBuffers": 345370
+        },
+        "afterGc": {
+          "rss": 314355712,
+          "heapTotal": 139161600,
+          "heapUsed": 65657184,
+          "external": 4811055,
+          "arrayBuffers": 343642
+        },
+        "resources": {
+          "userCPUTime": 1879819,
+          "systemCPUTime": 123738,
+          "maxRSS": 308660,
+          "sharedMemorySize": 0,
+          "unsharedDataSize": 0,
+          "unsharedStackSize": 0,
+          "minorPageFault": 78618,
+          "majorPageFault": 0,
+          "swappedOut": 0,
+          "fsRead": 0,
+          "fsWrite": 0,
+          "ipcSent": 0,
+          "ipcReceived": 0,
+          "signalsCount": 0,
+          "voluntaryContextSwitches": 4042,
+          "involuntaryContextSwitches": 55
+        },
+        "cpu": {
+          "user": 1879856,
+          "system": 123738
+        }
+      },
+      "settledMemory": {
+        "sequence": 2,
+        "beforeGc": {
+          "rss": 315666432,
+          "heapTotal": 152268800,
+          "heapUsed": 83762008,
+          "external": 4874959,
+          "arrayBuffers": 409258
+        },
+        "afterGc": {
+          "rss": 315666432,
+          "heapTotal": 148336640,
+          "heapUsed": 67678160,
+          "external": 4874943,
+          "arrayBuffers": 343658
+        },
+        "resources": {
+          "userCPUTime": 2563283,
+          "systemCPUTime": 143446,
+          "maxRSS": 308660,
+          "sharedMemorySize": 0,
+          "unsharedDataSize": 0,
+          "unsharedStackSize": 0,
+          "minorPageFault": 82622,
+          "majorPageFault": 0,
+          "swappedOut": 0,
+          "fsRead": 0,
+          "fsWrite": 0,
+          "ipcSent": 0,
+          "ipcReceived": 0,
+          "signalsCount": 0,
+          "voluntaryContextSwitches": 5287,
+          "involuntaryContextSwitches": 285
+        },
+        "cpu": {
+          "user": 2563329,
+          "system": 143448
+        }
+      }
+    },
+    {
+      "workload": "tail",
+      "iteration": 2,
+      "dimensions": {
+        "turns": 2000,
+        "events": 13001,
+        "deltaCount": 82000,
+        "compactRecordCount": 15000,
+        "toolCount": 500,
+        "assistantMarkerCount": 2000,
+        "historyMarkerCount": 2001,
+        "userTextBytes": 444893,
+        "assistantTextBytes": 1342000,
+        "reasoningBytes": 624000,
+        "toolOutputBytes": 3968011,
+        "maxAssistantTextBytes": 671,
+        "fileBytes": 14264343,
+        "sessionId": "tui-perf-session"
+      },
+      "initialInputMs": 130.45071299999836,
+      "firstInputMs": 1095.972732000002,
+      "historyMarkersAtFirstInput": 105,
+      "readyMs": 4430.844989000005,
+      "idleInputMs": [
+        4.203135000003385,
+        35.80619000000297,
+        4.614201999997022,
+        39.74968000000081,
+        4.15272399999958
+      ],
+      "idleBytes": 880,
+      "initialBytes": 3536409,
+      "firstDeltaMs": 170.51896000000124,
+      "liveInputMs": 43.91293600000063,
+      "streamMs": 1666.4949260000067,
+      "streamBytes": 33537,
+      "shutdownMs": 82.92331899999408,
+      "historyMarkerOccurrences": 2001,
+      "readyMemory": {
+        "sequence": 1,
+        "beforeGc": {
+          "rss": 367755264,
+          "heapTotal": 225898496,
+          "heapUsed": 161512384,
+          "external": 4799030,
+          "arrayBuffers": 343642
+        },
+        "afterGc": {
+          "rss": 367353856,
+          "heapTotal": 210046976,
+          "heapUsed": 83999168,
+          "external": 4798550,
+          "arrayBuffers": 343642
+        },
+        "resources": {
+          "userCPUTime": 6168112,
+          "systemCPUTime": 186538,
+          "maxRSS": 359136,
+          "sharedMemorySize": 0,
+          "unsharedDataSize": 0,
+          "unsharedStackSize": 0,
+          "minorPageFault": 102600,
+          "majorPageFault": 0,
+          "swappedOut": 0,
+          "fsRead": 0,
+          "fsWrite": 0,
+          "ipcSent": 0,
+          "ipcReceived": 0,
+          "signalsCount": 0,
+          "voluntaryContextSwitches": 5793,
+          "involuntaryContextSwitches": 539
+        },
+        "cpu": {
+          "user": 6168170,
+          "system": 186538
+        }
+      },
+      "settledMemory": {
+        "sequence": 2,
+        "beforeGc": {
+          "rss": 371548160,
+          "heapTotal": 214441984,
+          "heapUsed": 130142288,
+          "external": 5425461,
+          "arrayBuffers": 970553
+        },
+        "afterGc": {
+          "rss": 371548160,
+          "heapTotal": 170074112,
+          "heapUsed": 85920872,
+          "external": 5425461,
+          "arrayBuffers": 343658
+        },
+        "resources": {
+          "userCPUTime": 7174542,
+          "systemCPUTime": 207642,
+          "maxRSS": 362840,
+          "sharedMemorySize": 0,
+          "unsharedDataSize": 0,
+          "unsharedStackSize": 0,
+          "minorPageFault": 110304,
+          "majorPageFault": 0,
+          "swappedOut": 0,
+          "fsRead": 0,
+          "fsWrite": 0,
+          "ipcSent": 0,
+          "ipcReceived": 0,
+          "signalsCount": 0,
+          "voluntaryContextSwitches": 7047,
+          "involuntaryContextSwitches": 732
+        },
+        "cpu": {
+          "user": 7174607,
+          "system": 207642
+        }
+      }
+    },
+    {
+      "workload": "tools",
+      "iteration": 2,
+      "dimensions": {
+        "turns": 500,
+        "events": 7001,
+        "deltaCount": 20500,
+        "compactRecordCount": 7500,
+        "toolCount": 2000,
+        "assistantMarkerCount": 500,
+        "historyMarkerCount": 501,
+        "userTextBytes": 110892,
+        "assistantTextBytes": 335500,
+        "reasoningBytes": 156000,
+        "toolOutputBytes": 15872011,
+        "maxAssistantTextBytes": 671,
+        "fileBytes": 20444187,
+        "sessionId": "tui-perf-session"
+      },
+      "initialInputMs": 188.2815200000041,
+      "firstInputMs": 1573.1027100000065,
+      "historyMarkersAtFirstInput": 30,
+      "readyMs": 5282.121864000001,
+      "idleInputMs": [
+        6.332270999999309,
+        38.16980200000398,
+        5.894462999996904,
+        37.94091599999956,
+        6.354680999997072
+      ],
+      "idleBytes": 880,
+      "initialBytes": 1628115,
+      "firstDeltaMs": 171.703797999995,
+      "liveInputMs": 42.080958999998984,
+      "streamMs": 1707.834544999998,
+      "streamBytes": 32006,
+      "shutdownMs": 57.50242199999775,
+      "historyMarkerOccurrences": 501,
+      "readyMemory": {
+        "sequence": 1,
+        "beforeGc": {
+          "rss": 330727424,
+          "heapTotal": 219041792,
+          "heapUsed": 160339152,
+          "external": 4809287,
+          "arrayBuffers": 343642
+        },
+        "afterGc": {
+          "rss": 330727424,
+          "heapTotal": 211177472,
+          "heapUsed": 85039504,
+          "external": 4799136,
+          "arrayBuffers": 343642
+        },
+        "resources": {
+          "userCPUTime": 6611467,
+          "systemCPUTime": 204445,
+          "maxRSS": 324360,
+          "sharedMemorySize": 0,
+          "unsharedDataSize": 0,
+          "unsharedStackSize": 0,
+          "minorPageFault": 91774,
+          "majorPageFault": 0,
+          "swappedOut": 0,
+          "fsRead": 0,
+          "fsWrite": 0,
+          "ipcSent": 0,
+          "ipcReceived": 0,
+          "signalsCount": 0,
+          "voluntaryContextSwitches": 4389,
+          "involuntaryContextSwitches": 801
+        },
+        "cpu": {
+          "user": 6611556,
+          "system": 204445
+        }
+      },
+      "settledMemory": {
+        "sequence": 2,
+        "beforeGc": {
+          "rss": 333086720,
+          "heapTotal": 214433792,
+          "heapUsed": 112929720,
+          "external": 5241875,
+          "arrayBuffers": 786381
+        },
+        "afterGc": {
+          "rss": 333086720,
+          "heapTotal": 173563904,
+          "heapUsed": 87027792,
+          "external": 5241875,
+          "arrayBuffers": 343658
+        },
+        "resources": {
+          "userCPUTime": 7575906,
+          "systemCPUTime": 232213,
+          "maxRSS": 325280,
+          "sharedMemorySize": 0,
+          "unsharedDataSize": 0,
+          "unsharedStackSize": 0,
+          "minorPageFault": 97912,
+          "majorPageFault": 0,
+          "swappedOut": 0,
+          "fsRead": 0,
+          "fsWrite": 0,
+          "ipcSent": 0,
+          "ipcReceived": 0,
+          "signalsCount": 0,
+          "voluntaryContextSwitches": 5694,
+          "involuntaryContextSwitches": 1161
+        },
+        "cpu": {
+          "user": 7575956,
+          "system": 232214
+        }
+      }
+    },
+    {
+      "workload": "large-output",
+      "iteration": 2,
+      "dimensions": {
+        "turns": 12,
+        "events": 79,
+        "deltaCount": 32928,
+        "compactRecordCount": 90,
+        "toolCount": 3,
+        "assistantMarkerCount": 192,
+        "historyMarkerCount": 193,
+        "userTextBytes": 2643,
+        "assistantTextBytes": 786432,
+        "reasoningBytes": 3744,
+        "toolOutputBytes": 23819,
+        "maxAssistantTextBytes": 65536,
+        "fileBytes": 2584005,
+        "sessionId": "tui-perf-session"
+      },
+      "initialInputMs": 52.56634099999792,
+      "firstInputMs": 614.3733619999985,
+      "historyMarkersAtFirstInput": 52,
+      "readyMs": 786.4704090000014,
+      "idleInputMs": [
+        35.63528299999598,
+        2.0580819999959203,
+        37.17305599999963,
+        2.062541000006604,
+        37.129987000000256
+      ],
+      "idleBytes": 880,
+      "initialBytes": 848726,
+      "firstDeltaMs": 78.64713699999993,
+      "liveInputMs": 37.21949699999823,
+      "streamMs": 1306.8214640000006,
+      "streamBytes": 32643,
+      "shutdownMs": 49.94129899999825,
+      "historyMarkerOccurrences": 193,
+      "readyMemory": {
+        "sequence": 1,
+        "beforeGc": {
+          "rss": 243183616,
+          "heapTotal": 139870208,
+          "heapUsed": 73096312,
+          "external": 4952855,
+          "arrayBuffers": 487210
+        },
+        "afterGc": {
+          "rss": 242343936,
+          "heapTotal": 138010624,
+          "heapUsed": 62391696,
+          "external": 4952895,
+          "arrayBuffers": 343642
+        },
+        "resources": {
+          "userCPUTime": 1128088,
+          "systemCPUTime": 70456,
+          "maxRSS": 237484,
+          "sharedMemorySize": 0,
+          "unsharedDataSize": 0,
+          "unsharedStackSize": 0,
+          "minorPageFault": 57454,
+          "majorPageFault": 0,
+          "swappedOut": 0,
+          "fsRead": 0,
+          "fsWrite": 0,
+          "ipcSent": 0,
+          "ipcReceived": 0,
+          "signalsCount": 0,
+          "voluntaryContextSwitches": 2913,
+          "involuntaryContextSwitches": 38
+        },
+        "cpu": {
+          "user": 1128121,
+          "system": 70458
+        }
+      },
+      "settledMemory": {
+        "sequence": 2,
+        "beforeGc": {
+          "rss": 250732544,
+          "heapTotal": 146399232,
+          "heapUsed": 90768904,
+          "external": 4809503,
+          "arrayBuffers": 343818
+        },
+        "afterGc": {
+          "rss": 250449920,
+          "heapTotal": 137486336,
+          "heapUsed": 64513248,
+          "external": 4809503,
+          "arrayBuffers": 343658
+        },
+        "resources": {
+          "userCPUTime": 1661463,
+          "systemCPUTime": 86178,
+          "maxRSS": 244856,
+          "sharedMemorySize": 0,
+          "unsharedDataSize": 0,
+          "unsharedStackSize": 0,
+          "minorPageFault": 60273,
+          "majorPageFault": 0,
+          "swappedOut": 0,
+          "fsRead": 0,
+          "fsWrite": 0,
+          "ipcSent": 0,
+          "ipcReceived": 0,
+          "signalsCount": 0,
+          "voluntaryContextSwitches": 4264,
+          "involuntaryContextSwitches": 61
+        },
+        "cpu": {
+          "user": 1661497,
+          "system": 86179
+        }
+      }
+    }
+  ]
+}

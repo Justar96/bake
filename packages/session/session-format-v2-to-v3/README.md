@@ -3,7 +3,7 @@ description: "The complete V2-to-V3 Session conversion: system heads, audited re
 kind: "package-library"
 ---
 
-# @deepseek-ai/dsh-session-format-v2-to-v3
+# bake-session-format-v2-to-v3
 
 ## Summary
 

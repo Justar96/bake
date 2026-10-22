@@ -1,13 +1,13 @@
 ---
-description: "App-owned command lines for dsh app bins: your app parses its own flags, --help, and exit behavior from the launcher's remaining arguments."
+description: "App-owned command lines for Bake app bins: your app parses its own flags, --help, and exit behavior from the launcher's remaining arguments."
 kind: "package-library"
 ---
 
-# @deepseek-ai/dsh-cmdline
+# bake-cmdline
 
 ## Summary
 
-`dsh-cmdline` lets an app parse its own flags, `--help`, and errors from the arguments left unchanged after launcher flags. Parsed values can override configuration defaults without rewriting configuration. The app can also request process exit through the launcher's shutdown path. Use this package for app bins with their own command-line interface. It adds no prompt, schema, or model-visible content.
+`bake-cmdline` lets an app parse its own flags, `--help`, and errors from the arguments left unchanged after launcher flags. Parsed values can override configuration defaults without rewriting configuration. The app can also request process exit through the launcher's shutdown path. Use this package for app bins with their own command-line interface. It adds no prompt, schema, or model-visible content.
 
 ## Table of Contents
 
@@ -29,7 +29,7 @@ Your app reads the invocation's inner arguments at startup, and any number of it
 
 The launcher makes three things available to your app:
 
-- `ctx.cmdlineArgs` — the inner arguments of your invocation. Reading them returns an immutable snapshot and never consumes or changes them: `dsh --profile tui --resume abc` gives your app `['--resume', 'abc']`.
+- `ctx.cmdlineArgs` — the inner arguments of your invocation. Reading them returns an immutable snapshot and never consumes or changes them: `bake --profile tui --resume abc` gives your app `['--resume', 'abc']`.
 - `ctx.appExit` — a way to ask the process to exit once the tree has shut down, wired to the launcher's shutdown controller.
 - `ctx.appReady` — the successful-startup signal, committed only after the Loader tree and launcher-owned setup succeed.
 
@@ -52,14 +52,14 @@ Rows configured from the parsed values inject the published service and read it 
 
 ```yaml
 - id: webserver
-  name: '@deepseek-ai/dsh-host-webserver'
+  name: 'bake-host-webserver'
   inject: [webStartup]
   config:
     host: !!js ctx.webStartup.host ?? '127.0.0.1'
     port: !!js ctx.webStartup.port ?? 3080
 ```
 
-The outcomes: `dsh --profile web --port 8080` starts the server on port 8080 even when the config says 3080, because the flag wins. `--help` prints your app's help and exits 0 without starting anything; a rejected value (for example a non-numeric port) prints your error and exits nonzero, and no row that depends on the parsed values ever starts.
+The outcomes: `bake --profile web --port 8080` starts the server on port 8080 even when the config says 3080, because the flag wins. `--help` prints your app's help and exits 0 without starting anything; a rejected value (for example a non-numeric port) prints your error and exits nonzero, and no row that depends on the parsed values ever starts.
 
 ### How flags beat config values
 
@@ -108,8 +108,8 @@ The parse path is one small family with two owners: `provideCmdline` freezes the
 
 Read these pages when the package-level contract is not enough. They move from the handoff mechanism to the apps that consume it.
 
-- [dsh-app-boot](../app-boot/README.md) — the boot sequence that provides these launcher values.
-- [dsh-headless bundle](../../bundle/headless/README.md) — the one-shot runner that reads its task from the command line.
+- [bake-app-boot](../app-boot/README.md) — the boot sequence that provides these launcher values.
+- [bake-headless bundle](../../bundle/headless/README.md) — the one-shot runner that reads its task from the command line.
 
 -----
 

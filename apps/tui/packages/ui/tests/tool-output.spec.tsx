@@ -2,7 +2,7 @@
 import { execa } from 'execa'
 import stringWidth from 'string-width'
 import { expect, it, onTestFinished } from 'vitest'
-import type { ToolResultView } from '@deepseek-ai/dsh-tools'
+import type { ToolResultView } from 'bake-tools'
 
 type Scene = { tool: string, title: string, view: ToolResultView, failed?: boolean }
 

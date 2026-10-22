@@ -1,16 +1,16 @@
 /**
- * dsh-jobs' owned branded id, carried across the registry, the model-facing
+ * bake-jobs' owned branded id, carried across the registry, the model-facing
  * control surface, and the client wire.
  *
  * It lives in its own leaf because the package root and `./types` both reach
  * `dsh-agent` through the owner and listener signatures, which a Client program
  * cannot resolve even as a type. A browser-safe consumer imports the id here;
- * `Branded<B>` itself comes from the zero-dependency `@deepseek-ai/dsh-brand`.
+ * `Branded<B>` itself comes from the zero-dependency `bake-brand`.
  *
- * @module @deepseek-ai/dsh-jobs/brand
+ * @module bake-jobs/brand
  */
 
-import type { Branded } from '@deepseek-ai/dsh-brand'
+import type { Branded } from 'bake-brand'
 
 /**
  * Identifies a background job. The registry generates `<kind>-N`; predictable

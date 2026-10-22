@@ -1,5 +1,5 @@
 {
-  "name": "@deepseek-ai/dsh-mcp-resources",
+  "name": "bake-mcp-resources",
   "description": "Scoped MCP resource discovery and reading through shared model tools",
   "version": "0.1.6-alpha.2",
   "publishConfig": {
@@ -28,25 +28,25 @@
   "license": "MIT",
   "peerDependencies": {
     "@deepseek-ai/cordis": "workspace:^",
-    "@deepseek-ai/dsh-llm": "workspace:^",
-    "@deepseek-ai/dsh-scope": "workspace:^",
-    "@deepseek-ai/dsh-system-prompt": "workspace:^",
-    "@deepseek-ai/dsh-tools": "workspace:^"
+    "bake-llm": "workspace:^",
+    "bake-scope": "workspace:^",
+    "bake-system-prompt": "workspace:^",
+    "bake-tools": "workspace:^"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "workspace:^",
-    "@deepseek-ai/dsh-llm": "workspace:^",
-    "@deepseek-ai/dsh-ptc-runtime": "workspace:^",
-    "@deepseek-ai/dsh-scope": "workspace:^",
-    "@deepseek-ai/dsh-tools": "workspace:^",
-    "@deepseek-ai/dsh-system-prompt": "workspace:^",
-    "@deepseek-ai/dsh-agent": "workspace:^"
+    "bake-llm": "workspace:^",
+    "bake-ptc-runtime": "workspace:^",
+    "bake-scope": "workspace:^",
+    "bake-tools": "workspace:^",
+    "bake-system-prompt": "workspace:^",
+    "bake-agent": "workspace:^"
   },
   "dependencies": {
-    "@deepseek-ai/dsh-util-values": "workspace:^"
+    "bake-util-values": "workspace:^"
   },
   "peerDependenciesMeta": {
-    "@deepseek-ai/dsh-system-prompt": {
+    "bake-system-prompt": {
       "optional": true
     }
   }

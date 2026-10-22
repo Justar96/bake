@@ -8,15 +8,15 @@
  * and the bytes captured before the command. A file that was clean takes its
  * previous content from the index blob. Every phase has a time budget, and
  * running out of time degrades the report instead of the command.
- * @module @deepseek-ai/dsh-shell-change-report
+ * @module bake-shell-change-report
  */
 
 import { createHash } from 'node:crypto'
-import { copyFile, lstat, mkdtemp, open, realpath, rm } from 'node:fs/promises'
+import { copyFile, lstat, mkdtemp, open, realpath, rm, stat, utimes } from 'node:fs/promises'
 import type { BigIntStats } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, relative, resolve } from 'node:path'
-import { deadline, timeoutOf } from '@deepseek-ai/dsh-timeout'
+import { deadline, timeoutOf } from 'bake-timeout'
 import { createGitRead, parseStatus } from './git.ts'
 import type { ConfineArgv, GitRead, StatusEntry, StatusSnapshot } from './git.ts'
 import { boundedHunks } from './hunks.ts'
@@ -222,9 +222,17 @@ export async function beginChangeReport(options: ChangeReportOptions): Promise<C
     temp = await mkdtemp(join(tmpdir(), 'bake-shell-change-'))
     const index = join(temp, 'index')
     // A repository with no index yet reads as an empty one.
-    await copyFile(resolve(workdir, indexPath), index).catch((error: unknown) => {
+    try {
+      const source = resolve(workdir, indexPath)
+      const stats = await stat(source, { bigint: true })
+      await copyFile(source, index)
+      // Git uses the index mtime to detect racily clean entries. A newer copy
+      // hides same-size edits; rounding down keeps that check conservative.
+      const modified = Number(stats.mtimeNs / 1_000_000_000n)
+      await utimes(index, modified, modified)
+    } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-    })
+    }
     const text = await read(STATUS_ARGS, { cwd: top, signal: before.signal, maxBytes: limits.statusMaxBytes, indexFile: index })
     if (text === undefined) {
       noteSlow(workdir, before.signal)

@@ -1,7 +1,7 @@
 /** Command discovery through the harness registry. */
 import { afterEach, describe, expect, it } from 'vitest'
-import { formatRow, transcriptRows } from '@dsh-tui/ui'
-import { dictionaries } from '@dsh-tui/ui/copy.ts'
+import { formatRow, transcriptRows } from 'bake-tui-ui'
+import { dictionaries } from 'bake-tui-ui/copy.ts'
 import { openSession } from '../src/session.ts'
 import { SessionController } from '../src/controller.ts'
 import { harness } from './harness.ts'

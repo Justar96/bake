@@ -1,6 +1,6 @@
 /** Terminal install progress: a log of finished steps under one live row, owning its clock and leaving diagnostics readable. */
 import { afterEach, expect, it, vi } from 'vitest'
-import { PROGRESS_FRAME_MS } from '@dsh-tui/ui/install-progress.ts'
+import { PROGRESS_FRAME_MS } from 'bake-tui-ui/install-progress.ts'
 import { startProgress } from '../src/progress.ts'
 
 afterEach(() => vi.useRealTimers())

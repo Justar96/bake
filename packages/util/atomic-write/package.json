@@ -1,5 +1,5 @@
 {
-  "name": "@deepseek-ai/dsh-atomic-write",
+  "name": "bake-atomic-write",
   "description": "Atomic file replacement (exclusive-create random-suffix temp + rename carrying the caller-stated permissions) and a crash-safe cross-process writer lock",
   "version": "0.1.6-alpha.2",
   "publishConfig": {

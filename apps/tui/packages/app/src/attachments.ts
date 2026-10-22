@@ -1,10 +1,10 @@
 /** Explicit file reads and prompt admission through the Agent's Harness services. */
-import type { Agent, ModelSelectionRef } from '@deepseek-ai/dsh-agent'
-import type { FileBlock, ImageBlock } from '@deepseek-ai/dsh-llm'
-import type {} from '@deepseek-ai/dsh-fs'
-import type { ImageMediaType, SaveImageAttachment } from '@deepseek-ai/dsh-attachment'
-import type { AttachmentSummary } from '@dsh-tui/ui/rows.ts'
-import type { TuiCopy } from '@dsh-tui/ui/copy.ts'
+import type { Agent, ModelSelectionRef } from 'bake-agent'
+import type { FileBlock, ImageBlock } from 'bake-llm'
+import type {} from 'bake-fs'
+import type { ImageMediaType, SaveImageAttachment } from 'bake-attachment'
+import type { AttachmentSummary } from 'bake-tui-ui/rows.ts'
+import type { TuiCopy } from 'bake-tui-ui/copy.ts'
 
 /** Validated limits on the TUI's in-memory attachment draft. */
 export interface AttachmentOptions {

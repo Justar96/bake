@@ -2,10 +2,10 @@
  * Surface layer on top of the session event log: an ordered view of events
  * that produce LLM messages. The append-only log remains the source of truth.
  *
- * @module @deepseek-ai/dsh-session/surface
+ * @module bake-session/surface
  */
 
-import type { Message } from '@deepseek-ai/dsh-llm'
+import type { Message } from 'bake-llm'
 import { validateToolUpdateData } from './tool-history.ts'
 import { SessionLogOffset, SessionSeq } from './types.ts'
 import { KNOWN_SESSION_EVENT_TYPES, MESSAGE_PROJECTION_EVENT_TYPES } from './known-event-types.ts'
@@ -16,7 +16,7 @@ import type {
   SurfaceEvent,
   SurfaceOp,
 } from './types.ts'
-import { isRecord } from '@deepseek-ai/dsh-util-values'
+import { isRecord } from 'bake-util-values'
 
 /** Readonly history immediately before a message-projection event. */
 export interface SessionMessageProjectionContext {

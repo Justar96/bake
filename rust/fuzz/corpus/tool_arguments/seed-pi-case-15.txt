@@ -1,0 +1,2 @@
+{"type":"object","properties":{"v":{"$ref":"#/$defs/n"}},"$defs":{"n":{"type":"object","properties":{"x":{"type":"integer"}},"required":["x"]}}}
+{"v":{"x":"q"}}

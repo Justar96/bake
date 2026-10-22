@@ -1,6 +1,6 @@
 /** Pure completion presentation using the Harness's path grammar. */
-import { activeAtToken, formatFileMention } from '@deepseek-ai/dsh-file-reference/grammar'
-import type { FileReferenceCandidate } from '@deepseek-ai/dsh-file-reference/types'
+import { activeAtToken, formatFileMention } from 'bake-file-reference/grammar'
+import type { FileReferenceCandidate } from 'bake-file-reference/types'
 
 /** One Harness-owned command or user-invocable skill. */
 export interface Completion {

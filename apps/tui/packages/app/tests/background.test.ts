@@ -1,6 +1,6 @@
 /** The background row's entries, read from the job registry's snapshots. */
 import { describe, expect, test } from 'bun:test'
-import type { JobSnapshot } from '@deepseek-ai/dsh-jobs'
+import type { JobSnapshot } from 'bake-jobs'
 import { backgroundEntries } from '../src/background.ts'
 
 const job = (id: string, kind: string, status: JobSnapshot['status'], startedAt: number): JobSnapshot =>

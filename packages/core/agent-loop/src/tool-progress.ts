@@ -5,7 +5,7 @@
  * @module dsh-agent-loop/tool-progress
  */
 
-import { TOOL_PROGRESS_INTERVAL_MS, TOOL_PROGRESS_MAX_CHARS, type ToolProgress } from '@deepseek-ai/dsh-agent'
+import { TOOL_PROGRESS_INTERVAL_MS, TOOL_PROGRESS_MAX_CHARS, type ToolProgress } from 'bake-agent'
 
 /**
  * Keep the tail of a snapshot's output within {@link TOOL_PROGRESS_MAX_CHARS},

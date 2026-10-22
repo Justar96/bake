@@ -10,18 +10,18 @@
  * execution. No continuable path creates a Task or an intermediate
  * result-bearing wrapper.
  *
- * @module @deepseek-ai/dsh-subagent
+ * @module bake-subagent
  */
 
 import { randomUUID } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
-import type { Agent } from '@deepseek-ai/dsh-agent'
-import { brandString } from '@deepseek-ai/dsh-brand'
-import { ReasoningEffortId, contentHasImage, createUserMessage } from '@deepseek-ai/dsh-llm'
-import type { ContentBlock, MessageId, MessageSource } from '@deepseek-ai/dsh-llm'
-import type { SessionId } from '@deepseek-ai/dsh-session'
-import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
-import type { SessionObservation, SessionQueryEngine } from '@deepseek-ai/dsh-session-query'
+import type { Agent } from 'bake-agent'
+import { brandString } from 'bake-brand'
+import { ReasoningEffortId, contentHasImage, createUserMessage } from 'bake-llm'
+import type { ContentBlock, MessageId, MessageSource } from 'bake-llm'
+import type { SessionId } from 'bake-session'
+import type { SessionPersistence } from 'bake-session-persistence'
+import type { SessionObservation, SessionQueryEngine } from 'bake-session-query'
 import {
   childSessionMeta,
   captureDelegatedPolicyOverrides,

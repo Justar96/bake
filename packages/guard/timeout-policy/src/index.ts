@@ -8,12 +8,12 @@
  * home; decide at resolution time
  * ([regrouping Agent Note](../../../../.agents/notes/archived/architecture/2026-07-29-package-regrouping.md)).
  *
- * @module @deepseek-ai/dsh-tool-call-timeout-policy
+ * @module bake-tool-call-timeout-policy
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import { deadline, timeoutOf } from '@deepseek-ai/dsh-timeout'
-import type { ToolExecutionResult } from '@deepseek-ai/dsh-tools'
+import { deadline, timeoutOf } from 'bake-timeout'
+import type { ToolExecutionResult } from 'bake-tools'
 
 /**
  * The code owned by this plugin, used BOTH as the internal {@link deadline}

@@ -1,59 +1,63 @@
 # Bake
 
-Bake is a keyboard-driven coding agent for the terminal. It streams the model's answer as it arrives, runs shell and file tools inside a sandbox, and saves every session as an append-only log you can resume.
+Bake is a keyboard-driven coding agent for the terminal. It streams the model's answer as it arrives, runs shell and file tools inside a sandbox under a permission preset you choose, and saves every session so you can continue, resume, or fork it later. Bake 0.4 is a single native executable, `bake`, written in Rust.
 
-- **Slash commands** for models and reasoning effort, sign-in, sessions, goals, compaction, permissions, and settings, with argument completion.
-- **Long-running work**: goals that continue across rounds, subagents you can watch from the input row, and shell commands left running in the background.
-- **Sandboxed tools**: bash or PowerShell, file reads and edits, search, and web search and fetch, each gated by a permission preset.
-- **Sessions you keep**: resume by id or pick from a list; context is compacted when it fills up, at a threshold you can set.
-- **Skills and attachments**: invoke project or user skills as `/name`, and attach images and files to a prompt.
+> [!NOTE]
+> **Bake 0.4.0 runs on Linux**, x86_64 and arm64, with glibc 2.34 or newer (RHEL 9 and its rebuilds, Amazon Linux 2023, Ubuntu 22.04, Debian 12, and newer). **macOS and Windows support is coming in a later 0.4 release.** Until then the installer stops on those platforms before it downloads anything; on Windows, install Bake inside WSL.
+>
+> 0.4 is a new install, not an upgrade of Bake 0.3, the earlier TypeScript agent. A 0.3 install keeps working with its own files, but 0.3 receives no further fixes ([D10 and D13](docs/roadmap/rust-0.4/scope-00/support.md#decision-register)).
+
+- **Interactive sessions**, fullscreen or inline in your terminal's scrollback: steer a running turn, stop it with Esc, and pick models, thinking levels, sessions, and settings from slash commands.
+- **Sandboxed tools**: bash, file reads and edits, search, web search and fetch, and code mode, which runs a JavaScript program that calls the other tools, each gated by a permission preset and approvals.
+- **Sessions you keep**: continue the last one with `bake -c`, pick one with `bake -r`, fork, branch, and compact when the context fills.
+- **Headless runs**: `bake -p` prints one answer; `--mode json` streams every event and `--mode rpc` speaks a JSONL protocol.
+- **Extensions**: `AGENTS.md` context files, skills, prompt templates, MCP servers, command hooks, and Wasm plugins that can veto tool calls.
 
 ## Install
-
-Bake needs **Node.js 24 or newer** on `PATH`. Releases are published for macOS (arm64, x64), Linux (arm64, x64), and Windows (x64).
-
-**macOS and Linux**
 
 ```sh
 curl -fsSL https://bake.justar.dev/install.sh | sh
 ```
 
-**Windows (PowerShell)**
+The installer verifies the release manifest's Ed25519 signature and the archive's SHA-256, runs the new release's self-check, and only then makes it current. It needs `curl` or `wget`, `tar`, `sha256sum` or `shasum`, and an OpenSSL with Ed25519 (1.1.1 or newer); it needs no Node or Bun.
 
-```powershell
-irm https://bake.justar.dev/install.ps1 | iex
-```
+| Installs to | `bake` command |
+|---|---|
+| `~/.local/share/bake-native` | linked into `~/.local/bin` (add it to `PATH` if asked) |
 
-The installer checks the release manifest's Ed25519 signature and the archive's SHA-256 before it installs anything.
-
-| Platform | Installs to | `bake` command | Needs |
-|---|---|---|---|
-| macOS, Linux | `~/.local/share/bake` | linked into `~/.local/bin` (add it to `PATH` if asked) | `curl`, `tar`, `shasum` or `sha256sum` |
-| Windows | `%LOCALAPPDATA%\Bake` | `bin` added to the user `PATH` and the current session | `tar.exe` |
+If `bake` already runs Bake 0.3, the installer takes that command over and records how to restore it; 0.3's `dsh` command is left alone. A `bake` command that no Bake installer made is left in place unless you pass `--replace-command`.
 
 <details>
 <summary>Installer options</summary>
 
-| Variable | Effect |
-|---|---|
-| `BAKE_INSTALL_ROOT` | Install directory, instead of `~/.local/share/bake` or `%LOCALAPPDATA%\Bake` |
-| `BAKE_BIN_DIR` | Directory for the `bake` command, instead of `~/.local/bin` or `<install root>\bin` |
-| `BAKE_RELEASE_BASE_URL` | Release host; `https://github.com/Justar96/bake/releases/latest/download` installs from GitHub releases |
-| `BAKE_SKIP_PATH_UPDATE=1` | Windows: leave the user `PATH` unchanged |
+Pass options to a piped install after `sh -s --`, for example `curl -fsSL https://bake.justar.dev/install.sh | sh -s -- --replace-command`.
 
-The [release manifest](https://bake.justar.dev/latest.json) lists the current version and platforms.
+| Option or variable | Effect |
+|---|---|
+| `--replace-command`, `BAKE_REPLACE_COMMAND=1` | Replace a `bake` command this installer did not make, keeping a backup it can restore |
+| `--uninstall-links` | Restore the commands the installer replaced and remove the links it made |
+| `BAKE_NATIVE_ROOT` | Install directory, instead of `~/.local/share/bake-native` |
+| `BAKE_BIN_DIR` | Directory for the `bake` command, instead of `~/.local/bin` |
+| `BAKE_OPENSSL` | The `openssl` that verifies the release signature |
 
 </details>
 
 ## Get started
 
 ```sh
+cd your-project
 bake
 ```
 
-Bake has no default provider: sign in with `/login` (DeepSeek, CLIProxyAPI, OpenAI, Anthropic, GitHub Copilot, OpenRouter, Kimi, or xAI), and the first sign-in selects its model. An exported `DEEPSEEK_API_KEY` counts as signed in; choose its model with `/model`. Type `/` to browse commands, `/help` for the list, and `@` to reference a file. `/settings` changes the screen mode, the default model and permissions, compaction, and tool limits. `bake --help` shows the launch options, such as `--resume <id>`.
+Bake reaches models through your providers. Run `/login` in a session to connect a [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) account, or describe any OpenAI- or Anthropic-compatible provider in `~/.bake/models.json` with its key in `auth.json`; `bake docs models` shows both. If you used Bake 0.3, its CLIProxyAPI route, key, and default model are read from `~/.bake` without changing them. Then:
 
-Bake keeps sessions, credentials, and profiles in `~/.bake`. Set `DSH_HOME` to use a different directory.
+- Type a prompt and press Enter; `@` references a file and `/` lists the commands, such as `/model`, `/thinking`, `/resume`, `/compact`, and `/settings`.
+- `bake -p "explain this repository"` prints one answer and exits.
+- `bake --inline` keeps the session in your terminal's scrollback instead of the full screen.
+- `bake --permission workspace-write` or `danger-full-access` picks the permission preset; `bake docs permissions` explains them.
+- `bake docs` lists the built-in documentation, and `bake --help` the launch options.
+
+Bake keeps sessions, settings, and credentials in `~/.bake`. Set `BAKE_HOME` to use another directory; the earlier `DSH_HOME` name still works when `BAKE_HOME` is unset.
 
 ## Update
 
@@ -61,27 +65,29 @@ Bake keeps sessions, credentials, and profiles in `~/.bake`. Set `DSH_HOME` to u
 bake update
 ```
 
-`bake update` downloads the latest release, verifies it the same way the installer does, and switches only after the new version starts. The previous version stays on disk; older releases no `bake` has started for a week are removed. `bake update --check` only reports: it exits 0 when current, 10 when a newer release exists, and 1 on failure. The status line also shows when an update is available, checking hourly and again ten minutes after a failed check; run `/update` in the terminal to install it without leaving the session. The download service counts each install that checks as one active install that day: it sends a salted hash of the requesting address, which changes daily, to its activity counter at gissx.org, and the address itself never leaves the service. Set `BAKE_NO_UPDATE_CHECK=1` to turn the background check off, and with it the daily count; `bake update` and `/update` still contact the service when you run them.
-
-Installs of 0.1.0 have no `bake update`; run the installer once more to move to the updatable layout.
+`bake update` installs the newest signed release and switches to it only after its self-check passes; anything that fails before then leaves the install as it was. `bake update --check` only reports, exiting 10 when a newer release is published, and `bake update --rollback` makes the release the last update replaced current again. `bake docs update` describes each step.
 
 ## Uninstall
 
-Delete the install directory and the `bake` link: `~/.local/share/bake` and `~/.local/bin/bake`, or `%LOCALAPPDATA%\Bake` on Windows, where you also remove its `bin` entry from the user `PATH`. Delete `~/.bake` too to remove sessions and stored credentials.
+```sh
+curl -fsSL https://bake.justar.dev/install.sh | sh -s -- --uninstall-links
+rm -rf ~/.local/share/bake-native
+```
+
+The first command restores any `bake` command the installer replaced and removes the links it made. Delete `~/.bake` too to remove sessions and stored credentials; a Bake 0.3 install shares that directory.
 
 ## Documentation
 
+- `bake docs <topic>`: the command line, the Bake home, models, settings, permissions, sessions, context files, skills, MCP, hooks, plugins, code mode, RPC, and updates.
 - [Safety](SAFETY.md): what the sandbox does and does not protect.
-- [Terminal application](apps/tui/packages/app/README.md): commands, keys, and session navigation.
-- [TUI design](apps/tui/DESIGN.md), including its [known limits](apps/tui/DESIGN.md#10-limits).
-- [Development guide](docs/development.md): building from source, test loops, and repository layout.
+- [Rust workspace](rust/README.md): building from source (`bun run dev:rust` from a checkout), the crates, and their checks.
+- [Distribution](distribution/README.md): the native release route, the installers, and how a release is published.
+- [0.4 roadmap](docs/roadmap/rust-0.4/README.md): the Rust port's scopes, decisions, and evidence, and what the macOS and Windows releases still need.
 - [Contributing](CONTRIBUTING.md) and the [changelog](CHANGELOG.md).
 
 ## Acknowledgements
 
-Bake is a fork of [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness), DeepSeek's MIT-licensed agent harness. Its agent loop, session log, sandbox, and Cordis plugin runtime are still the foundation Bake runs on. Since the fork, Bake has built its own terminal interface and distribution, dropped upstream's web client, desktop app, and SDKs, and reworked much of the runtime; upstream fixes are reviewed and ported selectively, never merged automatically. Shared runtime packages keep their original `@deepseek-ai/*` names so those fixes stay easy to port.
-
-Bake reaches every model through [pi](https://github.com/earendil-works/pi), also MIT-licensed: `pi-ai` connects each provider, `pi-codemode` runs code mode's scripts, and `pi-mcp` connects MCP servers.
+Bake's native agent ports [pi](https://github.com/earendil-works/pi), which is MIT-licensed: its agent loop, session format, tools, and coding agent are the foundation `bake` is built on, with Bake's own sandbox, permissions, terminal interface, and distribution. Bake began as a fork of [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness), DeepSeek's MIT-licensed agent harness, which the 0.3 TypeScript agent ran on.
 
 Thank you to the authors of both projects.
 

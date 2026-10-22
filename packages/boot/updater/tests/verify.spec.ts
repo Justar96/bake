@@ -19,7 +19,7 @@ function recording(report: string, then: string): string {
   return [
     'import { writeFileSync } from \'node:fs\'',
     'import { tmpdir } from \'node:os\'',
-    `writeFileSync(${JSON.stringify(report)}, JSON.stringify({ argv: process.argv.slice(2), execArgv: process.execArgv, home: process.env.DSH_HOME, tmp: tmpdir() }))`,
+    `writeFileSync(${JSON.stringify(report)}, JSON.stringify({ argv: process.argv.slice(2), execArgv: process.execArgv, home: process.env.BAKE_HOME, legacyHome: process.env.DSH_HOME, tmp: tmpdir() }))`,
     then,
     '',
   ].join('\n')
@@ -34,7 +34,9 @@ describe.skipIf(process.platform === 'win32')('launchProblem', () => {
     const report = join(root, 'report.json')
     const release = releaseTree(join(root, 'release'), recording(report, 'console.log(\'Bake 0.4.0 self-check passed\')'))
     await expect(check(release, '0.4.0')).resolves.toBeUndefined()
-    const seen = JSON.parse(readFileSync(report, 'utf8')) as { argv: string[]; execArgv: string[]; home: string; tmp: string }
+    const seen = JSON.parse(readFileSync(report, 'utf8')) as { argv: string[]; execArgv: string[]; home: string; legacyHome: string; tmp: string }
+    // A release from before BAKE_HOME reads DSH_HOME, so both name the scratch home.
+    expect(seen.legacyHome).toBe(seen.home)
     expect(seen.argv).toEqual(['--self-check'])
     // The launcher runs directly, without restarting itself for these flags.
     expect(seen.execArgv).toEqual(['--report-exclude-env', '--report-exclude-network', `--diagnostic-dir=${join(seen.home, 'diagnostics')}`])

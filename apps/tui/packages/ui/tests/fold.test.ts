@@ -4,7 +4,7 @@ import { describe, expect, it } from 'bun:test'
 import { Actions, foldEvent, SETTLES } from '../src/actions.ts'
 import { PENDING_ARGUMENTS } from '../src/present.ts'
 import type { Row, ToolCallRow } from '../src/rows.ts'
-import type { SessionEvent } from '@deepseek-ai/dsh-session'
+import type { SessionEvent } from 'bake-session'
 
 const call = (callId: string): Row => ({ kind: 'tool-call', callId, tool: 'bash', input: callId })
 const result = (callId: string, ok = true): Row => ({ kind: 'tool-result', callId, ok, text: `${callId} out` })

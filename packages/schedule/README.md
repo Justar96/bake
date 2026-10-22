@@ -30,7 +30,7 @@ The schedule group lets an agent create, list, and cancel reminders for the curr
 ## Related documentation
 
 - [Session-local Schedule subsystem](../../docs/subsystems/schedule.md) — durable record, transition, view, and delivery contracts.
-- [Generated tool catalog](../../docs/tool-catalog.md#deepseek-aidsh-schedule) — the `schedule_create`/`schedule_list`/`schedule_delete` schemas the model receives.
+- [Generated tool catalog](../../docs/tool-catalog.md#bake-schedule) — the `schedule_create`/`schedule_list`/`schedule_delete` schemas the model receives.
 - [Schedule user guide](../../docs/user/guide/schedule.md) — the official configuration path for mounting the package.
 
 -----

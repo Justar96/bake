@@ -6,9 +6,9 @@ import LlmRuntime, {
   createUserMessage,
   ReasoningEffortId,
   ToolCallId,
-} from '@deepseek-ai/dsh-llm'
-import type { Message, ToolSchema } from '@deepseek-ai/dsh-llm'
-import * as LlmPiAi from '@deepseek-ai/dsh-llm-pi-ai'
+} from 'bake-llm'
+import type { Message, ToolSchema } from 'bake-llm'
+import * as LlmPiAi from 'bake-llm-pi-ai'
 import { assemble, type AssembledResult } from './assemble.ts'
 import { deepseekProfile } from './deepseek-profile.ts'
 

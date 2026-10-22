@@ -1,0 +1,15 @@
+{"type":"session","version":3,"id":"retry-attempt","createdAt":1791378812486,"isSeeded":false,"delegationDepth":0}
+{"type":"agent/inbox/spliced","seq":0,"time":1791378812488,"data":{"target":"next-turn","start":0,"inserted":[{"content":[{"type":"text","text":"go"}],"source":{"kind":"user"},"role":"user","id":"ecb91dc1-6e1c-4647-b940-aa71a89f83dd"}]}}
+{"type":"turn/start","seq":1,"time":1791378812489,"data":{"turn":1}}
+{"type":"agent/inbox/spliced","seq":2,"time":1791378812489,"data":{"target":"next-turn","start":0,"removedCount":1,"inserted":[]}}
+{"type":"step/start","seq":3,"time":1791378812490,"data":{"turn":1,"step":1}}
+{"type":"system/message","seq":4,"time":1791378812491,"data":{"turn":1,"step":1,"message":{"role":"system","content":[{"type":"text","text":"stable base"}],"source":{"kind":"plugin","plugin":"@deepseek-ai/dsh-system-prompt"},"id":"dfbddb98-21cd-4ebc-bf81-950e374e1e5b"}},"surfaceOp":"append"}
+{"type":"user/message","seq":5,"time":1791378812491,"data":{"content":[{"type":"text","text":"go"}],"source":{"kind":"user"},"role":"user","id":"ecb91dc1-6e1c-4647-b940-aa71a89f83dd"},"surfaceOp":"append"}
+{"type":"request/header","seq":6,"time":1791378812491,"data":{"header":{"config":{"provider":"mock","model":"mock"},"tools":[{"name":"echo","description":"echo back","parameters":{"type":"object","properties":{"text":{"type":"string"}}}}]},"reason":"initial"}}
+{"type":"request/context","seq":7,"time":1791378812491,"data":{"provider":"mock","model":"mock"}}
+{"type":"assistant/attempt","seq":8,"time":1791378812492,"data":{"turn":1,"step":1,"stream":[{"type":"chunk","time":1791378812492,"chunk":{"type":"finish","reason":{"kind":"error","failure":{"message":"retry","code":"SERVER"}}}}]}}
+{"type":"request/header","seq":9,"time":1791378812492,"data":{"header":{"config":{"provider":"mock","model":"mock-b"},"tools":[{"name":"echo","description":"echo back","parameters":{"type":"object","properties":{"text":{"type":"string"}}}}]},"reason":"change"}}
+{"type":"request/context","seq":10,"time":1791378812492,"data":{"provider":"mock","model":"mock-b"}}
+{"type":"assistant/message","seq":11,"time":1791378812493,"data":{"turn":1,"step":1,"message":{"role":"assistant","content":[{"type":"text","text":"done"}],"source":{"kind":"model","provider":"mock","model":"mock-b"},"id":"3e299125-66f4-4304-8251-2ddf1ea571fa"},"usage":{"inputTokens":10,"outputTokens":4},"stream":[{"type":"chunk","time":1791378812493,"chunk":{"type":"block-start","index":0,"blockType":"text"}},{"type":"text-chunks","time0":1791378812493,"index":0,"dt":[0,0,0],"texts":["d","o","n","e"]},{"type":"chunk","time":1791378812493,"chunk":{"type":"block-end","index":0,"block":{"type":"text","text":"done"}}},{"type":"chunk","time":1791378812493,"chunk":{"type":"usage","usage":{"inputTokens":10,"outputTokens":4}}},{"type":"chunk","time":1791378812493,"chunk":{"type":"finish","reason":{"kind":"stop"}}}]},"surfaceOp":"append"}
+{"type":"step/end","seq":12,"time":1791378812493,"data":{"turn":1,"step":1}}
+{"type":"turn/end","seq":13,"time":1791378812493,"data":{"turn":1,"reason":{"kind":"completed"}}}

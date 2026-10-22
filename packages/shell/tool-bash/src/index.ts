@@ -5,26 +5,26 @@
  *
  * TODO(permissions): deployment policy belongs in `tools/pre-execute` and
  * sandboxing executors; see docs/architecture.md § Where new behavior goes.
- * @module @deepseek-ai/dsh-tool-bash
+ * @module bake-tool-bash
  */
 
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { isAbsolute, sep } from 'node:path'
-import { defineTool, TOOL_ABORTED } from '@deepseek-ai/dsh-tools'
-import type { GenericCallView, TerminalCallView, ToolExecution, ToolResult, ToolResultView } from '@deepseek-ai/dsh-tools'
-import { HarnessError } from '@deepseek-ai/dsh-llm'
-import type { Agent } from '@deepseek-ai/dsh-agent'
-import type {} from '@deepseek-ai/dsh-jobs'
-import type {} from '@deepseek-ai/dsh-user-approval'
-import type {} from '@deepseek-ai/dsh-shell-env'
-import type { SandboxExecutionPolicy, SandboxMode } from '@deepseek-ai/dsh-sandbox'
-import { ESCALATION_TARGETS, approveEscalation, validateEscalationArgs, isNoOpEscalation } from '@deepseek-ai/dsh-sandbox'
-import type { SandboxPolicyService } from '@deepseek-ai/dsh-sandbox-policy'
-import { DSH_ENV_PREFIX } from '@deepseek-ai/dsh-shell'
-import type { ShellRunResult } from '@deepseek-ai/dsh-shell'
+import { defineTool, TOOL_ABORTED } from 'bake-tools'
+import type { GenericCallView, TerminalCallView, ToolExecution, ToolResult, ToolResultView } from 'bake-tools'
+import { HarnessError } from 'bake-llm'
+import type { Agent } from 'bake-agent'
+import type {} from 'bake-jobs'
+import type {} from 'bake-user-approval'
+import type {} from 'bake-shell-env'
+import type { SandboxExecutionPolicy, SandboxMode } from 'bake-sandbox'
+import { ESCALATION_TARGETS, approveEscalation, validateEscalationArgs, isNoOpEscalation } from 'bake-sandbox'
+import type { SandboxPolicyService } from 'bake-sandbox-policy'
+import { DSH_ENV_PREFIX } from 'bake-shell'
+import type { ShellRunResult } from 'bake-shell'
 import { processJob } from './background.ts'
-import { openChangeReport, shellChangesOf, terminalChanges, withRunningJobs } from '@deepseek-ai/dsh-shell-change-report'
+import { openChangeReport, shellChangesOf, terminalChanges, withRunningJobs } from 'bake-shell-change-report'
 import { parseExitStatus, renderProcessRead, renderResult } from './render.ts'
 
 export const name = 'tool-bash'

@@ -3,10 +3,10 @@
  * the target, and for a message only its first line, since a message can be
  * as long as a delegation prompt and the target's session keeps all of it.
  * Pure over the logged arguments, so a replayed session draws the same card.
- * @module @deepseek-ai/dsh-tool-subagent-control/src/presentation
+ * @module bake-tool-subagent-control/src/presentation
  */
 
-import type { GenericCallView } from '@deepseek-ai/dsh-tools'
+import type { GenericCallView } from 'bake-tools'
 
 /** Characters of a message's first line a title shows beside the target id. */
 const MESSAGE_CHARS = 48

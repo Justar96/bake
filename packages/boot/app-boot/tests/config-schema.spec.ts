@@ -70,7 +70,7 @@ function validates(dump: ConfigSchemaDump, value: unknown, definition = 'entryLi
 describe('generateConfigSchema', () => {
   it('owns ordered composition, skipped-bundle diagnostics, and runtime resolution without mutating layers', async () => {
     profile.layers = [{ packageName: 'loaded', packageDir: dir, patchPaths: [join(dir, 'bundle.yml')], patches: [] }]
-    writeFileSync(join(dir, 'package.json'), JSON.stringify({ dsh: { profile: { bundles: ['loaded', 'missing'] } } }))
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ bake: { profile: { bundles: ['loaded', 'missing'] } } }))
     modules.set('server', { Config: Schema.string() })
     const layers: PatchOptions[][] = [
       [{ insert: [{ ...row('cordis:group', []), id: 'group', group: true }] }],

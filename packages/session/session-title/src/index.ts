@@ -1,24 +1,24 @@
 /**
  * Log-backed session title service, deterministic fallback, and provider contract.
- * @module @deepseek-ai/dsh-session-title
+ * @module bake-session-title
  */
 
 import { Context, FiberState, Service, type Fiber } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { z as zod } from 'zod'
 import type { ZodType } from 'zod'
-import type { Branded } from '@deepseek-ai/dsh-brand'
-import { isAgentLoopRequest } from '@deepseek-ai/dsh-llm'
-import type { GenerateOptions } from '@deepseek-ai/dsh-llm'
-import { assertNever, assertPositiveInteger, deepFreeze } from '@deepseek-ai/dsh-util-values'
+import type { Branded } from 'bake-brand'
+import { isAgentLoopRequest } from 'bake-llm'
+import type { GenerateOptions } from 'bake-llm'
+import { assertNever, assertPositiveInteger, deepFreeze } from 'bake-util-values'
 import type {
   Session,
   SessionEvent,
-} from '@deepseek-ai/dsh-session'
-import { SessionSeq } from '@deepseek-ai/dsh-session'
-import type {} from '@deepseek-ai/dsh-session-projection'
-import type { ProjectionDefinition } from '@deepseek-ai/dsh-session-projection'
-import type {} from '@deepseek-ai/dsh-agent'
+} from 'bake-session'
+import { SessionSeq } from 'bake-session'
+import type {} from 'bake-session-projection'
+import type { ProjectionDefinition } from 'bake-session-projection'
+import type {} from 'bake-agent'
 export type {
   SessionTitleEventData,
   SessionTitleModelIdentity,
@@ -68,7 +68,7 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 
-declare module '@deepseek-ai/dsh-session/types' {
+declare module 'bake-session/types' {
   interface SessionEventMap {
     /**
      * Latest-wins session title snapshot. Log-only: it never enters the model

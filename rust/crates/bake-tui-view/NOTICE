@@ -1,0 +1,51 @@
+bake-tui-view includes code adapted from the following project, under the
+license reproduced below. Bake's own changes are under the workspace's MIT
+license.
+
+================================================================================
+Pi (packages/coding-agent)
+https://github.com/earendil-works/pi
+Release v1.2.0, revision 06a466935536f8c9bcacb2d5efc0fc021be1bdff.
+Adapted in src/dialog.rs: the list selectors of
+src/modes/interactive/components/model-selector.ts, thinking-selector.ts, and
+settings-selector.ts (the current-item mark, filtering that resets the
+selection, and Ctrl+S to set the default), with the cases of
+test/model-selector.test.ts, test/thinking-selector.test.ts, and
+regression test 7209-model-selector-filter-resets-selection.test.ts that its
+tests name, and the first selection of
+components/user-message-selector.ts (the latest message, not marked
+current).
+The session search state of components/session-selector.ts (the sort and
+named-only toggles on Ctrl+S and Ctrl+N, app.session.toggleSort and
+app.session.toggleNamedFilter in src/core/keybindings.ts, and its
+'re:<pattern> regex · "phrase" exact' hint) is adapted in src/dialog.rs and
+src/render.rs.
+Release v1.3.0, revision 71023aec1546d6d677a65669c5665c0927ce0dd0.
+Adapted in src/codemode.rs: the codemode tool's renderer,
+src/extensions/codemode/renderer.ts (the script preview, one row per nested
+call with its status, arguments, duration, and error, the latest calls with a
+count of earlier ones, the output without the script header, previewed by
+wrapped rows, and the full output's file), with the cases of
+test/codemode-renderer.test.ts.
+--------------------------------------------------------------------------------
+MIT License
+
+Copyright (c) 2025 Mario Zechner
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

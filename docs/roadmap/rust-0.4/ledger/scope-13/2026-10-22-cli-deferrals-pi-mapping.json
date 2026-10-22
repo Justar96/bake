@@ -1,0 +1,363 @@
+{
+  "schema": "bake/rust-migration/qualification-attempt",
+  "version": 1,
+  "id": "2026-10-22-cli-deferrals-pi-mapping",
+  "scope": "13",
+  "status": "partial",
+  "recordedOn": "2026-10-22",
+  "summary": "CLI deferrals and the Pi test mapping at candidate b4e0f13fdd, the head of lane/cli-deferrals-scope13. The lane branched from develop bfce3d9249 and made seven commits from a5c397a4f7 to c157c5875a: D48 deferrals for commands, providers, and OAuth, the case-by-case mapping of Pi v1.3.0's args.test.ts (85 cases) and rpc tests (33 cases) in the test modules' tables with the missing ports added, and binary proofs of RPC approvals, abort while busy, shutdown, --export, --offline, key printing, and excluded flags. It merged develop d55ab04388 at 6557db4a22, whose conflict resolution moved the deferral edits into rust/crates/bake-tui/src/live/driver.rs, and ended with the review-fix commit b4e0f13fdd: an interactive command-line prompt goes through the composer's checks, /clear and /sessions join the deferred list, a test keeps both slash menus free of deferred names, and the MCP OAuth notice carries mcp::OAUTH_DEFERRED. Its base is d55ab04388, the develop commit the candidate contains. The 0.4 Linux integration merged it at ed256ff283. Evidence is one Linux x86_64 host, this Fedora Linux 44 machine: a workspace nextest run at d0c1891829 (all six lanes merged, before the integration's docs), 3190 cases all passed with 8 skipped, whose saved log holds only its summary and no exit status, so no result cites it; and the full Linux preflight at the integration head 3421fd94ce, 39 gates passed with actionlint skipped, whose rust-test gate ran 3092 nextest cases, all passed with 8 skipped, plus the codemode harness's 98, and whose rust-pty gate passed all 60 Rust PTY scenarios. The preflight log names the commit and umask 022; the orchestrating session reports BAKE_REQUIRE_KERNEL_FAULTS=1 and BAKE_REQUIRE_SANDBOX_BACKENDS=bwrap,landlock and a clean tree, which the log does not record. No fixture source below differs between the candidate and 3421fd94ce. No model-visible text changes. The fix worker's controls left no logs. This is the first scope 13 record and supersedes nothing. Binary approval cases run on Linux only by D47; macOS and Windows PTY, project trust (deferred by D44), aarch64, and reviewer acceptance are missing.",
+  "supersedes": [],
+  "provenance": {
+    "base": "d55ab04388042f767abea92b8622c9f4d898d14c",
+    "candidate": "b4e0f13fdd730f6449031ea453c36c140c46d1fc",
+    "oracle": {
+      "notApplicable": "D32: no TypeScript runtime arm. Pi v1.3.0 (71023aec15) is the source of the ported args and rpc cases, which the tables in cli/args.rs and rpc/tests.rs map one by one, each ported or excluded with the test that refuses it; Pi's tests were read and ported, not run. The D48 deferral texts and the D24 approvals over RPC confirm are Bake's own."
+    }
+  },
+  "support": [
+    {
+      "id": "d24-sandbox-contract",
+      "reference": "docs/roadmap/rust-0.4/scope-00/support.md"
+    },
+    {
+      "id": "d44-project-trust",
+      "reference": "docs/roadmap/rust-0.4/scope-00/support.md"
+    },
+    {
+      "id": "d48-deferred-features",
+      "reference": "docs/roadmap/rust-0.4/scope-00/support.md"
+    },
+    {
+      "id": "pi-v1-3-0-args-test",
+      "reference": "https://github.com/earendil-works/pi/blob/71023aec1546d6d677a65669c5665c0927ce0dd0/packages/coding-agent/test/args.test.ts"
+    },
+    {
+      "id": "pi-v1-3-0-rpc-client",
+      "reference": "https://github.com/earendil-works/pi/blob/71023aec1546d6d677a65669c5665c0927ce0dd0/packages/coding-agent/src/modes/rpc/rpc-client.ts"
+    }
+  ],
+  "fixtures": {
+    "files": [
+      {
+        "path": "rust/crates/bake-cli/tests/cli.rs",
+        "role": "fixture-definition-source",
+        "sha256": "a9f78a6f0bf01dbbc879c13b6a71d836472e3741b9667c4344a0954276b1bf58"
+      },
+      {
+        "path": "rust/crates/bake-cli/tests/rpc.rs",
+        "role": "fixture-definition-source",
+        "sha256": "a6c6358023d0e2f164174a886df06a109aa2951a643fadde5269cb3546c4b090"
+      },
+      {
+        "path": "rust/crates/bake-coding-agent/src/cli/args.rs",
+        "role": "fixture-definition-source",
+        "sha256": "378fa7866a3da8823188e530de3fac9a38961812c0c392675c6c5b891d115805"
+      },
+      {
+        "path": "rust/crates/bake-coding-agent/src/mcp/http_tests.rs",
+        "role": "fixture-definition-source",
+        "sha256": "ac75dd500919478f4631de4c24533af4998178dab3f7b484b79f1c5eef26cfcf"
+      },
+      {
+        "path": "rust/crates/bake-coding-agent/src/rpc/tests.rs",
+        "role": "fixture-definition-source",
+        "sha256": "41800e9d3a67929effa61efaae1c3dcc41a384f68fcd12fdb95e4fee961d663c"
+      },
+      {
+        "path": "rust/crates/bake-tui-view/src/completion.rs",
+        "role": "fixture-definition-source",
+        "sha256": "0e9e73f9a47864018718feee5f36ab536c4e53715760aef4cc786ffa4a6c0e96"
+      },
+      {
+        "path": "rust/crates/bake-tui-view/src/state.rs",
+        "role": "fixture-definition-source",
+        "sha256": "55bd5b2949f91f389f31ae9718707e2623eb7905f1cc9a2c8776789b16071723"
+      },
+      {
+        "path": "rust/crates/bake-tui/src/live/mcp.rs",
+        "role": "fixture-definition-source",
+        "sha256": "8fc17d43e3ca4a1e7268cc3288d6f4f2ab22ad96657bfdb3eaab6513bd36c539"
+      },
+      {
+        "path": "rust/crates/bake-tui/src/live/tests.rs",
+        "role": "fixture-definition-source",
+        "sha256": "fe12e5ceea67cfdc71296bde5eef19b3e94f12e9a87155b79d347538ae4768e5"
+      },
+      {
+        "path": "scripts/rust-preview-pty.ts",
+        "role": "fixture-definition-source",
+        "sha256": "3d5e6a206b97a598568de93bda8df80efcf9dfe465517d9be1eebcd1c3c47083"
+      }
+    ],
+    "digest": "e895d1a63574d6bf19e60a08e7c77bf32490c4f5009bceea9e1e51ffefcffb43"
+  },
+  "artifacts": {
+    "notApplicable": "Library, binary, and PTY tests of debug builds only; no shipped artifact is qualified by this record."
+  },
+  "commands": [
+    {
+      "id": "integration-nextest-d0c1891829",
+      "argv": [
+        "env",
+        "BAKE_REQUIRE_KERNEL_FAULTS=1",
+        "BAKE_REQUIRE_SANDBOX_BACKENDS=bwrap,landlock",
+        "cargo",
+        "nextest",
+        "run",
+        "--locked",
+        "--workspace"
+      ],
+      "cwd": "rust",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local Fedora Linux 44; kernel 7.2.11-200.fc44.x86_64; 32 threads"
+      },
+      "tools": {
+        "rust-toolchain": "1.99.0 (pinned by rust/rust-toolchain.toml; rustc and cargo 1.99.0 observed in rust/ after the run)",
+        "cargo-nextest": "0.9.148 (observed after the run)"
+      },
+      "testedCommit": "d0c189182976960a23f62c1dad1d48f9fa94f2a6",
+      "expectedExit": 0,
+      "actualExit": {
+        "missing": "The saved log holds a formatting marker, a Finished line, and nextest's Summary line with no failure; it records no exit status."
+      },
+      "counts": {
+        "passed": 3190,
+        "failed": 0,
+        "skipped": 8,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/nextest-d0c1891829.log",
+        "sha256": "a967f06e6d31bc51432702b77fef47dae5788f02dff9721d33d1a8b1a5f7c307"
+      }
+    },
+    {
+      "id": "linux-preflight-3421fd94ce",
+      "argv": [
+        "env",
+        "BAKE_REQUIRE_KERNEL_FAULTS=1",
+        "BAKE_REQUIRE_SANDBOX_BACKENDS=bwrap,landlock",
+        "bun",
+        "run",
+        "preflight",
+        "--full"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local Fedora Linux 44; kernel 7.2.11-200.fc44.x86_64; 32 threads"
+      },
+      "tools": {
+        "rust-toolchain": "1.99.0 (pinned by rust/rust-toolchain.toml; rustc 1.99.0 (b940084d7 2026-09-28) and cargo 1.99.0 (5f94df478 2026-08-27) observed in rust/ on this host after the run)",
+        "cargo-nextest": "0.9.148 (observed after the run)",
+        "bun": "1.4.3 (the gate logs print bun test v1.4.3; package.json pins bun@1.4.2)",
+        "node": "v26.10.0 (observed after the run)",
+        "git": "2.56.0 (observed after the run)",
+        "cargo-about": "0.9.2 on PATH (observed after the run)"
+      },
+      "testedCommit": "3421fd94ced0aa38ea72d0a2917cfd763a462805",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 39,
+        "failed": 0,
+        "skipped": 1,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/linux-preflight-full-3421fd94ce.log",
+        "sha256": "1ab428e65afe5e82aeb78b05aa67f662c28a8cf71e1f85a7c2904472229dde29"
+      }
+    },
+    {
+      "id": "linux-rust-test-3421fd94ce",
+      "argv": [
+        "bun",
+        "run",
+        "test:rust"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local Fedora Linux 44; kernel 7.2.11-200.fc44.x86_64; 32 threads"
+      },
+      "tools": {
+        "rust-toolchain": "1.99.0 (pinned by rust/rust-toolchain.toml; rustc and cargo 1.99.0 observed in rust/ after the run)",
+        "cargo-nextest": "0.9.148 (observed after the run)",
+        "bun": "1.4.3 (observed after the run)"
+      },
+      "testedCommit": "3421fd94ced0aa38ea72d0a2917cfd763a462805",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 3190,
+        "failed": 0,
+        "skipped": 8,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/linux-3421fd94ce/rust-test.log",
+        "sha256": "6bb857056eea2909f19a3562e2e7d50e372ec0bfafb2f175bfebd0a2c297ef0f"
+      }
+    },
+    {
+      "id": "linux-rust-pty-3421fd94ce",
+      "argv": [
+        "bun",
+        "run",
+        "test:rust:pty"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local Fedora Linux 44; kernel 7.2.11-200.fc44.x86_64; 32 threads"
+      },
+      "tools": {
+        "rust-toolchain": "1.99.0 (pinned by rust/rust-toolchain.toml; rustc and cargo 1.99.0 observed in rust/ after the run)",
+        "bun": "1.4.3 (observed after the run)"
+      },
+      "testedCommit": "3421fd94ced0aa38ea72d0a2917cfd763a462805",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 60,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/linux-3421fd94ce/rust-pty.log",
+        "sha256": "c8f7bffc8715d80271b29cc97c2dc8a2c2c8771f5fa86969acb0b3c765bc21af"
+      }
+    }
+  ],
+  "results": [
+    {
+      "id": "pi-args-mapping",
+      "behavior": "cli::args::tests passed in the rust-test gate, 26 tests, whose module table maps each of Pi's 85 args.test.ts cases to the test that ports it, or excludes it (the extension, theme, and --tui-mode flags) with the test that proves it refused. New ports include switches_parse_in_their_long_and_short_spellings and a_rejected_tool_list_is_dropped. Counts describe nextest test cases, not Pi cases.",
+      "owner": "rust/crates/bake-coding-agent/src/cli/args.rs",
+      "report": ".preflight/rust-orchestration/linux-3421fd94ce/rust-test.log",
+      "commands": [
+        "linux-preflight-3421fd94ce",
+        "linux-rust-test-3421fd94ce"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "pi-rpc-mapping",
+      "behavior": "rpc::tests passed, 21 tests, whose module table maps Pi's 33 rpc cases, bash commands and extension-dependent cases excluded with the test that refuses them. New ports include should_save_messages_to_session_file, should_handle_manual_compaction_and_retain_pre_compaction_entries, should_create_new_session, and should_export_to_html.",
+      "owner": "rust/crates/bake-coding-agent/src/rpc/tests.rs",
+      "report": ".preflight/rust-orchestration/linux-3421fd94ce/rust-test.log",
+      "commands": [
+        "linux-preflight-3421fd94ce",
+        "linux-rust-test-3421fd94ce"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "rpc-binary",
+      "behavior": "bake-cli's tests/rpc.rs passed, 13 tests, driving the built bake --mode rpc over its pipes against a loopback model server: an_approved_write_runs_after_its_decision_is_recorded, a_denied_write_is_refused_and_recorded, and a_client_that_disconnects_unanswered_leaves_the_write_refused, each checked against the session file's approval records, which come before the tool result; abort_and_read_only_commands_are_answered_while_a_turn_runs; end_of_input_during_a_bash_call_exits_with_no_process_left; and stop_signals_during_a_bash_call_exit_with_no_process_left (SIGTERM, SIGINT, SIGHUP, with no process of the call left in /proc). The existing answers_a_malformed_record_and_an_unknown_command and a_request_in_flight_when_the_process_exits_gets_no_response passed beside them.",
+      "owner": "rust/crates/bake-cli/tests/rpc.rs",
+      "report": ".preflight/rust-orchestration/linux-3421fd94ce/rust-test.log",
+      "commands": [
+        "linux-preflight-3421fd94ce",
+        "linux-rust-test-3421fd94ce"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "cli-binary",
+      "behavior": "bake-cli's tests/cli.rs passed, 19 tests, among them export_never_writes_its_input (a read-only, back-dated session stays byte-identical with the same mtime), offline_stops_the_interactive_startup_refresh (on a pseudo-terminal, with a control run that does fetch GET /v1/models), offline_print_and_rpc_modes_make_no_startup_connection, keys_are_printed_only_by_the_commands_that_print_one, excluded_flags_are_refused_as_unknown_options, and no_built_in_model_catalog_or_provider_route_is_reachable (D48). Every server a case uses binds 127.0.0.1 and belongs to that case.",
+      "owner": "rust/crates/bake-cli/tests/cli.rs",
+      "report": ".preflight/rust-orchestration/linux-3421fd94ce/rust-test.log",
+      "commands": [
+        "linux-preflight-3421fd94ce",
+        "linux-rust-test-3421fd94ce"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "deferred-commands",
+      "behavior": "bake-tui's live::tests passed (85 tests), including each_deferred_command_refuses_with_a_deferral_sentence, deferred_commands_are_refused_and_the_draft_comes_back, the_menus_list_no_deferred_command, command_line_commands_are_refused_into_the_draft_and_the_rest_run, command_line_templates_skills_and_paths_still_run, and a_command_line_command_bake_runs_is_kept_for_the_composer; live::mcp::tests::a_server_that_needs_oauth_shows_the_deferral passed. In bake-tui-view, state::tests::declined_prompts_go_ahead_of_the_draft_with_their_reason, state::tests::enter_on_the_menu_runs_a_command_whose_argument_is_optional, and completion::tests::the_preview_lists_only_commands_a_live_session_runs passed. mcp::http::tests::offered_prompts_and_subscriptions_are_never_requested passed: a server offering prompts and resource subscriptions is never asked for either.",
+      "owner": "rust/crates/bake-tui/src/live/tests.rs",
+      "report": ".preflight/rust-orchestration/linux-3421fd94ce/rust-test.log",
+      "commands": [
+        "linux-preflight-3421fd94ce",
+        "linux-rust-test-3421fd94ce"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "pty-scenarios",
+      "behavior": "The Rust PTY suite passed 60 scenarios with none ending in a named gap, including live command-line prompts running first; its slash-menu scenario completes /thinking, since /goal is deferred and no longer listed.",
+      "owner": "scripts/rust-preview-pty.ts",
+      "report": ".preflight/rust-orchestration/linux-3421fd94ce/rust-pty.log",
+      "commands": [
+        "linux-preflight-3421fd94ce",
+        "linux-rust-pty-3421fd94ce"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "pty-macos-windows",
+      "behavior": "The binary approval, shutdown, and --offline PTY cases and the Rust PTY suite on macOS and Windows ConPTY.",
+      "owner": "rust/crates/bake-cli/tests/rpc.rs",
+      "report": {
+        "missing": "Only Linux x86_64 ran; 0b0c35889b limits the binary approval cases to Linux."
+      },
+      "commands": [],
+      "outcome": "missing",
+      "reason": "D47 moves macOS and Windows qualification to 0.4.x. Neither worker built cross-target Clippy: ring's build script found no cross C toolchain, and the cfg gating was reviewed by hand."
+    }
+  ],
+  "negativeControls": {
+    "missing": "The fix worker reports controls on its uncommitted worktree before b4e0f13fdd, each mutation applied, run, and restored, with no log kept: an auth.json of {} made the keys test panic with \"No API key found for faux.\"; an anthropic route with no key panicked with \"No API key found for anthropic.\"; kill(pid, 0) instead of SIGTERM failed the offline test after 30.03 s (\"bake did not end within 30 seconds of SIGTERM\"); term: Option<Signal> = None in main.rs made the rpc test panic (\"a signal killed bake: signal: 15\"); release_held never refusing failed the command-line refusal test; a Declined handler dropping its texts failed the state test; OAuth append disabled failed the MCP notice test; http.rs appending \".\" failed the HTTP test; removing \"clear\" failed the list tests; adding \"model\" to the list failed the menus test; a command line refusing every / prompt failed the templates test; and five Pi-row controls (a --mode json diagnostic, a bare --mode unknown flag, a + tool diagnostic, a cycle without applying, and a models listing of only the id) each failed. The lane worker reports bun run mutants:rust: 25 mutants, 23 caught, 1 missed in refused_command's _ branch, which a later test caught (9 of 9 on a scoped rerun), and 1 unviable. None saved output, an exit status, or a tree."
+  },
+  "missingEvidence": [
+    {
+      "what": "Project trust (--approve and --no-approve)",
+      "reason": "Deferred beyond 0.4.0 by D44; bake refuses both flags with that reason.",
+      "owner": "docs/roadmap/rust-0.4/scope-00/support.md"
+    },
+    {
+      "what": "macOS and Windows PTY and binary cases, and aarch64 Linux",
+      "reason": "Only Linux x86_64 ran; D47 moves macOS and Windows to 0.4.x, and aarch64 Linux awaits a dispatched CI run.",
+      "owner": "docs/roadmap/rust-0.4/scope-00/support.md"
+    },
+    {
+      "what": "The acceptance matrix's withdrawn-approval case, named as such",
+      "reason": "This record shows approvals answered, refused, and abandoned by a disconnecting client; it maps no test to an approval the client withdraws while the connection stays open.",
+      "owner": "docs/roadmap/rust-0.4/verification.md"
+    },
+    {
+      "what": "Logs of the lane and fix workers' runs",
+      "reason": "The lane worker reports iterate:rust (2287 passed, 6 skipped), bake-tui and bake-tui-view nextest (516 passed, 1 skipped), the cli and rpc suites (rpc 5 times, the offline tests 4 times), the rpc:: filter 8 times after its steer-race fix, and the PTY suite (60 passed); the fix worker reports nextest for bake-tui, bake-tui-view, bake-cli, and bake-coding-agent (2312 passed, 6 skipped), the cli and rpc suites 10 times (32 passed each), and the PTY suite (60 passed). None saved a log; the preflight above stands in for them.",
+      "owner": "unassigned"
+    },
+    {
+      "what": "actionlint",
+      "reason": "The preflight skipped it: actionlint 1.7.12 or later is not on PATH.",
+      "owner": "unassigned"
+    }
+  ],
+  "evalRecords": {
+    "notApplicable": "No model-visible change: the lane report and b4e0f13fdd change no tool schema, description, result, prompt, or context. Slash-command, /login, and /logout refusals stop before a prompt reaches the model, auth messages go to stdout and stderr, the MCP OAuth text goes to stderr and terminal notices, and a failed MCP server is left out of the prompt's servers section and publishes no tools, as before. Print and RPC mode still send a command-line prompt to the model as Pi does."
+  },
+  "performanceRecords": {
+    "notApplicable": "No performance qualification attempted."
+  },
+  "rollback": {
+    "observed": "Each RPC and CLI binary test owns a temporary Bake home and project directory and, when it runs a turn, a loopback model server on 127.0.0.1 answering from fixtures; nothing reaches the network and no real key is used. The shutdown cases check /proc for no process of the call left. The PTY helper's stop is bounded. No user home is touched. The preflight log opens with its commit and umask 022 and records no git status; the orchestrating session reports the tree clean.",
+    "commands": [
+      "linux-preflight-3421fd94ce"
+    ]
+  },
+  "review": {
+    "missing": "No reviewer has accepted scope 13. The orchestrating session's review agents reviewed the lane and a fix worker fixed their findings in b4e0f13fdd; that is not scope acceptance."
+  }
+}

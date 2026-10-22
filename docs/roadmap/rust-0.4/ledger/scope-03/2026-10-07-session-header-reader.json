@@ -1,0 +1,931 @@
+{
+  "schema": "bake/rust-migration/qualification-attempt",
+  "version": 1,
+  "id": "2026-10-07-session-header-reader",
+  "scope": "03",
+  "status": "partial",
+  "recordedOn": "2026-10-07",
+  "summary": "Scope 03 groundwork only: the development-only bake-session crate reads one current-format Session header record. A clean checkout of the candidate passed the TypeScript oracle and Rust tests over 86 shared cases, 19 of them explicit native-subset refusals, and 28 absolute-path rows. Outcome agreement is claimed for header records outside the native subset, not whole-log replay. CI tested synthetic merge 20de2f6371b2bdd6392dc54ea93364f6d2774523; that commit, final PR head 219e042a51875b1265eb8d0af5a28dbdd54427cd, and candidate 586083f7545d0cf139e0a9dfc92f03d2a7d0fae8 all have tree f853423a1b9f0333e662f7c4e42b5ae72d873399. Two controls on a private mutated copy were rejected. No event rows, writer, migration, lease or query; not scope acceptance.",
+  "supersedes": [],
+  "provenance": {
+    "base": "e7b3bc16c7d995d6fbbbfd8fe7b0727ab9517ade",
+    "candidate": "586083f7545d0cf139e0a9dfc92f03d2a7d0fae8",
+    "oracle": {
+      "missing": "Scope 00 has not accepted a final frozen TypeScript oracle."
+    }
+  },
+  "support": {
+    "notApplicable": "Development-only test oracle and unshipped reader; this attempt changes no shipped support entry."
+  },
+  "fixtures": {
+    "files": [
+      {
+        "path": "conformance/runtime/request-reconstruction/tool-call-turn/session.jsonl",
+        "role": "shared-fixture-bytes",
+        "sha256": "a7a8222990ef9f4c4f00a051c019de86d3156ca7f6c3c0d28af4be4cc3fbe657"
+      },
+      {
+        "path": "conformance/session/header-cases.json",
+        "role": "shared-fixture-bytes",
+        "sha256": "78494c5964baf4654a3fbfc812afc1b0e341f514a7441f7708b8297ca21bcd61"
+      },
+      {
+        "path": "packages/session/session-persistence-jsonl/tests/header-conformance.spec.ts",
+        "role": "fixture-definition-source",
+        "sha256": "4823957b4e7e6c66c1f6c0586ff03da4c71dc284f1c8aa525ee40b3c0ff00004"
+      },
+      {
+        "path": "rust/crates/bake-session/tests/header_cases.rs",
+        "role": "fixture-definition-source",
+        "sha256": "cd6e0fc8c4d29c51743b9dd8f910e3535ad514f4824a2aab7350b35fb6a5a370"
+      }
+    ],
+    "digest": "2640925841c950dc921e7d59e9d90bb0f2547da7208e3a2e43ea67424a8f7304"
+  },
+  "artifacts": [
+    {
+      "id": "local-bake-session-unit",
+      "description": "Linux debug bake_session unit-test executable rust/target/debug/deps/bake_session-3d471d6b4e5d9982 listed by header-artifacts and hashed after that command; local build only, not the executable native-check ran.",
+      "sha256": "4b0e444ec85d2d8d223f2cbb86f0181570e4780c288b2ef74653e9300f88527e",
+      "command": "header-artifacts"
+    },
+    {
+      "id": "local-header-cases",
+      "description": "Linux debug header_cases integration-test executable rust/target/debug/deps/header_cases-a024145b28dfa7db listed by header-artifacts and hashed after that command; local build only, not the executable native-check ran.",
+      "sha256": "d907d1abe641736f0dec4c282ee17baa5ddf7e14e80ae6dc0d971027b7b73d2e",
+      "command": "header-artifacts"
+    },
+    {
+      "id": "mutated-header-cases",
+      "description": "Private-copy conformance/session/header-cases.json with only version-neg-zero newer flipped to true; read by control-a-ts and control-a-rust. The original hash is the fixture manifest entry.",
+      "sha256": "2f2cf6eee0b52dec87cee5b2d2deecb368212e5b1cd097db8ac8485754b05382",
+      "command": "control-a-ts"
+    },
+    {
+      "id": "mutated-session-lib",
+      "description": "Private-copy rust/crates/bake-session/src/lib.rs with only the three-line Object/Array id guard returning VersionDiagnostic removed; original hash eff5906279581e85a5e4a2085ba4ba7b7ae89da3247cbd4cb07a13e0e6ddbb72.",
+      "sha256": "9515036c362f51603daa90a28b026856097f07d5fd7caacf2679d86665f07b76",
+      "command": "control-b-rust"
+    },
+    {
+      "id": "ci-native-linux",
+      "description": "Compiled native artifacts on linux.",
+      "sha256": {
+        "missing": "Successful native jobs retain gate summaries only; their binary hashes are not in the downloadable job log."
+      },
+      "command": "ci-native-linux"
+    },
+    {
+      "id": "ci-native-macos",
+      "description": "Compiled native artifacts on macos.",
+      "sha256": {
+        "missing": "Successful native jobs retain gate summaries only; their binary hashes are not in the downloadable job log."
+      },
+      "command": "ci-native-macos"
+    },
+    {
+      "id": "ci-native-windows",
+      "description": "Compiled native artifacts on windows.",
+      "sha256": {
+        "missing": "Successful native jobs retain gate summaries only; their binary hashes are not in the downloadable job log."
+      },
+      "command": "ci-native-windows"
+    }
+  ],
+  "commands": [
+    {
+      "id": "build",
+      "argv": [
+        "bun",
+        "run",
+        "build"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local; kernel 7.2.8-200.fc44.x86_64"
+      },
+      "tools": {
+        "bun": "1.4.2",
+        "node": "v26.10.0",
+        "git": "2.56.0"
+      },
+      "testedCommit": "586083f7545d0cf139e0a9dfc92f03d2a7d0fae8",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "missing": "Builds the Node runtime and TUI artifacts; it reports no test or gate count."
+      },
+      "evidence": {
+        "reference": ".preflight/header-ledger/evidence/build.json",
+        "sha256": "6989c20c49f708fdabe3cba315e7c4fca6efc602cbf0c52ed768d03fea63e75e"
+      }
+    },
+    {
+      "id": "ts-header-oracle",
+      "argv": [
+        "bun",
+        "run",
+        "test:runtime",
+        "packages/session/session-persistence-jsonl/tests/header-conformance.spec.ts",
+        "--reporter",
+        "verbose"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local; kernel 7.2.8-200.fc44.x86_64"
+      },
+      "tools": {
+        "bun": "1.4.2",
+        "node": "v26.10.0",
+        "git": "2.56.0"
+      },
+      "testedCommit": "586083f7545d0cf139e0a9dfc92f03d2a7d0fae8",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 88,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/header-ledger/evidence/ts-header-oracle.json",
+        "sha256": "115f83336ff5953bd1917a1b3fcc012d58d13bc98f1e4262e1b8c413768f6bd7"
+      }
+    },
+    {
+      "id": "native-check",
+      "argv": [
+        "bun",
+        "run",
+        "check:rust"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local; kernel 7.2.8-200.fc44.x86_64"
+      },
+      "tools": {
+        "bun": "1.4.2",
+        "node": "v26.10.0",
+        "git": "2.56.0",
+        "rustc": "1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "1.99.0 (5f94df478 2026-08-27)"
+      },
+      "testedCommit": "586083f7545d0cf139e0a9dfc92f03d2a7d0fae8",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 66,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/header-ledger/evidence/native-check.json",
+        "sha256": "6d62decfa8175aaea2a1cc486bfa3e5c2db0c5237b48958ae64728d37c66126b"
+      }
+    },
+    {
+      "id": "conformance-types",
+      "argv": [
+        "bun",
+        "node_modules/typescript/bin/tsc",
+        "-p",
+        "scripts/tsconfig.conformance.json"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local; kernel 7.2.8-200.fc44.x86_64"
+      },
+      "tools": {
+        "bun": "1.4.2",
+        "node": "v26.10.0",
+        "git": "2.56.0"
+      },
+      "testedCommit": "586083f7545d0cf139e0a9dfc92f03d2a7d0fae8",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/header-ledger/evidence/conformance-types.json",
+        "sha256": "65d1377b51d7720a032897d1ba5bf1b3e4e2e3c8d650d6c0a2c755750615dc48"
+      }
+    },
+    {
+      "id": "persistence-catalog",
+      "argv": [
+        "bun",
+        "run",
+        "verify-persistence-catalog"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local; kernel 7.2.8-200.fc44.x86_64"
+      },
+      "tools": {
+        "bun": "1.4.2",
+        "node": "v26.10.0",
+        "git": "2.56.0"
+      },
+      "testedCommit": "586083f7545d0cf139e0a9dfc92f03d2a7d0fae8",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/header-ledger/evidence/persistence-catalog.json",
+        "sha256": "4008a8ce0578f40523e2bdcac0ef9fe2f0c8bbb2ab34bc5437113f1e454eb5fa"
+      }
+    },
+    {
+      "id": "header-reachability",
+      "argv": [
+        "sh",
+        "-c",
+        "cd rust && cargo tree --locked -i bake-session"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local; kernel 7.2.8-200.fc44.x86_64"
+      },
+      "tools": {
+        "bun": "1.4.2",
+        "node": "v26.10.0",
+        "git": "2.56.0",
+        "rustc": "1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "1.99.0 (5f94df478 2026-08-27)"
+      },
+      "testedCommit": "586083f7545d0cf139e0a9dfc92f03d2a7d0fae8",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/header-ledger/evidence/header-reachability.json",
+        "sha256": "839f9ddb024653a559deaaec68cf53058c7092acd75d7dc8443344312aa641fa"
+      }
+    },
+    {
+      "id": "header-artifacts",
+      "argv": [
+        "sh",
+        "-c",
+        "cd rust && cargo test --locked -p bake-session --no-run --message-format=json"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local; kernel 7.2.8-200.fc44.x86_64"
+      },
+      "tools": {
+        "bun": "1.4.2",
+        "node": "v26.10.0",
+        "git": "2.56.0",
+        "rustc": "1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "1.99.0 (5f94df478 2026-08-27)"
+      },
+      "testedCommit": "586083f7545d0cf139e0a9dfc92f03d2a7d0fae8",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "missing": "Lists compiled test executables without running tests."
+      },
+      "evidence": {
+        "reference": ".preflight/header-ledger/evidence/header-artifacts.json",
+        "sha256": "1907c5fb735a99001b9dd99288e247857701c985894d91c4d8eab516fcb8bbdc"
+      }
+    },
+    {
+      "id": "control-a-ts",
+      "argv": [
+        "bun",
+        "run",
+        "test:runtime",
+        "packages/session/session-persistence-jsonl/tests/header-conformance.spec.ts",
+        "--reporter",
+        "verbose"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local; kernel 7.2.8-200.fc44.x86_64"
+      },
+      "tools": {
+        "bun": "1.4.2",
+        "node": "v26.10.0",
+        "git": "2.56.0"
+      },
+      "testedCommit": {
+        "missing": "Temporary copy of 586083f7545d0cf139e0a9dfc92f03d2a7d0fae8 with one deliberate mutation; not a committed checkout."
+      },
+      "expectedExit": 1,
+      "actualExit": 1,
+      "counts": {
+        "passed": 87,
+        "failed": 1,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/header-ledger/evidence/controls/a-ts.log",
+        "sha256": "cdcbd4507288bfad99a90e52e398e66cbfc1bbd784ef0c41cba7b5972e39f243"
+      }
+    },
+    {
+      "id": "control-a-rust",
+      "argv": [
+        "sh",
+        "-c",
+        "cd rust && exec cargo test --locked -p bake-session"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local; kernel 7.2.8-200.fc44.x86_64"
+      },
+      "tools": {
+        "bun": "1.4.2",
+        "node": "v26.10.0",
+        "git": "2.56.0",
+        "rustc": "1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "1.99.0 (5f94df478 2026-08-27)"
+      },
+      "testedCommit": {
+        "missing": "Temporary copy of 586083f7545d0cf139e0a9dfc92f03d2a7d0fae8 with one deliberate mutation; not a committed checkout."
+      },
+      "expectedExit": 101,
+      "actualExit": 101,
+      "counts": {
+        "passed": 5,
+        "failed": 1,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/header-ledger/evidence/controls/a-rust.log",
+        "sha256": "36b464f5fe0bfa0ad8c481b8bccae8a3fa22186c141c0cac5951ea184a8693f7"
+      }
+    },
+    {
+      "id": "control-b-rust",
+      "argv": [
+        "sh",
+        "-c",
+        "cd rust && exec cargo test --locked -p bake-session"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local; kernel 7.2.8-200.fc44.x86_64"
+      },
+      "tools": {
+        "bun": "1.4.2",
+        "node": "v26.10.0",
+        "git": "2.56.0",
+        "rustc": "1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "1.99.0 (5f94df478 2026-08-27)"
+      },
+      "testedCommit": {
+        "missing": "Temporary copy of 586083f7545d0cf139e0a9dfc92f03d2a7d0fae8 with one deliberate mutation; not a committed checkout."
+      },
+      "expectedExit": 101,
+      "actualExit": 101,
+      "counts": {
+        "passed": 5,
+        "failed": 1,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/header-ledger/evidence/controls/b-rust.log",
+        "sha256": "9ccf13d43486d4c816352d239289c0456c437f4f03c6f0b2a9ba568287c2c3cc"
+      }
+    },
+    {
+      "id": "ci-runtime-linux",
+      "argv": [
+        "bun",
+        "run",
+        "preflight",
+        "--full",
+        "--only",
+        "build,runtime"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "ubuntu-latest; image ubuntu-24.04 20260927.320.1"
+      },
+      "tools": {
+        "bun": "1.4.2",
+        "node": "v24.21.0"
+      },
+      "testedCommit": "20de2f6371b2bdd6392dc54ea93364f6d2774523",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 3,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": "https://github.com/Justar96/bake/actions/runs/37563430266/job/112605651613",
+        "sha256": "8ba28fbef334f9485f49925d1e3d733a618a2c6ee0d267272b0f6763b43bdb82"
+      }
+    },
+    {
+      "id": "ci-runtime-macos",
+      "argv": [
+        "bun",
+        "run",
+        "preflight",
+        "--full",
+        "--only",
+        "build,runtime"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "darwin",
+        "arch": "arm64",
+        "runner": "macos-latest; image macos-26-arm64 20260907.0351.1"
+      },
+      "tools": {
+        "bun": "1.4.2",
+        "node": "v24.20.0"
+      },
+      "testedCommit": "20de2f6371b2bdd6392dc54ea93364f6d2774523",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 3,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": "https://github.com/Justar96/bake/actions/runs/37563430266/job/112605651668",
+        "sha256": "960d7f6db10d1a5ddd018c1fbdb6acabe412a308b0056ea706ff8d3b0624bf94"
+      }
+    },
+    {
+      "id": "ci-native-linux",
+      "argv": [
+        "bun",
+        "run",
+        "preflight",
+        "--only",
+        "native"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "ubuntu-latest; image ubuntu-24.04 20260927.320.1"
+      },
+      "tools": {
+        "bun": "1.4.2",
+        "node": "v24.21.0",
+        "rust-toolchain": "1.99.0-x86_64-unknown-linux-gnu"
+      },
+      "testedCommit": "20de2f6371b2bdd6392dc54ea93364f6d2774523",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 4,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": "https://github.com/Justar96/bake/actions/runs/37563430266/job/112605651595",
+        "sha256": "0b296e43326cd890c39078ddd241fdd5a86d9e05633d06a8870b9128c1faf606"
+      }
+    },
+    {
+      "id": "ci-native-macos",
+      "argv": [
+        "bun",
+        "run",
+        "preflight",
+        "--only",
+        "native"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "darwin",
+        "arch": "arm64",
+        "runner": "macos-latest; image macos-26-arm64 20260907.0351.1"
+      },
+      "tools": {
+        "bun": "1.4.2",
+        "node": "v24.20.0",
+        "rust-toolchain": "1.99.0-aarch64-apple-darwin"
+      },
+      "testedCommit": "20de2f6371b2bdd6392dc54ea93364f6d2774523",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 4,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": "https://github.com/Justar96/bake/actions/runs/37563430266/job/112605651649",
+        "sha256": "6a8d15668ff1ff60aa76a9997d27cea5e9e3197e3059e5358e9dcc89ad1e50ea"
+      }
+    },
+    {
+      "id": "ci-native-windows",
+      "argv": [
+        "bun",
+        "run",
+        "preflight",
+        "--only",
+        "native"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "win32",
+        "arch": "x64",
+        "runner": "windows-latest; image windows-2025-vs2026 20260925.250.1"
+      },
+      "tools": {
+        "bun": "1.4.2",
+        "node": "v24.21.0",
+        "rust-toolchain": "1.99.0-x86_64-pc-windows-msvc"
+      },
+      "testedCommit": "20de2f6371b2bdd6392dc54ea93364f6d2774523",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 3,
+        "failed": 0,
+        "skipped": 1,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": "https://github.com/Justar96/bake/actions/runs/37563430266/job/112605651484",
+        "sha256": "5a3f673a03c1cb97a18df3bccb9fd7033400f27153f037ec8c1873c33180efc1"
+      }
+    },
+    {
+      "id": "ci-windows-release",
+      "argv": [
+        "bun",
+        "run",
+        "test:runtime",
+        "apps/cli/tests/bin.spec.ts",
+        "packages/session/session-persistence-jsonl/tests/win32.spec.ts",
+        "packages/session/session-persistence-jsonl/tests/lease.spec.ts",
+        "packages/session/session-persistence-jsonl/tests/lease.two-process.spec.ts",
+        "packages/session/session-persistence-jsonl/tests/header-conformance.spec.ts"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "win32",
+        "arch": "x64",
+        "runner": "windows-latest; image windows-2025-vs2026 20260925.250.1"
+      },
+      "tools": {
+        "bun": "1.4.2",
+        "node": "v24.21.0"
+      },
+      "testedCommit": "20de2f6371b2bdd6392dc54ea93364f6d2774523",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 119,
+        "failed": 0,
+        "skipped": 16,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": "https://github.com/Justar96/bake/actions/runs/37563430266/job/112605651690",
+        "sha256": "95d991ad93700843543f87ba490941697e2a14a89cc46ff63eff166a911f4bc9"
+      }
+    },
+    {
+      "id": "ci-checks-linux",
+      "argv": [
+        "bun",
+        "run",
+        "preflight",
+        "--full",
+        "--skip",
+        "runtime,native"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "ubuntu-latest; image ubuntu-24.04 20260927.320.1"
+      },
+      "tools": {
+        "bun": "1.4.2",
+        "node": "v24.21.0"
+      },
+      "testedCommit": "20de2f6371b2bdd6392dc54ea93364f6d2774523",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 27,
+        "failed": 0,
+        "skipped": 8,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": "https://github.com/Justar96/bake/actions/runs/37563430266/job/112605651702",
+        "sha256": "15c567cce093a8229b97a0afd848f55e3d67e8165a2244b9b5c13e131e550598"
+      }
+    },
+    {
+      "id": "ci-checks-macos",
+      "argv": [
+        "bun",
+        "run",
+        "preflight",
+        "--full",
+        "--skip",
+        "runtime,native"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "darwin",
+        "arch": "arm64",
+        "runner": "macos-latest; image macos-26-arm64 20260907.0351.1"
+      },
+      "tools": {
+        "bun": "1.4.2",
+        "node": "v24.20.0"
+      },
+      "testedCommit": "20de2f6371b2bdd6392dc54ea93364f6d2774523",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 27,
+        "failed": 0,
+        "skipped": 8,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": "https://github.com/Justar96/bake/actions/runs/37563430266/job/112605651681",
+        "sha256": "fec8242b5778d62cc854fde927d5af817477af6b75fe42d063a40bc397acf49f"
+      }
+    }
+  ],
+  "results": [
+    {
+      "id": "ts-oracle",
+      "behavior": "88 Vitest tests passed: one per shared case (86) on the host path flavor, which is POSIX locally; a table-coverage test; and a test checking all 28 absolute-path rows against both Node path flavors. Counts describe Vitest tests.",
+      "owner": "packages/session/session-persistence-jsonl/tests/header-conformance.spec.ts",
+      "report": ".preflight/header-ledger/evidence/ts-header-oracle.json",
+      "commands": [
+        "ts-header-oracle"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "rust-agreement",
+      "behavior": "check:rust passed formatting, clippy, build and 66 workspace Cargo tests. Six are bake-session tests: three unit tests (absolute paths, JSON.parse witnesses, parser allow-list) and three integration tests, one of which iterates all 86 shared cases on both path platforms and requires the TypeScript outcome for every case without a native override. Counts describe all workspace Cargo tests.",
+      "owner": "rust/crates/bake-session/tests/header_cases.rs",
+      "report": ".preflight/header-ledger/evidence/native-check.json",
+      "commands": [
+        "native-check"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "native-subset",
+      "behavior": "19 shared cases carry an explicit native-subset refusal that the Rust test requires instead of the TypeScript outcome: 8 float-lexeme, 5 json-parser, 2 invalid-utf8 and 4 version-diagnostic. This passes the refuse-rather-than-guess property; it is not parity for those cases.",
+      "owner": "conformance/session/header-cases.json",
+      "report": ".preflight/header-ledger/evidence/native-check.json",
+      "commands": [
+        "native-check"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "conformance-types",
+      "behavior": "Strict typecheck of scripts/tsconfig.conformance.json, which includes both fixture specs, exited 0. Counts are one passed gate.",
+      "owner": "scripts/tsconfig.conformance.json",
+      "report": ".preflight/header-ledger/evidence/conformance-types.json",
+      "commands": [
+        "conformance-types"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "persistence-unchanged",
+      "behavior": "The persistence catalog, known event types and persistence schema were reported up to date. Counts are one passed gate.",
+      "owner": "scripts/gen-persistence-catalog.ts",
+      "report": ".preflight/header-ledger/evidence/persistence-catalog.json",
+      "commands": [
+        "persistence-catalog"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "unshipped",
+      "behavior": "cargo tree --locked -i bake-session printed only bake-session itself, so no workspace crate depends on it. Counts are one passed gate.",
+      "owner": "rust/Cargo.toml",
+      "report": ".preflight/header-ledger/evidence/header-reachability.json",
+      "commands": [
+        "header-reachability"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "ci-runtime",
+      "behavior": "Linux and macOS runtime jobs each passed 3 preflight gates; the whole-suite runtime gate includes the header spec. Counts describe gates.",
+      "owner": "scripts/preflight.ts",
+      "report": "https://github.com/Justar96/bake/actions/runs/37563430266",
+      "commands": [
+        "ci-runtime-linux",
+        "ci-runtime-macos"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "ci-native",
+      "behavior": "Native preflight passed on Linux and macOS (4 gates each) and Windows (3 with 1 PTY skip); the rust gate runs check:rust including the bake-session tests. Counts describe gates.",
+      "owner": "scripts/preflight.ts",
+      "report": "https://github.com/Justar96/bake/actions/runs/37563430266",
+      "commands": [
+        "ci-native-linux",
+        "ci-native-macos",
+        "ci-native-windows"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "windows-ts-oracle",
+      "behavior": "The windows-release runtime step ran five selected files, with header-conformance.spec.ts reporting 88 passing tests on a win32 host, which covers the Windows path flavor. Counts are the step's combined 119 passed and 16 skipped tests across all five files.",
+      "owner": "packages/session/session-persistence-jsonl/tests/header-conformance.spec.ts",
+      "report": "https://github.com/Justar96/bake/actions/runs/37563430266/job/112605651690",
+      "commands": [
+        "ci-windows-release"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "ci-app-checks",
+      "behavior": "App checks passed on Linux and macOS (27 gates, 8 skipped each), including typecheck and the ledger verifier. Counts describe gates.",
+      "owner": "scripts/preflight.ts",
+      "report": "https://github.com/Justar96/bake/actions/runs/37563430266",
+      "commands": [
+        "ci-checks-linux",
+        "ci-checks-macos"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "windows-local",
+      "behavior": "Local run of the header spec and Rust tests on Windows.",
+      "owner": "packages/session/session-persistence-jsonl/tests/header-conformance.spec.ts",
+      "report": {
+        "missing": "No local Windows command ran."
+      },
+      "commands": [],
+      "outcome": "skip",
+      "reason": "The local host is Linux; Windows coverage comes only from the CI jobs above."
+    },
+    {
+      "id": "actionlint",
+      "behavior": "Workflow syntax lint.",
+      "owner": "scripts/preflight.ts",
+      "report": "https://github.com/Justar96/bake/actions/runs/37563430266",
+      "commands": [
+        "ci-checks-linux",
+        "ci-checks-macos"
+      ],
+      "outcome": "skip",
+      "reason": "actionlint 1.7.12+ was not on PATH on either app CI runner."
+    },
+    {
+      "id": "ci-whitespace",
+      "behavior": "Whitespace check against the merge base.",
+      "owner": "scripts/preflight.ts",
+      "report": "https://github.com/Justar96/bake/actions/runs/37563430266",
+      "commands": [
+        "ci-checks-linux",
+        "ci-checks-macos"
+      ],
+      "outcome": "skip",
+      "reason": "Both app CI jobs reported no merge base for the whitespace gate."
+    }
+  ],
+  "negativeControls": [
+    {
+      "id": "flip-shared-expectation",
+      "defect": "In a private detached copy of the candidate, flipped only version-neg-zero's expected newer from false to true in conformance/session/header-cases.json.",
+      "assertion": "Both harnesses reject the edited table: Vitest failed only version-neg-zero (87 passed, 1 failed; exit 1), and Rust reported five passed tests plus an integration-test panic on version-neg-zero (Posix) (exit 101).",
+      "observed": "rejected",
+      "commands": [
+        "control-a-ts",
+        "control-a-rust"
+      ]
+    },
+    {
+      "id": "remove-version-diagnostic-guard",
+      "defect": "In the same private copy, removed only the three-line Object/Array id guard returning SubsetLimit::VersionDiagnostic from rust/crates/bake-session/src/lib.rs.",
+      "assertion": "The Rust integration test rejects the reader: version-4-id-own-toString returned unsupported instead of the native-subset version-diagnostic refusal (exit 101). It stops at the first failing case.",
+      "observed": "rejected",
+      "commands": [
+        "control-b-rust"
+      ]
+    }
+  ],
+  "missingEvidence": [
+    {
+      "what": "Rest of scope 03",
+      "reason": "No event rows, admission, replay, writer or serializer, migrations, compressed generations, crash-tail repair, leases, query or CLI use.",
+      "owner": "unassigned"
+    },
+    {
+      "what": "Scope 02 Session types",
+      "reason": "The reader returns header metadata only; no shared Session model exists.",
+      "owner": "unassigned"
+    },
+    {
+      "what": "Native-subset coverage",
+      "reason": "19 cases are refused rather than matched: float lexemes, the JSON parser allow-list pinned to serde_json 1.0.151, invalid UTF-8, and version diagnostics.",
+      "owner": "rust/crates/bake-session/src/lib.rs"
+    },
+    {
+      "what": "Local Windows run",
+      "reason": "No local Windows host; Windows evidence is CI gate summaries plus the windows-release step totals.",
+      "owner": "unassigned"
+    },
+    {
+      "what": "CI test-level output and artifact digests",
+      "reason": "Successful preflight job logs retain gate summaries only, not inner test output or binary digests. Local logs live in ignored .preflight and are not published; local digests do not identify CI binaries.",
+      "owner": "scripts/preflight.ts"
+    },
+    {
+      "what": "Scope 00 decisions and accepted full baseline",
+      "reason": "Owner decisions, fixed qualification budgets, minimum supported hosts, and complete baseline qualification remain open.",
+      "owner": "docs/roadmap/rust-0.4/scope-00/support.md"
+    },
+    {
+      "what": "Scope acceptance",
+      "reason": "No qualification reviewer or product-owner acceptance is recorded.",
+      "owner": "unassigned"
+    }
+  ],
+  "evalRecords": {
+    "notApplicable": "Nothing model-visible changes: the request fixture is a test-only oracle and the header reader is not shipped."
+  },
+  "performanceRecords": {
+    "notApplicable": "No performance qualification attempted; command duration is not a performance baseline."
+  },
+  "rollback": {
+    "observed": "The baseline command wrapper observed unchanged source and no command-owned surviving descendants after each clean candidate command. The controls ran by hand in a private detached worktree: both mutated files were restored to their original hashes, git status was empty, and the worktree was removed. The controls did not measure surviving descendants. No user install or Session storage is touched.",
+    "commands": [
+      "build",
+      "ts-header-oracle",
+      "native-check",
+      "conformance-types",
+      "persistence-catalog",
+      "header-reachability",
+      "header-artifacts",
+      "control-a-ts",
+      "control-a-rust",
+      "control-b-rust"
+    ]
+  },
+  "review": {
+    "missing": "No reviewer has accepted scope 03 qualification. Code review and green CI do not establish scope acceptance."
+  }
+}

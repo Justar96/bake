@@ -1,11 +1,11 @@
-/** Verbatim content-addressed local file storage. @module @deepseek-ai/dsh-attachment-local/file-store */
+/** Verbatim content-addressed local file storage. @module bake-attachment-local/file-store */
 
 import { createHash } from 'node:crypto'
 import { join } from 'node:path'
-import { AttachmentError, AttachmentId } from '@deepseek-ai/dsh-attachment'
+import { AttachmentError, AttachmentId } from 'bake-attachment'
 import type {
   FileAttachmentRef, SaveFileAttachment,
-} from '@deepseek-ai/dsh-attachment'
+} from 'bake-attachment'
 import {
   publishImmutableAlias, publishImmutableObject,
 } from './store.ts'

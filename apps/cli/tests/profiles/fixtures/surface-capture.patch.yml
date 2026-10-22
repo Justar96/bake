@@ -1,0 +1,11 @@
+# Keyless capture route for the model-surface snapshots: the shipped profile
+# with only its default model replaced by an adapter that records the first
+# agent-loop request.
+- id: agent-default-model
+  config:
+    provider: surface-capture
+    model: surface-model
+
+- insert:
+    - id: surface-capture-llm
+      name: '../../../../../packages/test-support/loader-smoke/tests/fixtures/surface-capture-llm.ts'

@@ -1,9 +1,9 @@
 /** Terminal session navigation over Harness query, setup, and handle ownership. */
 import type { Context } from '@deepseek-ai/cordis'
-import type { Agent, AgentHandle } from '@deepseek-ai/dsh-agent'
-import { SessionInUseError } from '@deepseek-ai/dsh-cmdline'
-import type { TuiCopy } from '@dsh-tui/ui/copy.ts'
-import { formatAge } from '@dsh-tui/ui/format.ts'
+import type { Agent, AgentHandle } from 'bake-agent'
+import { SessionInUseError } from 'bake-cmdline'
+import type { TuiCopy } from 'bake-tui-ui/copy.ts'
+import { formatAge } from 'bake-tui-ui/format.ts'
 import type { AttachmentOptions } from './attachments.ts'
 import { SessionController } from './controller.ts'
 import { needsPreset, openElsewhere, openSession, type SessionOptions } from './session.ts'

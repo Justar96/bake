@@ -3,11 +3,11 @@ description: "Shared subprocess and direct-agent harness for keyless example smo
 kind: "package-library"
 ---
 
-# @deepseek-ai/dsh-loader-smoke
+# bake-loader-smoke
 
 ## Summary
 
-Use `dsh-loader-smoke` to boot an application fixture from its real bin and `cordis.yml` in an isolated temporary directory, with captured output and cleanup. `runFixtureTurn` drives one task through the configured root agent and returns the final assistant text plus token usage. Tests can select zero-build source execution or built-package execution, so local and CI smoke tests use the intended consumer path for each environment. This support-tier library is for test authors, not product integrations.
+Use `bake-loader-smoke` to boot an application fixture from its real bin and `cordis.yml` in an isolated temporary directory, with captured output and cleanup. `runFixtureTurn` drives one task through the configured root agent and returns the final assistant text plus token usage. Tests can select zero-build source execution or built-package execution, so local and CI smoke tests use the intended consumer path for each environment. This support-tier library is for test authors, not product integrations.
 
 ## Table of Contents
 
@@ -43,11 +43,15 @@ Set `expectedExitCode` when the scenario pins a designed failure surface — a o
 
 ### Testing a shipped profile
 
-Profile integration drivers use the repository-only `tests/fixtures/production-profile.ts` helper. It loads the named shipped profile and its bundle patches through `loadProfile`, materializes the retained link-mode fallback, mounts `PluginPackages` with native lookup as the link-mode launcher does, and passes the bundle patches followed by the test's `*.patch.yml` files to the root `cordis:include` mounted by `boot`. Those patches should contain only the test provider or model, isolated persistence paths, and subject-specific changes. Package-level unit tests that need an agent loop without profile integration mount `dsh-agent-loop-testkit` locally instead.
+Profile integration drivers use the repository-only `tests/fixtures/production-profile.ts` helper. It loads the named shipped profile and its bundle patches through `loadProfile`, materializes the retained link-mode fallback, mounts `PluginPackages` with native lookup as the link-mode launcher does, and passes the bundle patches followed by the test's `*.patch.yml` files to the root `cordis:include` mounted by `boot`. Those patches should contain only the test provider or model, isolated persistence paths, and subject-specific changes. Package-level unit tests that need an agent loop without profile integration mount `bake-agent-loop-testkit` locally instead.
 
 ### Driving a fixture turn
 
 `runFixtureTurn(ctx, options)` drives one task through exactly one configured root agent: it waits for the task to reach the durable inbox, forwards canonical events to your observer, flushes the session, and returns the final assistant text plus accumulated usage. Example-local drivers keep configuration, rendering, and assertion ownership.
+
+### Pinning a model surface
+
+`renderModelSurface` turns one captured first request into a Markdown snapshot: measured sizes, request settings, each message's exact text, and each tool's description and JSON schema in request order. `normalizeModelSurface` keeps only the model-visible fields and replaces machine-specific values first; `pathPlaceholders` expands one path into every spelling a request can carry (its real path and both slash forms), and ISO dates always become `<date>`. `plantModelSurfaceWorkspace` writes the fixed workspace the scenarios share, and `MODEL_SURFACE_TASK` is their first message. A subprocess profile captures its request through the repository-only `tests/fixtures/surface-capture-llm.ts` adapter, which writes the first agent-loop request to the file named by `BAKE_SURFACE_CAPTURE`. The [model-surface snapshots](../../../docs/testing.md#pin-the-model-surface) are the consumers.
 
 ### Source or built mode
 
@@ -71,7 +75,7 @@ This section explains the design of the harness; the observable behavior is full
 
 ### Design
 
-The harness is built on one separation: the smoke runs in a child process under an isolated world, and the test process only observes and asserts. `runLoaderSmoke` creates a temporary cwd (or reuses a caller-provided one), prepares world state there, spawns the resolved bin with isolated DSH homes (`DSH_HOME`, `DSH_AGENTS_HOME` under that cwd), closes stdin immediately, and awaits a clean exit within the deadline before inspecting on every outcome and removing only a cwd it created. `runFixtureTurn` stays in-process: it looks up the composition's single root agent, follows the task from its durable inbox receipt through whole-agent idle, sums per-step usage, and flushes the session before returning.
+The harness is built on one separation: the smoke runs in a child process under an isolated world, and the test process only observes and asserts. `runLoaderSmoke` creates a temporary cwd (or reuses a caller-provided one), prepares world state there, spawns the resolved bin with isolated homes (`BAKE_HOME` and `BAKE_AGENTS_HOME` under that cwd, each set under its `DSH_` spelling too), closes stdin immediately, and awaits a clean exit within the deadline before inspecting on every outcome and removing only a cwd it created. `runFixtureTurn` stays in-process: it looks up the composition's single root agent, follows the task from its durable inbox receipt through whole-agent idle, sums per-step usage, and flushes the session before returning.
 
 ### Source map
 
@@ -80,7 +84,9 @@ The harness is built on one separation: the smoke runs in a child process under 
 | [`src/index.ts`](src/index.ts) | Mode resolver, `runLoaderSmoke` subprocess harness, options and result types |
 | [`src/agent-turn.ts`](src/agent-turn.ts) | `runFixtureTurn` direct-agent driver and result envelope |
 | — | No runtime invariant companion is published; this test-support package owns no production event stream or mutable data; consuming test suites exercise its behavior. |
+| [`src/model-surface.ts`](src/model-surface.ts) | Model-surface workspace, normalization, sizes, and Markdown rendering |
 | [`tests/fixtures/production-profile.ts`](tests/fixtures/production-profile.ts) | Repository-only shipped-profile composition helper for integration fixtures |
+| [`tests/fixtures/surface-capture-llm.ts`](tests/fixtures/surface-capture-llm.ts) | Repository-only keyless adapter that records a profile's first agent-loop request |
 
 </details>
 

@@ -1,0 +1,60 @@
+# Rust performance harness
+
+`scripts/rust-perf.ts` measures the D18 terminal workloads by one external method for a native `bake` binary and for a built Bake 0.3 checkout, and proposes budgets from a baseline report. It reads `/proc`, so it runs on Linux only. It loads no code from `apps/` or `packages/` and needs no model key: both arms stream from a loopback model the harness owns.
+
+```sh
+cd rust && cargo build --locked --release -p bake-cli && cd ..
+bun scripts/rust-perf.ts --arm ts:/path/to/bake-v0.3.8 --arm native:rust/target/release/bake --max-load 1
+bun scripts/rust-perf.ts budgets --baseline .preflight/perf/<report>.json --arm ts:/path/to/bake-v0.3.8
+```
+
+The `ts` arm is a clean v0.3.8 checkout (`git worktree add --detach <dir> v0.3.8`, so the report records the tag's revision) built with `bun install --frozen-lockfile`, `bun run build`, and `bun run build:native-system`; the harness runs `node <checkout>/apps/cli/lib/bin.js --profile tui --patch <file>` in it. The `native` arm must be a release build: the harness reads the Cargo profile from the binary's resolved path (`target/[<triple>/]<profile>/bake`), records it in the report, and refuses another profile, or a path that shows none, unless `--allow-non-release` is given; a report made that way warns that it sets no budget, and so does a budget proposal from it. `--workload` (repeatable) selects workloads, `--samples` the measured samples per arm, workload, and cache mode (20 by default), and `--mode cold`, `warm`, or `both` (the default) the cache conditions. Reports go to `.preflight/perf/` unless `--out` names another file; the harness refuses any path under `docs/`. The comment at the top of `scripts/rust-perf.ts` lists every option.
+
+The first SIGINT or SIGTERM stops the run promptly: every wait in a sample observes it, the current sample kills its program and that program's processes and removes its temporary directories, and the report is written with `interrupted: true`. A second signal exits at once after killing every in-flight process and removing the temporary directories synchronously.
+
+## Workloads
+
+The six workloads are those of the 0.3 terminal performance driver: `fresh` (no history), `small` (50 turns), `typical` (500), `tail` (2000), `tools` (500 turns with four tool calls each), and `large-output` (12 turns of 64 KiB answers). [`workloads.ts`](workloads.ts) generates their prompts, reasoning, answers, tool calls, and results; each answer section ends in a unique history marker, and so does the last tool result when the last turn has tools. [`seed-session03.ts`](seed-session03.ts) encodes them as the 0.3 Session log that 0.3's own fixture writer persisted, byte for byte, and [`seed-pi.ts`](seed-pi.ts) as the Pi session the native arm opens with `--session`. The tests pin the hashes of both.
+
+## A sample
+
+Every sample is a fresh process with a freshly seeded session, a new user home and workspace, and a `BAKE_HOME` set by its cache mode (see [Method](#method)), in a 120×40 PTY whose shell `exec`s the program after a handshake, so the termios flags are read before the program starts. The faux model ([`model.ts`](model.ts)) answers every OpenAI Responses request with 100 text deltas 10 ms apart (`--pace-ms`); the native arm reaches it through `models.json`, the 0.3 arm through an `llm-pi-ai` route in the invocation patch. The native arm runs `--inline`, which writes resumed history to the terminal as 0.3 does; a fullscreen frame shows only its last rows.
+
+| Metric | Endpoint |
+|---|---|
+| `inputReadyMs` | Handshake through the arrival of the output that enabled bracketed paste (`CSI ? 2004 h`), or, if later, the first sight of changed termios flags, which are read at each output chunk and each 2 ms poll. In the native arm this is terminal acquisition: `bake` enters raw mode and enables bracketed paste after it has read the resumed session and before its first frame and its input loop. In the 0.3 arm Ink enables bracketed paste from the mounted application's paste effect, with raw mode set by its input hook, so its key reader is attached. The two are not the same event, so compare `startupMs` for first usable input. |
+| `startupMs` | Handshake through the composer echo of `PERF_READY`, typed at input readiness: first usable input. |
+| `replayMs` | Handshake through the last history marker's first appearance; null for `fresh`. |
+| `readyMs` | Handshake through both the echo and every history marker: full-history readiness. |
+| `firstDeltaMs` | Enter, which submits `PERF_READY`, through the first streamed delta. |
+| `streamInputMs` | `PERF_LIVE_DRAFT` typed after the first delta, through its echo, which must arrive before the last delta. |
+| `streamMs` | Enter through the settled turn after the last delta, including the fixed pacing. |
+| `idleCpuMs` | CPU time of the process tree over 5 s after the turn settles (`--idle-ms`). |
+| `shutdownMs` | SIGTERM through the observed exit. The sample fails when the program is no longer alive at SIGTERM, when it has not exited `--shutdown-timeout-ms` (10 s) after SIGTERM, at which point its tree is killed, or when its exit is not 0 or 143 with the terminal restored. |
+| `peakRssMiB` | Peak memory from the kernel's high-water marks: the sum over every process the tree held of its largest `VmHWM`, read every 10 ms from spawn to exit in a worker thread ([`proc-tree.ts`](proc-tree.ts)). A spike between readings is kept; growth after a process's last reading before it exits is not. Members that peaked at different times are summed, so it bounds the simultaneous peak from above. Shared pages count once per process. This is the budgeted memory metric. |
+| `sampledPeakRssMiB` | The largest sum of the tree's `VmRSS` in one 10 ms reading; it can miss a short spike. Reported without a budget. |
+
+Times come from the monotonic clock when the PTY output chunk holding the observed text arrives, not from terminal paint; neither arm queries the terminal. Output is never emulated. [`terminal.ts`](terminal.ts) strips each chunk in one byte loop and searches the visible bytes with `Buffer.indexOf`, keeping a 64-byte carry so a marker or echo split across chunks is found once, and a 256 KiB visible tail for the settled-turn check and failure messages. The PTY is read on the harness's main thread and back-pressure makes the program wait for it, so output-heavy workloads include the read cost. Measured with `cat` of 38-42 MB through the observer on a 32-CPU Linux host with Bun 1.4.3: 205-265 ms (about 160-200 MB/s), against 166-188 ms for Bun's PTY with a reader that only counts bytes and 620-940 ms (40-60 MB/s) for the earlier per-character observer. The observer itself adds about 1-2 ms per MB, the PTY transport about 4.5 ms per MB; each record's `outputBytes` shows how much a sample paid. No replay can be observed faster than its output allows: the native `tail` workload writes about 70 MB, which takes the harness about 350-420 ms to read of its 1.2-1.3 s replay. During such a flood a 10 ms timer, as the faux model paces its deltas, fired at most 9 ms late, and the model streams only after the history has replayed, so its pacing does not wait on a replay.
+
+The observer also follows, across chunks, the DEC private modes the arms toggle, single or in lists such as `CSI ? 1000 ; 1006 h`: auto-wrap (`?7`), cursor visibility (`?25`), mouse reporting (`?1000`, `?1002`, `?1003`, `?1005`, `?1006`, `?1015`), focus events (`?1004`), the alternate screen (`?1047`, `?1049`), and bracketed paste (`?2004`); `ESC c` resets them. A sample fails unless, at exit, the termios flags equal those before the program started and each of these modes is back in a terminal's initial state, with auto-wrap and the cursor on and the rest off. Every history marker must appear exactly once.
+
+A sample tracks every process it sees in the program's tree: at the idle window, before SIGTERM, before it kills a failed program, and at each 10 ms reading of the monitor. After the program exits, it adds every live process still in the program's session, which finds a descendant that double-forked away from the tree but not one that called `setsid`. Processes alive 250 ms after the exit, compared by pid and start time so a reused pid is never taken for one, are recorded as leaked and killed with their descendants, and the sample waits up to 2 s for them to die, for failed samples as for completed ones; the grace lets the kernel's hang-up of the terminal's foreground jobs land. A failed sample is recorded with its error and never enters a distribution, and a completed one whose duration or size is negative or missing fails instead.
+
+## Method
+
+Iterations are outermost; within one, each workload and cache mode runs every arm once, the arm order reversed on odd iterations. Both cache modes apply to both arms alike:
+
+- `cold`: a new empty `BAKE_HOME` and an empty private `TMPDIR`, where Node keeps its compile cache, per sample. Every launch sets up its home, as a first run does; for 0.3 that includes installing the `tui` profile and building `profiles/node_modules`.
+- `warm`: before any warm sample, one unmeasured launch of the arm on `fresh` runs a whole sample in an empty `BAKE_HOME` at a fixed per-arm path, and that home, without its `sessions/`, is kept as the arm's prepared home. Each warm sample then runs in a fresh copy of the prepared home at the same path (`cp -a --reflink=auto`, made before spawn and never timed), so absolute paths the arm wrote into its home stay valid, with its own seeded session and the `TMPDIR` that the arm's warm samples share. One discarded warm-up launch per arm and workload precedes the measured warm samples. The preparation and warm-ups are in the report with `warmup: true` (iterations -2 and -1) and are never summarized; if the preparation fails, the run stops.
+
+Neither mode drops the kernel page cache, which needs privileges, so seeded files and the binary may be cached in both, and the report says so. Every sample has a new user `HOME` and workspace.
+
+The harness refuses to start when the 1-minute load average exceeds `--max-load` (by default a quarter of the CPUs, at least 1) and records each sample's load. Pass `--max-load 1` on a quiet host for a baseline. The report holds the host's kernel, CPU, governor, memory, and Bun version, each arm's build identity (the binary's SHA-256 and version, or the checkout's revision and launcher, application, and lock hashes), the harness's revision and source hash, the method, every sample, and per cell the minimum, median, nearest-rank p95, maximum, unscaled MAD, and 95% percentile-bootstrap intervals of the median and p95 (2000 resamples, fixed seed).
+
+## Budgets
+
+`budgets` reads a baseline report and writes a proposal ([`budgets.ts`](budgets.ts)) to `.preflight/perf/` or `--out`: for each workload and cache mode, each latency's and peak RSS's median and p95 may degrade by at most 10%, and a candidate may leak no process and fail no sample. Idle CPU and the sampled RSS peak are reported without a bound. The proposal carries the baseline's intervals and warns about failed or leaking cells and cells under 20 samples. It has `status: "proposed"` and no approval; the owner approves it before any candidate measurement, and only then are budgets recorded in the roadmap, by hand.
+
+## Tests
+
+`bun test scripts/rust-perf.test.ts` checks the statistics, seeds, faux model, `/proc` readers, the observer, and `runSample` against small bash programs the tests own: a program that ignores SIGTERM, one that exits before it, leaked children wherever they went, a DEC mode left set, an interrupt, and the warm-home preparation. Its native smoke measures the binary `BAKE_PERF_NATIVE` names (for example `BAKE_PERF_NATIVE=rust/target/release/bake` after a release build) on `fresh` and the Pi-seeded `small`, cold and warm. The scripts-unit preflight gate runs before any build, where a binary under `rust/target/` may be older than the sources, so the smoke never picks one itself: without the variable it is skipped and prints why.

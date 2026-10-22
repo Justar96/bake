@@ -254,6 +254,18 @@ function packageSearchPaths(
     : cjs._nodeModulePaths(dirname(entry.declarer))
 }
 
+/**
+ * Return the request a route resolves. A fallback entry for a deprecated
+ * legacy package name resolves the same subpath of the package that replaced it.
+ * @param request - bare package or package-subpath specifier.
+ * @param route - the route selected for the request.
+ * @returns the request under the current package name, or `request` unchanged.
+ */
+function routedRequest(request: string, route: ResolutionRoute): string {
+  if (route.kind !== 'fallback' || route.entry.renamedTo === undefined) return request
+  return route.entry.renamedTo + request.slice(route.entry.name.length)
+}
+
 function localCandidateOwnsResolution(candidate: string, resolved: string, request: string, name: string): boolean {
   if (startsWithin(resolved, prefixes(candidate))) return true
   if (sameResolution(candidate, resolved)) return true
@@ -691,14 +703,15 @@ export function installProfileResolution(
         return result
       }
       const routedParent = pathToFileURL(route.kind === 'fallback' ? route.entry.declarer : route.parent).href
+      const target = routedRequest(request, route)
       if (behavior === 'enforce') {
         const previous = delegatedEsm
-        delegatedEsm = { parent: routedParent, request }
+        delegatedEsm = { parent: routedParent, request: target }
         const restoreImporter = (error: unknown): never => throwWithImporter(error, routedParent, parent)
         try {
           let result: ResolveResult | Promise<ResolveResult>
           try {
-            result = native(request, routedParent, attributes)
+            result = native(target, routedParent, attributes)
           } catch (error) {
             return restoreImporter(error)
           }
@@ -712,12 +725,12 @@ export function installProfileResolution(
       }
       const actual = native(request, parent, attributes)
       const previous = delegatedEsm
-      delegatedEsm = { parent: routedParent, request }
+      delegatedEsm = { parent: routedParent, request: target }
       const restoreImporter = (error: unknown): never => throwWithImporter(error, routedParent, parent)
       try {
         let expected: ResolveResult | Promise<ResolveResult>
         try {
-          const result = native(request, routedParent, attributes)
+          const result = native(target, routedParent, attributes)
           expected = result
           /* v8 ignore next -- Node 24+ resolves synchronously; the Node 22 matrix covers its Promise result */
           if (result instanceof Promise) expected = result.catch(restoreImporter)
@@ -790,15 +803,16 @@ export function installProfileResolution(
     parent: CommonJsParent, main: boolean, options?: CommonJsOptions,
   ): string => {
     const anchor = routed.kind === 'fallback' ? routed.entry.declarer : routed.parent
+    const target = routedRequest(request, routed)
     const synthetic = new cjs(anchor)
     // Late parent assignment preserves Node's require stack without publishing this routing anchor in parent.children.
     synthetic.parent = parent
     synthetic.filename = anchor
     synthetic.paths = routed.kind === 'fallback'
-      ? packageSearchPaths(routed.entry, request, cjs)
+      ? packageSearchPaths(routed.entry, target, cjs)
       : cjs._nodeModulePaths(dirname(anchor))
     try {
-      return originalFilename.call(cjs, request, synthetic, main, options)
+      return originalFilename.call(cjs, target, synthetic, main, options)
     } catch (error) {
       return throwWithoutCjsAnchor(error, anchor)
     }
@@ -818,15 +832,15 @@ export function installProfileResolution(
     target: { specifier: string; parentURL: string }, conditions: Iterable<string>,
   ): string => {
     const state = router.routeUrl(target.specifier, target.parentURL)
-    const resolveFrom = (parentURL: string): string => fileURLToPath(esmDefaultResolve(
-      target.specifier, { parentURL, conditions: [...conditions] },
+    const resolveFrom = (parentURL: string, specifier = target.specifier): string => fileURLToPath(esmDefaultResolve(
+      specifier, { parentURL, conditions: [...conditions] },
     ).url)
     /* v8 ignore next -- the target manifest was found inside the established profile scope */
     if (state === undefined) return resolveFrom(target.parentURL)
     if (state.route.kind === 'native') return resolveFrom(target.parentURL)
     const route = state.route
     if (route.kind === 'after-fallback') return resolveFrom(pathToFileURL(route.parent).href)
-    return resolveFrom(pathToFileURL(route.entry.declarer).href)
+    return resolveFrom(pathToFileURL(route.entry.declarer).href, routedRequest(target.specifier, route))
   }
   const wrappedFilename: CommonJsModule['_resolveFilename'] = (request, parent, main, options) => {
     if (delegatedCjs || !parent?.filename) {

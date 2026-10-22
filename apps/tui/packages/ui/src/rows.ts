@@ -4,10 +4,10 @@
  * One row is one visually distinct line group. The renderer never inspects
  * session events directly.
  *
- * @module @dsh-tui/ui/rows
+ * @module bake-tui-ui/rows
  */
 
-import type { UserMessage } from '@deepseek-ai/dsh-session'
+import type { UserMessage } from 'bake-session'
 
 /** Display metadata only; source bytes and local storage paths never reach the UI. */
 export interface AttachmentSummary {

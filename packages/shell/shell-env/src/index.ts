@@ -1,19 +1,19 @@
 /**
  * Tool-independent shell environment plugin: owns the `ctx.shellEnv` registry of
  * trusted, per-execution `DSH_*` variables consumed by the model-facing shell
- * tools (`dsh-tool-bash`, `dsh-tool-pwsh`). Built-in shell facts are owned by
+ * tools (`bake-tool-bash`, `bake-tool-pwsh`). Built-in shell facts are owned by
  * the registry itself while plugins can register additional, enumerable facts
  * with effect-scoped disposal.
  *
- * @module @deepseek-ai/dsh-shell-env
+ * @module bake-shell-env
  */
 
 import { Service, type Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import { DSH_ENV_PREFIX } from '@deepseek-ai/dsh-shell'
-import type { DshEnvironment, DshEnvironmentKey } from '@deepseek-ai/dsh-shell'
-import { DSH_HOME_ENV, resolveDshHome } from '@deepseek-ai/dsh-home-paths'
-import type { ToolExecution } from '@deepseek-ai/dsh-tools'
+import { DSH_ENV_PREFIX } from 'bake-shell'
+import type { DshEnvironment, DshEnvironmentKey } from 'bake-shell'
+import { DSH_HOME_ENV, resolveDshHome } from 'bake-home-paths'
+import type { ToolExecution } from 'bake-tools'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -26,7 +26,7 @@ export const inject: string[] = []
 
 /** Plugin config (all optional — the built-in facts resolve without defaults). */
 export interface Config {
-  /** DeepSeek Harness home directory exposed as `DSH_HOME`; defaults to `$DSH_HOME` or `~/.dsh`. */
+  /** DeepSeek Harness home directory exposed as `DSH_HOME` and `BAKE_HOME`; defaults to `$BAKE_HOME`, `$DSH_HOME`, or `~/.dsh`. */
   dshHome?: string
 }
 

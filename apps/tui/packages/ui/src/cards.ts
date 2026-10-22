@@ -14,10 +14,10 @@
  * back to the raw arguments and result text. So does a generic result that
  * omits its `content`, which the contract defines as "render the raw result".
  *
- * @module @dsh-tui/ui/cards
+ * @module bake-tui-ui/cards
  */
 
-import type { FileDiff, TerminalChanges, TerminalFileChange, ToolCallView, ToolResult, ToolResultView } from '@deepseek-ai/dsh-tools'
+import type { FileDiff, TerminalChanges, TerminalFileChange, ToolCallView, ToolResult, ToolResultView } from 'bake-tools'
 import { diffArrays, diffWordsWithSpace } from 'diff'
 import type { TuiCopy } from './copy.ts'
 import type { CardChanges, CardLine } from './rows.ts'

@@ -27,10 +27,10 @@ function createWorkspace(): string {
   return root
 }
 
-describe('DSH package license gate', () => {
+describe('Bake and DSH package license gate', () => {
   it('checks root, unhyphenated CLI, and dsh-prefixed package names while ignoring other families', () => {
     const root = createWorkspace()
-    writeManifest(root, 'apps/cli/package.json', { name: '@deepseek-ai/dsh', license: 'MIT' })
+    writeManifest(root, 'apps/cli/package.json', { name: 'bake-cli', license: 'MIT' })
     writeManifest(root, 'packages/core/agent/package.json', {
       name: '@deepseek-ai/dsh-agent',
       license: 'BSD-3-Clause',
@@ -44,6 +44,25 @@ describe('DSH package license gate', () => {
       packageCount: 3,
       failures: [
         'packages/core/agent/package.json: @deepseek-ai/dsh-agent must declare "license": "MIT"; found "BSD-3-Clause".',
+      ],
+    })
+  })
+
+  it('checks Bake root and core packages while retaining DSH coverage', () => {
+    const root = createWorkspace()
+    writeManifest(root, 'package.json', {
+      name: 'bake', license: 'MIT', workspaces: ['packages/*/*', 'vendor/*'],
+    })
+    writeManifest(root, 'packages/core/agent/package.json', { name: 'bake-agent', license: 'BSD-3-Clause' })
+    writeManifest(root, 'packages/llm/llm/package.json', { name: 'bake-llm' })
+    writeManifest(root, 'vendor/cordis/package.json', { name: '@deepseek-ai/cordis', license: 'BSD-3-Clause' })
+    writeManifest(root, 'vendor/other/package.json', { name: 'bakery', license: 'BSD-3-Clause' })
+
+    expect(inspectDshPackageLicenses(root)).toEqual({
+      packageCount: 3,
+      failures: [
+        'packages/core/agent/package.json: bake-agent must declare "license": "MIT"; found "BSD-3-Clause".',
+        'packages/llm/llm/package.json: bake-llm must declare "license": "MIT"; found undefined.',
       ],
     })
   })

@@ -1,29 +1,48 @@
-/** A deployment counts as a release only once the public host serves it, signed by a committed key, byte for byte. */
-import { afterEach, expect, test } from 'bun:test'
+/**
+ * A deployment counts as a native release only once the public host serves it,
+ * signed by the committed native key, byte for byte, with the 0.3 route intact.
+ */
+import { expect, test } from 'bun:test'
 import { createHash, generateKeyPairSync, sign, type KeyObject } from 'node:crypto'
+import { nativeManifestBytes } from './native-manifest.ts'
+import { archiveName, type RustTarget } from './pack-rust.ts'
 import { verifyLive } from './verify-live.ts'
-import { RELEASE_PUBLIC_KEYS } from '../../packages/boot/updater/src/index.ts'
 
-const saved = [...RELEASE_PUBLIC_KEYS]
-afterEach(() => { (RELEASE_PUBLIC_KEYS as string[]).splice(0, Infinity, ...saved) })
+const BASE = 'https://releases.test'
 
-/** Trust a throwaway key as if it were committed, for the life of one test. */
-function committedKey(): KeyObject {
+/** A throwaway Ed25519 pair, with its public half as a client trusts it. */
+function keyPair(): { readonly privateKey: KeyObject; readonly publicKey: string } {
   const pair = generateKeyPairSync('ed25519')
-  ;(RELEASE_PUBLIC_KEYS as string[]).splice(0, Infinity, pair.publicKey.export({ type: 'spki', format: 'der' }).toString('base64'))
-  return pair.privateKey
+  return { privateKey: pair.privateKey, publicKey: pair.publicKey.export({ type: 'spki', format: 'der' }).toString('base64') }
 }
 
-/** A host serving `versions` in turn, one per manifest request, each signed by `key`. */
-function host(key: KeyObject, versions: string[], archive = Buffer.from('release bytes')) {
+const native = keyPair()
+const legacy = keyPair()
+const keys = [native.publicKey]
+const legacyKeys = [legacy.publicKey]
+
+/**
+ * A download service serving `versions` in turn, one per native manifest
+ * request, each signed by `key`, beside a frozen 0.3 `latest.json`.
+ */
+function host(versions: string[], options: { key?: KeyObject; targets?: readonly RustTarget[]; archive?: Buffer } = {}) {
+  const archive = options.archive ?? Buffer.from('release bytes')
   const files = new Map<string, Uint8Array<ArrayBuffer>>([['health', Buffer.from('ok')], ['install.sh', Buffer.from('')], ['install.ps1', Buffer.from('')]])
+  const frozen = Buffer.from(JSON.stringify({ version: '0.3.8', artifacts: { 'linux-x64': {
+    file: 'bake-v0.3.8-linux-x64.tar.gz', sha256: 'a'.repeat(64), size: 1,
+  } } }))
+  files.set('latest.json', frozen)
+  files.set('latest.json.sig', Buffer.from(sign(null, frozen, legacy.privateKey).toString('base64')))
   const publish = (version: string): void => {
-    const manifest = Buffer.from(JSON.stringify({ version, artifacts: { 'linux-x64': {
-      file: `bake-v${version}-linux-x64.tar.gz`, sha256: createHash('sha256').update(archive).digest('hex'), size: archive.byteLength,
-    } } }))
-    files.set('latest.json', manifest)
-    files.set('latest.json.sig', Buffer.from(sign(null, manifest, key).toString('base64')))
-    files.set(`releases/${version}/bake-v${version}-linux-x64.tar.gz`, archive)
+    const artifacts: Partial<Record<RustTarget, { file: string; sha256: string; size: number }>> = {}
+    for (const target of options.targets ?? ['linux-arm64', 'linux-x64']) {
+      const file = archiveName(version, target)
+      artifacts[target] = { file, sha256: createHash('sha256').update(archive).digest('hex'), size: archive.byteLength }
+      files.set(`native/releases/${version}/${file}`, new Uint8Array(archive))
+    }
+    const manifest = new Uint8Array(nativeManifestBytes({ schema: 'bake-native-release/1', channel: 'stable', version, published: '2026-10-22T00:00:00Z', artifacts }))
+    files.set('native/stable.json', manifest)
+    files.set('native/stable.json.sig', Buffer.from(sign(null, manifest, options.key ?? native.privateKey).toString('base64')))
   }
   let served = 0
   const next = (): void => {
@@ -34,8 +53,8 @@ function host(key: KeyObject, versions: string[], archive = Buffer.from('release
   next()
   served = 0
   const fetch = (async (url: string) => {
-    const path = String(url).replace('https://releases.test/', '')
-    if (path === 'latest.json' && served < versions.length) next()
+    const path = String(url).replace(`${BASE}/`, '')
+    if (path === 'native/stable.json' && served < versions.length) next()
     const body = files.get(path)
     return body === undefined ? new Response('', { status: 404 }) : new Response(body)
   }) as unknown as typeof globalThis.fetch
@@ -43,37 +62,65 @@ function host(key: KeyObject, versions: string[], archive = Buffer.from('release
 }
 
 const noWait = async (): Promise<void> => {}
+const verify = (fetch: typeof globalThis.fetch, extra: { complete?: boolean; timeoutMs?: number } = {}) =>
+  verifyLive({ base: BASE, version: '0.4.1', keys, legacyKeys, fetch, sleep: noWait, ...extra })
 
 test('waits for the new deployment, then verifies every archive it lists', async () => {
-  const { fetch } = host(committedKey(), ['0.1.0', '0.1.0', '0.1.1'])
-  const manifest = await verifyLive({ base: 'https://releases.test', version: '0.1.1', fetch, sleep: noWait })
-  expect(manifest.version).toBe('0.1.1')
+  const { fetch } = host(['0.4.0', '0.4.0', '0.4.1'])
+  const manifest = await verify(fetch, { complete: true })
+  expect(manifest.version).toBe('0.4.1')
+  expect(Object.keys(manifest.artifacts)).toEqual(['linux-arm64', 'linux-x64'])
 })
 
 test('waits for an archive that appears after its manifest', async () => {
-  const served = host(committedKey(), ['0.1.1'])
+  const served = host(['0.4.1'])
   let attempts = 0
   const fetch = (async (url: string) => {
     if (String(url).endsWith('.tar.gz') && attempts++ === 0) return new Response('', { status: 404 })
     return served.fetch(url)
   }) as unknown as typeof globalThis.fetch
-  await expect(verifyLive({ base: 'https://releases.test', version: '0.1.1', fetch, sleep: noWait })).resolves.toMatchObject({ version: '0.1.1' })
-  expect(attempts).toBe(2)
+  await expect(verify(fetch)).resolves.toMatchObject({ version: '0.4.1' })
+  expect(attempts).toBe(3)
 })
 
-test('refuses a manifest no committed key signed, however long it waits', async () => {
-  committedKey()
-  const { fetch } = host(generateKeyPairSync('ed25519').privateKey, ['0.1.1'])
-  await expect(verifyLive({ base: 'https://releases.test', version: '0.1.1', fetch, sleep: noWait, timeoutMs: 0 }))
-    .rejects.toThrow('never served Bake 0.1.1: The release manifest signature did not verify')
+test('refuses a native manifest no trusted key signed, however long it waits', async () => {
+  const { fetch } = host(['0.4.1'], { key: keyPair().privateKey })
+  await expect(verify(fetch, { timeoutMs: 0 })).rejects.toThrow('never served Bake 0.4.1: the native release manifest signature did not verify')
+  // The 0.3 key signs no native manifest.
+  await expect(verify(host(['0.4.1'], { key: legacy.privateKey }).fetch, { timeoutMs: 0 })).rejects.toThrow('signature did not verify')
 })
 
-test('refuses served archive bytes that differ from the manifest, and an incomplete release when all platforms are required', async () => {
-  const key = committedKey()
-  const tampered = host(key, ['0.1.1'])
-  const original = tampered.fetch
-  const fetch = (async (url: string) => String(url).endsWith('.tar.gz') ? new Response(Buffer.from('release bytez')) : original(url)) as unknown as typeof globalThis.fetch
-  await expect(verifyLive({ base: 'https://releases.test', version: '0.1.1', fetch, sleep: noWait })).rejects.toThrow('served bytes do not match')
-  await expect(verifyLive({ base: 'https://releases.test', version: '0.1.1', fetch: host(key, ['0.1.1']).fetch, sleep: noWait, complete: true }))
-    .rejects.toThrow('The live release lacks darwin-arm64, darwin-x64, linux-arm64, win32-x64')
+test('refuses a host that publishes no native release', async () => {
+  const served = host(['0.4.1'])
+  const fetch = (async (url: string) => String(url).endsWith('/native/stable.json') ? new Response('', { status: 404 }) : served.fetch(url)) as unknown as typeof globalThis.fetch
+  await expect(verify(fetch, { timeoutMs: 0 })).rejects.toThrow('never served Bake 0.4.1: it publishes no native release')
+})
+
+test('refuses served archive bytes that differ from the manifest', async () => {
+  const served = host(['0.4.1'])
+  const fetch = (async (url: string) => String(url).endsWith('.tar.gz') ? new Response(Buffer.from('release bytez')) : served.fetch(url)) as unknown as typeof globalThis.fetch
+  await expect(verify(fetch)).rejects.toThrow('served bytes do not match')
+})
+
+test('refuses an incomplete release when both Linux platforms are required, and any other platform always', async () => {
+  await expect(verify(host(['0.4.1'], { targets: ['linux-x64'] }).fetch)).resolves.toMatchObject({ version: '0.4.1' })
+  await expect(verify(host(['0.4.1'], { targets: ['linux-x64'] }).fetch, { complete: true })).rejects.toThrow('The live release lacks linux-arm64')
+  await expect(verify(host(['0.4.1'], { targets: ['darwin-arm64', 'linux-arm64', 'linux-x64'] }).fetch))
+    .rejects.toThrow('The live release names darwin-arm64, which this release does not publish')
+})
+
+test('refuses a deployment that dropped or broke the frozen 0.3 route', async () => {
+  const dropped = host(['0.4.1'])
+  dropped.files.delete('latest.json')
+  await expect(verify(dropped.fetch, { timeoutMs: 0 })).rejects.toThrow('The frozen 0.3 route no longer verifies')
+  const resigned = host(['0.4.1'])
+  const latest = resigned.files.get('latest.json') ?? Buffer.alloc(0)
+  resigned.files.set('latest.json.sig', Buffer.from(sign(null, latest, native.privateKey).toString('base64')))
+  await expect(verify(resigned.fetch, { timeoutMs: 0 })).rejects.toThrow('The frozen 0.3 route no longer verifies')
+})
+
+test('requires the installers and the health check', async () => {
+  const { files, fetch } = host(['0.4.1'])
+  files.delete('install.sh')
+  await expect(verify(fetch, { timeoutMs: 0 })).rejects.toThrow(`${BASE}/install.sh did not become available: answered 404`)
 })

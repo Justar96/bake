@@ -1,0 +1,12 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": false,
+    "incremental": false,
+    "noEmit": true,
+    "rootDir": "..",
+    "rewriteRelativeImportExtensions": false,
+    "types": ["node", "bun"]
+  },
+  "include": ["rust-migration-ledger.ts", "rust-migration-ledger.test.ts"]
+}

@@ -1,0 +1,15 @@
+[package]
+name = "bake-plugin-fixture-hostile"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "A hostile test plugin: each tool name exercises one limit of Bake's Wasm plugin host"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+bake-plugin-sdk = { path = "../../../crates/bake-plugin-sdk" }
+serde_json = { workspace = true, features = ["std"] }

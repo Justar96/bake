@@ -3,7 +3,7 @@
  * per-call classifier. Presets set the sandbox mode and approval policy;
  * the classifier adds what presets cannot express: which tools ask in the
  * `normal` tier and which are refused in `read-only`.
- * @module @deepseek-ai/dsh-desktop/permission
+ * @module bake-desktop/permission
  */
 
 import type { PermissionTier } from './protocol.ts'

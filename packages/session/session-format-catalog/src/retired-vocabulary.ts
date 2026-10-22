@@ -21,12 +21,12 @@
  * an entry only with the Session-format version bump and migration that
  * retires its records.
  *
- * @module @deepseek-ai/dsh-session-format-catalog/retired-vocabulary
+ * @module bake-session-format-catalog/retired-vocabulary
  */
-import type { Branded } from '@deepseek-ai/dsh-brand'
-import type { ContentBlock } from '@deepseek-ai/dsh-llm/types'
-import type { MessageId, ToolCallId } from '@deepseek-ai/dsh-llm/brand'
-import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import type { Branded } from 'bake-brand'
+import type { ContentBlock } from 'bake-llm/types'
+import type { MessageId, ToolCallId } from 'bake-llm/brand'
+import type { SessionId } from 'bake-session/types'
 
 /** Complete model selection a web client recorded for one Session. */
 export interface RetiredModelSelection {
@@ -142,7 +142,7 @@ export interface RetiredTeamMessageSource {
   readonly senderName: string
 }
 
-declare module '@deepseek-ai/dsh-llm' {
+declare module 'bake-llm' {
   interface MessageSourceMap {
     /** A web client's prompt correlation and optional validated time zone. */
     'user-rpc': { kind: 'user'; rpcId: RetiredSessionRequestId; clientTimeZone?: string }
@@ -161,7 +161,7 @@ declare module '@deepseek-ai/dsh-llm' {
   }
 }
 
-declare module '@deepseek-ai/dsh-session/types' {
+declare module 'bake-session/types' {
   interface SessionEventMap {
     /** Model selection a web client requested for later prompt assembly. Log-only. */
     'model/selection': RetiredModelSelection

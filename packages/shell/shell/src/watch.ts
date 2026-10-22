@@ -1,10 +1,10 @@
 /**
  * Live-output polling for foreground runs, shared by the bash and pwsh
  * executors so both honor {@link ShellExecSpec.onOutput} the same way.
- * @module @deepseek-ai/dsh-shell/watch
+ * @module bake-shell/watch
  */
 
-import type { SubprocessOutputReader } from '@deepseek-ai/dsh-subprocess'
+import type { SubprocessOutputReader } from 'bake-subprocess'
 import type { ShellExecSpec } from './types.ts'
 
 /** How often a running command's captured streams are read for live output. */

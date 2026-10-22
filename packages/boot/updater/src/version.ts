@@ -1,6 +1,6 @@
 /**
  * Release version syntax and ordering.
- * @module @deepseek-ai/dsh-updater/version
+ * @module bake-updater/version
  */
 
 /** A Bake release version: `major.minor.patch` with an optional prerelease. */

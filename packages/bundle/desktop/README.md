@@ -1,13 +1,13 @@
 ---
-description: "Long-lived bridge that lets the Bake Desktop app drive one dsh Agent: streamed output, forwarded approvals, and three permission tiers, for desktop integrators."
+description: "Long-lived bridge that lets the Bake Desktop app drive one Bake Agent: streamed output, forwarded approvals, and three permission tiers, for desktop integrators."
 kind: "package-bundle"
 ---
 
-# @deepseek-ai/dsh-desktop
+# bake-desktop
 
 ## Summary
 
-`dsh-desktop` is the bundle the Bake Desktop app launches: `dsh --profile desktop` keeps one process alive for a workspace, drives one root Agent, and exchanges protocol messages with the desktop. It streams assistant text, reports tool calls and token usage, forwards every approval question to the desktop's approval card, and applies the desktop's permission tier (read-only, normal, or full access). It also reports harness spans, so a desktop trace follows one turn from the user's click through the model request and each tool call. The boundary: one root Agent per process, driven only by the desktop protocol.
+`bake-desktop` is the bundle the Bake Desktop app launches: `dsh --profile desktop` keeps one process alive for a workspace, drives one root Agent, and exchanges protocol messages with the desktop. It streams assistant text, reports tool calls and token usage, forwards every approval question to the desktop's approval card, and applies the desktop's permission tier (read-only, normal, or full access). It also reports harness spans, so a desktop trace follows one turn from the user's click through the model request and each tool call. The boundary: one root Agent per process, driven only by the desktop protocol.
 
 ## Table of Contents
 
@@ -37,6 +37,10 @@ printf '%s\n' \
 
 Under Electron the desktop launches the same entry in a utility process, and every message travels as one string on the process's message port. Without that port the bridge reads newline-delimited JSON on stdin and writes it on stdout, which is how tests and benchmarks drive it. It announces `ready` once the composition is settled, answers `init` with `initialized`, and exits when stdin closes or a `shutdown` arrives.
 
+### Environment
+
+The process reads each product setting from its `BAKE_*` name first and falls back to the `DSH_*` name, so an app that still sets only `DSH_HOME`, `DSH_TOOLS_MODE`, or `DSH_PERMISSION_MODE` keeps working. A blank or whitespace-only `BAKE_*` value counts as unset: the `DSH_*` value, or the default when that is unset too, applies. An opt-out that any non-empty value enables, such as `TELEMETRY_DISABLED`, takes effect under either name, so clearing `BAKE_TELEMETRY_DISABLED` does not override `DSH_TELEMETRY_DISABLED=1`. The `--profile desktop` launch command works as both `bake` and `dsh`.
+
 ### Permission tiers
 
 | Tier | Preset | What asks | What is refused |
@@ -53,7 +57,7 @@ Every approval question for the root Agent becomes an `approval.request` carryin
 
 ### When to use it
 
-Use this profile when an application owns the conversation and the user interface: it needs streamed text, approval questions it can show, and a permission tier it can switch. Use `dsh-headless` for one task from a script, and the terminal profile for interactive use.
+Use this profile when an application owns the conversation and the user interface: it needs streamed text, approval questions it can show, and a permission tier it can switch. Use `bake-headless` for one task from a script, and the terminal profile for interactive use.
 
 -----
 
@@ -92,9 +96,9 @@ No runtime invariant companion is published; the bridge owns no durable Session 
 <a id="further-exploration"></a>
 ## Further Exploration
 
-- [`@deepseek-ai/dsh-headless`](../headless/README.md) — the one-shot runner this bridge is modelled on.
-- [`@deepseek-ai/dsh-permission-presets`](../../interaction/permission-presets/README.md) — the presets each tier selects.
-- [`@deepseek-ai/dsh-user-approval`](../../interaction/user-approval/README.md) — the approval service whose questions the bridge answers.
+- [`bake-headless`](../headless/README.md) — the one-shot runner this bridge is modelled on.
+- [`bake-permission-presets`](../../interaction/permission-presets/README.md) — the presets each tier selects.
+- [`bake-user-approval`](../../interaction/user-approval/README.md) — the approval service whose questions the bridge answers.
 
 -----
 

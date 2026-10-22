@@ -28,19 +28,19 @@
  * a settings service the panel still changes the running process, and says
  * the change ends with it.
  *
- * @module @dsh-tui/app/preferences
+ * @module bake-tui-app/preferences
  */
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import type { SettingsDescriptor, SettingsProvider, SettingsScope } from '@deepseek-ai/dsh-settings'
-import type { CommandResult } from '@deepseek-ai/dsh-commands'
-import type {} from '@deepseek-ai/dsh-agent-default-model'
-import { PERMISSION_SETTINGS_NAMESPACE } from '@deepseek-ai/dsh-permission-presets'
-import { COMPACTION_BASIC_SETTINGS_NAMESPACE, COMPACTION_DEFAULTS } from '@deepseek-ai/dsh-compaction-basic'
-import type { TuiCopy } from '@dsh-tui/ui/copy.ts'
-import { formatTokens } from '@dsh-tui/ui/format.ts'
-import type { Choice } from '@dsh-tui/ui/picker.tsx'
-import { compactPath } from '@dsh-tui/ui/present.ts'
+import type { SettingsDescriptor, SettingsProvider, SettingsScope } from 'bake-settings'
+import type { CommandResult } from 'bake-commands'
+import type {} from 'bake-agent-default-model'
+import { PERMISSION_SETTINGS_NAMESPACE } from 'bake-permission-presets'
+import { COMPACTION_BASIC_SETTINGS_NAMESPACE, COMPACTION_DEFAULTS } from 'bake-compaction-basic'
+import type { TuiCopy } from 'bake-tui-ui/copy.ts'
+import { formatTokens } from 'bake-tui-ui/format.ts'
+import type { Choice } from 'bake-tui-ui/picker.tsx'
+import { compactPath } from 'bake-tui-ui/present.ts'
 import type { EditText } from './external-editor.ts'
 import type { Interactions } from './interactions.ts'
 import type { LoginPrompt } from './login.ts'

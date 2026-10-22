@@ -5,9 +5,9 @@ import {
   Session,
   SessionId,
   SessionLogOffset,
-} from '@deepseek-ai/dsh-session'
-import type { SessionEvent, SessionHeader } from '@deepseek-ai/dsh-session'
-import type { SessionFormatArtifact, SessionFormatHeader } from '@deepseek-ai/dsh-session-format'
+} from 'bake-session'
+import type { SessionEvent, SessionHeader } from 'bake-session'
+import type { SessionFormatArtifact, SessionFormatHeader } from 'bake-session-format'
 import { currentSessionMessageProjections } from './message-projections.ts'
 
 /**

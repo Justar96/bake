@@ -6,10 +6,10 @@
  * here, once, at the package boundary. The presentation layer takes the answer
  * as a prop and does not read `process`.
  *
- * @module @dsh-tui/app/frame
+ * @module bake-tui-app/frame
  */
 
-import type { FrameStyle } from '@dsh-tui/ui/layout.ts'
+import type { FrameStyle } from 'bake-tui-ui/layout.ts'
 
 /** Everything the decision reads, so it can be made without a terminal. */
 export interface FrameRequest {

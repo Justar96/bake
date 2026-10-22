@@ -78,10 +78,10 @@ function fixture(options: {
     exports,
     files: ['lib/index.js', ...invariantFile ? ['lib/invariant.js'] : []],
     peerDependencies: !invariantDependency || developmentOnlyInvariant ? {} : {
-      '@deepseek-ai/dsh-invariants': 'workspace:^',
+      'bake-invariants': 'workspace:^',
     },
     devDependencies: !invariantDependency ? {} : {
-      '@deepseek-ai/dsh-invariants': 'workspace:^',
+      'bake-invariants': 'workspace:^',
     },
   }
   writeFileSync(join(dir, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`)
@@ -125,7 +125,7 @@ describe('package invariant gate', () => {
   })
 
   it('accepts development-only invariants for configured Host dependencies', () => {
-    expect(collectPackageInvariantViolations(fixture({ packageName: '@deepseek-ai/dsh-llm' }))).toEqual([])
+    expect(collectPackageInvariantViolations(fixture({ packageName: 'bake-llm' }))).toEqual([])
   })
 
   it('accepts development-only invariants for client packages', () => {

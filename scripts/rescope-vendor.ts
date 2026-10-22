@@ -10,7 +10,7 @@
  * scalar. A match needs a quote (or `name: `) immediately left and the matching
  * quote — optionally after a `/subpath` — immediately right, which excludes
  * `cordis.yml`, the Loader's `cordis:` builtin prefix, `cordis-config-entry`,
- * `@deepseek-ai/dsh-tool-cordis`, and `cordiverse/cordis`, and makes the
+ * `bake-tool-cordis`, and `cordiverse/cordis`, and makes the
  * rewrite idempotent because the scoped name's `cordis` is preceded by `/`.
  * Markdown follows the rename inside every fence, and in `docs/` prose too:
  * a tutorial that teaches an unresolvable name is wrong, while prose elsewhere
@@ -99,6 +99,14 @@ const GENERIC_SKIPS: readonly GenericSkip[] = [
   { file: 'apps/cli/tests/windows-shell.spec.ts', upstream: ['cordis'] },
   // Opens a session under the `cordis` preset id, which the scoped name would not select.
   { file: 'apps/tui/packages/app/tests/host-plane.spec.ts', upstream: ['cordis'] },
+  // The model-surface helper and spec open each shipped preset by id, and the
+  // snapshot pins the `cordis` preset's own prompt verbatim.
+  { file: 'apps/tui/packages/app/tests/composed-profile.ts', upstream: ['cordis'] },
+  { file: 'apps/tui/packages/app/tests/model-surface.spec.ts', upstream: ['cordis'] },
+  { file: 'apps/tui/packages/app/tests/expected/model-surface/cordis.md', upstream: ['cordis'] },
+  // Migration ownership and support decisions name the shipped preset by id.
+  { file: 'docs/roadmap/rust-0.4/scope-00/inventory.json', upstream: ['cordis'] },
+  { file: 'docs/roadmap/rust-0.4/scope-00/support.md', upstream: ['cordis'] },
   // GROUP_ORDER holds `packages/<group>/` directory names, not package names.
   { file: 'scripts/gen-module-graph.ts', upstream: ['cordis'] },
   { file: 'scripts/gen-doc-graphs.ts', upstream: ['cordis'] },

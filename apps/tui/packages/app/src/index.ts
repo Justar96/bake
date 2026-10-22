@@ -1,6 +1,6 @@
 /** Cordis entry point for the interactive terminal profile. */
 import type { Context } from '@deepseek-ai/cordis'
-import { SESSION_IN_USE_EXIT, SessionInUseError } from '@deepseek-ai/dsh-cmdline'
+import { SESSION_IN_USE_EXIT, SessionInUseError } from 'bake-cmdline'
 import z from '@deepseek-ai/schemastery'
 import type { RunnerOptions, TuiIo } from './runner.ts'
 import type { CredentialTargetConfig, SignInFlowConfig } from './login.ts'

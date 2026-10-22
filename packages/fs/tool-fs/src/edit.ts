@@ -3,13 +3,13 @@
  * It obtains an optional guard from the single intent slot, calls `ctx.fs.editText` without a
  * separate stat, then records the observed version; no policy means an unconditional atomic edit.
  * When an anchored edit lands on content the model had not seen, the result shows the edited lines.
- * @module @deepseek-ai/dsh-tool-fs/src/edit
+ * @module bake-tool-fs/src/edit
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import { defineTool } from '@deepseek-ai/dsh-tools'
-import type { DiffCallView, DiffResultView, ToolResult } from '@deepseek-ai/dsh-tools'
-import type { FsEditBasis, FsEditRequest } from '@deepseek-ai/dsh-fs'
+import { defineTool } from 'bake-tools'
+import type { DiffCallView, DiffResultView, ToolResult } from 'bake-tools'
+import type { FsEditBasis, FsEditRequest } from 'bake-fs'
 import { computeHunkDiffs, diffsFromMeta } from './diff.ts'
 import { remediateFsError } from './error.ts'
 import { sessionResolveOptions } from './session-cwd.ts'

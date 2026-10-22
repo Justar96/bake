@@ -1,5 +1,5 @@
 {
-  "name": "@deepseek-ai/dsh-updater",
+  "name": "bake-updater",
   "description": "Bake self-update: signed release manifests, staged installs beside the running release, and a cached update check",
   "version": "0.1.0",
   "private": true,

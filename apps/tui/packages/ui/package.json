@@ -1,5 +1,5 @@
 {
-  "name": "@dsh-tui/ui",
+  "name": "bake-tui-ui",
   "description": "Terminal presentation for the dsh TUI: session-event projection and row rendering, pure over props",
   "version": "0.0.0",
   "private": true,
@@ -10,8 +10,8 @@
   },
   "license": "MIT",
   "dependencies": {
-    "@deepseek-ai/dsh-file-reference": "workspace:^",
-    "@deepseek-ai/dsh-util-values": "workspace:^",
+    "bake-file-reference": "workspace:^",
+    "bake-util-values": "workspace:^",
     "diff": "catalog:",
     "ink": "catalog:",
     "react": "catalog:",
@@ -24,12 +24,12 @@
   },
   "devDependencies": {
     "@xterm/headless": "catalog:",
-    "@deepseek-ai/dsh-agent": "workspace:^",
-    "@deepseek-ai/dsh-commands": "workspace:^",
-    "@deepseek-ai/dsh-compaction": "workspace:^",
-    "@deepseek-ai/dsh-session": "workspace:^",
-    "@deepseek-ai/dsh-tools": "workspace:^",
-    "@deepseek-ai/dsh-user-questions": "workspace:^",
+    "bake-agent": "workspace:^",
+    "bake-commands": "workspace:^",
+    "bake-compaction": "workspace:^",
+    "bake-session": "workspace:^",
+    "bake-tools": "workspace:^",
+    "bake-user-questions": "workspace:^",
     "@types/react": "catalog:",
     "ink-testing-library": "^4.0.0",
     "@types/mdast": "catalog:"

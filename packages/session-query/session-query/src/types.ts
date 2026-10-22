@@ -2,7 +2,7 @@
  * Public records for exact reads and provider-independent filters over the
  * live-preferred logical session corpus.
  *
- * @module @deepseek-ai/dsh-session-query/types
+ * @module bake-session-query/types
  */
 
 import type {
@@ -13,8 +13,8 @@ import type {
   SessionSeq,
   OptionalSessionSeq,
   SurfaceEvent,
-} from '@deepseek-ai/dsh-session'
-import type { SessionTitleSnapshot } from '@deepseek-ai/dsh-session-title'
+} from 'bake-session'
+import type { SessionTitleSnapshot } from 'bake-session-title'
 import type { SessionSearchCursor } from './cursor.ts'
 
 export type { SessionSearchCursor } from './cursor.ts'

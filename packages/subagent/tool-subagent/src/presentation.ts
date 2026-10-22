@@ -3,10 +3,10 @@
  * the short label the model gave it, not by its prompt, which can run to many
  * paragraphs and is the child session's own first message. Pure over the
  * logged arguments, so a replayed session draws the same card.
- * @module @deepseek-ai/dsh-tool-subagent/src/presentation
+ * @module bake-tool-subagent/src/presentation
  */
 
-import type { GenericCallView } from '@deepseek-ai/dsh-tools'
+import type { GenericCallView } from 'bake-tools'
 
 /** Characters a title may take: a card header or a log line. */
 const TITLE_CHARS = 80

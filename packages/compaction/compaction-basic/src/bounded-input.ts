@@ -4,11 +4,11 @@
  * transcript with long tool output cut, sent without the conversation's
  * system prompt or tool schemas.
  *
- * @module @deepseek-ai/dsh-compaction-basic/bounded-input
+ * @module bake-compaction-basic/bounded-input
  */
 
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import type { ContentBlock, Message } from '@deepseek-ai/dsh-llm'
+import { createUserMessage } from 'bake-llm'
+import type { ContentBlock, Message } from 'bake-llm'
 import type { SummarizationInput } from './summarizer.ts'
 
 /** Most characters kept from one tool result, tool-call argument list, or reasoning block. */

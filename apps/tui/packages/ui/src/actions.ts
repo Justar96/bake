@@ -24,10 +24,10 @@
  * event's rows, live or replayed, so a resumed session prints the same blocks
  * a live one did.
  *
- * @module @dsh-tui/ui/actions
+ * @module bake-tui-ui/actions
  */
 
-import type { SessionEvent } from '@deepseek-ai/dsh-session'
+import type { SessionEvent } from 'bake-session'
 import { announcedCalls } from './project.ts'
 import type { Row, ToolCallRow } from './rows.ts'
 

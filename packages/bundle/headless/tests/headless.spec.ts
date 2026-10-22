@@ -3,24 +3,24 @@
 import { Readable } from 'node:stream'
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { brandString } from '@deepseek-ai/dsh-brand'
-import AgentRegistry from '@deepseek-ai/dsh-agent'
+import { brandString } from 'bake-brand'
+import AgentRegistry from 'bake-agent'
 import type {
   Agent,
   AgentHandle,
   AssistantStreamFrame,
   CreateAgentOptions,
   ResumeAgentOptions,
-} from '@deepseek-ai/dsh-agent'
-import AgentDefaultModelConfig from '@deepseek-ai/dsh-agent-default-model'
-import { LlmAttemptId, ToolCallId, createAssistantMessage, createToolResultMessage, type StreamChunk } from '@deepseek-ai/dsh-llm'
-import SessionStore from '@deepseek-ai/dsh-session'
-import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
-import type { Session, SessionId, UserMessage } from '@deepseek-ai/dsh-session'
-import { SESSION_IN_USE_EXIT } from '@deepseek-ai/dsh-cmdline'
-import { SessionAlreadyOwnedError } from '@deepseek-ai/dsh-session-persistence'
-import { SessionQueryError } from '@deepseek-ai/dsh-session-query'
-import { createInboxStub } from '@deepseek-ai/dsh-agent-loop-testkit'
+} from 'bake-agent'
+import AgentDefaultModelConfig from 'bake-agent-default-model'
+import { LlmAttemptId, ToolCallId, createAssistantMessage, createToolResultMessage, type StreamChunk } from 'bake-llm'
+import SessionStore from 'bake-session'
+import SessionProjectionRegistry from 'bake-session-projection'
+import type { Session, SessionId, UserMessage } from 'bake-session'
+import { SESSION_IN_USE_EXIT } from 'bake-cmdline'
+import { SessionAlreadyOwnedError } from 'bake-session-persistence'
+import { SessionQueryError } from 'bake-session-query'
+import { createInboxStub } from 'bake-agent-loop-testkit'
 import { apply, Config } from '../src/index.ts'
 import { internals } from '../src/runner-internals.ts'
 
@@ -119,7 +119,7 @@ function appendTurn(
   })
 }
 
-/** Append the preset-selection event owned by dsh-agent-presets. */
+/** Append the preset-selection event owned by bake-agent-presets. */
 function selectPreset(session: Session, agentPreset: string): void {
   const target = session as unknown as { append(type: string, data: unknown): void }
   target.append('agent-preset/selected', { agentPreset })
@@ -644,7 +644,7 @@ describe('headless runner', () => {
     })
     expect(await test.run()).toMatchObject({
       code: 1,
-      err: 'dsh: a task is required, for example: dsh --profile headless "run the tests"\n',
+      err: 'dsh: a task is required, for example: bake --profile headless "run the tests"\n',
     })
     await test.ctx.fiber.dispose()
   })

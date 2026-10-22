@@ -656,8 +656,8 @@ class Run {
     this.overlay = join(root, 'replay.patch.yml')
     mkdirSync(this.workspace, { recursive: true })
     // `Bun.Terminal` does not export TERM to the child, so the environment names the terminal.
-    this.env = { ...process.env as Record<string, string>, DSH_HOME: this.home,
-                 DSH_AGENTS_HOME: join(root, 'agents'), TERM: 'xterm-256color', NO_COLOR: '1' }
+    this.env = { ...process.env as Record<string, string>, BAKE_HOME: this.home, DSH_HOME: this.home,
+                 BAKE_AGENTS_HOME: join(root, 'agents'), DSH_AGENTS_HOME: join(root, 'agents'), TERM: 'xterm-256color', NO_COLOR: '1' }
     // Replay must not pick up a developer's provider key; CI detection stays intact.
     delete this.env.DEEPSEEK_API_KEY
     delete this.env.CLIPROXYAPI_API_KEY
@@ -1177,8 +1177,8 @@ scenario('thinking', 'selected and provider-default thinking levels follow model
 
 scenario('permissions', 'workspace-write default, the access mode where a session opens, command feedback at narrow widths, and durable session selection', { replayOnly: true },
   async run => {
-    const override = run.env.DSH_PERMISSION_MODE
-    delete run.env.DSH_PERMISSION_MODE
+    const overrides = { BAKE_PERMISSION_MODE: run.env.BAKE_PERMISSION_MODE, DSH_PERMISSION_MODE: run.env.DSH_PERMISSION_MODE }
+    for (const name of Object.keys(overrides)) Reflect.deleteProperty(run.env, name)
     const access = dictionaries.en.permission
     /**
      * Drive one terminal. `opened` finds the mode where the session opens, in
@@ -1237,13 +1237,15 @@ scenario('permissions', 'workspace-write default, the access mode where a sessio
       for (const record of [await events(path), fresh]) {
         assert(!record.some(e => e.type === 'request/header'), 'permission commands unexpectedly called the model')
       }
-      run.env.DSH_PERMISSION_MODE = 'read-only'
+      run.env.BAKE_PERMISSION_MODE = 'read-only'
       await run.terminal('permissions-override', [], tty => inspect(tty, async ({ opened }) => {
         await opened('read-only')
       }))
     } finally {
-      if (override === undefined) delete run.env.DSH_PERMISSION_MODE
-      else run.env.DSH_PERMISSION_MODE = override
+      for (const [name, value] of Object.entries(overrides)) {
+        if (value === undefined) Reflect.deleteProperty(run.env, name)
+        else run.env[name] = value
+      }
     }
   })
 
@@ -3294,8 +3296,8 @@ scenario('navigate', 'session picker cancellation, a new session, and switching 
  */
 const LOCK_HOLDER = `
 import { Context } from '@deepseek-ai/cordis'
-import { SESSION_FORMAT_VERSION } from '@deepseek-ai/dsh-session'
-import Persistence from '@deepseek-ai/dsh-session-persistence-jsonl'
+import { SESSION_FORMAT_VERSION } from 'bake-session'
+import Persistence from 'bake-session-persistence-jsonl'
 const [root, id, cwd] = process.argv.slice(1)
 const ctx = new Context()
 await ctx.plugin(Persistence, { root, compression: 'none' })
@@ -3611,7 +3613,7 @@ setInterval(() => {
     assert(!text.includes('PTY_REJECTION_FIELD'), 'the record kept an error property beyond its name, message, and stack')
   })
 
-scenario('hangup', 'a closed terminal or a repeated SIGHUP exits 129 once disposal stops a tool that ignores hangups,'
+scenario('hangup', 'a terminal error before SIGHUP, a closed terminal, or repeated SIGHUP exits 129 once disposal stops a tool that ignores hangups,'
   + ' with the compressed session flushed and released and the terminal restored', { replayOnly: true },
   async run => {
     const root = join(run.root, 'hangup-sessions')
@@ -3635,12 +3637,13 @@ scenario('hangup', 'a closed terminal or a repeated SIGHUP exits 129 once dispos
      * @param label - the terminal's name.
      * @param extra - extra CLI arguments.
      * @param drive - ends the app, and checks how it went.
+     * @param nodeArgs - Node flags for a scenario-owned preload.
      * @returns the session's id, once its log has been read back whole.
      */
-    const hold = async (label: string, extra: readonly string[], drive: (tty: Terminal) => Promise<void>): Promise<string> => {
+    const hold = async (label: string, extra: readonly string[], drive: (tty: Terminal) => Promise<void>, nodeArgs: readonly string[] = []): Promise<string> => {
       rmSync(pidFile, { force: true })
       const known = new Set(await glob('**/session.v*.jsonl.zstd', root))
-      const tty = new Terminal(label, run.command(extra), run.workspace, run.env, run.options)
+      const tty = new Terminal(label, run.command(extra, nodeArgs), run.workspace, run.env, run.options)
       let processes: ProcessState[] = []
       try {
         await tty.ready()
@@ -3690,6 +3693,23 @@ scenario('hangup', 'a closed terminal or a repeated SIGHUP exits 129 once dispos
     // Compressed as by default, where a flush cut short tears a frame.
     await run.writeOverlay(override, { root, compression: 'zstd' })
     try {
+      const trigger = join(run.root, 'hangup-error.trigger')
+      const preload = join(run.root, 'hangup-error.mjs')
+      // Pin the ordering a closed PTY can produce: stream error first, signal
+      // dispatch later. The real launcher still owns disposal and persistence.
+      await Bun.write(preload, `import { existsSync } from 'node:fs'
+const poll = setInterval(() => {
+  if (!existsSync(${JSON.stringify(trigger)})) return
+  clearInterval(poll)
+  setImmediate(() => { process.kill(process.pid, 'SIGHUP') })
+  process.stdout.emit('error', Object.assign(new Error('write EIO'), { code: 'EIO' }))
+}, 20).unref()
+`)
+      await hold('hangup-error', [], async tty => {
+        await Bun.write(trigger, '')
+        await tty.ended(129, 'a terminal write error before SIGHUP', 7)
+        tty.check('terminal loss to avoid the fatal exception path', !tty.text.includes('fatal uncaught exception'))
+      }, ['--import', preload])
       const closed = await hold('hangup-close', [], async tty => {
         tty.hangup()
         await tty.exits(129, 'its terminal closed', 7)
@@ -3832,7 +3852,7 @@ async function main(): Promise<void> {
       + '  --only NAME       run this scenario and its prerequisites; repeatable\n'
       + '  --list            print the scenarios and exit\n'
       + '  --trace           print each step to stderr as it is satisfied\n'
-      + '  --keep-home       keep the temporary DSH_HOME and workspace for inspection\n'
+      + '  --keep-home       keep the temporary BAKE_HOME and workspace for inspection\n'
       + '  --step-timeout N  how long one step may take (default: 30)\n'
       + '  --budget N        how long one terminal may take (default: 120)\n'
       + '  [node]            the node binary to run the product with (default: node)\n')

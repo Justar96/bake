@@ -1,0 +1,4 @@
+{"type":"session","version":2,"id":"legacy-v2","timestamp":"2026-01-01T00:00:00.000Z","cwd":"/golden/project"}
+{"type":"message","id":"a1b2c3d4","parentId":null,"timestamp":"2026-01-01T00:00:01.000Z","message":{"role":"user","content":"hello","timestamp":1767225601000}}
+{"type":"message","id":"b2c3d4e5","parentId":"a1b2c3d4","timestamp":"2026-01-01T00:00:02.000Z","message":{"role":"hookMessage","customType":"x","content":[{"type":"text","text":"hook text"}],"display":false,"details":{"n":1},"timestamp":1767225602000}}
+{"type":"label","id":"c3d4e5f6","parentId":"b2c3d4e5","timestamp":"2026-01-01T00:00:03.000Z","targetId":"a1b2c3d4","label":"start"}

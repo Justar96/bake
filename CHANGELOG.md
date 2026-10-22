@@ -1,8 +1,19 @@
 # Changelog
 
-Notable changes to Bake. `/changelog` in the terminal prints the section for the running version, so each release heading must match the root `package.json` version.
+Notable changes to Bake. `bake` compiles this file in, and `/changelog` shows its released sections. Each release heading names the version in `[workspace.package]` of `rust/Cargo.toml`, which `bun run release:prepare` sets.
 
 ## [Unreleased]
+
+## [0.4.0] - 2026-10-22
+
+Bake 0.4.0 is a new native agent, `bake`, written in Rust. This first release is for Linux.
+
+- **Linux first.** Releases are published for Linux x86_64 and arm64 with glibc 2.34 or newer. macOS and Windows support is coming in a later 0.4 release; until then the installers stop on those platforms before they download anything, and on Windows you can install Bake inside WSL.
+- **A separate install.** `curl -fsSL https://bake.justar.dev/install.sh | sh` installs `bake` into `~/.local/share/bake-native` and links it into `~/.local/bin`; it needs no Node or Bun. It does not upgrade or migrate a Bake 0.3 install: it takes over a 0.3 `bake` command and records how to restore it (`--uninstall-links`), leaves 0.3's `dsh` command alone, and a 0.3 `bake update` stays on 0.3.
+- **The end of 0.3.** Bake 0.3, the TypeScript agent, receives no further bug or security fixes, and its `dsh` command, profile, and package aliases retire with it ([D10 and D13](docs/roadmap/rust-0.4/scope-00/support.md#decision-register)). Each `BAKE_*` environment setting still falls back to its `DSH_*` name.
+- **Your Bake home carries over.** `bake` uses `~/.bake` (`BAKE_HOME`, then `DSH_HOME`) and reads 0.3's CLIProxyAPI route, key, and default model without changing them. Sessions are saved in pi's session format; 0.3 session logs are not opened.
+- **What it does:** interactive sessions, fullscreen or inline, where you can steer or stop a turn; model, thinking, session, tree, fork, compaction, and settings commands; `/login` for a CLIProxyAPI account and `models.json` for any OpenAI- or Anthropic-compatible provider; sandboxed bash, file, search, web, and code-mode tools under permission presets and approvals; background shells, and opt-in subagents and reminders; `AGENTS.md` context files, skills, prompt templates, MCP servers, command hooks, and Wasm plugins that can veto tool calls; print, JSON, and RPC modes; and `bake update` with `--rollback`. `bake docs` describes each.
+- **Not in 0.4.0:** goals and the task router, MCP OAuth, MCP resource subscriptions and prompts, and further slash commands come in later releases.
 
 ## [0.3.8] - 2026-10-05
 

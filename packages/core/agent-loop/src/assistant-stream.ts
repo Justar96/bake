@@ -11,9 +11,9 @@ import {
   type StreamChunk,
   type TokenUsage,
   type ToolCallBlock,
-} from '@deepseek-ai/dsh-llm'
-import type { AssistantStreamFrame } from '@deepseek-ai/dsh-agent'
-import type { SessionEventMap, SessionId, SessionSeq } from '@deepseek-ai/dsh-session'
+} from 'bake-llm'
+import type { AssistantStreamFrame } from 'bake-agent'
+import type { SessionEventMap, SessionId, SessionSeq } from 'bake-session'
 
 /** Folds one model attempt into one compact stream plus ordered transient frames. */
 export class AssistantStreamAttempt {

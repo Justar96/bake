@@ -23,15 +23,15 @@
  * the lock file: every acquired lock belongs to a materialized or
  * materializing session, and the surviving file keeps the stable inode later
  * POSIX lockers verify against.
- * @module @deepseek-ai/dsh-session-persistence-jsonl/lease
+ * @module bake-session-persistence-jsonl/lease
  */
 
 import { mkdir, open, stat } from 'node:fs/promises'
 import type { FileHandle } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tryLockExclusive } from '@deepseek-ai/node-addon-system/flock'
-import { SessionAlreadyOwnedError } from '@deepseek-ai/dsh-session-persistence'
-import type { SessionId } from '@deepseek-ai/dsh-session'
+import { SessionAlreadyOwnedError } from 'bake-session-persistence'
+import type { SessionId } from 'bake-session'
 import { acquireLockHandleWin32, releaseLockHandleWin32, type Win32LockHandle } from './win32.ts'
 
 /** Base name of the kernel lock file inside a session's directory. */

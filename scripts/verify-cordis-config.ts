@@ -59,7 +59,7 @@ const CHOOSER_BACKEND_PACKAGES = [
   '@deepseek-ai/dsh-client-ui-directory-picker-native',
 ]
 /** The package whose row mounts the agent preset roster. */
-const PRESETS_PACKAGE = '@deepseek-ai/dsh-agent-presets'
+const PRESETS_PACKAGE = 'bake-agent-presets'
 
 /**
  * Rows a preset-hosting profile deliberately runs on its host plane while
@@ -506,7 +506,7 @@ function packageTestManifestPath(file: string): string | undefined {
 /**
  * Discover workspace Bundle packages from their manifest declaration: the
  * shared runtime's, and the terminal app's, which the `tui` profile layers
- * over `dsh-base`.
+ * over `bake-base`.
  * @param repoRoot Repository root to scan.
  * @returns Sorted slash-normalized repository-relative package manifest paths.
  */

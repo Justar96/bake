@@ -11,7 +11,7 @@
  * Adapted from the `WheelScrollAccelerator` of pi (MIT, Mario Zechner,
  * https://github.com/earendil-works/pi).
  *
- * @module @dsh-tui/ui/wheel
+ * @module bake-tui-ui/wheel
  */
 
 /** One report per line, or one per notch. */

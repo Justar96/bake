@@ -1,0 +1,1116 @@
+//! The session owns prompt preparation, execution, recovery, and settlement.
+//! Callers only wait for the immutable execution they admitted.
+
+use super::*;
+use bake_agent::ToolReplay;
+
+#[derive(Default)]
+pub(super) struct Executions {
+    next_id: u64,
+    pub current: Option<Arc<Execution>>,
+}
+
+pub(super) type SharedExecutions = Arc<Mutex<Executions>>;
+
+pub(super) struct Execution {
+    id: u64,
+    pub control: RunControl,
+    jobs: JobRegistry,
+    pending_notices: Arc<Mutex<Vec<CustomMessage>>>,
+    delivery_only: bool,
+    pub notice_turn_started: AtomicBool,
+    pub journal: Option<Arc<run_journal::Journal>>,
+    finished: tokio::sync::watch::Receiver<Option<RunOutcome>>,
+}
+
+pub(super) type Completion = tokio::sync::watch::Sender<Option<RunOutcome>>;
+
+pub(super) enum Input {
+    Prompt {
+        text: String,
+        images: Vec<ImageContent>,
+    },
+    Notices,
+    Continue,
+}
+
+impl Executions {
+    /// Called while the session's activity claim is locked.
+    pub fn claim(
+        &mut self,
+        control: RunControl,
+        jobs: JobRegistry,
+        pending_notices: Arc<Mutex<Vec<CustomMessage>>>,
+        delivery_only: bool,
+        journal: Option<Arc<run_journal::Journal>>,
+    ) -> Result<(Arc<Execution>, Completion), String> {
+        if self.current.is_some() {
+            return Err("The previous session execution has not finished.".into());
+        }
+        let id = self
+            .next_id
+            .checked_add(1)
+            .ok_or_else(|| "The session exhausted its execution identities.".to_owned())?;
+        self.next_id = id;
+        let (completion, finished) = tokio::sync::watch::channel(None);
+        let execution = Arc::new(Execution {
+            id,
+            control,
+            jobs,
+            pending_notices,
+            delivery_only,
+            notice_turn_started: AtomicBool::new(false),
+            journal,
+            finished,
+        });
+        self.current = Some(Arc::clone(&execution));
+        Ok((execution, completion))
+    }
+}
+
+impl Execution {
+    pub async fn wait(&self) -> Result<RunOutcome, String> {
+        let mut finished = self.finished.clone();
+        finished
+            .wait_for(Option::is_some)
+            .await
+            .map_err(|_| "The session execution ended before reporting its outcome.".to_owned())?
+            .clone()
+            .ok_or_else(|| "The session execution reported no outcome.".to_owned())
+    }
+}
+
+/// Live services stay shared; prompt configuration is fixed at admission.
+pub(super) struct PromptExecution {
+    agent: Arc<Agent>,
+    core: Arc<Core>,
+    work: WorkGate,
+    registry: ModelRuntime,
+    settings: SharedSettings,
+    tools: Vec<Arc<AgentTool>>,
+    active_tool_names: Vec<String>,
+    prompt_options: SystemPromptOptions,
+    prompt_templates: Vec<PromptTemplate>,
+    docs_command: String,
+    listeners: Arc<Listeners>,
+    persist_error: Arc<Mutex<Option<String>>>,
+    mcp: Arc<OnceLock<McpServers>>,
+    codemode: Arc<super::codemode::SessionCodemodeHost>,
+    hidden_declarations: super::codemode::HiddenDeclarations,
+    hooks: hooks::SharedHooks,
+    executions: SharedExecutions,
+    runtime: tokio::runtime::Handle,
+    jobs: JobRegistry,
+    pending_notices: Arc<Mutex<Vec<CustomMessage>>>,
+    tool_hooks: run_journal::ToolHooks,
+}
+
+impl PromptExecution {
+    pub fn new(session: &AgentSession) -> Self {
+        Self {
+            agent: Arc::clone(&session.agent),
+            core: Arc::clone(&session.core),
+            work: session.work.clone(),
+            registry: session.registry.clone(),
+            settings: Arc::clone(&session.settings),
+            tools: session.tools.clone(),
+            active_tool_names: session.active_tool_names.clone(),
+            prompt_options: session.prompt_options.clone(),
+            prompt_templates: session.prompt_templates.clone(),
+            docs_command: session.docs_command.clone(),
+            listeners: Arc::clone(&session.listeners),
+            persist_error: Arc::clone(&session.persist_error),
+            mcp: Arc::clone(&session.mcp),
+            codemode: Arc::clone(&session.codemode),
+            hidden_declarations: Arc::clone(&session.hidden_declarations),
+            hooks: Arc::clone(&session.hooks),
+            executions: Arc::clone(&session.executions),
+            runtime: session.runtime.clone(),
+            jobs: session.jobs.clone(),
+            pending_notices: Arc::clone(&session.pending_notices),
+            tool_hooks: session.tool_hooks.clone(),
+        }
+    }
+
+    pub async fn run(
+        self,
+        execution: Arc<Execution>,
+        completion: Completion,
+        scope: TaskScope,
+        input: Input,
+    ) {
+        if let Some(journal) = &execution.journal {
+            journal.bind(scope.permit());
+        }
+        let guard = RunGuard {
+            core: Arc::clone(&self.core),
+            agent: Arc::clone(&self.agent),
+            executions: Arc::clone(&self.executions),
+            execution: Arc::clone(&execution),
+            completion,
+            runtime: self.runtime.clone(),
+            permit: Some(scope.permit().share()),
+            finished: false,
+        };
+        let control = &execution.control;
+        let result = {
+            let prompt = async {
+                if let Some(journal) = &execution.journal {
+                    self.core
+                        .cancel_background_compaction("recoverable run admission")
+                        .await;
+                    if let Some(outcome) = journal.begin().await? {
+                        return Ok(outcome);
+                    }
+                }
+                let outcome = match input {
+                    Input::Prompt { text, images } => {
+                        self.prompt_inner(&text, images, control).await
+                    }
+                    Input::Notices => self.deliver_notices(&execution).await,
+                    Input::Continue => {
+                        self.continue_inner(control, execution.journal.as_deref())
+                            .await
+                    }
+                }?;
+                if outcome == RunOutcome::FinishedTurn
+                    && let Some(journal) = &execution.journal
+                {
+                    self.settle_journal_jobs(journal, control).await
+                } else {
+                    Ok(outcome)
+                }
+            };
+            tokio::pin!(prompt);
+            tokio::select! {
+                result = &mut prompt => result,
+                _ = control.wait_stopped() => {
+                    self.request_abort();
+                    prompt.await
+                }
+                () = scope.signal().cancelled() => {
+                    control.cancel();
+                    self.request_abort();
+                    prompt.await
+                }
+            }
+        };
+        if self.core.aborted() {
+            self.core.finish_cancelled_retry();
+        }
+        if execution.journal.is_some() {
+            self.core
+                .cancel_background_compaction("recoverable run settlement")
+                .await;
+        }
+        drain_execution(&self.core, &self.agent, control).await;
+        let persisted = self
+            .persist_error
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        let gap = lock_gap(&self.core.gap).clone();
+        let mut outcome = if let Some(error) = persisted.or(gap) {
+            control.fail(error)
+        } else {
+            control.settle(result.unwrap_or_else(|message| RunOutcome::Failed { message }))
+        };
+        if let Some(journal) = &execution.journal {
+            outcome = match journal.finish(outcome, control.clone()).await {
+                Ok(outcome) => outcome,
+                Err(error) => control.fail(error),
+            };
+            journal.release();
+        }
+        guard.finish(outcome);
+    }
+
+    fn model(&self) -> Option<Model> {
+        self.core.model()
+    }
+
+    fn closed_reason(&self) -> Option<String> {
+        closed_reason(&self.work, &self.listeners, &self.core.gap)
+    }
+
+    fn request_abort(&self) {
+        abort_operations(&self.core, &self.agent, self.mcp.get());
+    }
+
+    async fn prepare_user_input(
+        &self,
+        text: &str,
+        images: Vec<ImageContent>,
+        model: Option<Model>,
+    ) -> Result<(String, Vec<ImageContent>), String> {
+        prepare_user_input(
+            &self.work,
+            &self.prompt_options,
+            &self.prompt_templates,
+            &self.settings,
+            text,
+            images,
+            model,
+        )
+        .await
+    }
+}
+
+pub(super) fn closed_reason(
+    work: &WorkGate,
+    listeners: &Listeners,
+    gap: &Mutex<Option<String>>,
+) -> Option<String> {
+    if listeners.closed.load(Ordering::SeqCst) || work.is_closing() {
+        return Some("The session is shut down.".into());
+    }
+    lock_gap(gap).as_ref().map(|error| {
+        format!(
+            "The session file could not be written ({error}), so the session takes no more prompts."
+        )
+    })
+}
+
+pub(super) fn abort_operations(core: &Core, agent: &Agent, mcp: Option<&McpServers>) {
+    if let Some(control) = core.control() {
+        control.cancel();
+    }
+    core.abort_requested.store(true, Ordering::SeqCst);
+    core.abort_retry_and_compaction();
+    if let Some(mcp) = mcp {
+        mcp.interrupt_startup_wait();
+    }
+    agent.abort();
+}
+
+async fn drain_execution(core: &Core, agent: &Agent, control: &RunControl) {
+    agent.wait_for_idle().await;
+    control.drain_admissions().await;
+    let mut activity = core.activity.subscribe();
+    let _ = activity
+        .wait_for(|activity| activity.context_commits == 0)
+        .await;
+}
+
+/// Clears only this admission. An old waiter or cleanup cannot release a
+/// successor, even when both prompts deliberately share the same control.
+pub(super) fn release_execution(
+    core: &Core,
+    executions: &Mutex<Executions>,
+    execution: &Execution,
+) -> bool {
+    let mut released = false;
+    core.activity.send_if_modified(|activity| {
+        let mut executions = executions.lock().unwrap_or_else(PoisonError::into_inner);
+        if !executions
+            .current
+            .as_ref()
+            .is_some_and(|current| current.id == execution.id)
+        {
+            return false;
+        }
+        let pending: Vec<String> = execution
+            .pending_notices
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .filter_map(|notice| job_notices::notice_id(notice.details.as_ref()).map(str::to_owned))
+            .collect();
+        execution.jobs.release_deliveries(&pending);
+        executions.current = None;
+        core.run_control
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        activity.run = false;
+        released = true;
+        true
+    });
+    released
+}
+
+struct RunGuard {
+    core: Arc<Core>,
+    agent: Arc<Agent>,
+    executions: SharedExecutions,
+    execution: Arc<Execution>,
+    completion: Completion,
+    runtime: tokio::runtime::Handle,
+    permit: Option<WorkPermit>,
+    finished: bool,
+}
+
+impl RunGuard {
+    fn finish(mut self, outcome: RunOutcome) {
+        publish_completion(
+            &self.core,
+            &self.executions,
+            &self.execution,
+            &self.completion,
+            outcome,
+        );
+        self.finished = true;
+    }
+}
+
+fn publish_completion(
+    core: &Core,
+    executions: &Mutex<Executions>,
+    execution: &Execution,
+    completion: &Completion,
+    outcome: RunOutcome,
+) {
+    if release_execution(core, executions, execution)
+        && (!execution.delivery_only || execution.notice_turn_started.load(Ordering::SeqCst))
+    {
+        core.emit(&SessionEvent::AgentSettled {
+            outcome: &outcome,
+            aborted: outcome.is_cancelled(),
+        });
+    }
+    completion.send_replace(Some(outcome));
+}
+
+pub(super) fn reject_execution(
+    core: &Core,
+    executions: &Mutex<Executions>,
+    execution: &Execution,
+    completion: &Completion,
+    message: String,
+) {
+    let outcome = execution.control.settle(RunOutcome::Failed { message });
+    publish_completion(core, executions, execution, completion, outcome);
+}
+
+impl Drop for RunGuard {
+    fn drop(&mut self) {
+        if self.finished {
+            return;
+        }
+        let core = Arc::clone(&self.core);
+        let agent = Arc::clone(&self.agent);
+        let executions = Arc::clone(&self.executions);
+        let execution = Arc::clone(&self.execution);
+        let completion = self.completion.clone();
+        let permit = self.permit.take();
+        let current = executions
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .current
+            .as_ref()
+            .is_some_and(|current| current.id == execution.id);
+        if !current {
+            completion.send_replace(Some(RunOutcome::Failed {
+                message: "The session prompt task ended before settlement.".into(),
+            }));
+            return;
+        }
+        execution
+            .control
+            .fail("The session prompt task ended before settlement.".into());
+        agent.abort();
+        drop(self.runtime.spawn(async move {
+            // This share was admitted with the driver, so shutdown also
+            // awaits its cleanup if the task unwinds after the gate closes.
+            let _permit = permit;
+            if execution.journal.is_some() {
+                core.cancel_background_compaction("recoverable execution lost")
+                    .await;
+            }
+            drain_execution(&core, &agent, &execution.control).await;
+            let mut outcome = if let Some(error) = lock_gap(&core.gap).clone() {
+                execution.control.fail(error)
+            } else {
+                execution.control.stopped().unwrap_or_else(|| {
+                    execution
+                        .control
+                        .fail("The session prompt task ended before settlement.".into())
+                })
+            };
+            if let Some(journal) = &execution.journal {
+                outcome = match journal.finish(outcome, execution.control.clone()).await {
+                    Ok(outcome) => outcome,
+                    Err(error) => execution.control.fail(error),
+                };
+                journal.release();
+            }
+            publish_completion(&core, &executions, &execution, &completion, outcome);
+        }));
+    }
+}
+
+impl PromptExecution {
+    fn pending_job_notices(&self) -> Vec<CustomMessage> {
+        self.pending_notices
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    async fn deliver_notices(&self, execution: &Execution) -> Result<RunOutcome, String> {
+        self.deliver_notice_turn(&execution.control, Some(&execution.notice_turn_started))
+            .await
+            .map(|(outcome, _)| outcome)
+    }
+
+    async fn deliver_notice_turn(
+        &self,
+        control: &RunControl,
+        started: Option<&AtomicBool>,
+    ) -> Result<(RunOutcome, bool), String> {
+        if let Some(stopped) = control.stopped() {
+            return Ok((stopped, false));
+        }
+        if self.closed_reason().is_some() {
+            return Ok((RunOutcome::FinishedTurn, false));
+        }
+        let notices: Vec<CustomMessage> = job_notices::claim(&self.jobs);
+        if notices.is_empty() {
+            return Ok((RunOutcome::FinishedTurn, false));
+        }
+        if self.model().is_none() || !self.jobs.spend_wake() {
+            self.pending_notices
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .extend(notices);
+            return Ok((RunOutcome::FinishedTurn, false));
+        }
+        if let Some(started) = started {
+            started.store(true, Ordering::SeqCst);
+        }
+        let mut messages = Vec::new();
+        if let Some(update) = self.prepare_prompt_and_tools()? {
+            messages.push(update.into());
+        }
+        messages.extend(
+            self.pending_job_notices()
+                .into_iter()
+                .map(job_notices::live),
+        );
+        messages.extend(notices.into_iter().map(job_notices::live));
+        self.run_agent_input(Some(messages), control)
+            .await
+            .map(|outcome| (outcome, true))
+    }
+
+    async fn settle_journal_jobs(
+        &self,
+        journal: &run_journal::Journal,
+        control: &RunControl,
+    ) -> Result<RunOutcome, String> {
+        if journal.job_wait.is_zero() || (self.jobs.list().is_empty() && self.jobs.live() == 0) {
+            return Ok(control.stopped().unwrap_or(RunOutcome::FinishedTurn));
+        }
+        let deadline = tokio::time::Instant::now()
+            .checked_add(journal.job_wait)
+            .ok_or_else(|| "Job wait exceeds the supported duration".to_owned())?;
+        let mut events = self.jobs.subscribe();
+        journal.begin_job_wait().await?;
+        loop {
+            if let Some(stopped) = control.stopped() {
+                return Ok(stopped);
+            }
+            let live = self.jobs.live();
+            if tokio::time::Instant::now() >= deadline {
+                return Ok(RunOutcome::FinishedTurn);
+            }
+            let delivery = self.deliver_notice_turn(control, None);
+            tokio::pin!(delivery);
+            let mut polled = false;
+            let delivered = {
+                let poll_delivery = std::future::poll_fn(|cx| {
+                    polled = true;
+                    delivery.as_mut().poll(cx)
+                });
+                tokio::select! {
+                    biased;
+                    () = tokio::time::sleep_until(deadline) => None,
+                    _ = control.wait_stopped() => None,
+                    result = poll_delivery => Some(result?),
+                }
+            };
+            let Some((outcome, delivered)) = delivered else {
+                if !polled {
+                    return Ok(control.stopped().unwrap_or(RunOutcome::FinishedTurn));
+                }
+                self.request_abort();
+                // Retain the admitted future through its Agent work and
+                // required journal writes; the driver still owns the lease.
+                return delivery.await.map(|(outcome, _)| outcome);
+            };
+            if outcome != RunOutcome::FinishedTurn {
+                return Ok(outcome);
+            }
+            if delivered {
+                continue;
+            }
+            if live == 0 {
+                return Ok(RunOutcome::FinishedTurn);
+            }
+            tokio::select! {
+                () = tokio::time::sleep_until(deadline) => return Ok(RunOutcome::FinishedTurn),
+                outcome = control.wait_stopped() => return Ok(outcome),
+                changed = events.changed() => if !changed { return Ok(RunOutcome::FinishedTurn); },
+            }
+        }
+    }
+
+    async fn continue_inner(
+        &self,
+        control: &RunControl,
+        journal: Option<&run_journal::Journal>,
+    ) -> Result<RunOutcome, String> {
+        if let Some(outcome) = control.stopped() {
+            return Ok(outcome);
+        }
+        if let Some(reason) = self.closed_reason() {
+            return Err(reason);
+        }
+        let model = self
+            .model()
+            .ok_or_else(|| format_no_model_selected_message(&self.docs_command))?;
+        let registry = self.registry.snapshot();
+        if !registry.has_configured_auth(&model.provider)
+            && registry.check_auth(&model.provider).is_none()
+        {
+            return Err(format_no_api_key_found_message(
+                &model.provider,
+                &self.docs_command,
+            ));
+        }
+        if let Some(mcp) = self.mcp.get() {
+            mcp.wait_for_startup(|| self.core.aborted() || self.closed_reason().is_some())
+                .await;
+        }
+        // A recovery notice already refreshed the durable context. The active
+        // tool set is selected afresh; a changed prompt patch is persisted by
+        // the agent as part of this execution before its first request.
+        let mut messages: Vec<LiveMessage> = self
+            .prepare_prompt_and_tools()?
+            .into_iter()
+            .map(Into::into)
+            .collect();
+        // A resumed run's rerun results are committed before its notice.
+        if let Some(journal) = journal
+            && !journal.reruns().is_empty()
+        {
+            self.rerun_safe_calls(journal, control).await?;
+            if let Some(outcome) = control.stopped() {
+                return Ok(outcome);
+            }
+            journal.resume_notice().await?;
+        }
+        if let Some(installed) = self.hooks.get() {
+            messages.extend(installed.take_pending());
+        }
+        messages.extend(
+            self.pending_job_notices()
+                .into_iter()
+                .map(job_notices::live),
+        );
+        messages.extend(
+            job_notices::claim(&self.jobs)
+                .into_iter()
+                .map(job_notices::live),
+        );
+        self.run_agent_input((!messages.is_empty()).then_some(messages), control)
+            .await
+    }
+
+    /// Runs a resumed run's unresolved `Safe` calls again, one at a time,
+    /// as the agent loop runs a call: through the current plugin vetoes and
+    /// journal dispatch, permission wrappers, and result hooks. Each result
+    /// is committed and acknowledged as the loop's would be. A tool that is
+    /// no longer active and `Safe` fails the run instead.
+    async fn rerun_safe_calls(
+        &self,
+        journal: &run_journal::Journal,
+        control: &RunControl,
+    ) -> Result<(), String> {
+        let tools = self.agent.tools();
+        let mut context = bake_agent::AgentContext {
+            messages: self.agent.messages(),
+            tools: tools.clone(),
+        };
+        let assistant = context
+            .messages
+            .iter()
+            .rev()
+            .find_map(LiveMessage::as_assistant)
+            .cloned()
+            .ok_or_else(|| format!("Run {} has no assistant to resume", journal.run_id))?;
+        for rerun in journal.reruns() {
+            if let Some(reason) = self.closed_reason() {
+                return Err(reason);
+            }
+            if self.core.aborted() {
+                // The caller stops before the notice and the next request.
+                control.cancel();
+                return Ok(());
+            }
+            let call = &rerun.call;
+            let issued = assistant.content.iter().any(
+                |block| matches!(block, bake_ai::AssistantContentBlock::ToolCall(issued) if issued == call),
+            );
+            if !issued || run_journal::replay_of(&tools, &call.name) != Some(ToolReplay::Safe) {
+                return Err(format!(
+                    "Run {} needs reconciliation: {} is no longer safe to run again",
+                    journal.run_id, call.name
+                ));
+            }
+            self.core
+                .emit(&SessionEvent::Agent(&AgentEvent::ToolExecutionStart {
+                    tool_call_id: call.id.clone(),
+                    tool_name: call.name.clone(),
+                    args: serde_json::Value::Object(call.arguments.clone()),
+                    parent_tool_call_id: None,
+                }));
+            let abort = bake_ai::AbortController::new();
+            let outcome = {
+                let running = bake_agent::run_tool_call(
+                    call,
+                    bake_agent::RunToolCallOptions {
+                        tools: &tools,
+                        assistant_message: &assistant,
+                        context: &context,
+                        before_tool_call: self.tool_hooks.before.clone(),
+                        after_tool_call: self.tool_hooks.after.clone(),
+                        signal: Some(abort.signal()),
+                        on_update: None,
+                        parent_tool_call_id: None,
+                    },
+                );
+                tokio::pin!(running);
+                tokio::select! {
+                    outcome = &mut running => outcome,
+                    _ = control.wait_stopped() => {
+                        abort.abort();
+                        running.await
+                    }
+                }
+            };
+            self.core
+                .emit(&SessionEvent::Agent(&AgentEvent::ToolExecutionEnd {
+                    tool_call_id: call.id.clone(),
+                    tool_name: call.name.clone(),
+                    result: outcome.result.clone(),
+                    is_error: outcome.is_error,
+                    duration_ms: outcome.duration_ms,
+                    parent_tool_call_id: None,
+                }));
+            // Pi's `createToolResultMessage`.
+            let message: LiveMessage = bake_ai::ToolResultMessage {
+                tool_call_id: call.id.clone(),
+                tool_name: call.name.clone(),
+                content: outcome.result.content,
+                details: outcome.result.details,
+                usage: outcome.result.usage,
+                nested_calls: None,
+                is_error: outcome.is_error,
+                timestamp: bake_ai::now_ms(),
+                duration_ms: outcome.duration_ms,
+            }
+            .into();
+            self.core
+                .emit(&SessionEvent::Agent(&AgentEvent::MessageStart {
+                    message: message.clone(),
+                }));
+            let Ok(entry_id) = persist_message(&self.core, &self.persist_error, &message).await
+            else {
+                return Err(lock_gap(&self.core.gap)
+                    .clone()
+                    .unwrap_or_else(|| "The session is shut down.".into()));
+            };
+            journal.message(&message, entry_id).await?;
+            self.core
+                .emit(&SessionEvent::Agent(&AgentEvent::MessageEnd {
+                    message: message.clone(),
+                }));
+            context.messages.push(message);
+        }
+        Ok(())
+    }
+
+    /// The system message patching the sections the transcript replays,
+    /// Pi's `_preparePromptAndToolLoadout`; it also activates the tools.
+    fn prepare_prompt_and_tools(&self) -> Result<Option<SystemMessage>, String> {
+        let mut active: Vec<Arc<AgentTool>> = self
+            .active_tool_names
+            .iter()
+            .filter_map(|name| self.tools.iter().find(|tool| &tool.name == name))
+            .cloned()
+            .collect();
+        // The MCP tools published now, one generation per server; the run
+        // keeps these for its whole length.
+        if let Some(mcp) = self.mcp.get() {
+            active.extend(mcp.tools());
+        }
+        // The active `codemode` tool's descriptions and hidden declarations;
+        // without it, the tools as they are.
+        let (active, hidden) = super::codemode::apply_codemode_loadout(
+            active,
+            &read_settings(&self.settings),
+            &self.codemode,
+        );
+        self.agent.set_tools(active);
+        *self
+            .hidden_declarations
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = hidden.clone();
+        let mut options = self.prompt_options.clone();
+        options.selected_tools = self.active_tool_names.clone();
+        // The rules match the declarations the request carries, which
+        // leave out the caller's hidden tools too.
+        options.hidden_tools.extend(hidden);
+        // The `mcp_servers` section lists the servers connected now, as
+        // Pi's `before_agent_start` handler does; a session without one
+        // adds no section and its requests are unchanged.
+        if let Some(section) = self
+            .mcp
+            .get()
+            .and_then(crate::mcp::McpServers::servers_prompt_section)
+        {
+            options
+                .sections
+                .push((crate::mcp::MCP_SERVERS_SECTION.to_owned(), section));
+        }
+        let sections = build_system_prompt_sections(&options).map_err(|error| error.to_string())?;
+        let systems: Vec<Message> = self
+            .agent
+            .messages()
+            .iter()
+            .filter_map(|message| message.as_system().cloned().map(Message::System))
+            .collect();
+        let previous = get_current_system_message(&systems)
+            .and_then(|system| system.sections)
+            .unwrap_or_default();
+        Ok(
+            diff_system_prompt_sections(&previous, &sections).map(|sections| SystemMessage {
+                content: SystemContent::Text(String::new()),
+                sections: Some(sections),
+                tools_added: None,
+                tools_removed: None,
+                timestamp: bake_ai::now_ms(),
+            }),
+        )
+    }
+
+    async fn prompt_inner(
+        &self,
+        text: &str,
+        images: Vec<ImageContent>,
+        control: &RunControl,
+    ) -> Result<RunOutcome, String> {
+        if let Some(outcome) = control.stopped() {
+            return Ok(outcome);
+        }
+        let docs_command = &self.docs_command;
+        if let Some(reason) = self.closed_reason() {
+            return Err(reason);
+        }
+        let Some(model) = self.model() else {
+            return Err(format_no_model_selected_message(docs_command));
+        };
+        let registry = self.registry.snapshot();
+        if !registry.has_configured_auth(&model.provider)
+            && registry.check_auth(&model.provider).is_none()
+        {
+            return Err(format_no_api_key_found_message(
+                &model.provider,
+                docs_command,
+            ));
+        }
+        // Compact before sending when the last response calls for it,
+        // aborted ones included; the new prompt is sent either way.
+        let last = self
+            .agent
+            .messages()
+            .iter()
+            .rev()
+            .find_map(|message| message.as_assistant().cloned());
+        if let Some(last) = last {
+            self.core.check_compaction(&last, None, false).await?;
+        }
+        if let Some(outcome) = control.stopped() {
+            return Ok(outcome);
+        }
+        let (text, images) = self.prepare_user_input(text, images, Some(model)).await?;
+        // Preparation may outlast a shutdown or a failed write.
+        if let Some(reason) = self.closed_reason() {
+            return Err(reason);
+        }
+        // The first prompt waits for MCP servers still connecting, so their
+        // tools are declared in its first request, as Pi's
+        // `waitForDirectServers` does.
+        if let Some(mcp) = self.mcp.get() {
+            mcp.wait_for_startup(|| self.core.aborted() || self.closed_reason().is_some())
+                .await;
+            if let Some(reason) = self.closed_reason() {
+                return Err(reason);
+            }
+        }
+        // `SessionStart` and `UserPromptSubmit`, written before they take
+        // effect: a blocked prompt is refused and never sent.
+        let (before, after) = match self.hooks.get() {
+            Some(installed) => {
+                let transcript = self.agent.messages();
+                match hooks::before_prompt(
+                    installed,
+                    &self.core,
+                    &self.persist_error,
+                    &transcript,
+                    &text,
+                    control,
+                )
+                .await?
+                {
+                    hooks::PromptHooks::Send { before, after } => (before, after),
+                    hooks::PromptHooks::Refuse(error) => return Err(error),
+                    hooks::PromptHooks::Stopped => {
+                        return Ok(control.stopped().unwrap_or(RunOutcome::Cancelled));
+                    }
+                }
+            }
+            None => (Vec::new(), Vec::new()),
+        };
+        let mut content = vec![UserContentBlock::Text(TextContent::new(text))];
+        content.extend(images.into_iter().map(UserContentBlock::Image));
+        let mut messages: Vec<LiveMessage> = Vec::with_capacity(2);
+        if let Some(update) = self.prepare_prompt_and_tools()? {
+            messages.push(update.into());
+        }
+        self.jobs.reset_wakes();
+        messages.extend(
+            self.pending_job_notices()
+                .into_iter()
+                .map(job_notices::live),
+        );
+        messages.extend(
+            job_notices::claim(&self.jobs)
+                .into_iter()
+                .map(job_notices::live),
+        );
+        messages.extend(before);
+        messages.push(
+            UserMessage {
+                content: UserContent::Blocks(content),
+                timestamp: bake_ai::now_ms(),
+            }
+            .into(),
+        );
+        messages.extend(after);
+        self.run_agent_prompt(messages, control).await
+    }
+
+    /// Pi's `_runAgentPrompt`: the run, then retries, overflow recovery,
+    /// and queued messages until the session settles.
+    async fn run_agent_prompt(
+        &self,
+        messages: Vec<LiveMessage>,
+        control: &RunControl,
+    ) -> Result<RunOutcome, String> {
+        self.run_agent_input(Some(messages), control).await
+    }
+
+    async fn run_agent_input(
+        &self,
+        messages: Option<Vec<LiveMessage>>,
+        control: &RunControl,
+    ) -> Result<RunOutcome, String> {
+        let core = &self.core;
+        {
+            let mut state = core.state();
+            state.last_assistant = None;
+        }
+        let installed = self.hooks.get().cloned();
+        if let Some(installed) = &installed {
+            let mut state = installed.engine.state();
+            state.halted = false;
+            state.stop_active = false;
+            state.stop_continuations = 0;
+        }
+        let halted = || {
+            installed
+                .as_ref()
+                .is_some_and(|installed| installed.engine.state().halted)
+        };
+        let mut result = if core.aborted() {
+            Ok(control.stopped().unwrap_or(RunOutcome::Cancelled))
+        } else if let Some(messages) = messages {
+            self.agent
+                .prompt_with_control(PromptInput::Messages(messages), control.clone())
+                .await
+                .map_err(|error: AgentError| error.to_string())
+        } else {
+            self.agent
+                .continue_with_control(control.clone())
+                .await
+                .map_err(|error| error.to_string())
+        };
+        while result.is_ok() && !core.aborted() {
+            if matches!(result, Ok(RunOutcome::Cancelled)) {
+                control.cancel();
+                break;
+            }
+            // A hook's `continue: false` ended the run: nothing continues it.
+            if halted() {
+                break;
+            }
+            match self.handle_post_agent_run().await {
+                Ok(true) => {
+                    if core.aborted() {
+                        break;
+                    }
+                    result = self
+                        .agent
+                        .continue_with_control(control.clone())
+                        .await
+                        .map_err(|e| e.to_string());
+                    continue;
+                }
+                Ok(false) => {}
+                Err(error) => {
+                    result = Err(error);
+                    break;
+                }
+            }
+            if core.aborted() {
+                break;
+            }
+            if self.agent.has_queued_messages() {
+                result = self
+                    .agent
+                    .continue_with_control(control.clone())
+                    .await
+                    .map_err(|e| e.to_string());
+                continue;
+            }
+            let notices: Vec<LiveMessage> = job_notices::claim(&self.jobs)
+                .into_iter()
+                .map(job_notices::live)
+                .collect();
+            if notices.is_empty() {
+                // `Stop` hooks may continue a run that would settle.
+                let continuation = match (&installed, &result) {
+                    (Some(installed), Ok(RunOutcome::FinishedTurn)) => {
+                        hooks::before_settle(
+                            installed,
+                            core,
+                            &self.persist_error,
+                            &self.agent.messages(),
+                            control,
+                        )
+                        .await
+                    }
+                    _ => Ok(None),
+                };
+                match continuation {
+                    Ok(Some(message)) if !core.aborted() => {
+                        result = self
+                            .agent
+                            .prompt_with_control(
+                                PromptInput::Messages(vec![message]),
+                                control.clone(),
+                            )
+                            .await
+                            .map_err(|error| error.to_string());
+                        continue;
+                    }
+                    Ok(_) => break,
+                    Err(error) => {
+                        result = Err(error);
+                        break;
+                    }
+                }
+            }
+            result = self
+                .agent
+                .prompt_with_control(PromptInput::Messages(notices), control.clone())
+                .await
+                .map_err(|error| error.to_string());
+        }
+        result
+    }
+
+    /// Pi's `_handlePostAgentRun`: whether to continue the agent.
+    async fn handle_post_agent_run(&self) -> Result<bool, String> {
+        let core = &self.core;
+        let last = core.state().last_assistant.take();
+        if core.aborted() {
+            core.finish_cancelled_retry();
+            return Ok(false);
+        }
+        let Some((message, entry_id)) = last else {
+            return Ok(self.agent.has_queued_messages());
+        };
+        if core.is_retryable_error(&message)
+            && core.prepare_retry(&message, entry_id.clone()).await?
+        {
+            if core.aborted() {
+                core.finish_cancelled_retry();
+            }
+            return Ok(!core.aborted());
+        }
+        if core.aborted() {
+            core.finish_cancelled_retry();
+            return Ok(false);
+        }
+        if message.stop_reason == bake_ai::StopReason::Error {
+            let attempt = std::mem::take(&mut core.state().retry_attempt);
+            if attempt > 0 {
+                core.emit(&SessionEvent::AutoRetryEnd {
+                    success: false,
+                    attempt,
+                    final_error: message.error_message.clone(),
+                });
+            }
+        }
+        if core.check_compaction(&message, entry_id, true).await? {
+            return Ok(!core.aborted());
+        }
+        // The loop drains both queues before `agent_end`; messages queued
+        // by `agent_end` listeners need a fresh run.
+        Ok(!core.aborted() && self.agent.has_queued_messages())
+    }
+}
+
+pub(super) async fn prepare_user_input(
+    work: &WorkGate,
+    prompt_options: &SystemPromptOptions,
+    prompt_templates: &[PromptTemplate],
+    settings: &SharedSettings,
+    text: &str,
+    images: Vec<ImageContent>,
+    model: Option<Model>,
+) -> Result<(String, Vec<ImageContent>), String> {
+    let shut_down = || "The session is shut down.".to_owned();
+    let mut text = if text.starts_with("/skill:") {
+        let skills = prompt_options.skills.clone();
+        let command = text.to_owned();
+        // The gate owns the work, so shutdown waits for it even when
+        // this future is dropped.
+        work.spawn_blocking(move || expand_skill_command(&command, &skills))
+            .map_err(|_| shut_down())?
+            .await
+            .unwrap_or_else(|_| text.to_owned())
+    } else {
+        text.to_owned()
+    };
+    text = expand_prompt_template(&text, prompt_templates);
+    if images.is_empty() {
+        return Ok((text, images));
+    }
+    let auto_resize = read_settings(settings).image_auto_resize();
+    let resize_options = model
+        .and_then(|model| ImageResizeOptions::from_input_limits(model.input_limits.as_ref()))
+        .unwrap_or_default();
+    let (normalized, hints) = work
+        .spawn_blocking(move || normalize_prompt_images(&images, auto_resize, resize_options))
+        .map_err(|_| shut_down())?
+        .await
+        .map_err(|error| format!("Image processing task failed: {error}"))?;
+    if !hints.is_empty() {
+        text = format!("{text}\n\n{}", hints.join("\n"));
+    }
+    Ok((text, normalized))
+}

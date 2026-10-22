@@ -1,6 +1,6 @@
 /** Title text normalization and UTF-8-safe truncation. */
 
-import { assertPositiveInteger } from '@deepseek-ai/dsh-util-values'
+import { assertPositiveInteger } from 'bake-util-values'
 
 /** Operating-system-command escape sequences, including unterminated tails. */
 const OSC_SEQUENCE = /(?:\u001B\]|\u009D)(?:(?!\u0007|\u001B\\)[\s\S])*(?:\u0007|\u001B\\|$)/gu

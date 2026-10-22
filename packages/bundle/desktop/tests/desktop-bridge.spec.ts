@@ -11,8 +11,8 @@ import { join } from 'node:path'
 import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
-import { resolveExampleLaunch } from '@deepseek-ai/dsh-loader-smoke'
-import { startMockLlmServer, type MockLlmBehavior, type MockLlmServer } from '@deepseek-ai/dsh-llm-mock-server'
+import { resolveExampleLaunch } from 'bake-loader-smoke'
+import { startMockLlmServer, type MockLlmBehavior, type MockLlmServer } from 'bake-llm-mock-server'
 import type { CoreMessage, HarnessMessage, PermissionTier } from '../src/protocol.ts'
 
 const dshBinScript = fileURLToPath(new URL('../../../../apps/cli/src/bin.ts', import.meta.url))

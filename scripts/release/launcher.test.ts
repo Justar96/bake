@@ -20,6 +20,7 @@ interface Launch {
   script: string
   argv: string[]
   home: string | null
+  legacyHome?: string | null
   nodeOptions: string | null
   excludeEnv: boolean
   excludeNetwork: boolean
@@ -38,7 +39,7 @@ function release(root: string): string {
   mkdirSync(join(cli, '..'), { recursive: true })
   writeFileSync(cli, `process.stdout.write(JSON.stringify({
   execArgv: process.execArgv, script: process.argv[1], argv: process.argv.slice(2),
-  home: process.env.DSH_HOME ?? null, nodeOptions: process.env.NODE_OPTIONS ?? null,
+  home: process.env.BAKE_HOME ?? null, legacyHome: process.env.DSH_HOME ?? null, nodeOptions: process.env.NODE_OPTIONS ?? null,
   excludeEnv: process.report.excludeEnv, excludeNetwork: process.report.excludeNetwork,
 }))\n`)
   return cli
@@ -58,9 +59,9 @@ test('the release bake.cmd starts Node as the installed Windows launcher does', 
   const shipped = starts(readFileSync(resolve(import.meta.dir, 'bake.cmd'), 'utf8'))
   expect(shipped).toEqual(starts(windowsLauncher('C:\\Program Files\\Bake')))
   expect(shipped).toEqual([
-    'if not exist "%DSH_HOME%\\diagnostics\\" mkdir "%DSH_HOME%\\diagnostics" 2>nul',
-    'node --report-exclude-env --report-exclude-network "--diagnostic-dir=%DSH_HOME%\\diagnostics" "%BAKE_CLI%" --profile tui %*',
-    'node --report-exclude-env --report-exclude-network "--diagnostic-dir=%DSH_HOME%\\diagnostics" "%BAKE_CLI%" %*',
+    'if not exist "%BAKE_HOME%\\diagnostics\\" mkdir "%BAKE_HOME%\\diagnostics" 2>nul',
+    'node --report-exclude-env --report-exclude-network "--diagnostic-dir=%BAKE_HOME%\\diagnostics" "%BAKE_CLI%" --profile tui %*',
+    'node --report-exclude-env --report-exclude-network "--diagnostic-dir=%BAKE_HOME%\\diagnostics" "%BAKE_CLI%" %*',
   ])
 })
 
@@ -84,7 +85,7 @@ describe.skipIf(process.platform === 'win32')('the POSIX launcher', () => {
     const diagnostics = join(home, '.bake/diagnostics')
     expect(started).toEqual({
       execArgv: [...FLAGS, `--diagnostic-dir=${diagnostics}`], script: cli, argv: ['--profile', 'tui', '--help'],
-      home: join(home, '.bake'), nodeOptions: null, excludeEnv: true, excludeNetwork: true,
+      home: join(home, '.bake'), legacyHome: join(home, '.bake'), nodeOptions: null, excludeEnv: true, excludeNetwork: true,
     })
     expect(statSync(diagnostics).mode & 0o777).toBe(0o700)
   })
@@ -92,13 +93,29 @@ describe.skipIf(process.platform === 'win32')('the POSIX launcher', () => {
   test('uses an explicit home and passes a subcommand through, leaving NODE_OPTIONS alone', async () => {
     const { root, command, cli } = install()
     const home = join(root, 'custom home')
-    const env: NodeJS.ProcessEnv = { PATH: process.env.PATH, HOME: root, DSH_HOME: home, NODE_OPTIONS: '--no-warnings' }
+    const env: NodeJS.ProcessEnv = { PATH: process.env.PATH, HOME: root, BAKE_HOME: home, DSH_HOME: join(root, 'ignored'), NODE_OPTIONS: '--no-warnings' }
     const started = await launch([command, 'update', '--check'], env)
     expect(started).toMatchObject({
       execArgv: [...FLAGS, `--diagnostic-dir=${home}/diagnostics`], script: cli, argv: ['update', '--check'], home,
-      nodeOptions: '--no-warnings',
+      legacyHome: home, nodeOptions: '--no-warnings',
     })
     expect(existsSync(join(home, 'diagnostics'))).toBe(true)
+  })
+
+  test('falls back to DSH_HOME when BAKE_HOME is unset', async () => {
+    const { root, command } = install()
+    const home = join(root, 'earlier home')
+    const started = await launch([command, '--help'], { PATH: process.env.PATH, HOME: root, DSH_HOME: home })
+    expect(started).toMatchObject({ execArgv: [...FLAGS, `--diagnostic-dir=${home}/diagnostics`], home, legacyHome: home })
+  })
+
+  test.each(['', '  '])('treats a blank BAKE_HOME (%j) as unset', async (blank) => {
+    const { root, command } = install()
+    const home = join(root, 'earlier home')
+    const started = await launch([command, '--help'], { PATH: process.env.PATH, HOME: root, BAKE_HOME: blank, DSH_HOME: home })
+    expect(started).toMatchObject({ execArgv: [...FLAGS, `--diagnostic-dir=${home}/diagnostics`], home, legacyHome: home })
+    const fallback = await launch([command, '--help'], { PATH: process.env.PATH, HOME: root, BAKE_HOME: blank })
+    expect(fallback).toMatchObject({ home: join(root, '.bake'), legacyHome: join(root, '.bake') })
   })
 })
 
@@ -116,7 +133,7 @@ describe.skipIf(process.platform !== 'win32')('the Windows launchers', () => {
     cpSync(resolve(import.meta.dir, 'bake.cmd'), join(root, 'release root/bin/bake.cmd'))
     const home = join(root, 'user home', '.bake')
     const command = join(root, 'release root/bin/bake.cmd')
-    const started = await launch(['cmd.exe', '/d', '/c', command, '--help'], { ...process.env, DSH_HOME: home })
+    const started = await launch(['cmd.exe', '/d', '/c', command, '--help'], { ...process.env, BAKE_HOME: home })
     expectWindowsLaunch(started, home, ['--profile', 'tui', '--help'])
   })
 
@@ -129,7 +146,7 @@ describe.skipIf(process.platform !== 'win32')('the Windows launchers', () => {
     writeFileSync(join(install, 'bin/bake.cmd'), windowsLauncher(install))
     const home = join(root, 'user home', '.bake')
     const command = join(install, 'bin/bake.cmd')
-    const started = await launch(['cmd.exe', '/d', '/c', command, 'update', '--check'], { ...process.env, DSH_HOME: home })
+    const started = await launch(['cmd.exe', '/d', '/c', command, 'update', '--check'], { ...process.env, BAKE_HOME: home })
     expectWindowsLaunch(started, home, ['update', '--check'])
   })
 })

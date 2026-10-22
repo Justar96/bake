@@ -8,12 +8,12 @@ import {
   decodeSeqRanges,
   SessionLogOffset,
   type SessionEvent,
-} from '@deepseek-ai/dsh-session'
-import type { SessionLogOffset as SessionLogOffsetType } from '@deepseek-ai/dsh-session'
-import { sessionFormatCatalog } from '@deepseek-ai/dsh-session-format-catalog'
-import { SessionFormatEventCollector, type SessionFormatArtifactDecoder, type SessionFormatCodec } from '@deepseek-ai/dsh-session-format'
-import { releasedV0SessionFormatCodec, releasedV1SessionFormatCodec } from '@deepseek-ai/dsh-session-format-v0-to-v1'
-import { releasedV2SessionFormatCodec } from '@deepseek-ai/dsh-session-format-v1-to-v2'
+} from 'bake-session'
+import type { SessionLogOffset as SessionLogOffsetType } from 'bake-session'
+import { sessionFormatCatalog } from 'bake-session-format-catalog'
+import { SessionFormatEventCollector, type SessionFormatArtifactDecoder, type SessionFormatCodec } from 'bake-session-format'
+import { releasedV0SessionFormatCodec, releasedV1SessionFormatCodec } from 'bake-session-format-v0-to-v1'
+import { releasedV2SessionFormatCodec } from 'bake-session-format-v1-to-v2'
 
 const historicalCodecs: readonly SessionFormatCodec[] = [
   releasedV0SessionFormatCodec, releasedV1SessionFormatCodec, releasedV2SessionFormatCodec,
@@ -27,6 +27,9 @@ const WEBWORKER_PHYSICAL_SESSION_FIXTURE_ROOT =
 const PYTHON_RUNTIME_PHYSICAL_SESSION_FIXTURE_ROOT =
   'scripts/snapshots/python-sdk-single-exe/'
 
+/** The Rust 0.4 workspace, whose JSONL fixtures are Pi session files rather than Bake Session logs (D32). */
+const PI_FORMAT_FIXTURE_ROOT = 'rust/'
+
 /** One repository session fixture and its canonical projected representation. */
 export interface SessionFixtureLayout {
   /** Repository-relative path with `/` separators. */
@@ -37,13 +40,22 @@ export interface SessionFixtureLayout {
   canonical: string
 }
 
+/** Request-reconstruction captures, each kept as the raw log one run wrote. */
+const REQUEST_RECONSTRUCTION_LOGS: ReadonlySet<string> = new Set([
+  'packages/core/agent-loop/tests/fixtures/request-reconstruction/tool-call-turn/session.v3.jsonl',
+  'packages/core/agent-loop/tests/fixtures/request-reconstruction/dynamic-tools/session.v3.jsonl',
+  'packages/core/agent-loop/tests/fixtures/request-reconstruction/retry-attempt/session.v3.jsonl',
+])
+
 /**
  * Whether a repository JSONL preserves physical persistence encoding rather
  * than the logical event projection owned by this script.
  * @param path - Repository-relative path with `/` separators.
- * @returns True for physical WebWorker and installed-runtime session logs.
+ * @returns True for an explicitly registered physical Session fixture.
  */
 export function isPhysicalSessionFixture(path: string): boolean {
+  // The request-reconstruction oracles preserve the captured envelopes and stream timing.
+  if (REQUEST_RECONSTRUCTION_LOGS.has(path)) return true
   if (path.startsWith(WEBWORKER_PHYSICAL_SESSION_FIXTURE_ROOT)) {
     return /\/session(?:\.v[1-9]\d*)?\.jsonl$/.test(path)
   }
@@ -284,7 +296,7 @@ function discoverJsonlFiles(root: string): string[] {
  */
 export function inspectSessionFixtureLayouts(root: string): SessionFixtureLayout[] {
   return discoverJsonlFiles(root).flatMap((path) => {
-    if (isPhysicalSessionFixture(path)) return []
+    if (isPhysicalSessionFixture(path) || path.startsWith(PI_FORMAT_FIXTURE_ROOT)) return []
     const source = readFileSync(resolve(root, path), 'utf8')
     const canonical = canonicalSessionFixture(source, path)
     return canonical === undefined ? [] : [{ path, source, canonical }]

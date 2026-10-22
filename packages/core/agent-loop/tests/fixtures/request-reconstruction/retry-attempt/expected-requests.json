@@ -1,0 +1,78 @@
+{
+  "schema": "bake/runtime-conformance/requests",
+  "version": 1,
+  "requests": [
+    {
+      "provider": "mock",
+      "model": "mock",
+      "messages": [
+        {
+          "id": "message-1",
+          "role": "system",
+          "content": [{ "type": "text", "text": "stable base" }],
+          "source": { "kind": "plugin", "plugin": "@deepseek-ai/dsh-system-prompt" }
+        },
+        {
+          "id": "message-2",
+          "role": "user",
+          "content": [{ "type": "text", "text": "go" }],
+          "source": { "kind": "user" }
+        }
+      ],
+      "tools": [
+        {
+          "name": "echo",
+          "description": "echo back",
+          "parameters": { "type": "object", "properties": { "text": { "type": "string" } } }
+        }
+      ],
+      "toolHistory": {
+        "tools": [
+          {
+            "name": "echo",
+            "description": "echo back",
+            "parameters": { "type": "object", "properties": { "text": { "type": "string" } } }
+          }
+        ],
+        "updates": []
+      },
+      "sessionId": "retry-attempt"
+    },
+    {
+      "provider": "mock",
+      "model": "mock-b",
+      "messages": [
+        {
+          "id": "message-1",
+          "role": "system",
+          "content": [{ "type": "text", "text": "stable base" }],
+          "source": { "kind": "plugin", "plugin": "@deepseek-ai/dsh-system-prompt" }
+        },
+        {
+          "id": "message-2",
+          "role": "user",
+          "content": [{ "type": "text", "text": "go" }],
+          "source": { "kind": "user" }
+        }
+      ],
+      "tools": [
+        {
+          "name": "echo",
+          "description": "echo back",
+          "parameters": { "type": "object", "properties": { "text": { "type": "string" } } }
+        }
+      ],
+      "toolHistory": {
+        "tools": [
+          {
+            "name": "echo",
+            "description": "echo back",
+            "parameters": { "type": "object", "properties": { "text": { "type": "string" } } }
+          }
+        ],
+        "updates": []
+      },
+      "sessionId": "retry-attempt"
+    }
+  ]
+}

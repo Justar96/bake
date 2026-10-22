@@ -2,7 +2,7 @@
  * The row `/update` draws while it installs a release: the orbit, what the
  * install is doing, and its meter, as the installers draw their live row.
  *
- * @module @dsh-tui/ui/installing
+ * @module bake-tui-ui/installing
  */
 import React from 'react'
 import { Box, Text, useWindowSize } from 'ink'

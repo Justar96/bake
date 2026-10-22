@@ -1,0 +1,2416 @@
+{
+	"model": {
+		"id": "faux-1",
+		"name": "Faux",
+		"api": "faux",
+		"provider": "faux",
+		"baseUrl": "http://localhost",
+		"reasoning": true,
+		"input": [
+			"text",
+			"image"
+		],
+		"cost": {
+			"input": 0,
+			"output": 0,
+			"cacheRead": 0,
+			"cacheWrite": 0
+		},
+		"contextWindow": 50000,
+		"maxTokens": 3000
+	},
+	"messages": [
+		{
+			"role": "system",
+			"content": "",
+			"sections": {
+				"preamble": "You are pi.",
+				"cwd": "Current working directory: /p"
+			},
+			"toolsAdded": [
+				{
+					"name": "read",
+					"description": "Read a file",
+					"parameters": {
+						"type": "object"
+					}
+				}
+			],
+			"timestamp": 1
+		},
+		{
+			"role": "user",
+			"content": "Fix the bug in src/app.ts 🍞",
+			"timestamp": 2
+		},
+		{
+			"role": "user",
+			"content": [
+				{
+					"type": "text",
+					"text": "look"
+				},
+				{
+					"type": "image",
+					"data": "AAAA",
+					"mimeType": "image/png"
+				},
+				{
+					"type": "text",
+					"text": "here"
+				}
+			],
+			"timestamp": 3
+		},
+		{
+			"role": "assistant",
+			"content": [
+				{
+					"type": "thinking",
+					"thinking": "I should read the file."
+				},
+				{
+					"type": "thinking",
+					"thinking": "And then edit it."
+				},
+				{
+					"type": "text",
+					"text": "Reading."
+				},
+				{
+					"type": "toolCall",
+					"id": "c1",
+					"name": "read",
+					"arguments": {
+						"1": "x",
+						"path": "src/app.ts",
+						"limit": 10,
+						"nested": {
+							"b": 1,
+							"a": [
+								1.5,
+								"é",
+								null
+							]
+						}
+					}
+				},
+				{
+					"type": "toolCall",
+					"id": "c2",
+					"name": "edit",
+					"arguments": {
+						"path": "src/app.ts",
+						"edits": []
+					}
+				},
+				{
+					"type": "toolCall",
+					"id": "c3",
+					"name": "write",
+					"arguments": {
+						"path": "new.ts",
+						"content": "x"
+					}
+				},
+				{
+					"type": "toolCall",
+					"id": "c4",
+					"name": "read",
+					"arguments": {
+						"path": "z/ü.md"
+					}
+				},
+				{
+					"type": "toolCall",
+					"id": "c5",
+					"name": "bash",
+					"arguments": {
+						"command": "ls"
+					}
+				}
+			],
+			"api": "faux",
+			"provider": "faux",
+			"model": "faux-1",
+			"usage": {
+				"input": 1200,
+				"output": 80,
+				"cacheRead": 0,
+				"cacheWrite": 0,
+				"totalTokens": 1280,
+				"cost": {
+					"input": 0,
+					"output": 0,
+					"cacheRead": 0,
+					"cacheWrite": 0,
+					"total": 0
+				}
+			},
+			"stopReason": "toolUse",
+			"timestamp": 10
+		},
+		{
+			"role": "toolResult",
+			"toolCallId": "c1",
+			"toolName": "read",
+			"content": [
+				{
+					"type": "text",
+					"text": "🍞line of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\n"
+				}
+			],
+			"isError": false,
+			"timestamp": 11
+		},
+		{
+			"role": "toolResult",
+			"toolCallId": "c2",
+			"toolName": "edit",
+			"content": [
+				{
+					"type": "text",
+					"text": "ok"
+				},
+				{
+					"type": "image",
+					"data": "BBBB",
+					"mimeType": "image/png"
+				}
+			],
+			"isError": false,
+			"timestamp": 12
+		},
+		{
+			"role": "toolResult",
+			"toolCallId": "c3",
+			"toolName": "write",
+			"content": [],
+			"isError": true,
+			"timestamp": 13
+		},
+		{
+			"role": "assistant",
+			"content": [
+				{
+					"type": "text",
+					"text": "First part."
+				},
+				{
+					"type": "text",
+					"text": "Second part."
+				}
+			],
+			"api": "faux",
+			"provider": "faux",
+			"model": "faux-1",
+			"usage": {
+				"input": 0,
+				"output": 0,
+				"cacheRead": 0,
+				"cacheWrite": 0,
+				"totalTokens": 0,
+				"cost": {
+					"input": 0,
+					"output": 0,
+					"cacheRead": 0,
+					"cacheWrite": 0,
+					"total": 0
+				}
+			},
+			"stopReason": "stop",
+			"timestamp": 10
+		},
+		{
+			"role": "assistant",
+			"content": [
+				{
+					"type": "toolCall",
+					"id": "c6",
+					"name": "codemode",
+					"arguments": {}
+				}
+			],
+			"api": "faux",
+			"provider": "faux",
+			"model": "faux-1",
+			"usage": {
+				"input": 0,
+				"output": 0,
+				"cacheRead": 0,
+				"cacheWrite": 0,
+				"totalTokens": 0,
+				"cost": {
+					"input": 0,
+					"output": 0,
+					"cacheRead": 0,
+					"cacheWrite": 0,
+					"total": 0
+				}
+			},
+			"stopReason": "toolUse",
+			"timestamp": 10
+		},
+		{
+			"role": "toolResult",
+			"toolCallId": "c6",
+			"toolName": "codemode",
+			"content": [
+				{
+					"type": "text",
+					"text": "done"
+				}
+			],
+			"isError": false,
+			"timestamp": 14,
+			"nestedCalls": {
+				"calls": [
+					{
+						"id": "c6/1",
+						"name": "read",
+						"arguments": {
+							"path": "nested-read.ts"
+						},
+						"status": "ok"
+					},
+					{
+						"id": "c6/2",
+						"name": "edit",
+						"arguments": {
+							"path": "nested-edit.ts",
+							"edits": []
+						},
+						"status": "ok"
+					},
+					{
+						"id": "c6/3",
+						"name": "write",
+						"argumentsBytes": 40000,
+						"status": "ok"
+					}
+				],
+				"complete": false
+			}
+		},
+		{
+			"role": "custom",
+			"customType": "note",
+			"content": "remember the deadline",
+			"display": true,
+			"timestamp": 15
+		},
+		{
+			"role": "custom",
+			"customType": "note",
+			"content": [
+				{
+					"type": "text",
+					"text": "block note"
+				}
+			],
+			"display": false,
+			"timestamp": 16
+		},
+		{
+			"role": "bashExecution",
+			"command": "ls -la",
+			"output": "a\nb",
+			"exitCode": 1,
+			"cancelled": false,
+			"truncated": false,
+			"timestamp": 17
+		},
+		{
+			"role": "bashExecution",
+			"command": "secret",
+			"output": "x",
+			"cancelled": false,
+			"truncated": false,
+			"timestamp": 18,
+			"excludeFromContext": true
+		},
+		{
+			"role": "branchSummary",
+			"summary": "explored another fix",
+			"fromId": "b1",
+			"timestamp": 19
+		},
+		{
+			"role": "compactionSummary",
+			"summary": "earlier work",
+			"tokensBefore": 5000,
+			"timestamp": 20
+		},
+		{
+			"role": "assistant",
+			"content": [
+				{
+					"type": "text",
+					"text": ""
+				}
+			],
+			"api": "faux",
+			"provider": "faux",
+			"model": "faux-1",
+			"usage": {
+				"input": 0,
+				"output": 0,
+				"cacheRead": 0,
+				"cacheWrite": 0,
+				"totalTokens": 0,
+				"cost": {
+					"input": 0,
+					"output": 0,
+					"cacheRead": 0,
+					"cacheWrite": 0,
+					"total": 0
+				}
+			},
+			"stopReason": "error",
+			"timestamp": 10,
+			"errorMessage": "overloaded"
+		},
+		{
+			"role": "user",
+			"content": [],
+			"timestamp": 21
+		}
+	],
+	"estimates": [
+		29,
+		7,
+		1202,
+		61,
+		651,
+		1201,
+		0,
+		6,
+		3,
+		1,
+		6,
+		3,
+		3,
+		2,
+		5,
+		3,
+		0,
+		0
+	],
+	"contextEstimate": {
+		"tokens": 3164,
+		"usageTokens": 1280,
+		"trailingTokens": 1884,
+		"lastUsageIndex": 3
+	},
+	"serialized": "[User]: Fix the bug in src/app.ts 🍞\n\n[User]: lookhere\n\n[Assistant]: Reading.\n\n[Assistant tool calls]: read(1=\"x\", path=\"src/app.ts\", limit=10, nested={\"b\":1,\"a\":[1.5,\"é\",null]}); edit(path=\"src/app.ts\", edits=[]); write(path=\"new.ts\", content=\"x\"); read(path=\"z/ü.md\"); bash(command=\"ls\")\n\n[Tool result]: 🍞line of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of c\n\n[... 602 more characters truncated]\n\n[Tool result]: ok\n\n[Assistant]: First part.\nSecond part.\n\n[Assistant tool calls]: codemode()\n\n[Tool result]: done\n\n[User]: remember the deadline\n\n[User]: block note\n\n[User]: Ran `ls -la`\n```\na\nb\n```\n\nCommand exited with code 1\n\n[User]: The following is a summary of a branch that this conversation came back from:\n\n<summary>\nexplored another fix</summary>\n\n[User]: The conversation history before this point was compacted into the following summary:\n\n<summary>\nearlier work\n</summary>\n\n[Assistant]: ",
+	"converted": [
+		{
+			"role": "system",
+			"text": null
+		},
+		{
+			"role": "user",
+			"text": "Fix the bug in src/app.ts 🍞"
+		},
+		{
+			"role": "user",
+			"text": "look\u0000here"
+		},
+		{
+			"role": "assistant",
+			"text": null
+		},
+		{
+			"role": "toolResult",
+			"text": null
+		},
+		{
+			"role": "toolResult",
+			"text": null
+		},
+		{
+			"role": "toolResult",
+			"text": null
+		},
+		{
+			"role": "assistant",
+			"text": null
+		},
+		{
+			"role": "assistant",
+			"text": null
+		},
+		{
+			"role": "toolResult",
+			"text": null
+		},
+		{
+			"role": "user",
+			"text": "remember the deadline"
+		},
+		{
+			"role": "user",
+			"text": "block note"
+		},
+		{
+			"role": "user",
+			"text": "Ran `ls -la`\n```\na\nb\n```\n\nCommand exited with code 1"
+		},
+		{
+			"role": "user",
+			"text": "The following is a summary of a branch that this conversation came back from:\n\n<summary>\nexplored another fix</summary>"
+		},
+		{
+			"role": "user",
+			"text": "The conversation history before this point was compacted into the following summary:\n\n<summary>\nearlier work\n</summary>"
+		},
+		{
+			"role": "assistant",
+			"text": null
+		},
+		{
+			"role": "user",
+			"text": ""
+		}
+	],
+	"entries": [
+		{
+			"id": "e0",
+			"parentId": null,
+			"timestamp": "2025-01-01T00:00:01.000Z",
+			"type": "message",
+			"message": {
+				"role": "user",
+				"content": "old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request ",
+				"timestamp": 100
+			}
+		},
+		{
+			"id": "e1",
+			"parentId": "e0",
+			"timestamp": "2025-01-01T00:00:02.000Z",
+			"type": "message",
+			"message": {
+				"role": "assistant",
+				"content": [
+					{
+						"type": "text",
+						"text": "old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer "
+					}
+				],
+				"api": "faux",
+				"provider": "faux",
+				"model": "faux-1",
+				"usage": {
+					"input": 0,
+					"output": 0,
+					"cacheRead": 0,
+					"cacheWrite": 0,
+					"totalTokens": 0,
+					"cost": {
+						"input": 0,
+						"output": 0,
+						"cacheRead": 0,
+						"cacheWrite": 0,
+						"total": 0
+					}
+				},
+				"stopReason": "stop",
+				"timestamp": 10
+			}
+		},
+		{
+			"id": "e2",
+			"parentId": "e1",
+			"timestamp": "2025-01-01T00:00:03.000Z",
+			"type": "message",
+			"message": {
+				"role": "user",
+				"content": "kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request ",
+				"timestamp": 101
+			}
+		},
+		{
+			"id": "e3",
+			"parentId": "e2",
+			"timestamp": "2025-01-01T00:00:04.000Z",
+			"type": "message",
+			"message": {
+				"role": "assistant",
+				"content": [
+					{
+						"type": "toolCall",
+						"id": "k1",
+						"name": "read",
+						"arguments": {
+							"path": "kept.ts"
+						}
+					}
+				],
+				"api": "faux",
+				"provider": "faux",
+				"model": "faux-1",
+				"usage": {
+					"input": 0,
+					"output": 0,
+					"cacheRead": 0,
+					"cacheWrite": 0,
+					"totalTokens": 0,
+					"cost": {
+						"input": 0,
+						"output": 0,
+						"cacheRead": 0,
+						"cacheWrite": 0,
+						"total": 0
+					}
+				},
+				"stopReason": "toolUse",
+				"timestamp": 10
+			}
+		},
+		{
+			"id": "e4",
+			"parentId": "e3",
+			"timestamp": "2025-01-01T00:00:05.000Z",
+			"type": "message",
+			"message": {
+				"role": "toolResult",
+				"toolCallId": "k1",
+				"toolName": "read",
+				"content": [
+					{
+						"type": "text",
+						"text": "kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file "
+					}
+				],
+				"isError": false,
+				"timestamp": 102
+			}
+		},
+		{
+			"id": "e5",
+			"parentId": "e4",
+			"timestamp": "2025-01-01T00:00:06.000Z",
+			"type": "compaction",
+			"summary": "First summary",
+			"firstKeptEntryId": "e2",
+			"tokensBefore": 9000,
+			"details": {
+				"readFiles": [
+					"prev-read.ts",
+					"kept.ts"
+				],
+				"modifiedFiles": [
+					"prev-mod.ts"
+				]
+			}
+		},
+		{
+			"id": "e6",
+			"parentId": "e5",
+			"timestamp": "2025-01-01T00:00:07.000Z",
+			"type": "model_change",
+			"provider": "faux",
+			"modelId": "faux-1"
+		},
+		{
+			"id": "e7",
+			"parentId": "e6",
+			"timestamp": "2025-01-01T00:00:08.000Z",
+			"type": "message",
+			"message": {
+				"role": "user",
+				"content": "new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request ",
+				"timestamp": 103
+			}
+		},
+		{
+			"id": "e8",
+			"parentId": "e7",
+			"timestamp": "2025-01-01T00:00:09.000Z",
+			"type": "message",
+			"message": {
+				"role": "assistant",
+				"content": [
+					{
+						"type": "text",
+						"text": "partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial "
+					},
+					{
+						"type": "toolCall",
+						"id": "n1",
+						"name": "edit",
+						"arguments": {
+							"path": "edited.ts",
+							"edits": []
+						}
+					}
+				],
+				"api": "faux",
+				"provider": "faux",
+				"model": "faux-1",
+				"usage": {
+					"input": 4000,
+					"output": 100,
+					"cacheRead": 0,
+					"cacheWrite": 0,
+					"totalTokens": 4100,
+					"cost": {
+						"input": 0,
+						"output": 0,
+						"cacheRead": 0,
+						"cacheWrite": 0,
+						"total": 0
+					}
+				},
+				"stopReason": "toolUse",
+				"timestamp": 10
+			}
+		},
+		{
+			"id": "e9",
+			"parentId": "e8",
+			"timestamp": "2025-01-01T00:00:10.000Z",
+			"type": "message",
+			"message": {
+				"role": "toolResult",
+				"toolCallId": "n1",
+				"toolName": "edit",
+				"content": [
+					{
+						"type": "text",
+						"text": "edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited "
+					}
+				],
+				"isError": false,
+				"timestamp": 104
+			}
+		},
+		{
+			"id": "e10",
+			"parentId": "e9",
+			"timestamp": "2025-01-01T00:00:11.000Z",
+			"type": "custom_message",
+			"customType": "note",
+			"content": "custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context ",
+			"display": true
+		},
+		{
+			"id": "e11",
+			"parentId": "e10",
+			"timestamp": "2025-01-01T00:00:12.000Z",
+			"type": "message",
+			"message": {
+				"role": "assistant",
+				"content": [
+					{
+						"type": "toolCall",
+						"id": "n2",
+						"name": "write",
+						"arguments": {
+							"path": "written.ts",
+							"content": "y"
+						}
+					}
+				],
+				"api": "faux",
+				"provider": "faux",
+				"model": "faux-1",
+				"usage": {
+					"input": 0,
+					"output": 0,
+					"cacheRead": 0,
+					"cacheWrite": 0,
+					"totalTokens": 0,
+					"cost": {
+						"input": 0,
+						"output": 0,
+						"cacheRead": 0,
+						"cacheWrite": 0,
+						"total": 0
+					}
+				},
+				"stopReason": "toolUse",
+				"timestamp": 10
+			}
+		},
+		{
+			"id": "e12",
+			"parentId": "e11",
+			"timestamp": "2025-01-01T00:00:13.000Z",
+			"type": "message",
+			"message": {
+				"role": "toolResult",
+				"toolCallId": "n2",
+				"toolName": "write",
+				"content": [
+					{
+						"type": "text",
+						"text": "written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written "
+					}
+				],
+				"isError": false,
+				"timestamp": 105
+			}
+		},
+		{
+			"id": "e13",
+			"parentId": "e12",
+			"timestamp": "2025-01-01T00:00:14.000Z",
+			"type": "message",
+			"message": {
+				"role": "assistant",
+				"content": [
+					{
+						"type": "text",
+						"text": "final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer "
+					}
+				],
+				"api": "faux",
+				"provider": "faux",
+				"model": "faux-1",
+				"usage": {
+					"input": 6000,
+					"output": 200,
+					"cacheRead": 0,
+					"cacheWrite": 0,
+					"totalTokens": 6200,
+					"cost": {
+						"input": 0,
+						"output": 0,
+						"cacheRead": 0,
+						"cacheWrite": 0,
+						"total": 0
+					}
+				},
+				"stopReason": "stop",
+				"timestamp": 10
+			}
+		}
+	],
+	"cutPoints": [
+		{
+			"keep": 0,
+			"result": {
+				"firstKeptEntryIndex": 13,
+				"turnStartIndex": 10,
+				"isSplitTurn": true
+			}
+		},
+		{
+			"keep": 1,
+			"result": {
+				"firstKeptEntryIndex": 13,
+				"turnStartIndex": 10,
+				"isSplitTurn": true
+			}
+		},
+		{
+			"keep": 50,
+			"result": {
+				"firstKeptEntryIndex": 13,
+				"turnStartIndex": 10,
+				"isSplitTurn": true
+			}
+		},
+		{
+			"keep": 200,
+			"result": {
+				"firstKeptEntryIndex": 13,
+				"turnStartIndex": 10,
+				"isSplitTurn": true
+			}
+		},
+		{
+			"keep": 400,
+			"result": {
+				"firstKeptEntryIndex": 10,
+				"turnStartIndex": -1,
+				"isSplitTurn": false
+			}
+		},
+		{
+			"keep": 1000,
+			"result": {
+				"firstKeptEntryIndex": 1,
+				"turnStartIndex": 0,
+				"isSplitTurn": true
+			}
+		},
+		{
+			"keep": 100000,
+			"result": {
+				"firstKeptEntryIndex": 0,
+				"turnStartIndex": -1,
+				"isSplitTurn": false
+			}
+		}
+	],
+	"preparations": [
+		{
+			"keep": 1,
+			"preparation": {
+				"firstKeptEntryId": "e13",
+				"messagesToSummarize": [
+					{
+						"role": "user",
+						"content": "kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request ",
+						"timestamp": 101
+					},
+					{
+						"role": "assistant",
+						"content": [
+							{
+								"type": "toolCall",
+								"id": "k1",
+								"name": "read",
+								"arguments": {
+									"path": "kept.ts"
+								}
+							}
+						],
+						"api": "faux",
+						"provider": "faux",
+						"model": "faux-1",
+						"usage": {
+							"input": 0,
+							"output": 0,
+							"cacheRead": 0,
+							"cacheWrite": 0,
+							"totalTokens": 0,
+							"cost": {
+								"input": 0,
+								"output": 0,
+								"cacheRead": 0,
+								"cacheWrite": 0,
+								"total": 0
+							}
+						},
+						"stopReason": "toolUse",
+						"timestamp": 10
+					},
+					{
+						"role": "toolResult",
+						"toolCallId": "k1",
+						"toolName": "read",
+						"content": [
+							{
+								"type": "text",
+								"text": "kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file "
+							}
+						],
+						"isError": false,
+						"timestamp": 102
+					},
+					{
+						"role": "user",
+						"content": "new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request ",
+						"timestamp": 103
+					},
+					{
+						"role": "assistant",
+						"content": [
+							{
+								"type": "text",
+								"text": "partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial "
+							},
+							{
+								"type": "toolCall",
+								"id": "n1",
+								"name": "edit",
+								"arguments": {
+									"path": "edited.ts",
+									"edits": []
+								}
+							}
+						],
+						"api": "faux",
+						"provider": "faux",
+						"model": "faux-1",
+						"usage": {
+							"input": 4000,
+							"output": 100,
+							"cacheRead": 0,
+							"cacheWrite": 0,
+							"totalTokens": 4100,
+							"cost": {
+								"input": 0,
+								"output": 0,
+								"cacheRead": 0,
+								"cacheWrite": 0,
+								"total": 0
+							}
+						},
+						"stopReason": "toolUse",
+						"timestamp": 10
+					},
+					{
+						"role": "toolResult",
+						"toolCallId": "n1",
+						"toolName": "edit",
+						"content": [
+							{
+								"type": "text",
+								"text": "edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited "
+							}
+						],
+						"isError": false,
+						"timestamp": 104
+					}
+				],
+				"turnPrefixMessages": [
+					{
+						"role": "custom",
+						"customType": "note",
+						"content": "custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context ",
+						"display": true,
+						"timestamp": 1735689611000
+					},
+					{
+						"role": "assistant",
+						"content": [
+							{
+								"type": "toolCall",
+								"id": "n2",
+								"name": "write",
+								"arguments": {
+									"path": "written.ts",
+									"content": "y"
+								}
+							}
+						],
+						"api": "faux",
+						"provider": "faux",
+						"model": "faux-1",
+						"usage": {
+							"input": 0,
+							"output": 0,
+							"cacheRead": 0,
+							"cacheWrite": 0,
+							"totalTokens": 0,
+							"cost": {
+								"input": 0,
+								"output": 0,
+								"cacheRead": 0,
+								"cacheWrite": 0,
+								"total": 0
+							}
+						},
+						"stopReason": "toolUse",
+						"timestamp": 10
+					},
+					{
+						"role": "toolResult",
+						"toolCallId": "n2",
+						"toolName": "write",
+						"content": [
+							{
+								"type": "text",
+								"text": "written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written "
+							}
+						],
+						"isError": false,
+						"timestamp": 105
+					}
+				],
+				"isSplitTurn": true,
+				"tokensBefore": 6200,
+				"previousSummary": "First summary",
+				"fileOps": {
+					"read": [
+						"prev-read.ts",
+						"kept.ts"
+					],
+					"written": [
+						"written.ts"
+					],
+					"edited": [
+						"prev-mod.ts",
+						"edited.ts"
+					]
+				}
+			}
+		},
+		{
+			"keep": 150,
+			"preparation": {
+				"firstKeptEntryId": "e13",
+				"messagesToSummarize": [
+					{
+						"role": "user",
+						"content": "kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request ",
+						"timestamp": 101
+					},
+					{
+						"role": "assistant",
+						"content": [
+							{
+								"type": "toolCall",
+								"id": "k1",
+								"name": "read",
+								"arguments": {
+									"path": "kept.ts"
+								}
+							}
+						],
+						"api": "faux",
+						"provider": "faux",
+						"model": "faux-1",
+						"usage": {
+							"input": 0,
+							"output": 0,
+							"cacheRead": 0,
+							"cacheWrite": 0,
+							"totalTokens": 0,
+							"cost": {
+								"input": 0,
+								"output": 0,
+								"cacheRead": 0,
+								"cacheWrite": 0,
+								"total": 0
+							}
+						},
+						"stopReason": "toolUse",
+						"timestamp": 10
+					},
+					{
+						"role": "toolResult",
+						"toolCallId": "k1",
+						"toolName": "read",
+						"content": [
+							{
+								"type": "text",
+								"text": "kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file "
+							}
+						],
+						"isError": false,
+						"timestamp": 102
+					},
+					{
+						"role": "user",
+						"content": "new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request ",
+						"timestamp": 103
+					},
+					{
+						"role": "assistant",
+						"content": [
+							{
+								"type": "text",
+								"text": "partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial "
+							},
+							{
+								"type": "toolCall",
+								"id": "n1",
+								"name": "edit",
+								"arguments": {
+									"path": "edited.ts",
+									"edits": []
+								}
+							}
+						],
+						"api": "faux",
+						"provider": "faux",
+						"model": "faux-1",
+						"usage": {
+							"input": 4000,
+							"output": 100,
+							"cacheRead": 0,
+							"cacheWrite": 0,
+							"totalTokens": 4100,
+							"cost": {
+								"input": 0,
+								"output": 0,
+								"cacheRead": 0,
+								"cacheWrite": 0,
+								"total": 0
+							}
+						},
+						"stopReason": "toolUse",
+						"timestamp": 10
+					},
+					{
+						"role": "toolResult",
+						"toolCallId": "n1",
+						"toolName": "edit",
+						"content": [
+							{
+								"type": "text",
+								"text": "edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited "
+							}
+						],
+						"isError": false,
+						"timestamp": 104
+					}
+				],
+				"turnPrefixMessages": [
+					{
+						"role": "custom",
+						"customType": "note",
+						"content": "custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context ",
+						"display": true,
+						"timestamp": 1735689611000
+					},
+					{
+						"role": "assistant",
+						"content": [
+							{
+								"type": "toolCall",
+								"id": "n2",
+								"name": "write",
+								"arguments": {
+									"path": "written.ts",
+									"content": "y"
+								}
+							}
+						],
+						"api": "faux",
+						"provider": "faux",
+						"model": "faux-1",
+						"usage": {
+							"input": 0,
+							"output": 0,
+							"cacheRead": 0,
+							"cacheWrite": 0,
+							"totalTokens": 0,
+							"cost": {
+								"input": 0,
+								"output": 0,
+								"cacheRead": 0,
+								"cacheWrite": 0,
+								"total": 0
+							}
+						},
+						"stopReason": "toolUse",
+						"timestamp": 10
+					},
+					{
+						"role": "toolResult",
+						"toolCallId": "n2",
+						"toolName": "write",
+						"content": [
+							{
+								"type": "text",
+								"text": "written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written "
+							}
+						],
+						"isError": false,
+						"timestamp": 105
+					}
+				],
+				"isSplitTurn": true,
+				"tokensBefore": 6200,
+				"previousSummary": "First summary",
+				"fileOps": {
+					"read": [
+						"prev-read.ts",
+						"kept.ts"
+					],
+					"written": [
+						"written.ts"
+					],
+					"edited": [
+						"prev-mod.ts",
+						"edited.ts"
+					]
+				}
+			}
+		},
+		{
+			"keep": 300,
+			"preparation": {
+				"firstKeptEntryId": "e10",
+				"messagesToSummarize": [
+					{
+						"role": "user",
+						"content": "kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request ",
+						"timestamp": 101
+					},
+					{
+						"role": "assistant",
+						"content": [
+							{
+								"type": "toolCall",
+								"id": "k1",
+								"name": "read",
+								"arguments": {
+									"path": "kept.ts"
+								}
+							}
+						],
+						"api": "faux",
+						"provider": "faux",
+						"model": "faux-1",
+						"usage": {
+							"input": 0,
+							"output": 0,
+							"cacheRead": 0,
+							"cacheWrite": 0,
+							"totalTokens": 0,
+							"cost": {
+								"input": 0,
+								"output": 0,
+								"cacheRead": 0,
+								"cacheWrite": 0,
+								"total": 0
+							}
+						},
+						"stopReason": "toolUse",
+						"timestamp": 10
+					},
+					{
+						"role": "toolResult",
+						"toolCallId": "k1",
+						"toolName": "read",
+						"content": [
+							{
+								"type": "text",
+								"text": "kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file "
+							}
+						],
+						"isError": false,
+						"timestamp": 102
+					},
+					{
+						"role": "user",
+						"content": "new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request ",
+						"timestamp": 103
+					},
+					{
+						"role": "assistant",
+						"content": [
+							{
+								"type": "text",
+								"text": "partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial "
+							},
+							{
+								"type": "toolCall",
+								"id": "n1",
+								"name": "edit",
+								"arguments": {
+									"path": "edited.ts",
+									"edits": []
+								}
+							}
+						],
+						"api": "faux",
+						"provider": "faux",
+						"model": "faux-1",
+						"usage": {
+							"input": 4000,
+							"output": 100,
+							"cacheRead": 0,
+							"cacheWrite": 0,
+							"totalTokens": 4100,
+							"cost": {
+								"input": 0,
+								"output": 0,
+								"cacheRead": 0,
+								"cacheWrite": 0,
+								"total": 0
+							}
+						},
+						"stopReason": "toolUse",
+						"timestamp": 10
+					},
+					{
+						"role": "toolResult",
+						"toolCallId": "n1",
+						"toolName": "edit",
+						"content": [
+							{
+								"type": "text",
+								"text": "edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited "
+							}
+						],
+						"isError": false,
+						"timestamp": 104
+					}
+				],
+				"turnPrefixMessages": [],
+				"isSplitTurn": false,
+				"tokensBefore": 6200,
+				"previousSummary": "First summary",
+				"fileOps": {
+					"read": [
+						"prev-read.ts",
+						"kept.ts"
+					],
+					"written": [],
+					"edited": [
+						"prev-mod.ts",
+						"edited.ts"
+					]
+				}
+			}
+		},
+		{
+			"keep": 600,
+			"preparation": {
+				"firstKeptEntryId": "e6",
+				"messagesToSummarize": [],
+				"turnPrefixMessages": [
+					{
+						"role": "user",
+						"content": "kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request ",
+						"timestamp": 101
+					},
+					{
+						"role": "assistant",
+						"content": [
+							{
+								"type": "toolCall",
+								"id": "k1",
+								"name": "read",
+								"arguments": {
+									"path": "kept.ts"
+								}
+							}
+						],
+						"api": "faux",
+						"provider": "faux",
+						"model": "faux-1",
+						"usage": {
+							"input": 0,
+							"output": 0,
+							"cacheRead": 0,
+							"cacheWrite": 0,
+							"totalTokens": 0,
+							"cost": {
+								"input": 0,
+								"output": 0,
+								"cacheRead": 0,
+								"cacheWrite": 0,
+								"total": 0
+							}
+						},
+						"stopReason": "toolUse",
+						"timestamp": 10
+					},
+					{
+						"role": "toolResult",
+						"toolCallId": "k1",
+						"toolName": "read",
+						"content": [
+							{
+								"type": "text",
+								"text": "kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file "
+							}
+						],
+						"isError": false,
+						"timestamp": 102
+					}
+				],
+				"isSplitTurn": true,
+				"tokensBefore": 6200,
+				"previousSummary": "First summary",
+				"fileOps": {
+					"read": [
+						"prev-read.ts",
+						"kept.ts"
+					],
+					"written": [],
+					"edited": [
+						"prev-mod.ts"
+					]
+				}
+			}
+		},
+		{
+			"keep": 100000
+		}
+	],
+	"summaries": [
+		{
+			"previousSummary": null,
+			"customInstructions": null,
+			"thinkingLevel": "high",
+			"result": {
+				"text": "## Goal\nsummary",
+				"usage": {
+					"input": 30,
+					"output": 7,
+					"cacheRead": 0,
+					"cacheWrite": 0,
+					"totalTokens": 37,
+					"cost": {
+						"input": 0,
+						"output": 0,
+						"cacheRead": 0,
+						"cacheWrite": 0,
+						"total": 0
+					}
+				}
+			},
+			"requests": [
+				{
+					"model": "faux-1",
+					"systemPrompt": "You are a context summarization assistant. Your task is to read a conversation between a user and an AI assistant, then produce a structured summary following the exact format specified.\n\nDo NOT continue the conversation. Do NOT respond to any questions in the conversation. ONLY output the structured summary.",
+					"roles": [
+						"system",
+						"user"
+					],
+					"prompt": "<conversation>\n[User]: Fix the bug in src/app.ts 🍞\n\n[User]: lookhere\n\n[Assistant]: Reading.\n\n[Assistant tool calls]: read(1=\"x\", path=\"src/app.ts\", limit=10, nested={\"b\":1,\"a\":[1.5,\"é\",null]}); edit(path=\"src/app.ts\", edits=[]); write(path=\"new.ts\", content=\"x\"); read(path=\"z/ü.md\"); bash(command=\"ls\")\n\n[Tool result]: 🍞line of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of c\n\n[... 602 more characters truncated]\n\n[Tool result]: ok\n\n[Assistant]: First part.\nSecond part.\n\n[Assistant tool calls]: codemode()\n\n[Tool result]: done\n\n[User]: remember the deadline\n\n[User]: block note\n\n[User]: Ran `ls -la`\n```\na\nb\n```\n\nCommand exited with code 1\n\n[User]: The following is a summary of a branch that this conversation came back from:\n\n<summary>\nexplored another fix</summary>\n\n[User]: The conversation history before this point was compacted into the following summary:\n\n<summary>\nearlier work\n</summary>\n\n[Assistant]: \n</conversation>\n\nThe messages above are a conversation to summarize. Create a structured context checkpoint summary that another LLM will use to continue the work.\n\nUse this EXACT format:\n\n## Goal\n[What is the user trying to accomplish? Can be multiple items if the session covers different tasks.]\n\n## Constraints & Preferences\n- [Any constraints, preferences, or requirements mentioned by user]\n- [Or \"(none)\" if none were mentioned]\n\n## Progress\n### Done\n- [x] [Completed tasks/changes]\n\n### In Progress\n- [ ] [Current work]\n\n### Blocked\n- [Issues preventing progress, if any]\n\n## Key Decisions\n- **[Decision]**: [Brief rationale]\n\n## Next Steps\n1. [Ordered list of what should happen next]\n\n## Critical Context\n- [Any data, examples, or references needed to continue]\n- [Or \"(none)\" if not applicable]\n\nKeep each section concise. Preserve exact file paths, function names, and error messages.",
+					"reasoning": "high",
+					"cacheRetention": "none",
+					"sessionIdSupplied": false
+				}
+			]
+		},
+		{
+			"previousSummary": "Earlier summary",
+			"customInstructions": "the parser",
+			"thinkingLevel": "off",
+			"result": {
+				"text": "## Goal\nsummary",
+				"usage": {
+					"input": 30,
+					"output": 7,
+					"cacheRead": 0,
+					"cacheWrite": 0,
+					"totalTokens": 37,
+					"cost": {
+						"input": 0,
+						"output": 0,
+						"cacheRead": 0,
+						"cacheWrite": 0,
+						"total": 0
+					}
+				}
+			},
+			"requests": [
+				{
+					"model": "faux-1",
+					"systemPrompt": "You are a context summarization assistant. Your task is to read a conversation between a user and an AI assistant, then produce a structured summary following the exact format specified.\n\nDo NOT continue the conversation. Do NOT respond to any questions in the conversation. ONLY output the structured summary.",
+					"roles": [
+						"system",
+						"user"
+					],
+					"prompt": "<conversation>\n[User]: Fix the bug in src/app.ts 🍞\n\n[User]: lookhere\n\n[Assistant]: Reading.\n\n[Assistant tool calls]: read(1=\"x\", path=\"src/app.ts\", limit=10, nested={\"b\":1,\"a\":[1.5,\"é\",null]}); edit(path=\"src/app.ts\", edits=[]); write(path=\"new.ts\", content=\"x\"); read(path=\"z/ü.md\"); bash(command=\"ls\")\n\n[Tool result]: 🍞line of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of code\nline of c\n\n[... 602 more characters truncated]\n\n[Tool result]: ok\n\n[Assistant]: First part.\nSecond part.\n\n[Assistant tool calls]: codemode()\n\n[Tool result]: done\n\n[User]: remember the deadline\n\n[User]: block note\n\n[User]: Ran `ls -la`\n```\na\nb\n```\n\nCommand exited with code 1\n\n[User]: The following is a summary of a branch that this conversation came back from:\n\n<summary>\nexplored another fix</summary>\n\n[User]: The conversation history before this point was compacted into the following summary:\n\n<summary>\nearlier work\n</summary>\n\n[Assistant]: \n</conversation>\n\n<previous-summary>\nEarlier summary\n</previous-summary>\n\nThe messages above are NEW conversation messages to incorporate into the existing summary provided in <previous-summary> tags.\n\nUpdate the existing structured summary with new information. RULES:\n- PRESERVE all existing information from the previous summary\n- ADD new progress, decisions, and context from the new messages\n- UPDATE the Progress section: move items from \"In Progress\" to \"Done\" when completed\n- UPDATE \"Next Steps\" based on what was accomplished\n- PRESERVE exact file paths, function names, and error messages\n- If something is no longer relevant, you may remove it\n\nUse this EXACT format:\n\n## Goal\n[Preserve existing goals, add new ones if the task expanded]\n\n## Constraints & Preferences\n- [Preserve existing, add new ones discovered]\n\n## Progress\n### Done\n- [x] [Include previously done items AND newly completed items]\n\n### In Progress\n- [ ] [Current work - update based on progress]\n\n### Blocked\n- [Current blockers - remove if resolved]\n\n## Key Decisions\n- **[Decision]**: [Brief rationale] (preserve all previous, add new)\n\n## Next Steps\n1. [Update based on current state]\n\n## Critical Context\n- [Preserve important context, add new if needed]\n\nKeep each section concise. Preserve exact file paths, function names, and error messages.\n\nAdditional focus: the parser",
+					"reasoning": null,
+					"cacheRetention": "none",
+					"sessionIdSupplied": false
+				}
+			]
+		}
+	],
+	"compactions": [
+		{
+			"keep": 300,
+			"result": {
+				"summary": "## Goal\nhistory summary\n\n<read-files>\nkept.ts\nprev-read.ts\n</read-files>\n\n<modified-files>\nedited.ts\nprev-mod.ts\n</modified-files>",
+				"firstKeptEntryId": "e10",
+				"tokensBefore": 6200,
+				"usage": {
+					"input": 30,
+					"output": 7,
+					"cacheRead": 0,
+					"cacheWrite": 0,
+					"totalTokens": 37,
+					"cost": {
+						"input": 0,
+						"output": 0,
+						"cacheRead": 0,
+						"cacheWrite": 0,
+						"total": 0
+					}
+				},
+				"details": {
+					"readFiles": [
+						"kept.ts",
+						"prev-read.ts"
+					],
+					"modifiedFiles": [
+						"edited.ts",
+						"prev-mod.ts"
+					]
+				}
+			},
+			"requests": [
+				{
+					"model": "faux-1",
+					"systemPrompt": "You are a context summarization assistant. Your task is to read a conversation between a user and an AI assistant, then produce a structured summary following the exact format specified.\n\nDo NOT continue the conversation. Do NOT respond to any questions in the conversation. ONLY output the structured summary.",
+					"roles": [
+						"system",
+						"user"
+					],
+					"prompt": "<conversation>\n[User]: kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request \n\n[Assistant tool calls]: read(path=\"kept.ts\")\n\n[Tool result]: kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file \n\n[User]: new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request \n\n[Assistant]: partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial \n\n[Assistant tool calls]: edit(path=\"edited.ts\", edits=[])\n\n[Tool result]: edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited \n</conversation>\n\n<previous-summary>\nFirst summary\n</previous-summary>\n\nThe messages above are NEW conversation messages to incorporate into the existing summary provided in <previous-summary> tags.\n\nUpdate the existing structured summary with new information. RULES:\n- PRESERVE all existing information from the previous summary\n- ADD new progress, decisions, and context from the new messages\n- UPDATE the Progress section: move items from \"In Progress\" to \"Done\" when completed\n- UPDATE \"Next Steps\" based on what was accomplished\n- PRESERVE exact file paths, function names, and error messages\n- If something is no longer relevant, you may remove it\n\nUse this EXACT format:\n\n## Goal\n[Preserve existing goals, add new ones if the task expanded]\n\n## Constraints & Preferences\n- [Preserve existing, add new ones discovered]\n\n## Progress\n### Done\n- [x] [Include previously done items AND newly completed items]\n\n### In Progress\n- [ ] [Current work - update based on progress]\n\n### Blocked\n- [Current blockers - remove if resolved]\n\n## Key Decisions\n- **[Decision]**: [Brief rationale] (preserve all previous, add new)\n\n## Next Steps\n1. [Update based on current state]\n\n## Critical Context\n- [Preserve important context, add new if needed]\n\nKeep each section concise. Preserve exact file paths, function names, and error messages.",
+					"reasoning": "medium",
+					"cacheRetention": "none",
+					"sessionIdSupplied": true
+				}
+			]
+		},
+		{
+			"keep": 150,
+			"result": {
+				"summary": "## Goal\nhistory summary\n\n---\n\n**Turn Context (split turn):**\n\n## Original Request\nturn prefix\n\n<read-files>\nkept.ts\nprev-read.ts\n</read-files>\n\n<modified-files>\nedited.ts\nprev-mod.ts\nwritten.ts\n</modified-files>",
+				"firstKeptEntryId": "e13",
+				"tokensBefore": 6200,
+				"usage": {
+					"input": 60,
+					"output": 14,
+					"cacheRead": 0,
+					"cacheWrite": 0,
+					"totalTokens": 74,
+					"cost": {
+						"input": 0,
+						"output": 0,
+						"cacheRead": 0,
+						"cacheWrite": 0,
+						"total": 0
+					}
+				},
+				"details": {
+					"readFiles": [
+						"kept.ts",
+						"prev-read.ts"
+					],
+					"modifiedFiles": [
+						"edited.ts",
+						"prev-mod.ts",
+						"written.ts"
+					]
+				}
+			},
+			"requests": [
+				{
+					"model": "faux-1",
+					"systemPrompt": "You are a context summarization assistant. Your task is to read a conversation between a user and an AI assistant, then produce a structured summary following the exact format specified.\n\nDo NOT continue the conversation. Do NOT respond to any questions in the conversation. ONLY output the structured summary.",
+					"roles": [
+						"system",
+						"user"
+					],
+					"prompt": "<conversation>\n[User]: kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request \n\n[Assistant tool calls]: read(path=\"kept.ts\")\n\n[Tool result]: kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file kept file \n\n[User]: new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request \n\n[Assistant]: partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial \n\n[Assistant tool calls]: edit(path=\"edited.ts\", edits=[])\n\n[Tool result]: edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited edited \n</conversation>\n\n<previous-summary>\nFirst summary\n</previous-summary>\n\nThe messages above are NEW conversation messages to incorporate into the existing summary provided in <previous-summary> tags.\n\nUpdate the existing structured summary with new information. RULES:\n- PRESERVE all existing information from the previous summary\n- ADD new progress, decisions, and context from the new messages\n- UPDATE the Progress section: move items from \"In Progress\" to \"Done\" when completed\n- UPDATE \"Next Steps\" based on what was accomplished\n- PRESERVE exact file paths, function names, and error messages\n- If something is no longer relevant, you may remove it\n\nUse this EXACT format:\n\n## Goal\n[Preserve existing goals, add new ones if the task expanded]\n\n## Constraints & Preferences\n- [Preserve existing, add new ones discovered]\n\n## Progress\n### Done\n- [x] [Include previously done items AND newly completed items]\n\n### In Progress\n- [ ] [Current work - update based on progress]\n\n### Blocked\n- [Current blockers - remove if resolved]\n\n## Key Decisions\n- **[Decision]**: [Brief rationale] (preserve all previous, add new)\n\n## Next Steps\n1. [Update based on current state]\n\n## Critical Context\n- [Preserve important context, add new if needed]\n\nKeep each section concise. Preserve exact file paths, function names, and error messages.",
+					"reasoning": "medium",
+					"cacheRetention": "none",
+					"sessionIdSupplied": true
+				},
+				{
+					"model": "faux-1",
+					"systemPrompt": "You are a context summarization assistant. Your task is to read a conversation between a user and an AI assistant, then produce a structured summary following the exact format specified.\n\nDo NOT continue the conversation. Do NOT respond to any questions in the conversation. ONLY output the structured summary.",
+					"roles": [
+						"system",
+						"user"
+					],
+					"prompt": "# Conversation\n[User]: custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context \n\n[Assistant tool calls]: write(path=\"written.ts\", content=\"y\")\n\n[Tool result]: written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written written \n\n# Instructions\nThe messages above are earlier context from an ongoing conversation. Later messages are stored separately and do not need to be reconstructed.\n\nCreate a concise checkpoint of the user's request and the progress shown above. This checkpoint will be placed before the later messages so the conversation can continue with the necessary context.\n\n## Original Request\n[What did the user ask for?]\n\n## Progress So Far\n- [Key decisions and work completed in these messages]\n\n## Context Needed to Continue\n- [Information from these messages needed to understand the later work]\n\nOnly summarize information explicitly present above. Do not infer or recreate later messages.",
+					"reasoning": "medium",
+					"cacheRetention": "none",
+					"sessionIdSupplied": true
+				}
+			]
+		}
+	],
+	"branch": [
+		{
+			"options": {},
+			"result": {
+				"summary": "The user explored a different conversation branch before returning here.\nSummary of that exploration:\n\n## Goal\nbranch\n\n<read-files>\nkept.ts\n</read-files>\n\n<modified-files>\nedited.ts\nwritten.ts\n</modified-files>",
+				"usage": {
+					"input": 30,
+					"output": 7,
+					"cacheRead": 0,
+					"cacheWrite": 0,
+					"totalTokens": 37,
+					"cost": {
+						"input": 0,
+						"output": 0,
+						"cacheRead": 0,
+						"cacheWrite": 0,
+						"total": 0
+					}
+				},
+				"readFiles": [
+					"kept.ts"
+				],
+				"modifiedFiles": [
+					"edited.ts",
+					"written.ts"
+				]
+			},
+			"requests": [
+				{
+					"model": "faux-1",
+					"systemPrompt": "You are a context summarization assistant. Your task is to read a conversation between a user and an AI assistant, then produce a structured summary following the exact format specified.\n\nDo NOT continue the conversation. Do NOT respond to any questions in the conversation. ONLY output the structured summary.",
+					"roles": [
+						"system",
+						"user"
+					],
+					"prompt": "<conversation>\n[User]: old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request \n\n[Assistant]: old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer \n\n[User]: kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request \n\n[Assistant tool calls]: read(path=\"kept.ts\")\n\n[User]: The conversation history before this point was compacted into the following summary:\n\n<summary>\nFirst summary\n</summary>\n\n[User]: new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request \n\n[Assistant]: partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial \n\n[Assistant tool calls]: edit(path=\"edited.ts\", edits=[])\n\n[User]: custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context \n\n[Assistant tool calls]: write(path=\"written.ts\", content=\"y\")\n\n[Assistant]: final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer \n</conversation>\n\nCreate a structured summary of this conversation branch for context when returning later.\n\nUse this EXACT format:\n\n## Goal\n[What was the user trying to accomplish in this branch?]\n\n## Constraints & Preferences\n- [Any constraints, preferences, or requirements mentioned]\n- [Or \"(none)\" if none were mentioned]\n\n## Progress\n### Done\n- [x] [Completed tasks/changes]\n\n### In Progress\n- [ ] [Work that was started but not finished]\n\n### Blocked\n- [Issues preventing progress, if any]\n\n## Key Decisions\n- **[Decision]**: [Brief rationale]\n\n## Next Steps\n1. [What should happen next to continue this work]\n\nKeep each section concise. Preserve exact file paths, function names, and error messages.",
+					"reasoning": null,
+					"cacheRetention": "none",
+					"sessionIdSupplied": false
+				}
+			]
+		},
+		{
+			"options": {
+				"customInstructions": "the edits"
+			},
+			"result": {
+				"summary": "The user explored a different conversation branch before returning here.\nSummary of that exploration:\n\n## Goal\nbranch\n\n<read-files>\nkept.ts\n</read-files>\n\n<modified-files>\nedited.ts\nwritten.ts\n</modified-files>",
+				"usage": {
+					"input": 30,
+					"output": 7,
+					"cacheRead": 0,
+					"cacheWrite": 0,
+					"totalTokens": 37,
+					"cost": {
+						"input": 0,
+						"output": 0,
+						"cacheRead": 0,
+						"cacheWrite": 0,
+						"total": 0
+					}
+				},
+				"readFiles": [
+					"kept.ts"
+				],
+				"modifiedFiles": [
+					"edited.ts",
+					"written.ts"
+				]
+			},
+			"requests": [
+				{
+					"model": "faux-1",
+					"systemPrompt": "You are a context summarization assistant. Your task is to read a conversation between a user and an AI assistant, then produce a structured summary following the exact format specified.\n\nDo NOT continue the conversation. Do NOT respond to any questions in the conversation. ONLY output the structured summary.",
+					"roles": [
+						"system",
+						"user"
+					],
+					"prompt": "<conversation>\n[User]: old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request \n\n[Assistant]: old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer \n\n[User]: kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request \n\n[Assistant tool calls]: read(path=\"kept.ts\")\n\n[User]: The conversation history before this point was compacted into the following summary:\n\n<summary>\nFirst summary\n</summary>\n\n[User]: new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request \n\n[Assistant]: partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial \n\n[Assistant tool calls]: edit(path=\"edited.ts\", edits=[])\n\n[User]: custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context \n\n[Assistant tool calls]: write(path=\"written.ts\", content=\"y\")\n\n[Assistant]: final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer \n</conversation>\n\nCreate a structured summary of this conversation branch for context when returning later.\n\nUse this EXACT format:\n\n## Goal\n[What was the user trying to accomplish in this branch?]\n\n## Constraints & Preferences\n- [Any constraints, preferences, or requirements mentioned]\n- [Or \"(none)\" if none were mentioned]\n\n## Progress\n### Done\n- [x] [Completed tasks/changes]\n\n### In Progress\n- [ ] [Work that was started but not finished]\n\n### Blocked\n- [Issues preventing progress, if any]\n\n## Key Decisions\n- **[Decision]**: [Brief rationale]\n\n## Next Steps\n1. [What should happen next to continue this work]\n\nKeep each section concise. Preserve exact file paths, function names, and error messages.\n\nAdditional focus: the edits",
+					"reasoning": null,
+					"cacheRetention": "none",
+					"sessionIdSupplied": false
+				}
+			]
+		},
+		{
+			"options": {
+				"customInstructions": "Only list files.",
+				"replaceInstructions": true
+			},
+			"result": {
+				"summary": "The user explored a different conversation branch before returning here.\nSummary of that exploration:\n\n## Goal\nbranch\n\n<read-files>\nkept.ts\n</read-files>\n\n<modified-files>\nedited.ts\nwritten.ts\n</modified-files>",
+				"usage": {
+					"input": 30,
+					"output": 7,
+					"cacheRead": 0,
+					"cacheWrite": 0,
+					"totalTokens": 37,
+					"cost": {
+						"input": 0,
+						"output": 0,
+						"cacheRead": 0,
+						"cacheWrite": 0,
+						"total": 0
+					}
+				},
+				"readFiles": [
+					"kept.ts"
+				],
+				"modifiedFiles": [
+					"edited.ts",
+					"written.ts"
+				]
+			},
+			"requests": [
+				{
+					"model": "faux-1",
+					"systemPrompt": "You are a context summarization assistant. Your task is to read a conversation between a user and an AI assistant, then produce a structured summary following the exact format specified.\n\nDo NOT continue the conversation. Do NOT respond to any questions in the conversation. ONLY output the structured summary.",
+					"roles": [
+						"system",
+						"user"
+					],
+					"prompt": "<conversation>\n[User]: old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request \n\n[Assistant]: old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer \n\n[User]: kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request \n\n[Assistant tool calls]: read(path=\"kept.ts\")\n\n[User]: The conversation history before this point was compacted into the following summary:\n\n<summary>\nFirst summary\n</summary>\n\n[User]: new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request \n\n[Assistant]: partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial \n\n[Assistant tool calls]: edit(path=\"edited.ts\", edits=[])\n\n[User]: custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context \n\n[Assistant tool calls]: write(path=\"written.ts\", content=\"y\")\n\n[Assistant]: final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer \n</conversation>\n\nOnly list files.",
+					"reasoning": null,
+					"cacheRetention": "none",
+					"sessionIdSupplied": false
+				}
+			]
+		},
+		{
+			"options": {
+				"reserveTokens": 49500
+			},
+			"result": {
+				"summary": "The user explored a different conversation branch before returning here.\nSummary of that exploration:\n\n## Goal\nbranch\n\n<read-files>\nkept.ts\n</read-files>\n\n<modified-files>\nedited.ts\nwritten.ts\n</modified-files>",
+				"usage": {
+					"input": 30,
+					"output": 7,
+					"cacheRead": 0,
+					"cacheWrite": 0,
+					"totalTokens": 37,
+					"cost": {
+						"input": 0,
+						"output": 0,
+						"cacheRead": 0,
+						"cacheWrite": 0,
+						"total": 0
+					}
+				},
+				"readFiles": [
+					"kept.ts"
+				],
+				"modifiedFiles": [
+					"edited.ts",
+					"written.ts"
+				]
+			},
+			"requests": [
+				{
+					"model": "faux-1",
+					"systemPrompt": "You are a context summarization assistant. Your task is to read a conversation between a user and an AI assistant, then produce a structured summary following the exact format specified.\n\nDo NOT continue the conversation. Do NOT respond to any questions in the conversation. ONLY output the structured summary.",
+					"roles": [
+						"system",
+						"user"
+					],
+					"prompt": "<conversation>\n[Assistant tool calls]: read(path=\"kept.ts\")\n\n[User]: The conversation history before this point was compacted into the following summary:\n\n<summary>\nFirst summary\n</summary>\n\n[User]: new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request \n\n[Assistant]: partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial \n\n[Assistant tool calls]: edit(path=\"edited.ts\", edits=[])\n\n[User]: custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context \n\n[Assistant tool calls]: write(path=\"written.ts\", content=\"y\")\n\n[Assistant]: final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer \n</conversation>\n\nCreate a structured summary of this conversation branch for context when returning later.\n\nUse this EXACT format:\n\n## Goal\n[What was the user trying to accomplish in this branch?]\n\n## Constraints & Preferences\n- [Any constraints, preferences, or requirements mentioned]\n- [Or \"(none)\" if none were mentioned]\n\n## Progress\n### Done\n- [x] [Completed tasks/changes]\n\n### In Progress\n- [ ] [Work that was started but not finished]\n\n### Blocked\n- [Issues preventing progress, if any]\n\n## Key Decisions\n- **[Decision]**: [Brief rationale]\n\n## Next Steps\n1. [What should happen next to continue this work]\n\nKeep each section concise. Preserve exact file paths, function names, and error messages.",
+					"reasoning": null,
+					"cacheRetention": "none",
+					"sessionIdSupplied": false
+				}
+			]
+		}
+	],
+	"branchPreparations": [
+		{
+			"budget": 0,
+			"messages": [
+				{
+					"role": "user",
+					"content": "old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request ",
+					"timestamp": 100
+				},
+				{
+					"role": "assistant",
+					"content": [
+						{
+							"type": "text",
+							"text": "old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer "
+						}
+					],
+					"api": "faux",
+					"provider": "faux",
+					"model": "faux-1",
+					"usage": {
+						"input": 0,
+						"output": 0,
+						"cacheRead": 0,
+						"cacheWrite": 0,
+						"totalTokens": 0,
+						"cost": {
+							"input": 0,
+							"output": 0,
+							"cacheRead": 0,
+							"cacheWrite": 0,
+							"total": 0
+						}
+					},
+					"stopReason": "stop",
+					"timestamp": 10
+				},
+				{
+					"role": "user",
+					"content": "kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request ",
+					"timestamp": 101
+				},
+				{
+					"role": "assistant",
+					"content": [
+						{
+							"type": "toolCall",
+							"id": "k1",
+							"name": "read",
+							"arguments": {
+								"path": "kept.ts"
+							}
+						}
+					],
+					"api": "faux",
+					"provider": "faux",
+					"model": "faux-1",
+					"usage": {
+						"input": 0,
+						"output": 0,
+						"cacheRead": 0,
+						"cacheWrite": 0,
+						"totalTokens": 0,
+						"cost": {
+							"input": 0,
+							"output": 0,
+							"cacheRead": 0,
+							"cacheWrite": 0,
+							"total": 0
+						}
+					},
+					"stopReason": "toolUse",
+					"timestamp": 10
+				},
+				{
+					"role": "compactionSummary",
+					"summary": "First summary",
+					"tokensBefore": 9000,
+					"timestamp": 1735689606000
+				},
+				{
+					"role": "user",
+					"content": "new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request ",
+					"timestamp": 103
+				},
+				{
+					"role": "assistant",
+					"content": [
+						{
+							"type": "text",
+							"text": "partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial "
+						},
+						{
+							"type": "toolCall",
+							"id": "n1",
+							"name": "edit",
+							"arguments": {
+								"path": "edited.ts",
+								"edits": []
+							}
+						}
+					],
+					"api": "faux",
+					"provider": "faux",
+					"model": "faux-1",
+					"usage": {
+						"input": 4000,
+						"output": 100,
+						"cacheRead": 0,
+						"cacheWrite": 0,
+						"totalTokens": 4100,
+						"cost": {
+							"input": 0,
+							"output": 0,
+							"cacheRead": 0,
+							"cacheWrite": 0,
+							"total": 0
+						}
+					},
+					"stopReason": "toolUse",
+					"timestamp": 10
+				},
+				{
+					"role": "custom",
+					"customType": "note",
+					"content": "custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context ",
+					"display": true,
+					"timestamp": 1735689611000
+				},
+				{
+					"role": "assistant",
+					"content": [
+						{
+							"type": "toolCall",
+							"id": "n2",
+							"name": "write",
+							"arguments": {
+								"path": "written.ts",
+								"content": "y"
+							}
+						}
+					],
+					"api": "faux",
+					"provider": "faux",
+					"model": "faux-1",
+					"usage": {
+						"input": 0,
+						"output": 0,
+						"cacheRead": 0,
+						"cacheWrite": 0,
+						"totalTokens": 0,
+						"cost": {
+							"input": 0,
+							"output": 0,
+							"cacheRead": 0,
+							"cacheWrite": 0,
+							"total": 0
+						}
+					},
+					"stopReason": "toolUse",
+					"timestamp": 10
+				},
+				{
+					"role": "assistant",
+					"content": [
+						{
+							"type": "text",
+							"text": "final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer "
+						}
+					],
+					"api": "faux",
+					"provider": "faux",
+					"model": "faux-1",
+					"usage": {
+						"input": 6000,
+						"output": 200,
+						"cacheRead": 0,
+						"cacheWrite": 0,
+						"totalTokens": 6200,
+						"cost": {
+							"input": 0,
+							"output": 0,
+							"cacheRead": 0,
+							"cacheWrite": 0,
+							"total": 0
+						}
+					},
+					"stopReason": "stop",
+					"timestamp": 10
+				}
+			],
+			"totalTokens": 705,
+			"fileOps": {
+				"read": [
+					"kept.ts"
+				],
+				"written": [
+					"written.ts"
+				],
+				"edited": [
+					"edited.ts"
+				]
+			}
+		},
+		{
+			"budget": 300,
+			"messages": [
+				{
+					"role": "assistant",
+					"content": [
+						{
+							"type": "text",
+							"text": "partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial "
+						},
+						{
+							"type": "toolCall",
+							"id": "n1",
+							"name": "edit",
+							"arguments": {
+								"path": "edited.ts",
+								"edits": []
+							}
+						}
+					],
+					"api": "faux",
+					"provider": "faux",
+					"model": "faux-1",
+					"usage": {
+						"input": 4000,
+						"output": 100,
+						"cacheRead": 0,
+						"cacheWrite": 0,
+						"totalTokens": 4100,
+						"cost": {
+							"input": 0,
+							"output": 0,
+							"cacheRead": 0,
+							"cacheWrite": 0,
+							"total": 0
+						}
+					},
+					"stopReason": "toolUse",
+					"timestamp": 10
+				},
+				{
+					"role": "custom",
+					"customType": "note",
+					"content": "custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context ",
+					"display": true,
+					"timestamp": 1735689611000
+				},
+				{
+					"role": "assistant",
+					"content": [
+						{
+							"type": "toolCall",
+							"id": "n2",
+							"name": "write",
+							"arguments": {
+								"path": "written.ts",
+								"content": "y"
+							}
+						}
+					],
+					"api": "faux",
+					"provider": "faux",
+					"model": "faux-1",
+					"usage": {
+						"input": 0,
+						"output": 0,
+						"cacheRead": 0,
+						"cacheWrite": 0,
+						"totalTokens": 0,
+						"cost": {
+							"input": 0,
+							"output": 0,
+							"cacheRead": 0,
+							"cacheWrite": 0,
+							"total": 0
+						}
+					},
+					"stopReason": "toolUse",
+					"timestamp": 10
+				},
+				{
+					"role": "assistant",
+					"content": [
+						{
+							"type": "text",
+							"text": "final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer "
+						}
+					],
+					"api": "faux",
+					"provider": "faux",
+					"model": "faux-1",
+					"usage": {
+						"input": 6000,
+						"output": 200,
+						"cacheRead": 0,
+						"cacheWrite": 0,
+						"totalTokens": 6200,
+						"cost": {
+							"input": 0,
+							"output": 0,
+							"cacheRead": 0,
+							"cacheWrite": 0,
+							"total": 0
+						}
+					},
+					"stopReason": "stop",
+					"timestamp": 10
+				}
+			],
+			"totalTokens": 272,
+			"fileOps": {
+				"read": [],
+				"written": [
+					"written.ts"
+				],
+				"edited": [
+					"edited.ts"
+				]
+			}
+		},
+		{
+			"budget": 1000,
+			"messages": [
+				{
+					"role": "user",
+					"content": "old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request old request ",
+					"timestamp": 100
+				},
+				{
+					"role": "assistant",
+					"content": [
+						{
+							"type": "text",
+							"text": "old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer old answer "
+						}
+					],
+					"api": "faux",
+					"provider": "faux",
+					"model": "faux-1",
+					"usage": {
+						"input": 0,
+						"output": 0,
+						"cacheRead": 0,
+						"cacheWrite": 0,
+						"totalTokens": 0,
+						"cost": {
+							"input": 0,
+							"output": 0,
+							"cacheRead": 0,
+							"cacheWrite": 0,
+							"total": 0
+						}
+					},
+					"stopReason": "stop",
+					"timestamp": 10
+				},
+				{
+					"role": "user",
+					"content": "kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request kept request ",
+					"timestamp": 101
+				},
+				{
+					"role": "assistant",
+					"content": [
+						{
+							"type": "toolCall",
+							"id": "k1",
+							"name": "read",
+							"arguments": {
+								"path": "kept.ts"
+							}
+						}
+					],
+					"api": "faux",
+					"provider": "faux",
+					"model": "faux-1",
+					"usage": {
+						"input": 0,
+						"output": 0,
+						"cacheRead": 0,
+						"cacheWrite": 0,
+						"totalTokens": 0,
+						"cost": {
+							"input": 0,
+							"output": 0,
+							"cacheRead": 0,
+							"cacheWrite": 0,
+							"total": 0
+						}
+					},
+					"stopReason": "toolUse",
+					"timestamp": 10
+				},
+				{
+					"role": "compactionSummary",
+					"summary": "First summary",
+					"tokensBefore": 9000,
+					"timestamp": 1735689606000
+				},
+				{
+					"role": "user",
+					"content": "new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request new request ",
+					"timestamp": 103
+				},
+				{
+					"role": "assistant",
+					"content": [
+						{
+							"type": "text",
+							"text": "partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial partial "
+						},
+						{
+							"type": "toolCall",
+							"id": "n1",
+							"name": "edit",
+							"arguments": {
+								"path": "edited.ts",
+								"edits": []
+							}
+						}
+					],
+					"api": "faux",
+					"provider": "faux",
+					"model": "faux-1",
+					"usage": {
+						"input": 4000,
+						"output": 100,
+						"cacheRead": 0,
+						"cacheWrite": 0,
+						"totalTokens": 4100,
+						"cost": {
+							"input": 0,
+							"output": 0,
+							"cacheRead": 0,
+							"cacheWrite": 0,
+							"total": 0
+						}
+					},
+					"stopReason": "toolUse",
+					"timestamp": 10
+				},
+				{
+					"role": "custom",
+					"customType": "note",
+					"content": "custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context custom context ",
+					"display": true,
+					"timestamp": 1735689611000
+				},
+				{
+					"role": "assistant",
+					"content": [
+						{
+							"type": "toolCall",
+							"id": "n2",
+							"name": "write",
+							"arguments": {
+								"path": "written.ts",
+								"content": "y"
+							}
+						}
+					],
+					"api": "faux",
+					"provider": "faux",
+					"model": "faux-1",
+					"usage": {
+						"input": 0,
+						"output": 0,
+						"cacheRead": 0,
+						"cacheWrite": 0,
+						"totalTokens": 0,
+						"cost": {
+							"input": 0,
+							"output": 0,
+							"cacheRead": 0,
+							"cacheWrite": 0,
+							"total": 0
+						}
+					},
+					"stopReason": "toolUse",
+					"timestamp": 10
+				},
+				{
+					"role": "assistant",
+					"content": [
+						{
+							"type": "text",
+							"text": "final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer final answer "
+						}
+					],
+					"api": "faux",
+					"provider": "faux",
+					"model": "faux-1",
+					"usage": {
+						"input": 6000,
+						"output": 200,
+						"cacheRead": 0,
+						"cacheWrite": 0,
+						"totalTokens": 6200,
+						"cost": {
+							"input": 0,
+							"output": 0,
+							"cacheRead": 0,
+							"cacheWrite": 0,
+							"total": 0
+						}
+					},
+					"stopReason": "stop",
+					"timestamp": 10
+				}
+			],
+			"totalTokens": 705,
+			"fileOps": {
+				"read": [
+					"kept.ts"
+				],
+				"written": [
+					"written.ts"
+				],
+				"edited": [
+					"edited.ts"
+				]
+			}
+		}
+	],
+	"edited": [
+		{
+			"id": "e14",
+			"parentId": null,
+			"timestamp": "2025-01-01T00:00:15.000Z",
+			"type": "message",
+			"message": {
+				"role": "system",
+				"content": "",
+				"sections": {
+					"preamble": "You are pi.",
+					"cwd": "Current working directory: /p"
+				},
+				"toolsAdded": [
+					{
+						"name": "read",
+						"description": "Read a file",
+						"parameters": {
+							"type": "object"
+						}
+					}
+				],
+				"timestamp": 1
+			}
+		},
+		{
+			"id": "e15",
+			"parentId": "e14",
+			"timestamp": "2025-01-01T00:00:16.000Z",
+			"type": "message",
+			"message": {
+				"role": "system",
+				"content": "",
+				"sections": {
+					"cwd": "Current working directory: /q"
+				},
+				"timestamp": 2
+			}
+		},
+		{
+			"id": "e16",
+			"parentId": "e15",
+			"timestamp": "2025-01-01T00:00:17.000Z",
+			"type": "message",
+			"message": {
+				"role": "user",
+				"content": "question question question question question question question question question question question question question question question question question question question question ",
+				"timestamp": 3
+			}
+		},
+		{
+			"id": "e17",
+			"parentId": "e16",
+			"timestamp": "2025-01-01T00:00:18.000Z",
+			"type": "message",
+			"message": {
+				"role": "assistant",
+				"content": [
+					{
+						"type": "text",
+						"text": "answer"
+					}
+				],
+				"api": "faux",
+				"provider": "faux",
+				"model": "faux-1",
+				"usage": {
+					"input": 900,
+					"output": 100,
+					"cacheRead": 0,
+					"cacheWrite": 0,
+					"totalTokens": 1000,
+					"cost": {
+						"input": 0,
+						"output": 0,
+						"cacheRead": 0,
+						"cacheWrite": 0,
+						"total": 0
+					}
+				},
+				"stopReason": "stop",
+				"timestamp": 10
+			}
+		},
+		{
+			"id": "e18",
+			"parentId": "e17",
+			"timestamp": "2025-01-01T00:00:19.000Z",
+			"type": "message",
+			"message": {
+				"role": "user",
+				"content": "follow-up follow-up follow-up follow-up follow-up follow-up follow-up follow-up follow-up follow-up follow-up follow-up follow-up follow-up follow-up follow-up follow-up follow-up follow-up follow-up ",
+				"timestamp": 4
+			}
+		},
+		{
+			"id": "e19",
+			"parentId": "e18",
+			"timestamp": "2025-01-01T00:00:20.000Z",
+			"type": "context_edit",
+			"targetId": "e18",
+			"replacement": {
+				"content": "short"
+			}
+		}
+	],
+	"projectedEstimate": {
+		"tokens": 78,
+		"usageTokens": 0,
+		"trailingTokens": 78,
+		"lastUsageIndex": null
+	}
+}

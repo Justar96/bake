@@ -1,5 +1,5 @@
 {
-  "name": "@deepseek-ai/dsh-invariants",
+  "name": "bake-invariants",
   "description": "Registry service for package-owned DeepSeek Harness runtime invariants",
   "version": "0.1.6-alpha.2",
   "publishConfig": {

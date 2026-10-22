@@ -15,7 +15,7 @@
  * @module
  */
 
-import type { JsonValue } from '@deepseek-ai/dsh-util-values'
+import type { JsonValue } from 'bake-util-values'
 
 /** A protocol object with unknown provenance. */
 type ProtocolObject = Record<string, unknown>

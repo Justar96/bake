@@ -1,9 +1,9 @@
 /** The goal rule under the composer follows the goal service through `/goal` and its lifecycle. */
 import { afterEach, expect, it, vi } from 'vitest'
-import Goals from '@deepseek-ai/dsh-goal'
-import * as CommandGoal from '@deepseek-ai/dsh-command-goal'
-import { dictionaries } from '@dsh-tui/ui/copy.ts'
-import { goalState } from '@dsh-tui/ui'
+import Goals from 'bake-goal'
+import * as CommandGoal from 'bake-command-goal'
+import { dictionaries } from 'bake-tui-ui/copy.ts'
+import { goalState } from 'bake-tui-ui'
 import { SessionController } from '../src/controller.ts'
 import { openSession } from '../src/session.ts'
 import { harness } from './harness.ts'

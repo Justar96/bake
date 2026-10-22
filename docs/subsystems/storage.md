@@ -1,6 +1,6 @@
 # Storage
 
-The storage subsystem persists non-session-log data through [dsh-storage](../../packages/storage/storage) and its JSON backend [dsh-storage-json](../../packages/storage/storage-json). [dsh-storage-domain](../../packages/storage/storage-domain) provides typed domain records. Session logs use the separate [persistence capability](persistence.md).
+The storage subsystem persists non-session-log data through [bake-storage](../../packages/storage/storage) and its JSON backend [bake-storage-json](../../packages/storage/storage-json). [bake-storage-domain](../../packages/storage/storage-domain) provides typed domain records. Session logs use the separate [persistence capability](persistence.md).
 
 Source: [`packages/storage/storage/src/backend.ts`](../../packages/storage/storage/src/backend.ts) · [`packages/storage/storage-domain/src/spec.ts`](../../packages/storage/storage-domain/src/spec.ts) · [`packages/storage/storage-domain/src/events.ts`](../../packages/storage/storage-domain/src/events.ts)
 

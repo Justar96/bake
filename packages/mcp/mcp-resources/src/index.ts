@@ -1,14 +1,14 @@
 /**
  * Scoped MCP resource providers and the shared model-facing resource tools.
  *
- * @module @deepseek-ai/dsh-mcp-resources
+ * @module bake-mcp-resources
  */
 
 import { Service, type Context } from '@deepseek-ai/cordis'
-import { createScope, NamedEntries, ScopedLayers, scopeOf, type ScopeKey, type ScopeLayer } from '@deepseek-ai/dsh-scope'
-import type { JsonValue } from '@deepseek-ai/dsh-util-values'
-import type { ToolExecution } from '@deepseek-ai/dsh-tools'
-import type {} from '@deepseek-ai/dsh-system-prompt'
+import { createScope, NamedEntries, ScopedLayers, scopeOf, type ScopeKey, type ScopeLayer } from 'bake-scope'
+import type { JsonValue } from 'bake-util-values'
+import type { ToolExecution } from 'bake-tools'
+import type {} from 'bake-system-prompt'
 import { registerResourceTools } from './tools.ts'
 
 declare module '@deepseek-ai/cordis' {

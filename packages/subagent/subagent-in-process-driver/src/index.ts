@@ -8,16 +8,16 @@
  * composes and drives them directly, so this driver owns exactly one turn with
  * one result.
  *
- * @module @deepseek-ai/dsh-subagent-in-process-driver
+ * @module bake-subagent-in-process-driver
  */
 
 import { randomUUID } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
-import { brandString } from '@deepseek-ai/dsh-brand'
-import { foldConsumedWork } from '@deepseek-ai/dsh-agent'
-import type { Agent, AgentHandle } from '@deepseek-ai/dsh-agent'
-import type { SessionId, TurnEndReason } from '@deepseek-ai/dsh-session'
-import { createUserMessage, type ContentBlock } from '@deepseek-ai/dsh-llm'
+import { brandString } from 'bake-brand'
+import { foldConsumedWork } from 'bake-agent'
+import type { Agent, AgentHandle } from 'bake-agent'
+import type { SessionId, TurnEndReason } from 'bake-session'
+import { createUserMessage, type ContentBlock } from 'bake-llm'
 import {
   appendDelegatedPolicyOverrides,
   applyChildComposition,
@@ -27,14 +27,14 @@ import {
   finalAssistantOutput,
   resolveChildAgentOptions,
   resolveChildDepth,
-} from '@deepseek-ai/dsh-subagent'
+} from 'bake-subagent'
 import type {
   ResolvedSubagentStartRequest,
   SubagentDescriptorData,
   SubagentResult,
   SubagentRun,
   SubagentStopReason,
-} from '@deepseek-ai/dsh-subagent'
+} from 'bake-subagent'
 import {
   attachStructuredRuntime,
   type StructuredAttachment,

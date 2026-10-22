@@ -1,0 +1,2 @@
+{"type":"object","properties":{"v":{"type":"string","minimum":3}}}
+{"v":[]}

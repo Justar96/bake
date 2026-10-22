@@ -4,7 +4,7 @@
  * worker reports, and the program-relative rendering of QuickJS stacks. Pure
  * and erasable, so Node's type stripping can load it in the worker during
  * source runs.
- * @module @deepseek-ai/dsh-ptc-runtime-codemode/protocol
+ * @module bake-ptc-runtime-codemode/protocol
  */
 
 /**

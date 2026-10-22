@@ -1,0 +1,46 @@
+{
+  "schema": "bake/rust-migration/check-result",
+  "schemaVersion": 1,
+  "scope": "00",
+  "kind": "check-result",
+  "id": "terminal-performance",
+  "argv": [
+    "bun",
+    "apps/tui/scripts/tui.ts",
+    "perf",
+    "--samples",
+    "3",
+    "--output",
+    "../evidence/v0.3.8/performance-raw.json"
+  ],
+  "cwd": ".",
+  "source": {
+    "commit": "dcb26d756e008a3d17c057a6b153933c018c275d",
+    "sourceDigest": "933773046a7c1c0e4f49bfe0db1406fac2dfc88c449bd190f72f57f88c6bfcb7"
+  },
+  "environment": {
+    "platform": "linux",
+    "arch": "x64",
+    "osRelease": "7.2.8-200.fc44.x86_64",
+    "tools": {
+      "bun": "1.4.2",
+      "node": "v26.10.0",
+      "git": "git version 2.56.0"
+    }
+  },
+  "startedAt": "2026-10-06T20:15:59.124Z",
+  "durationMs": 62707,
+  "timeoutMs": 600000,
+  "exitCode": 0,
+  "signal": null,
+  "timedOut": false,
+  "interrupted": false,
+  "descendantsRemained": false,
+  "sourceUnchanged": true,
+  "log": {
+    "file": "terminal-performance.log",
+    "sha256": "497dc48c446de1aee94b9bbcbb85ea387bf07729b3a0d5cd4b5bf009baaa2639",
+    "bytes": 10258
+  },
+  "outcome": "passed"
+}

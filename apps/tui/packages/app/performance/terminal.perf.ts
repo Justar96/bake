@@ -78,7 +78,7 @@ try {
       const home = join(root, 'home')
       const profile = join(home, 'profiles/tui')
       await mkdir(profile, { recursive: true })
-      await writeFile(join(profile, 'package.json'), JSON.stringify({ name: 'tui-perf-profile', private: true, dsh: { profile: { bundles: ['@deepseek-ai/dsh-base'] } } }))
+      await writeFile(join(profile, 'package.json'), JSON.stringify({ name: 'tui-perf-profile', private: true, bake: { profile: { bundles: ['bake-base'] } } }))
       const composition = join(root, 'tui.patch.yml')
       await writeFile(composition, sourcePatch.replace('./lib/index.js', JSON.stringify(join(bundle, 'index.js'))).replace('./lib/startup.js', JSON.stringify(join(bundle, 'startup.js'))))
       const patch = join(root, 'profile.json')
@@ -93,8 +93,8 @@ try {
         ] },
       ]))
       const metricsFile = join(root, 'metrics.json')
-      // The CLI loads React's production build unless DSH_RENDERER names the development one.
-      const env: NodeJS.ProcessEnv = { ...process.env, NODE_ENV: values.mode, ...values.mode === 'development' ? { DSH_RENDERER: 'development' } : {}, DSH_HOME: home, DSH_AGENTS_HOME: join(root, 'agents'), DSH_TUI_PERF_METRICS: metricsFile, TERM: 'xterm-256color', NO_COLOR: '1' }
+      // The CLI loads React's production build unless BAKE_RENDERER names the development one.
+      const env: NodeJS.ProcessEnv = { ...process.env, NODE_ENV: values.mode, ...values.mode === 'development' ? { BAKE_RENDERER: 'development' } : {}, BAKE_HOME: home, DSH_HOME: home, BAKE_AGENTS_HOME: join(root, 'agents'), DSH_AGENTS_HOME: join(root, 'agents'), DSH_TUI_PERF_METRICS: metricsFile, TERM: 'xterm-256color', NO_COLOR: '1' }
       delete env.CI
       delete env.NODE_OPTIONS
       delete env.DEEPSEEK_API_KEY
@@ -138,12 +138,13 @@ try {
       const streamBytes = terminal.bytes - beforeStream
       const settledMemory = await terminal.sample()
       if (terminal.markerOccurrences !== markerCount) throw new Error(`Historical markers were rendered ${terminal.markerOccurrences} times for ${markerCount} expected markers`)
-      const result = { workload: name, iteration, dimensions, initialInputMs, firstInputMs, historyMarkersAtFirstInput, readyMs, idleInputMs, idleBytes, initialBytes, firstDeltaMs, liveInputMs, streamMs, streamBytes,
-        historyMarkerOccurrences: terminal.markerOccurrences, readyMemory, settledMemory }
-      await terminal.quit()
-      results.push(result)
+      const historyMarkerOccurrences = terminal.markerOccurrences
+      // A failed quit throws, so only a confirmed clean exit completes the sample.
+      const shutdownMs = await terminal.quit()
+      results.push({ workload: name, iteration, dimensions, initialInputMs, firstInputMs, historyMarkersAtFirstInput, readyMs, idleInputMs, idleBytes, initialBytes, firstDeltaMs, liveInputMs, streamMs, streamBytes,
+        shutdownMs, historyMarkerOccurrences, readyMemory, settledMemory })
       process.stdout.write(JSON.stringify({ workload: name, iteration, initialInputMs, firstInputMs, readyMs, historyMarkersAtFirstInput,
-        inputMs: Math.max(...idleInputMs), liveInputMs, initialBytes, idleBytes, streamBytes,
+        inputMs: Math.max(...idleInputMs), liveInputMs, shutdownMs, initialBytes, idleBytes, streamBytes,
         retainedHeapMiB: readyMemory.afterGc.heapUsed / 1048576, settledRetainedHeapMiB: settledMemory.afterGc.heapUsed / 1048576,
         peakRssMiB: settledMemory.resources.maxRSS / 1024 }) + '\n')
     } catch (error) {

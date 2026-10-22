@@ -2,21 +2,21 @@
  * Shared service mounting, real AgentLoop drivers, and structural Inbox stubs
  * for agent-loop tests. Callers retain ownership of their contexts, adapters,
  * optional plugins, agents, and teardown.
- * @module @deepseek-ai/dsh-agent-loop-testkit
+ * @module bake-agent-loop-testkit
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import AgentRegistry from '@deepseek-ai/dsh-agent'
-import type { Agent, AgentOptions, Inbox, InboxTarget } from '@deepseek-ai/dsh-agent'
-import AgentLoop from '@deepseek-ai/dsh-agent-loop'
-import LlmRuntime from '@deepseek-ai/dsh-llm'
-import SessionStore from '@deepseek-ai/dsh-session'
-import type { SessionHeader, SessionId, UserMessage } from '@deepseek-ai/dsh-session'
-import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
-import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
-import type { Config as SystemPromptConfig } from '@deepseek-ai/dsh-system-prompt'
-import ToolRuntime from '@deepseek-ai/dsh-tools'
-import type { Config as ToolRuntimeConfig } from '@deepseek-ai/dsh-tools'
+import AgentRegistry from 'bake-agent'
+import type { Agent, AgentOptions, Inbox, InboxTarget } from 'bake-agent'
+import AgentLoop from 'bake-agent-loop'
+import LlmRuntime from 'bake-llm'
+import SessionStore from 'bake-session'
+import type { SessionHeader, SessionId, UserMessage } from 'bake-session'
+import SessionProjectionRegistry from 'bake-session-projection'
+import SystemPrompt from 'bake-system-prompt'
+import type { Config as SystemPromptConfig } from 'bake-system-prompt'
+import ToolRuntime from 'bake-tools'
+import type { Config as ToolRuntimeConfig } from 'bake-tools'
 
 export { createInboxStub, unsupportedInbox } from './inbox.ts'
 

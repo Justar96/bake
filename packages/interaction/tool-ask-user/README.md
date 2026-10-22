@@ -3,7 +3,7 @@ description: "The model-facing ask_user_question tool over the user-questions se
 kind: "package-reference"
 ---
 
-# @deepseek-ai/dsh-tool-ask-user
+# bake-tool-ask-user
 
 ## Summary
 
@@ -101,7 +101,7 @@ The `render` output projects the structured value to a single text block via `JS
 Read these pages when the package-level contract is not enough. They move from the tool surface to the seam contract and its answerer waterfall.
 
 - [User interaction subsystem reference](../../../docs/subsystems/user-questions.md) — the service contract, question vocabulary, and answerer waterfall behind this tool.
-- [Tool catalog](../../../docs/tool-catalog.md#deepseek-aidsh-tool-ask-user) — the generated `ask_user_question` schema.
+- [Tool catalog](../../../docs/tool-catalog.md#bake-tool-ask-user) — the generated `ask_user_question` schema.
 - [user-questions package](../user-questions/README.md) — the seam this tool consumes.
 - [Interaction group map](../README.md) — adjacent approval and command surfaces.
 
@@ -114,7 +114,7 @@ Read these pages when the package-level contract is not enough. They move from t
 
 #### What the model sees
 
-The model sees the generated [`ask_user_question` schema](../../../docs/tool-catalog.md#deepseek-aidsh-tool-ask-user), including question ids, prompts, headings, options, and multi-select flags. The field descriptions ask for a one-sentence question ending with a question mark, a header of about 12 characters, 1-5 word option labels, and one-sentence option descriptions. The text is static, so it does not vary between requests.
+The model sees the generated [`ask_user_question` schema](../../../docs/tool-catalog.md#bake-tool-ask-user), including question ids, prompts, headings, options, and multi-select flags. The field descriptions ask for a one-sentence question ending with a question mark, a header of about 12 characters, 1-5 word option labels, and one-sentence option descriptions. The text is static, so it does not vary between requests.
 
 #### Token effect
 

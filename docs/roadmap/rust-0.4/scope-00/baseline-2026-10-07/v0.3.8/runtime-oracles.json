@@ -1,0 +1,49 @@
+{
+  "schema": "bake/rust-migration/check-result",
+  "schemaVersion": 1,
+  "scope": "00",
+  "kind": "check-result",
+  "id": "runtime-oracles",
+  "argv": [
+    "bun",
+    "run",
+    "test:runtime",
+    "packages/core/agent-loop/tests/request-reconstruction.spec.ts",
+    "packages/core/agent-loop/tests/tool-order.spec.ts",
+    "packages/core/agent-loop/tests/shutdown-drain.spec.ts",
+    "packages/session/session-persistence-jsonl/tests/lease.two-process.spec.ts",
+    "packages/session/session-persistence-jsonl/tests/zstd.compat.spec.ts",
+    "packages/bundle/desktop/tests/transport.spec.ts",
+    "packages/llm/llm-pi-ai/tests/sse.spec.ts"
+  ],
+  "cwd": ".",
+  "source": {
+    "commit": "dcb26d756e008a3d17c057a6b153933c018c275d",
+    "sourceDigest": "933773046a7c1c0e4f49bfe0db1406fac2dfc88c449bd190f72f57f88c6bfcb7"
+  },
+  "environment": {
+    "platform": "linux",
+    "arch": "x64",
+    "osRelease": "7.2.8-200.fc44.x86_64",
+    "tools": {
+      "bun": "1.4.2",
+      "node": "v26.10.0",
+      "git": "git version 2.56.0"
+    }
+  },
+  "startedAt": "2026-10-06T20:09:49.863Z",
+  "durationMs": 1067,
+  "timeoutMs": 3600000,
+  "exitCode": 0,
+  "signal": null,
+  "timedOut": false,
+  "interrupted": false,
+  "descendantsRemained": false,
+  "sourceUnchanged": true,
+  "log": {
+    "file": "runtime-oracles.log",
+    "sha256": "8f9333ceac1481a6ba9d9fddd759bc6878229fae88e2b4762ca4e2111e2abcf8",
+    "bytes": 1340
+  },
+  "outcome": "passed"
+}

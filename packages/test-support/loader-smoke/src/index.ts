@@ -4,14 +4,14 @@
  *
  * It also owns the mode-aware launch resolver every example subprocess harness shares
  * ({@link resolveExampleLaunch}): booting an example bin from TypeScript source under `tsx` (the
- * zero-build dev path, resolving `@deepseek-ai/dsh-*` / `@cordisjs/*` through the tsconfig `paths`
+ * zero-build dev path, resolving `bake-*` / `@cordisjs/*` through the tsconfig `paths`
  * map) or from built `lib/` under plain Node (resolving bare packages through real `exports`, as an
  * installed consumer does, while Node type-strips relative example-local TypeScript plugins).
  *
- * @module @deepseek-ai/dsh-loader-smoke
+ * @module bake-loader-smoke
  */
 
-import { clearedProxyEnv } from '@deepseek-ai/dsh-http-proxy'
+import { clearedProxyEnv } from 'bake-http-proxy'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -22,6 +22,17 @@ export {
   type FixtureTurnOptions,
   type FixtureTurnResult,
 } from './agent-turn.ts'
+export {
+  MODEL_SURFACE_TASK,
+  modelSurfaceSizes,
+  normalizeModelSurface,
+  pathPlaceholders,
+  plantModelSurfaceWorkspace,
+  renderModelSurface,
+  type ModelSurfacePlaceholder,
+  type ModelSurfaceRequest,
+  type ModelSurfaceSizes,
+} from './model-surface.ts'
 
 const DEFAULT_PROCESS_TIMEOUT_MS = 30_000
 
@@ -223,7 +234,10 @@ export async function runLoaderSmoke(options: LoaderSmokeOptions): Promise<Loade
       ...options.mode !== undefined ? { mode: options.mode } : {},
       tsconfigPath: options.tsconfigPath,
       env: {
+        // Both spellings, so an ambient BAKE_* name cannot redirect the child.
+        BAKE_HOME: join(cwd, '.dsh'),
         DSH_HOME: join(cwd, '.dsh'),
+        BAKE_AGENTS_HOME: join(cwd, '.agents'),
         DSH_AGENTS_HOME: join(cwd, '.agents'),
         ...options.env,
       },

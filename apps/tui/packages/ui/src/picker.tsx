@@ -8,7 +8,7 @@
  * headings, the selected choice's levels where the prompt has them, what the
  * selected choice is for where the choices say, and the keys.
  *
- * @module @dsh-tui/ui/picker
+ * @module bake-tui-ui/picker
  */
 import React, { useRef, useState } from 'react'
 import { Box, Text, useInput, usePaste, useWindowSize } from 'ink'

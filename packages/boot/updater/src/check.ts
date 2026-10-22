@@ -1,7 +1,7 @@
 /**
  * Whether a newer release exists: answered from a cache so a launch never
  * waits on the network, and refreshed in the background.
- * @module @deepseek-ai/dsh-updater/check
+ * @module bake-updater/check
  */
 
 import { randomBytes } from 'node:crypto'

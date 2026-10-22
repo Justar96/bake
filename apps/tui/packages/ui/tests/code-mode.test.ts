@@ -1,6 +1,6 @@
 /** Code-mode presentation uses the same logged calls and outcomes in live views and replay. */
 import { describe, expect, it } from 'bun:test'
-import type { SessionEvent } from '@deepseek-ai/dsh-session'
+import type { SessionEvent } from 'bake-session'
 import { Actions, foldEvent } from '../src/actions.ts'
 import { phaseOf, turnSummary } from '../src/activity.ts'
 import { fittedAction, fittedGroup, present, type ResultBound } from '../src/present.ts'

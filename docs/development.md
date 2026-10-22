@@ -2,11 +2,15 @@
 
 This guide covers building Bake from source, the day-to-day development loops, the checks to run before a change lands, and where code lives. [`CONTRIBUTING.md`](../CONTRIBUTING.md) covers how changes are reviewed and how upstream DeepSeek Harness fixes are ported. [`AGENTS.md`](../AGENTS.md) holds the engineering rules every change follows.
 
+The [0.4 Rust migration roadmap](roadmap/rust-0.4/README.md) defines sequential implementation scopes and test evidence while 0.3.x receives bug fixes. The opt-in [Rust TUI preview](../rust/README.md) runs separately from the shipped Bun/Node application. Release-policy changes remain planned work.
+
 ## Prerequisites
 
 - **Bun**, at the version pinned in [`package.json`](../package.json) (`packageManager`). Bun owns dependency installation, `bun.lock`, workspace scripts, builds, and Git hooks. Do not add a pnpm or npm lockfile.
 - **Node.js 24 or newer.** The agent itself runs on Node, because its boot loader depends on V8 internals that Bun's engine lacks. Never substitute `bun --bun` for the Node process.
 - **A C/C++ toolchain with Node headers** for the native modules.
+- **Rustup** for the native preview and full preflight. Running Cargo from `rust/` selects the compiler, formatter, and Clippy pinned in `rust/rust-toolchain.toml`.
+- **Optional: [Symposium](https://symposium.dev)** for coding agents that do not read `.agents/skills/`. With symposium 0.5.1 installed (`cargo install --locked symposium`) and `cargo agents init` run once, `cargo agents sync` from `rust/` installs the repository's skills, including `bake-rust-testing`, for each agent you chose; [`rust/SYMPOSIUM.toml`](../rust/SYMPOSIUM.toml) names the source. The copies and hooks it writes under `rust/` are ignored. Agents started at the repository root, such as Pi, already read `.agents/skills/`. Where Symposium's generic Rust skill differs from Bake's, as on `cargo add` and the test command, Bake's skill and this guide apply.
 - **Linux or macOS for the terminal scenarios.** Builds, type checks, and unit tests also run on Windows, but the PTY scenarios (`bun run test:e2e`) need Linux or macOS. WSL 2 works; keep the checkout inside the Linux filesystem and install dependencies separately there.
 
 ## First build
@@ -21,11 +25,17 @@ bun run start
 
 `bun install` also installs the Lefthook Git hooks. `start` runs the existing build output without rebuilding; it needs an interactive terminal. `bun run start --help` prints the TUI flags without starting a session.
 
-Source runs use the same home as an installed `bake`: `~/.bake`, or the directory in `DSH_HOME`. An override selects that directory's existing profiles and sessions, not only its credentials. Existing `~/.dsh` data is never moved or changed.
+Source runs use the same home as an installed `bake`: `~/.bake`, or the directory in `BAKE_HOME`. An override selects that directory's existing profiles and sessions, not only its credentials. Existing `~/.dsh` data is never moved or changed.
 
 For real model requests, sign in with `/login` or set `DEEPSEEK_API_KEY` in the environment or in a gitignored `.env` at the repository root. To use another DeepSeek endpoint, set `baseURL` on the `deepseek-official` route under `llm-pi-ai` in `settings.yaml`, as the [model configuration guide](user/guide/providers.md) shows. Never commit keys or `.env`.
 
 ## Development loops
+
+Run `bun run dev:rust` from the repository root to build and launch the interactive Rust agent, `bake`: it reads the Bake home's models, credentials, and settings, connects to a model, runs Pi's tools in Bake's sandbox, and writes Pi-format sessions. `bun run dev:rust:preview` launches the TUI preview instead, with sample agents and scripted turns and no model connection, credentials, or session writes. See [its controls and limits](../rust/README.md). `bun run check:rust` checks its locked workspace; `bun run test:rust:pty` exercises the built binary on Linux or macOS.
+
+For a Rust edit, `bun run iterate:rust` formats, runs Clippy, and runs the tests the uncommitted change reaches, stopping at the first failure; `bun run test:rust --changed` runs the tests a branch reaches, and preflight scopes its `rust-test` gate the same way outside CI unless given `--full`. `bun run test:rust -p bake-agent --lib` runs only that crate's library tests; the command accepts Cargo's package, target, and test-name filters. `bun run preflight --only rust-fmt,rust-clippy` checks formatting and lint independently. `bun run check:rust` runs format, Clippy, tests, doctests, and build as separate gates and reports every result. The `rust` step builds artifacts; `rust-test` runs tests. See [Rust checks](../rust/README.md#checks) for the optional parallel runner and CI reports.
+
+After the Rust build, `bun run test:rust:eval` exercises a compiled fake arm through the [existing evaluator fixture and independent check](../evals/README.md#native-fixture-adapter), including test-file tampering, then runs the live evaluator's [native `bake` arm](../evals/README.md#native-bake-arm) on the debug binary against a local Responses server. It runs after Cargo builds in the native preflight group, which runs before a push on Linux and on a Mac, on Windows when one is available, and in the release pull request's CI on Linux and Windows. In the same group, `bun run test:rust:package` packs the debug `bake` into a [native preview archive](../distribution/README.md#native-preview-archive), checks its generated dependency license text byte for byte, and runs the unpacked binary without Node or Bun on PATH. It needs cargo-about 0.9.2, installed with `cargo install cargo-about --version =0.9.2 --locked --features cli` or named with `BAKE_CARGO_ABOUT`, and fails without it.
 
 | Work | Command | Behavior |
 |---|---|---|
@@ -37,7 +47,7 @@ For real model requests, sign in with `/login` or set `DEEPSEEK_API_KEY` in the 
 
 The preview accepts input for layout testing but does not submit tasks. Ctrl-C exits the preview; the real agent needs two Ctrl-C presses to quit. Stop the real agent before rebuilding its files.
 
-`bun run dsh --help` exposes the built profile and plugin launcher with the same Bake home. External profile-plugin installation stays separate from Bun's source workspace.
+`bun run bake --help` exposes the built profile and plugin launcher with the same Bake home. External profile-plugin installation stays separate from Bun's source workspace.
 
 ## Checks
 
@@ -72,7 +82,7 @@ bun run test:runtime apps/cli/tests/args.spec.ts
 
 Tests that use Cordis or Ink run on Node; pure modules and tooling tests run on Bun. A failing check is not a reason to refresh every snapshot or bypass hooks. Review expected-output changes, keep CI detection intact, and never overwrite recorded session generations under `snapshots/`.
 
-### Before a pull request
+### Before pushing
 
 ```sh
 bun run preflight          # every CI gate, runtime tests limited to what the change reaches
@@ -86,8 +96,9 @@ bun run verify             # every CI gate with the whole runtime suite (preflig
 - **generated**: every `verify-*` script, so the workspace manifests, tsconfig paths, config, tool, and Cordis catalogs, doc graphs, module graph, and pasted types match their sources. `verify-cordis-config` also keeps Loader row metadata static and requires each named plugin to resolve from the manifest that owns the row; it also fails when a profile that mounts agent presets runs one of their rows on its host plane as well, whether the preset enables that row or disables it, unless the script's `SHARED_PLANE_ROWS` list names the row with the reason both copies are harmless. `verify-package-invariants` requires each package's invariant companion to be wired completely, or its omission to be explained in the package README.
 - **types**, **lint** (Oxlint, and actionlint over the workflows when it is on `PATH`), and the Bun-run tooling tests.
 - **build**, then the TUI check targets, the runtime suite, and the PTY scenarios against what it built. The runtime step runs the specs the change reaches through the import graph (`vitest --changed`), the whole suite when a workspace or config file changed, and nothing when no runtime source changed. `--full` always runs the whole suite.
+- **native**: Cargo formatting, Clippy, tests, and a locked build, followed by the Rust preview PTY scenarios and the compiled eval fixture arm. `--fast` skips these; `--only native` runs them on their own. On Windows the PTY scenarios run through a ConPTY pseudoconsole host that the driver builds from `bake-process`'s `conpty` example; a scenario Windows cannot complete is reported as a named `GAP`, not a pass, and native Windows evidence for them is still pending. The eval fixture arm runs on all three operating systems.
 
-When a Vitest step fails, the files that failed are run again on their own. Files that pass alone make the step a `WARN` naming them, since real-process tests can miss a deadline on a busy machine; any that fail again make it a `FAIL`, and so does an unhandled error Vitest could not tie to a test file, since no rerun can clear it. Every gate runs even after one fails, and the summary lists each result. A failing gate's output is in `.preflight/<step>.log`, and its last lines are printed at the end. `--only` and `--skip` take step or group names; `--list` prints them. Fix what fails, or say in the pull request which gate failed and why it is unrelated to the change.
+Each test gate runs once, and a nonzero exit fails the gate. Reproduce a failure with a focused command; a later passing run does not clear the original failure. Independent gates run even after one fails, while artifact checks are skipped when their build fails. The summary lists each result. A failing gate's output is in `.preflight/<step>.log`, and its last lines are printed at the end. `--only` and `--skip` take step or group names; `--list` prints them. Fix what fails, or say which gate failed and why it is unrelated to the change.
 
 ### Git hooks
 
@@ -96,11 +107,13 @@ When a Vitest step fails, the files that failed are run again on their own. File
 - `pre-commit` lints staged TypeScript and JavaScript with Oxlint (applying fixes), rejects whitespace errors, and checks that changes under `vendor/*/src` update [`vendor/README.md`](../vendor/README.md).
 - `pre-push` runs `bun run preflight --fast`: the generated-artifact checks, types, lint, and the unit, layout, and docs targets.
 
-The hooks do not run the build, the Node suites, or the PTY scenarios; run `bun run preflight` before opening a pull request. Never skip hooks without the maintainer's agreement.
+The hooks do not run the build, the Node suites, or the PTY scenarios; run `bun run preflight` before pushing to `develop`. Never skip hooks without the maintainer's agreement.
 
 ### CI
 
-[`ci.yml`](../.github/workflows/ci.yml) runs `bun run preflight --full` on Linux and macOS for pull requests and direct pushes to `main`, in two jobs per system: the whole runtime suite, and every other gate. It skips a pull request's merge commit on `main`, which its pull request run already checked. A pull request from `develop` to `main` runs only the Linux jobs: each change it carries already ran on every platform in its own pull request, and the release tag that follows builds and checks every platform again. `main` takes changes only through merge-commit pull requests from `develop`: its ruleset requires the `develop only` check from [`main-source.yml`](../.github/workflows/main-source.yml), which fails a pull request from any other branch. [`release.yml`](../.github/workflows/release.yml) builds, signs, and publishes release archives; the [release guide](../distribution/README.md) covers the process.
+[`ci.yml`](../.github/workflows/ci.yml) runs only on the release pull request from `develop` into `main`, and on demand. Work reaches `develop` as direct pushes, checked locally first: `bun run preflight` on Linux, `bun run preflight:mac` on a Mac over SSH for a change to `rust/`, native code, or terminal behavior, and `bun run preflight --only native` on Windows when a Windows host is available. The release pull request is the one CI check of everything a release carries, so it runs every job: `bun run preflight --full` on Linux, split into the runtime suite and the remaining TypeScript gates; `bun run preflight --only native` for the Rust workspace on Linux, Windows, and Apple Silicon macOS; and a Windows check of the release build. `main` takes changes only through merge-commit pull requests from `develop`: its ruleset requires the `develop only` check from [`main-source.yml`](../.github/workflows/main-source.yml), which fails a pull request from any other branch. [`release.yml`](../.github/workflows/release.yml) builds, signs, and publishes release archives; the [release guide](../distribution/README.md) covers the process.
+
+The Mac helper raises its child process's soft open-file limit to at least 4,096 for Cargo's concurrent tests.
 
 ## Repository layout
 
@@ -109,6 +122,7 @@ The hooks do not run the build, the Node suites, or the PTY scenarios; run `bun 
 | [`apps/tui/`](../apps/tui/DESIGN.md) | The terminal application: `packages/app` (profile composition, agent control, terminal lifecycle), `packages/ui` (side-effect-free Ink components, projection, layout, localized copy), `packages/harness` (component development and recording), fixtures, and dev tools. |
 | [`apps/cli/`](../apps/cli/README.md) | Node launcher for the `tui` and `headless` profiles, and external-plugin management. |
 | [`packages/`](../packages/README.md) | The shared agent runtime: agent loop, sessions, models, tools, sandbox, and plugin services. Read the [architecture](architecture.md) before changing it. |
+| [`rust/`](../rust/README.md) | Opt-in Cargo workspace and native TUI preview; excluded from 0.3 release archives. |
 | [`native/`](../native/README.md), [`vendor/`](../vendor/README.md) | Native support and pinned Cordis sources. Preserve their licenses and upstream attribution. |
 | [`distribution/`](../distribution/README.md) | Release packaging, signing, and the download service. |
 | [`snapshots/`](../snapshots/AGENTS.md) | Recorded session evidence, including retained historical generations. |
@@ -121,7 +135,7 @@ Useful references while working in the runtime:
 
 ## Conventions
 
-- ESM and strict TypeScript throughout. Local relative imports use `.ts`; cross-package imports use declared package names. Runtime packages keep their `@deepseek-ai/*` names so upstream fixes port cleanly.
+- ESM and strict TypeScript throughout. Local relative imports use `.ts`; cross-package imports use declared package names. Every workspace package outside `vendor/` and `native/` uses a `bake-` name: `bake-<name>` under `packages/`, `bake-cli`, and `bake-tui-<name>`; vendored packages retain their declared names. Map upstream imports of migrated packages to the `bake-<name>` declared in each manifest; the [legacy package-name map](../packages/boot/app-boot/README.md#renamed-packages) lists every renamed package.
 - The shared Node runtime builds through `tsconfig.host.json`; package `tsconfig.json` files reference their workspace dependencies. When you add or remove a package, update its references and run `bun run gen-workspace` and `bun run gen-tsconfig-paths`.
 - External dependency versions shared by two or more manifests live once in the root `package.json` `catalog`, and each manifest references them as `"catalog:"`. To add or upgrade one, edit the catalog entry and run `bun install`, then commit `bun.lock` with it; `bun run verify-workspace` rejects shared literal ranges, missing entries, and unused entries. `vendor/` manifests and peer ranges keep literal ranges.
 - Product text shown in the TUI lives in [`apps/tui/packages/ui/src/copy.ts`](../apps/tui/packages/ui/src/copy.ts).

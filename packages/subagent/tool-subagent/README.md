@@ -3,7 +3,7 @@ description: "Model-facing subagent delegation tool for users and maintainers co
 kind: "package-reference"
 ---
 
-# @deepseek-ai/dsh-tool-subagent
+# bake-tool-subagent
 
 ## Summary
 
@@ -30,9 +30,9 @@ Mount one instance per delegation target, each with a distinct `toolName`. The t
 Load the subagent service, an in-process or remote backend, and this tool; then name the provider. This composition exposes a `subagent` tool that delegates to the `spawn` backend:
 
 ```yaml
-- name: '@deepseek-ai/dsh-subagent'
-- name: '@deepseek-ai/dsh-subagent-spawn-in-process'
-- name: '@deepseek-ai/dsh-tool-subagent'
+- name: 'bake-subagent'
+- name: 'bake-subagent-spawn-in-process'
+- name: 'bake-tool-subagent'
   config:
     provider: spawn
     toolName: subagent
@@ -50,7 +50,7 @@ Load the subagent service, an in-process or remote backend, and this tool; then 
 | `toolFilter` | — | Per-child global-tool restriction; requires the `toolFilter` capability |
 | `maxDepth` | Host setting (`1`) | Absolute delegation-depth cap (`0` forbids delegation); `'provider-managed'` sends no cap to an out-of-process provider |
 
-The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-tool-subagent) is the exhaustive source for every accepted field and its JSDoc.
+The generated [configuration catalog](../../../docs/config-catalog.md#bake-tool-subagent) is the exhaustive source for every accepted field and its JSDoc.
 
 ### Foreground and background modes
 
@@ -142,9 +142,9 @@ Each delegation tool declares a pure `presentCall`: a UI titles the call by its 
 Read these pages when the package-level contract is not enough; they move from the tool's runtime behavior to the seam it delegates over and the adjacent child tools.
 
 - [Subagent subsystem](../../../docs/subsystems/subagent.md) — providers, one-shot start requests, continuable children and activations.
-- [dsh-tool-subagent-control](../tool-subagent-control/README.md) — messaging, interrupt, and listing tools for continuable children.
-- [Generated tool catalog](../../../docs/tool-catalog.md#deepseek-aidsh-tool-subagent) — the default schema and per-mode wording.
-- [Generated configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-tool-subagent) — every accepted config field.
+- [bake-tool-subagent-control](../tool-subagent-control/README.md) — messaging, interrupt, and listing tools for continuable children.
+- [Generated tool catalog](../../../docs/tool-catalog.md#bake-tool-subagent) — the default schema and per-mode wording.
+- [Generated configuration catalog](../../../docs/config-catalog.md#bake-tool-subagent) — every accepted config field.
 - [Background-first continuable delegation](../../../.agents/notes/archived/feature/2026-08-11-background-first-continuable-delegation.md) — why continuable work defaults to background.
 - [Model-selected subagent routes](../../../.agents/notes/implemented/feature/2026-08-18-model-selected-subagent-routes.md) — selection policy, inheritance, discovery, and the fork restriction.
 
@@ -157,7 +157,7 @@ Read these pages when the package-level contract is not enough; they move from t
 
 #### What the model sees
 
-The generated default [`subagent` schema](../../../docs/tool-catalog.md#deepseek-aidsh-tool-subagent) under this instance's configured name while its provider exists. An enabled Session policy adds `provider`, `model`, and `reasoning_effort` plus inheritance and selection guidance; the provider must support `agentOptions`. Provider context inheritance changes the tool and prompt descriptions. Enabled background mode adds `run_in_background`: continuable mode documents its background default, the returned agent id, the completion notice, `send_message` follow-ups, starting independent subagents together, and when to pass `false`, while one-shot mode documents that the call waits unless `run_in_background` returns a job id for `job_output` or `job_kill`. The wording is kept terse because every parent request resends it. The package adds no system-prompt section, so all of this guidance travels with the schema. With the default tool name `subagent`, the continuable description is:
+The generated default [`subagent` schema](../../../docs/tool-catalog.md#bake-tool-subagent) under this instance's configured name while its provider exists. An enabled Session policy adds `provider`, `model`, and `reasoning_effort` plus inheritance and selection guidance; the provider must support `agentOptions`. Provider context inheritance changes the tool and prompt descriptions. Enabled background mode adds `run_in_background`: continuable mode documents its background default, the returned agent id, the completion notice, `send_message` follow-ups, starting independent subagents together, and when to pass `false`, while one-shot mode documents that the call waits unless `run_in_background` returns a job id for `job_output` or `job_kill`. The wording is kept terse because every parent request resends it. The package adds no system-prompt section, so all of this guidance travels with the schema. With the default tool name `subagent`, the continuable description is:
 
 ##### Continuable description
 

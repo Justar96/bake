@@ -1,5 +1,5 @@
 {
-  "name": "@deepseek-ai/dsh-api-gateway",
+  "name": "bake-api-gateway",
   "description": "Typert Remote Host dispatcher and Client API endpoint",
   "version": "0.1.6-alpha.2",
   "publishConfig": {
@@ -32,8 +32,8 @@
   "dsh": {
     "client": {
       "inject": [
-        "@deepseek-ai/dsh-typert-registry",
-        "@deepseek-ai/dsh-client-connection"
+        "bake-typert-registry",
+        "bake-client-connection"
       ],
       "platform": "web",
       "immediately": true
@@ -51,22 +51,22 @@
   ],
   "license": "MIT",
   "dependencies": {
-    "@deepseek-ai/dsh-deque": "workspace:^",
-    "@deepseek-ai/dsh-timeout": "workspace:^",
+    "bake-deque": "workspace:^",
+    "bake-timeout": "workspace:^",
     "@deepseek-ai/schemastery": "workspace:^",
     "ws": "catalog:",
-    "@deepseek-ai/dsh-typert-protocol": "workspace:^"
+    "bake-typert-protocol": "workspace:^"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "workspace:^"
   },
   "devDependencies": {
-    "@deepseek-ai/dsh-brand": "workspace:^",
-    "@deepseek-ai/dsh-client-connection": "workspace:^",
-    "@deepseek-ai/dsh-host-webserver": "workspace:^",
-    "@deepseek-ai/dsh-remote-mock": "workspace:^",
-    "@deepseek-ai/dsh-typert-registry": "workspace:^",
-    "@deepseek-ai/dsh-util-crypto": "workspace:^",
+    "bake-brand": "workspace:^",
+    "bake-client-connection": "workspace:^",
+    "bake-host-webserver": "workspace:^",
+    "bake-remote-mock": "workspace:^",
+    "bake-typert-registry": "workspace:^",
+    "bake-util-crypto": "workspace:^",
     "@types/ws": "catalog:",
     "@deepseek-ai/cordis": "workspace:^",
     "zod": "catalog:"

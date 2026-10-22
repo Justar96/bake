@@ -1,5 +1,5 @@
 {
-  "name": "@deepseek-ai/dsh-tool-web",
+  "name": "bake-tool-web",
   "description": "Model-facing web tools (web_search, web_fetch) over the DeepSeek Harness web capability seam (ctx.web)",
   "version": "0.1.6-alpha.2",
   "publishConfig": {
@@ -28,29 +28,29 @@
   "license": "MIT",
   "peerDependencies": {
     "@deepseek-ai/cordis": "workspace:^",
-    "@deepseek-ai/dsh-llm": "workspace:^",
-    "@deepseek-ai/dsh-tools": "workspace:^",
-    "@deepseek-ai/dsh-web": "workspace:^"
+    "bake-llm": "workspace:^",
+    "bake-tools": "workspace:^",
+    "bake-web": "workspace:^"
   },
   "dependencies": {
-    "@deepseek-ai/dsh-util-values": "workspace:^",
+    "bake-util-values": "workspace:^",
     "@deepseek-ai/schemastery": "workspace:^",
     "@joplin/turndown-plugin-gfm": "^1.0.67",
     "turndown": "^7.2.4"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "workspace:^",
-    "@deepseek-ai/dsh-agent": "workspace:^",
-    "@deepseek-ai/dsh-llm": "workspace:^",
-    "@deepseek-ai/dsh-session": "workspace:^",
-    "@deepseek-ai/dsh-spill-local": "workspace:^",
-    "@deepseek-ai/dsh-spill-policy": "workspace:^",
-    "@deepseek-ai/dsh-system-prompt": "workspace:^",
-    "@deepseek-ai/dsh-tool-call-timeout-policy": "workspace:^",
-    "@deepseek-ai/dsh-tools": "workspace:^",
-    "@deepseek-ai/dsh-web": "workspace:^",
-    "@deepseek-ai/dsh-web-fetch-http": "workspace:^",
+    "bake-agent": "workspace:^",
+    "bake-llm": "workspace:^",
+    "bake-session": "workspace:^",
+    "bake-spill-local": "workspace:^",
+    "bake-spill-policy": "workspace:^",
+    "bake-system-prompt": "workspace:^",
+    "bake-tool-call-timeout-policy": "workspace:^",
+    "bake-tools": "workspace:^",
+    "bake-web": "workspace:^",
+    "bake-web-fetch-http": "workspace:^",
     "@types/turndown": "^5.0.6",
-    "@deepseek-ai/dsh-scope": "workspace:^"
+    "bake-scope": "workspace:^"
   }
 }

@@ -9,12 +9,19 @@ while [ -L "$source" ]; do
   esac
 done
 root=$(CDPATH= cd -- "$(dirname -- "$source")/.." && pwd -P)
-if [ -z "${DSH_HOME+x}" ]; then DSH_HOME="$HOME/.bake"; export DSH_HOME; fi
+# BAKE_HOME selects the home; DSH_HOME, its earlier name, is read only when
+# BAKE_HOME is unset, empty, or only whitespace. Both are exported with the result.
+case ${BAKE_HOME:-} in
+  *[![:space:]]*) ;;
+  *) if [ -n "${DSH_HOME+x}" ]; then BAKE_HOME=$DSH_HOME; else BAKE_HOME="$HOME/.bake"; fi ;;
+esac
+DSH_HOME=$BAKE_HOME
+export BAKE_HOME DSH_HOME
 # Node writes the runtime watchdog's fatal-error reports and heap snapshots
 # here, without environment variables or network interfaces. Node arguments,
 # not NODE_OPTIONS, which the agent's subprocesses would inherit.
-diagnostics=$DSH_HOME/diagnostics
-if [ -n "$DSH_HOME" ]; then mkdir -p -m 700 -- "$diagnostics" 2>/dev/null || :; fi
+diagnostics=$BAKE_HOME/diagnostics
+if [ -n "$BAKE_HOME" ]; then mkdir -p -m 700 -- "$diagnostics" 2>/dev/null || :; fi
 case ${1-} in
   tui|headless|plugin|update|--profile) ;;
   *) set -- --profile tui "$@" ;;

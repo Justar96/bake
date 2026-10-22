@@ -1,5 +1,5 @@
 /** Client-safe payloads and event declarations owned by the agent-preset domain. */
-import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import type { SessionId } from 'bake-session/types'
 import type { PresetTrust } from './preset.ts'
 
 export type { PresetTrust } from './preset.ts'
@@ -33,7 +33,7 @@ export interface AgentPresetRoster {
   readonly modeSelectionEnabled: boolean
 }
 
-declare module '@deepseek-ai/dsh-typert-protocol' {
+declare module 'bake-typert-protocol' {
   interface RemoteErrorDetailsMap {
     /** No configured root supplies the requested id. */
     'agent-preset/not-found': { readonly agentPreset: string; readonly available: readonly string[] }
@@ -60,7 +60,7 @@ export interface AgentPresetDocument {
   readonly description?: string
 }
 
-declare module '@deepseek-ai/dsh-session-projection/types' {
+declare module 'bake-session-projection/types' {
   interface SessionProjectionStateMap {
     agentPreset: string | null
   }

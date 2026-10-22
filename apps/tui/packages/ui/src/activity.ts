@@ -8,7 +8,7 @@
  *
  * Everything here is pure. The caller owns the clock.
  *
- * @module @dsh-tui/ui/activity
+ * @module bake-tui-ui/activity
  */
 
 import { callsOf, type Row, type ToolCallRow } from './rows.ts'

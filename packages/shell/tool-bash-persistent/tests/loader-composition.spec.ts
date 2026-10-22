@@ -6,21 +6,21 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Include from '@deepseek-ai/cordis-plugin-include'
-import { ToolCallId } from '@deepseek-ai/dsh-llm'
-import { SESSION_FORMAT_VERSION, Session, SessionId } from '@deepseek-ai/dsh-session'
-import AgentRegistry from '@deepseek-ai/dsh-agent'
-import type { Agent } from '@deepseek-ai/dsh-agent'
-import TerminalSessionService from '@deepseek-ai/dsh-terminal'
-import * as TerminalLocal from '@deepseek-ai/dsh-terminal-bash'
-import SandboxProvider from '@deepseek-ai/dsh-sandbox'
-import type { ConfinedArgv, SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
-import SandboxPolicyService from '@deepseek-ai/dsh-sandbox-policy'
-import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
-import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
-import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
-import ToolRuntime from '@deepseek-ai/dsh-tools'
-import * as ToolBashPersistent from '@deepseek-ai/dsh-tool-bash-persistent'
-import { unsupportedInbox } from '@deepseek-ai/dsh-agent-loop-testkit'
+import { ToolCallId } from 'bake-llm'
+import { SESSION_FORMAT_VERSION, Session, SessionId } from 'bake-session'
+import AgentRegistry from 'bake-agent'
+import type { Agent } from 'bake-agent'
+import TerminalSessionService from 'bake-terminal'
+import * as TerminalLocal from 'bake-terminal-bash'
+import SandboxProvider from 'bake-sandbox'
+import type { ConfinedArgv, SandboxPolicy } from 'bake-sandbox'
+import SandboxPolicyService from 'bake-sandbox-policy'
+import SessionProjectionRegistry from 'bake-session-projection'
+import LocalSubprocessRuntime from 'bake-subprocess-local'
+import SystemPrompt from 'bake-system-prompt'
+import ToolRuntime from 'bake-tools'
+import * as ToolBashPersistent from 'bake-tool-bash-persistent'
+import { unsupportedInbox } from 'bake-agent-loop-testkit'
 
 let root: string | undefined
 let context: Context | undefined
@@ -74,18 +74,18 @@ suite('persistent Bash through a real cordis.yml Loader composition', () => {
     root = await mkdtemp(join(tmpdir(), 'dsh-persistent-bash-loader-'))
     const configPath = join(root, 'cordis.yml')
     await writeFile(configPath, [
-      "- name: '@deepseek-ai/dsh-agent'",
-      "- name: '@deepseek-ai/dsh-system-prompt'",
-      "- name: '@deepseek-ai/dsh-tools'",
-      "- name: '@deepseek-ai/dsh-terminal'",
+      "- name: 'bake-agent'",
+      "- name: 'bake-system-prompt'",
+      "- name: 'bake-tools'",
+      "- name: 'bake-terminal'",
       "- name: '@deepseek-ai/dsh-test-sandbox'",
-      "- name: '@deepseek-ai/dsh-session-projection'",
-      "- name: '@deepseek-ai/dsh-sandbox-policy'",
+      "- name: 'bake-session-projection'",
+      "- name: 'bake-sandbox-policy'",
       '  config:',
       '    mode: danger-full-access',
       `    workspaceRoot: ${JSON.stringify(root)}`,
-      "- name: '@deepseek-ai/dsh-subprocess-local'",
-      "- name: '@deepseek-ai/dsh-terminal-bash'",
+      "- name: 'bake-subprocess-local'",
+      "- name: 'bake-terminal-bash'",
       '  config:',
       '    pollIntervalMs: 10',
       '    exactProbeAfterMs: 20',
@@ -98,7 +98,7 @@ suite('persistent Bash through a real cordis.yml Loader composition', () => {
       // This bound also covers shell startup, which a loaded host can stretch past a few seconds.
       '    timeoutMs: 10000',
       '    disposeGraceMs: 500',
-      "- name: '@deepseek-ai/dsh-tool-bash-persistent'",
+      "- name: 'bake-tool-bash-persistent'",
       '  config:',
       '    timeoutMs: 20000',
       '',
@@ -109,16 +109,16 @@ suite('persistent Bash through a real cordis.yml Loader composition', () => {
     await context.plugin(Loader)
     context.loader.builtins.include = Include
     const modules = new Map<string, unknown>([
-      ['@deepseek-ai/dsh-agent', AgentRegistry],
-      ['@deepseek-ai/dsh-system-prompt', SystemPrompt],
-      ['@deepseek-ai/dsh-tools', ToolRuntime],
-      ['@deepseek-ai/dsh-terminal', TerminalSessionService],
+      ['bake-agent', AgentRegistry],
+      ['bake-system-prompt', SystemPrompt],
+      ['bake-tools', ToolRuntime],
+      ['bake-terminal', TerminalSessionService],
       ['@deepseek-ai/dsh-test-sandbox', PassthroughSandbox],
-      ['@deepseek-ai/dsh-session-projection', SessionProjectionRegistry],
-      ['@deepseek-ai/dsh-sandbox-policy', SandboxPolicyService],
-      ['@deepseek-ai/dsh-subprocess-local', LocalSubprocessRuntime],
-      ['@deepseek-ai/dsh-terminal-bash', TerminalLocal],
-      ['@deepseek-ai/dsh-tool-bash-persistent', ToolBashPersistent],
+      ['bake-session-projection', SessionProjectionRegistry],
+      ['bake-sandbox-policy', SandboxPolicyService],
+      ['bake-subprocess-local', LocalSubprocessRuntime],
+      ['bake-terminal-bash', TerminalLocal],
+      ['bake-tool-bash-persistent', ToolBashPersistent],
     ])
     context.loader.internal = {
       version: 'v2',

@@ -1,20 +1,20 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import BasicCompactionEngine from '@deepseek-ai/dsh-compaction-basic'
-import type { BasicCompactionConfig } from '@deepseek-ai/dsh-compaction-basic'
-import { compactCheckpointSource, CompactionId } from '@deepseek-ai/dsh-compaction'
+import BasicCompactionEngine from 'bake-compaction-basic'
+import type { BasicCompactionConfig } from 'bake-compaction-basic'
+import { compactCheckpointSource, CompactionId } from 'bake-compaction'
 import {
   collectCheckpointContext,
   formatCheckpointContext,
   MAX_LISTED_FILES,
-} from '@deepseek-ai/dsh-compaction-basic/src/checkpoint-context.ts'
+} from 'bake-compaction-basic/src/checkpoint-context.ts'
 import {
   boundedSummarizationInput,
   serializeTranscript,
-} from '@deepseek-ai/dsh-compaction-basic/src/bounded-input.ts'
-import { frameSummary } from '@deepseek-ai/dsh-compaction-basic/src/summarizer.ts'
-import { MAX_SUMMARY_RANGE_HALVINGS } from '@deepseek-ai/dsh-compaction-basic/src/region.ts'
-import { MAX_SUMMARY_RETRIES } from '@deepseek-ai/dsh-compaction-basic/src/summary-retry.ts'
+} from 'bake-compaction-basic/src/bounded-input.ts'
+import { frameSummary } from 'bake-compaction-basic/src/summarizer.ts'
+import { MAX_SUMMARY_RANGE_HALVINGS } from 'bake-compaction-basic/src/region.ts'
+import { MAX_SUMMARY_RETRIES } from 'bake-compaction-basic/src/summary-retry.ts'
 import LlmRuntime, {
   CONTEXT_WINDOW_EXCEEDED_CODE,
   createMessage,
@@ -23,7 +23,7 @@ import LlmRuntime, {
   LlmAdapter,
   resolveRetryPolicy,
   ToolCallId,
-} from '@deepseek-ai/dsh-llm'
+} from 'bake-llm'
 import type {
   GenerateOptions,
   LlmFailure,
@@ -31,11 +31,11 @@ import type {
   Message,
   ResolvedRetryPolicy,
   StreamChunk,
-} from '@deepseek-ai/dsh-llm'
-import SessionStore, { Session, SessionId } from '@deepseek-ai/dsh-session'
-import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
-import TokenMeter from '@deepseek-ai/dsh-token-meter'
-import { agentEvents, type Agent, type RequestErrorAction } from '@deepseek-ai/dsh-agent'
+} from 'bake-llm'
+import SessionStore, { Session, SessionId } from 'bake-session'
+import SessionProjectionRegistry from 'bake-session-projection'
+import TokenMeter from 'bake-token-meter'
+import { agentEvents, type Agent, type RequestErrorAction } from 'bake-agent'
 
 const MODEL = 'test-model'
 const SIGNAL = new AbortController().signal

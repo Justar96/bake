@@ -8,7 +8,7 @@
  * Placement follows `apps/tui/DESIGN-LAYOUT.md`. A marker column, a verb column
  * naming what the agent did, and output aligned under the verb's argument.
  *
- * @module @dsh-tui/ui/present
+ * @module bake-tui-ui/present
  */
 
 import wrapAnsi from 'wrap-ansi'

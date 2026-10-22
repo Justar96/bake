@@ -27,8 +27,9 @@ export default defineConfig({
     include: ['packages/*/tests/**/*.spec.{ts,tsx}'],
     environment: 'node',
     // Ink's console patching needs a real `console.Console`, which vitest's
-    // reporter console does not provide.
-    setupFiles: ['./tests/setup-ink.ts'],
+    // reporter console does not provide. The second file drops ambient
+    // `BAKE_*` names, so a suite's `DSH_HOME` decides where it writes.
+    setupFiles: ['./tests/setup-ink.ts', '../../scripts/test-bake-environment.ts'],
     // The integration specs drive real agents and durable persistence; the
     // default 5s timeout cuts off legitimate settlement.
     testTimeout: 30_000,

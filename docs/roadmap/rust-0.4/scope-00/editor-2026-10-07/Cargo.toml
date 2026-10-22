@@ -1,0 +1,10 @@
+[package]
+name = "editor_probe"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+crossterm = "0.29"
+ratatui = "0.30"
+ratatui-textarea = "=0.9.3"
+unicode-width = "=0.2.2"

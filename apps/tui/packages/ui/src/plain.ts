@@ -3,7 +3,7 @@
  * pre-render startup report, `--json`-free diagnostics, and test assertions.
  * Pure, so it runs under `bun test` alongside the projection.
  *
- * @module @dsh-tui/ui/plain
+ * @module bake-tui-ui/plain
  */
 
 import { PAST, VERB } from './layout.ts'

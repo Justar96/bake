@@ -4,11 +4,11 @@ Bake is a terminal application over a Cordis plugin runtime. Read this map befor
 
 ## Application launch
 
-Bun manages the source workspace and builds the application. Supported Node application launches go through `dsh` profiles. The shipped profiles are `tui`, for interactive terminal sessions, and `headless`, for one task. Custom composition remains a profile plus ordered patches, not an additional executable or inline application tree.
+Bun manages the source workspace and builds the application. Supported Node application launches go through `bake` profiles. The shipped profiles are `tui`, for interactive terminal sessions, and `headless`, for one task. Custom composition remains a profile plus ordered patches, not an additional executable or inline application tree.
 
-The terminal profile stacks [`dsh-base`](../packages/bundle/base/README.md) and [`@dsh-tui/app`](../apps/tui/packages/app/README.md). Base supplies models, tools, persistence, sandbox policy, settings, and credentials. The TUI supplies agent selection, terminal ownership, user input, and presentation. The [launcher](../apps/cli/README.md) owns profile initialization and argument forwarding.
+The terminal profile stacks [`bake-base`](../packages/bundle/base/README.md) and [`bake-tui-app`](../apps/tui/packages/app/README.md). Base supplies models, tools, persistence, sandbox policy, settings, and credentials. The TUI supplies agent selection, terminal ownership, user input, and presentation. The [launcher](../apps/cli/README.md) owns profile initialization and argument forwarding.
 
-Each profile lists its bundles under `dsh.profile.bundles`. Composition applies bundle patches, the profile patch, the home patch, and invocation patches in that order. YAML controls HMR. Existing profile manifests retain their user-selected bundles.
+Each profile lists its bundles under `bake.profile.bundles` (or the earlier `dsh.profile.bundles`). Composition applies bundle patches, the profile patch, the home patch, and invocation patches in that order. YAML controls HMR. Existing profile manifests retain their user-selected bundles.
 
 ## Shared runtime
 
@@ -49,4 +49,4 @@ The live region stays within the terminal row budget; committed transcript rows 
 
 ## Upstream adoption
 
-Bake retains shared runtime package names and session evidence to support selective upstream fixes. The [contributor guide](../CONTRIBUTING.md#upstream-deepseek-harness) owns release review. Upstream's Web, Desktop, SDK, and publication workflows are not Bake application requirements.
+Bake's runtime packages, including plugins and bundles, use `bake-<name>`; the CLI uses `bake-cli`, and terminal packages use `bake-tui-<name>`. Vendored names and recorded session evidence stay intact. The [contributor guide](../CONTRIBUTING.md#upstream-deepseek-harness) owns import mapping and release review. Upstream's Web, Desktop, SDK, and publication workflows are not Bake application requirements.

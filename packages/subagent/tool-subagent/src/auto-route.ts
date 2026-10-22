@@ -1,6 +1,6 @@
 /** Task-aware child route selection through an external router. */
 
-import type { LlmResolvedModelInfo, LlmRuntime } from '@deepseek-ai/dsh-llm'
+import type { LlmResolvedModelInfo, LlmRuntime } from 'bake-llm'
 import { modelRouteKey } from './model-selection.ts'
 import type { AllowedModelRoute, DelegationModelRequest } from './model-selection.ts'
 import type { SubagentRouteHint, SubagentRouterSettings } from './model-selection-settings.ts'

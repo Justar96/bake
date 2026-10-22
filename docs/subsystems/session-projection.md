@@ -1,6 +1,6 @@
 # Session Projections
 
-The session-projection seam provides complete log-derived per-session values through [dsh-session-projection](../../packages/session/session-projection) (`ctx.sessionProjections`). Its registry subscribes to committed `session/event` records and folds them through pure projection units; domain packages need no separate subscription. The [package README](../../packages/session/session-projection/README.md) owns drive, cache, and change-feed contracts.
+The session-projection seam provides complete log-derived per-session values through [bake-session-projection](../../packages/session/session-projection) (`ctx.sessionProjections`). Its registry subscribes to committed `session/event` records and folds them through pure projection units; domain packages need no separate subscription. The [package README](../../packages/session/session-projection/README.md) owns drive, cache, and change-feed contracts.
 
 Source: [`packages/session/session-projection/src/index.ts`](../../packages/session/session-projection/src/index.ts)
 

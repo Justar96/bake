@@ -1,4 +1,4 @@
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { createUserMessage } from 'bake-llm'
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import {
@@ -6,12 +6,12 @@ import {
   CompactionEngine,
   compactCheckpointSource,
   isCompactCheckpointSource,
-} from '@deepseek-ai/dsh-compaction'
-import type { CompactionResult, CompactionTrigger } from '@deepseek-ai/dsh-compaction'
-import { Session, SessionId } from '@deepseek-ai/dsh-session'
-import type { SessionSeq } from '@deepseek-ai/dsh-session'
-import type { CompactionAgentContext } from '@deepseek-ai/dsh-compaction'
-import type { ManualCompactAgentContext } from '@deepseek-ai/dsh-compaction'
+} from 'bake-compaction'
+import type { CompactionResult, CompactionTrigger } from 'bake-compaction'
+import { Session, SessionId } from 'bake-session'
+import type { SessionSeq } from 'bake-session'
+import type { CompactionAgentContext } from 'bake-compaction'
+import type { ManualCompactAgentContext } from 'bake-compaction'
 
 /**
  * A trivial concrete CompactionEngine implementing the abstract contract. The

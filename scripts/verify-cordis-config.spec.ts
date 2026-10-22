@@ -22,7 +22,7 @@ import {
 describe('verify-cordis-config metadata expressions', () => {
   it('accepts a disabled !!js expression', () => {
     const problems = metadataExpressionErrors(
-      { id: 'tool-bash', name: '@deepseek-ai/dsh-tool-bash', disabled: { __jsExpr: "process.platform === 'win32'" } },
+      { id: 'tool-bash', name: 'bake-tool-bash', disabled: { __jsExpr: "process.platform === 'win32'" } },
       '[0]',
     )
     expect(problems).toEqual([])
@@ -189,7 +189,7 @@ describe('preset plane overlaps across the profiles that mount the roster', () =
         '- { id: taken-back, disabled: true }',
         '- { id: host-realm, disabled: true }',
         '- insert:',
-        "    - { id: agent-presets, name: '@deepseek-ai/dsh-agent-presets' }",
+        "    - { id: agent-presets, name: 'bake-agent-presets' }",
         '',
       ].join('\n'))
       bundle(fixture, 'packages/bundle/plain', '@example/plain', '- insert:\n    - { id: plain-only, name: plain-plugin }\n')
@@ -217,11 +217,11 @@ describe('preset plane overlaps across the profiles that mount the roster', () =
         { profile: 'hosted', file: 'packages/preset/agent-presets/presets/quiet/agent.cordis.yml', ids: ['shared'] },
       ])
       // A host that leaves the group on still runs its child.
-      bundle(fixture, 'packages/bundle/open', '@example/open', "- insert:\n    - { id: agent-presets, name: '@deepseek-ai/dsh-agent-presets' }\n")
+      bundle(fixture, 'packages/bundle/open', '@example/open', "- insert:\n    - { id: agent-presets, name: 'bake-agent-presets' }\n")
       expect(presetPlaneOverlaps(fixture, { open: { bundles: ['@example/base', '@example/open'] } })[0])
         .toEqual({ profile: 'open', file: 'packages/preset/agent-presets/presets/full/agent.cordis.yml', ids: ['shared', 'taken-back', 'gated', 'grouped'] })
       expect(() => presetPlaneOverlaps(fixture, { plain: { bundles: ['@example/base', '@example/plain'] } }))
-        .toThrow('no shipped profile mounts @deepseek-ai/dsh-agent-presets')
+        .toThrow('no shipped profile mounts bake-agent-presets')
       expect(() => presetPlaneOverlaps(fixture, { missing: { bundles: ['@example/absent'] } }))
         .toThrow('profile template "missing" names bundle @example/absent, which no workspace manifest declares')
     } finally {

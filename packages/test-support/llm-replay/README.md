@@ -3,11 +3,11 @@ description: "Keyless LLM replay plugin for snapshot tests, for test authors boo
 kind: "package-reference"
 ---
 
-# @deepseek-ai/dsh-llm-replay
+# bake-llm-replay
 
 ## Summary
 
-`dsh-llm-replay` lets snapshot tests run the real agent without an API key by replaying model streams from recorded Session JSONL fixtures. Each parent and subagent session receives its recorded script in first-call order, while calls within a session advance independently. A `replay.override.json` sidecar represents pre-chunk failures, cancellation, hangs, and injected retries that durable settlements cannot reconstruct. Use it for deterministic headless and terminal scenarios that need real loop behavior with fixed model output.
+`bake-llm-replay` lets snapshot tests run the real agent without an API key by replaying model streams from recorded Session JSONL fixtures. Each parent and subagent session receives its recorded script in first-call order, while calls within a session advance independently. A `replay.override.json` sidecar represents pre-chunk failures, cancellation, hangs, and injected retries that durable settlements cannot reconstruct. Use it for deterministic headless and terminal scenarios that need real loop behavior with fixed model output.
 
 ## Table of Contents
 
@@ -31,7 +31,7 @@ With `providers` configured, the plugin registers a replay-only adapter whose ca
 
 ```yaml
 - id: llm-replay
-  name: '@deepseek-ai/dsh-llm-replay'
+  name: 'bake-llm-replay'
   config:
     providers:
       - id: deepseek-official
@@ -59,7 +59,7 @@ With `providers` configured, the plugin registers a replay-only adapter whose ca
 | `providers` | — | Optional replay-only model catalog with context and modality metadata, `systemPromptUpdate: in-history`, and `toolUpdate: in-history` or `addition-only`; invalid capability values fail at load, and routes perform no provider I/O |
 | `paceMs` | — (burst) | Optional per-chunk delay in ms for genuinely incremental delivery |
 
-The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-llm-replay) is the exhaustive source for every accepted field and its JSDoc.
+The generated [configuration catalog](../../../docs/config-catalog.md#bake-llm-replay) is the exhaustive source for every accepted field and its JSDoc.
 
 ### How the fixture works
 

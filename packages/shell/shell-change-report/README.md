@@ -3,11 +3,11 @@ description: "The workspace files a shell command changed while it ran, for main
 kind: "package-library"
 ---
 
-# @deepseek-ai/dsh-shell-change-report
+# bake-shell-change-report
 
 ## Summary
 
-`dsh-shell-change-report` finds the workspace files a shell command changed while it ran, so a terminal can show a shell edit the way it shows an `edit` call. It reads git before and after the command, with hardened and time-bounded reads. It returns the changed files with contextual hunks, bounded so the session log stays small. The report is for display only: the shell tools attach it as `tool/result.meta`, and the model never receives it. `tool-bash` and `tool-pwsh` use it; it registers no service and has no `ctx` key.
+`bake-shell-change-report` finds the workspace files a shell command changed while it ran, so a terminal can show a shell edit the way it shows an `edit` call. It reads git before and after the command, with hardened and time-bounded reads. It returns the changed files with contextual hunks, bounded so the session log stays small. The report is for display only: the shell tools attach it as `tool/result.meta`, and the model never receives it. `tool-bash` and `tool-pwsh` use it; it registers no service and has no `ctx` key.
 
 ## Table of Contents
 
@@ -26,7 +26,7 @@ kind: "package-library"
 A shell tool opens a window before it runs a foreground command and closes it afterwards. `openChangeReport` decides from the call's file policy whether to report the call, and how to confine the git reads. `finish` returns the report or `undefined`, and `release` closes a window without comparing, as an aborted command does.
 
 ```ts
-import { openChangeReport, withRunningJobs } from '@deepseek-ai/dsh-shell-change-report'
+import { openChangeReport, withRunningJobs } from 'bake-shell-change-report'
 
 const window = await openChangeReport(ctx, exec, policy, workdir)
 try {
@@ -93,7 +93,9 @@ After two consecutive timeouts before the command, a workdir is skipped for ten 
 
 ### How a comparison works
 
-Before the command, the library copies the repository's index into a temporary directory and runs `git status --porcelain=v2 --branch -z --untracked-files=all --no-renames --ignore-submodules=all` against the copy. It records an `lstat` signature for every path that already differs from the index, and captures the bytes of those within the bounds. After the command, it runs the same status against the same copy. Because the base is the index from before the command, a commit, stash, or checkout the command makes cannot hide a change. A dirty path whose signature held is skipped. A clean path takes its previous content from its index blob through `git cat-file blob`, which applies no filters. A deleted file and a created file with the same content are reported as one rename. On this repository, with 70 dirty files, a call that changes nothing adds about 33 ms at the median.
+Before the command, the library copies the repository's index into a temporary directory and runs `git status --porcelain=v2 --branch -z --untracked-files=all --no-renames --ignore-submodules=all` against the copy. The copy retains the original index modification time, rounded down to whole seconds, so Git still checks content for entries whose timestamps might hide same-size edits. It records an `lstat` signature for every path that already differs from the index, and captures the bytes of those within the bounds. After the command, it runs the same status against the same copy. Because the base is the index from before the command, a commit, stash, or checkout the command makes cannot hide a change. A dirty path whose signature held is skipped. A clean path takes its previous content from its index blob through `git cat-file blob`, which applies no filters. A deleted file and a created file with the same content are reported as one rename. On this repository, with 70 dirty files, a call that changes nothing adds about 33 ms at the median.
+
+The language-independent [racy-index cases](tests/fixtures/racy-index.json) fix the timestamps and bytes for clean and already-dirty files. The real-Git tests use these cases to verify the comparison without relying on host write timing. Rust migration scope 08 must adopt both cases when porting shell change reporting.
 
 ### Hardening
 
@@ -115,7 +117,7 @@ jsdiff is quadratic on dissimilar inputs: a full rewrite of 10,000 lines took 9.
 ## Further Exploration
 
 - [Shell change report Agent Note](../../../.agents/notes/implemented/feature/2026-10-01-shell-change-report.md) — the design, the alternatives it beat, and its risks.
-- [`dsh-tool-bash`](../tool-bash/README.md) and [`dsh-tool-pwsh`](../tool-pwsh/README.md) — the tools that open a window around each foreground call.
+- [`bake-tool-bash`](../tool-bash/README.md) and [`bake-tool-pwsh`](../tool-pwsh/README.md) — the tools that open a window around each foreground call.
 - [`dsh-tools`](../../core/tools/README.md#host-presentation-descriptors) — `presentResultMeta`, the channel the report travels through.
 
 -----

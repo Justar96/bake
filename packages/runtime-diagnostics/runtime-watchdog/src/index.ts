@@ -5,7 +5,7 @@
  * `directory` when a threshold is crossed, and arms Node's fatal-error report
  * in the same directory when Node keeps environment variables out of it. It
  * writes nothing to stdout or stderr and adds nothing to model context.
- * @module @deepseek-ai/dsh-runtime-watchdog
+ * @module bake-runtime-watchdog
  */
 
 import { isAbsolute } from 'node:path'

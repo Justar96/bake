@@ -1,0 +1,57 @@
+[package]
+name = "bake-sandbox"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Bake's process-confinement contract: sandbox modes, per-call policies, escalation vocabulary, and the provider seam its backends implement"
+
+[dependencies]
+# The local backends' functional probes, each an owned process tree that a
+# timeout or a drop kills and settles; on Windows also the runners' Job and
+# the account its end is settled on (`bake_process::windows_job`), shared
+# with the process owner.
+bake-process.workspace = true
+# The probes' bounded, cancellable waits and the once-only cached verdict.
+tokio = { workspace = true, features = ["process", "time", "sync", "io-util"] }
+# The Windows runner's capability SIDs (SHA-256) and private temp names.
+ring.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+# The Landlock helper's raw syscalls, `prctl`, `open(O_PATH)`, and `fstat`.
+libc.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+# The Windows runners' restricted token, each run's AppContainer profile
+# (create, folder lookup freed with `CoTaskMemFree`, delete), capability
+# SIDs, DACL grants and denials, and process creation; `Win32_Storage_FileSystem`
+# is the AppContainer grant walk's link counts and its run records.
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Security_Isolation", "Win32_Storage_FileSystem", "Win32_System_Com", "Win32_System_Console", "Win32_System_Threading"] }
+
+[target.'cfg(windows)'.dev-dependencies]
+# The enforcement tests' raw deletion, open, token, and SDDL probes and
+# their process and Job guards; `Win32_Security_Isolation` is the mechanism
+# probe's AppContainer profile and the runner cases' profile deletion and
+# package SID, and `Win32_System_Console` the candidates' output
+# redirection. The AppContainer object cases add the registry, sections,
+# the session id, and the TCP table (`Win32_System_Registry`,
+# `Win32_System_Memory`, `Win32_System_RemoteDesktop`,
+# `Win32_NetworkManagement_IpHelper`).
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_NetworkManagement_IpHelper", "Win32_Security", "Win32_Security_Isolation", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_JobObjects", "Win32_System_Memory", "Win32_System_Pipes", "Win32_System_Registry", "Win32_System_RemoteDesktop", "Win32_System_Threading"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["process", "time", "sync", "io-util", "rt", "rt-multi-thread", "macros"] }
+
+[features]
+# A provider that runs commands unconfined while reporting a chosen mode, for
+# tests of code above the seam. Never enable it in a shipped binary.
+testing = []
+
+# Real enforcement through each OS backend. Its own `main` serves as the
+# Landlock helper when re-executed, so the tests confine through a real
+# self-re-exec exactly as `bake` does.
+[[test]]
+name = "enforcement"
+path = "tests/enforcement.rs"
+harness = false

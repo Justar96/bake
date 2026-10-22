@@ -1,0 +1,189 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/bake-agent",
+    "crates/bake-ai",
+    "crates/bake-cli",
+    "crates/bake-codemode",
+    "crates/bake-coding-agent",
+    "crates/bake-conformance",
+    "crates/bake-mcp",
+    "crates/bake-plugin-sdk",
+    "crates/bake-process",
+    "crates/bake-sandbox",
+    "crates/bake-tui",
+    "crates/bake-tui-view",
+    "crates/bake-update",
+    "plugins/guard",
+    "plugins/fixtures/hostile",
+]
+# The cargo-fuzz crate is its own workspace on a pinned nightly toolchain
+# (`fuzz/rust-toolchain.toml`), with its own lock.
+exclude = ["fuzz"]
+
+[workspace.package]
+version = "0.4.0"
+edition = "2024"
+rust-version = "1.99"
+license = "MIT"
+publish = false
+
+[workspace.dependencies]
+bake-agent = { path = "crates/bake-agent" }
+bake-ai = { path = "crates/bake-ai" }
+bake-codemode = { path = "crates/bake-codemode" }
+bake-coding-agent = { path = "crates/bake-coding-agent" }
+bake-mcp = { path = "crates/bake-mcp" }
+bake-process = { path = "crates/bake-process" }
+bake-sandbox = { path = "crates/bake-sandbox" }
+bake-tui = { path = "crates/bake-tui" }
+bake-tui-view = { path = "crates/bake-tui-view" }
+bake-update = { path = "crates/bake-update" }
+ratatui = { version = "=0.30.2", default-features = false, features = ["crossterm"] }
+# The core crate the pinned Ratatui release depends on; the view crate uses it
+# without the terminal backend.
+ratatui-core = { version = "=0.1.2", default-features = false, features = ["std"] }
+# `use-dev-tty` swaps Crossterm's Unix reader for one that polls level-triggered.
+# The default mio reader is edge-triggered and returns after the first ready
+# source, so keys that arrive with a resize stay unread until the next key.
+crossterm = { version = "=0.29.0", default-features = false, features = ["bracketed-paste", "events", "use-dev-tty"] }
+# 0.3, not 0.4: the version Crossterm 0.29 uses, so the lock carries one.
+signal-hook = { version = "=0.3.18", default-features = false }
+unicode-segmentation = "=1.13.3"
+unicode-width = "=0.2.2"
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = { version = "=1.0.154", features = ["float_roundtrip", "preserve_order"] }
+# The `bake-ai` provider runtime: Tokio for tasks and timers, reqwest over
+# rustls (ring, webpki roots) for HTTP/1.1 with chunked streaming bodies, and
+# regex for Pi's provider error classifiers. No native TLS or OpenSSL.
+# reqwest's `rustls-no-provider` brings no crypto provider and verifies with
+# the platform's trust store unless given a TLS config, so each client is
+# built with a preconfigured `rustls` config: the ring provider and the
+# Mozilla roots of `webpki-roots`, which Node's `fetch` also trusts. `rustls`
+# is the version reqwest's own resolves to, as the config is matched by type.
+tokio = { version = "=1.54.1", default-features = false }
+reqwest = { version = "=0.13.5", default-features = false, features = ["rustls-no-provider"] }
+rustls = { version = "=0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
+webpki-roots = { version = "=1.0.10", default-features = false }
+regex = { version = "=1.13.1", default-features = false, features = ["std", "unicode-case", "unicode-perl"] }
+# The `bake-coding-agent` session store: OS randomness for Pi's session and
+# entry ids, and an insertion-ordered map for its JavaScript `Map` indexes.
+# Both versions are the ones the lock already carries for Wasmtime's `rand`
+# and serde_json.
+getrandom = { version = "=0.4.3", default-features = false }
+indexmap = { version = "=2.14.2", default-features = false, features = ["std"] }
+# The `bake-coding-agent` CLIProxyAPI import: a panic-free YAML reader with
+# built-in budgets (depth, aliases, nodes, input size) for the 0.3 home's
+# `settings.yaml` and `.credentials.yaml` (D25). MIT OR Apache-2.0.
+serde-saphyr = { version = "=2.0.0", default-features = false, features = ["deserialize"] }
+# The `bake-coding-agent` file tools. `image` decodes, orients, resizes
+# (Lanczos3), and re-encodes images as Pi's Photon (itself built on `image`)
+# does, for PNG, JPEG, GIF, WebP, and BMP only; MIT OR Apache-2.0.
+# `icu_normalizer` (already in the lock through `url`) gives the NFKC and NFD
+# forms Pi's edit matching and read-path fallbacks use; Unicode-3.0. `base64`
+# is the version the lock already carries; MIT OR Apache-2.0. `libc` (already in the lock) provides
+# `access(2)` for Pi's readable and writable checks on Unix, and `setsid`
+# and `kill(-pgid)` for the bash tool's process groups; MIT OR Apache-2.0.
+# `windows-sys` (already in the lock for Tokio) gives the bash tool Win32 job
+# objects; MIT OR Apache-2.0.
+image = { version = "=0.25.10", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp"] }
+icu_normalizer = { version = "=2.4.0", default-features = false, features = ["compiled_data"] }
+base64 = { version = "=0.23.1", default-features = false, features = ["std"] }
+libc = { version = "=0.2.191", default-features = false }
+windows-sys = { version = "=0.61.2", default-features = false }
+# The `bake-coding-agent` web fetch decodes a response's declared charset
+# with the WHATWG encodings `TextDecoder` used in 0.3; the version the lock
+# already carries through `serde-saphyr` and Wasmtime. (Apache-2.0 OR MIT)
+# AND BSD-3-Clause.
+encoding_rs = { version = "=0.8.42", default-features = false, features = ["alloc"] }
+# The `bake-sandbox` Windows runner: SHA-256 for the capability SIDs and the
+# OS random source for private temp names, from the `ring` the lock already
+# carries for rustls. Apache-2.0 AND ISC.
+ring = { version = "=0.17.14", default-features = false }
+# The `bake-coding-agent` skill discovery: `ignore`'s gitignore matcher reads
+# the `.gitignore`, `.ignore`, and `.fdignore` files in skill directories as
+# Pi's `ignore` package does. Unlicense OR MIT; its dependencies are MIT OR
+# Apache-2.0 or Unlicense OR MIT.
+ignore = { version = "=0.4.33", default-features = false }
+# The `bake-coding-agent` schedules: `jiff` parses RFC 3339 instants and
+# resolves local times in an IANA zone from its own bundled tz database
+# (`jiff-tzdb`), so a reminder's instant never depends on the host's zone
+# files or setting; Unlicense OR MIT, the tz data public domain.
+jiff = { version = "=0.2.38", default-features = false, features = ["std", "tzdb-bundle-always"] }
+# Third-party plugins (`bake-coding-agent::plugins::wasm`): Wasmtime compiles
+# and runs WASI 0.2 components inside Bake's own helper process. Only the
+# features the helper uses: the Cranelift compiler, the component model, and
+# async calls (`wasmtime-wasi`'s `p2` requires `async`). No `wat` text parser,
+# disk cache, parallel compilation, pooling allocator, GC, threads, or
+# profiling. `wasmparser` is the version Wasmtime itself depends on, for the
+# validating parse and import check that run before compiling. Apache-2.0
+# WITH LLVM-exception.
+wasmtime = { version = "=50.0.0", default-features = false, features = ["runtime", "std", "cranelift", "component-model", "async"] }
+wasmtime-wasi = { version = "=50.0.0", default-features = false, features = ["p2"] }
+wasmparser = { version = "=0.261.0", default-features = false, features = ["std", "validate", "component-model", "features"] }
+# The helper's metered random generators (`rand_core`'s `TryRng`, the
+# version `wasmtime-wasi`'s `rand` uses). MIT OR Apache-2.0.
+rand_core = { version = "=0.10.1", default-features = false }
+# The `bake-update` native updater unpacks a release archive in process:
+# `flate2`'s Rust inflate reads the gzip stream (the version the lock already
+# carries through `png`), and `tar` reads the entries. `tar`'s `xattr` feature
+# is off, because an archive member's extended attributes are never restored.
+# MIT OR Apache-2.0.
+flate2 = { version = "=1.1.10", default-features = false, features = ["rust_backend"] }
+tar = { version = "=0.4.46", default-features = false }
+# Property tests for the parsers and text functions that read untrusted
+# input: generated cases, shrunk to a minimal failure. Dev-only, so it is
+# never in the shipped dependency set; `std` without `fork` or `timeout`, so
+# no subprocess runner or temp files. MIT OR Apache-2.0.
+proptest = { version = "=1.12.0", default-features = false, features = ["std"] }
+# The guest SDK's bindings (`bake-plugin-sdk`), built for `wasm32-wasip2`.
+# Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT.
+wit-bindgen = { version = "=0.63.0", default-features = false, features = ["macros", "realloc", "std"] }
+
+# Image decoding, resizing, and encoding are hundreds of times slower
+# unoptimized; the read tool's image tests would take seconds per image.
+[profile.dev.package.image]
+opt-level = 3
+[profile.dev.package.png]
+opt-level = 3
+[profile.dev.package.zune-jpeg]
+opt-level = 3
+[profile.dev.package.fdeflate]
+opt-level = 3
+[profile.dev.package.flate2]
+opt-level = 3
+[profile.dev.package.miniz_oxide]
+opt-level = 3
+[profile.dev.package.image-webp]
+opt-level = 3
+[profile.dev.package.gif]
+opt-level = 3
+# Cranelift and the Wasm parser compile plugin components in the helper;
+# unoptimized, the Wasm host tests would spend minutes compiling guests.
+[profile.dev.package.cranelift-codegen]
+opt-level = 3
+[profile.dev.package.cranelift-frontend]
+opt-level = 3
+[profile.dev.package.cranelift-assembler-x64]
+opt-level = 3
+[profile.dev.package.regalloc2]
+opt-level = 3
+[profile.dev.package.wasmparser]
+opt-level = 3
+[profile.dev.package.wasmtime-environ]
+opt-level = 3
+[profile.dev.package.wasmtime-internal-cranelift]
+opt-level = 3
+[profile.dev.package.wasmtime]
+opt-level = 3
+
+# Plugin components under `plugins/`, built for `wasm32-wasip2` by
+# `plugins/build-fixtures.sh` (which also remaps source paths, so the
+# committed components rebuild byte for byte): small and aborting on panic.
+[profile.plugin]
+inherits = "release"
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"

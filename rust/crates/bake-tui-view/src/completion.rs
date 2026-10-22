@@ -1,0 +1,263 @@
+//! The slash-command menu: a sample catalog, the matches for the draft at the
+//! caret, and the drafts a choice makes.
+//!
+//! Ports the slash half of the TypeScript `completion.ts`. The preview has no
+//! command service, so its catalog is a fixed sample of the 0.3 runtime's
+//! commands, with their names, hints, and descriptions; none of them runs.
+//! It samples only commands a live session also runs, so it advertises
+//! none that D48 defers. A live session lists [`LIVE_CATALOG`], the
+//! commands it runs.
+
+/// One command in the sample catalog.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Command {
+    pub name: &'static str,
+    /// The argument placeholder: `<…>` marks required input, `[…]` optional.
+    pub hint: Option<&'static str>,
+    pub description: &'static str,
+}
+
+const fn command(
+    name: &'static str,
+    hint: Option<&'static str>,
+    description: &'static str,
+) -> Command {
+    Command {
+        name,
+        hint,
+        description,
+    }
+}
+
+/// The 0.3 runtime's commands as its command plugins describe them, for
+/// those a live session runs.
+pub const CATALOG: &[Command] = &[
+    command("compact", None, "Compact older conversation history"),
+    command("login", Some("[target]"), "Sign in or set up CLIProxyAPI"),
+    command(
+        "logout",
+        Some("[target]"),
+        "Remove a stored key or the CLIProxyAPI route",
+    ),
+    command(
+        "model",
+        Some("[provider/model [effort]]"),
+        "Choose model and reasoning effort",
+    ),
+    command("new", None, "New session"),
+    command("resume", None, "Browse sessions or start a new one"),
+    command("settings", None, "Change terminal and session settings"),
+    command(
+        "thinking",
+        Some("[effort|default]"),
+        "Change reasoning effort, also during a turn",
+    ),
+];
+
+/// The commands a live `bake` session runs.
+pub const LIVE_CATALOG: &[Command] = &[
+    command("model", Some("[search]"), "Choose the model"),
+    command("thinking", Some("[level]"), "Choose the thinking level"),
+    command("settings", None, "Change session settings"),
+    command("login", None, "Sign in to CLIProxyAPI"),
+    command("logout", None, "Sign out of CLIProxyAPI"),
+    command("refresh-models", None, "Refresh the CLIProxyAPI model list"),
+    command("session", None, "Show this session's details"),
+    command("name", Some("[name]"), "Name this session"),
+    command("new", None, "Start a new session"),
+    command("resume", None, "Resume a saved session from this directory"),
+    command("tree", None, "Navigate the session tree (switch branches)"),
+    command("fork", None, "Fork a new session from an earlier message"),
+    command(
+        "clone",
+        None,
+        "Duplicate the current session at the current position",
+    ),
+    command(
+        "compact",
+        Some("[instructions]"),
+        "Manually compact the session context",
+    ),
+    command("changelog", None, "Show changelog entries"),
+    command("share", None, "Share session as a secret GitHub gist"),
+    command(
+        "bug",
+        Some("[description]"),
+        "Report a bug to the Bake developers",
+    ),
+];
+
+/// Commands listed ahead of the rest, in this order, as the oracle ranks them.
+const FREQUENT: &[&str] = &["model", "resume", "new", "clear"];
+
+/// Rows the menu lists before it counts the rest: the oracle's
+/// `completionLimit` default.
+pub const MENU_ROWS: usize = 8;
+
+fn rank(command: &Command) -> usize {
+    FREQUENT
+        .iter()
+        .position(|&name| name == command.name)
+        .unwrap_or(FREQUENT.len())
+}
+
+/// The commands that match a leading slash token, when the draft up to the
+/// caret is exactly one: `/` and letters, digits, `_`, or `-`. Matching is
+/// by prefix, case-insensitively; the frequent commands come first and the
+/// rest keep the catalog's order. `None` outside the slash menu.
+pub fn matches(draft: &str, caret: usize, catalog: &[Command]) -> Option<Vec<Command>> {
+    let token = draft[..caret].strip_prefix('/')?;
+    if !token
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
+        return None;
+    }
+    let prefix = token.to_ascii_lowercase();
+    let mut found: Vec<Command> = catalog
+        .iter()
+        .filter(|command| command.name.starts_with(&prefix))
+        .copied()
+        .collect();
+    found.sort_by_key(rank);
+    Some(found)
+}
+
+/// Whether a command cannot run without an argument: its hint opens with a
+/// required placeholder.
+pub fn requires_input(command: &Command) -> bool {
+    command
+        .hint
+        .is_some_and(|hint| hint.trim_start().starts_with('<'))
+}
+
+/// The draft a choice makes and the caret after it: the leading token
+/// replaced by `/name`, then a space unless whitespace already follows, and
+/// the caret after the space.
+pub fn complete(draft: &str, command: &Command) -> (String, usize) {
+    let end = draft.find(char::is_whitespace).unwrap_or(draft.len());
+    let suffix = &draft[end..];
+    let head = format!("/{}", command.name);
+    let separator = if suffix.starts_with(char::is_whitespace) {
+        ""
+    } else {
+        " "
+    };
+    let caret = head.len() + 1;
+    (format!("{head}{separator}{suffix}"), caret)
+}
+
+/// The command whose arguments are being typed once the menu has closed: the
+/// one named before the first space or tab, when it has a hint.
+pub fn usage(draft: &str, catalog: &[Command]) -> Option<Command> {
+    let rest = draft.strip_prefix('/')?;
+    let end = rest.find([' ', '\t'])?;
+    let name = &rest[..end];
+    catalog
+        .iter()
+        .find(|command| command.name == name && command.hint.is_some())
+        .copied()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn matches_preview(draft: &str, caret: usize) -> Option<Vec<Command>> {
+        matches(draft, caret, CATALOG)
+    }
+
+    fn usage_preview(draft: &str) -> Option<Command> {
+        usage(draft, CATALOG)
+    }
+
+    #[test]
+    fn a_live_session_lists_the_commands_it_runs() {
+        let live: Vec<&str> = matches("/", 1, LIVE_CATALOG)
+            .unwrap()
+            .iter()
+            .map(|c| c.name)
+            .collect();
+        assert_eq!(live[0], "model");
+        assert_eq!(live.len(), LIVE_CATALOG.len());
+        assert!(live.contains(&"refresh-models"));
+        assert!(live.contains(&"resume") && live.contains(&"new"));
+        assert!(live.contains(&"tree") && live.contains(&"fork"));
+        assert!(live.contains(&"compact") && live.contains(&"clone"));
+        // `/compact`'s instructions are optional, so Enter on it submits.
+        let compact = LIVE_CATALOG.iter().find(|c| c.name == "compact").unwrap();
+        assert!(!requires_input(compact));
+    }
+
+    fn names(found: Option<Vec<Command>>) -> Option<Vec<&'static str>> {
+        found.map(|found| found.iter().map(|c| c.name).collect())
+    }
+
+    #[test]
+    fn a_leading_slash_token_lists_its_prefix_matches_frequent_first() {
+        let all = names(matches_preview("/", 1)).unwrap();
+        assert_eq!(
+            all,
+            [
+                "model", "resume", "new", "compact", "login", "logout", "settings", "thinking"
+            ]
+        );
+        assert_eq!(all.len(), CATALOG.len());
+        assert_eq!(
+            names(matches_preview("/lo", 3)),
+            Some(vec!["login", "logout"])
+        );
+        assert_eq!(
+            names(matches_preview("/LO", 3)),
+            Some(vec!["login", "logout"])
+        );
+        assert_eq!(names(matches_preview("/zz", 3)), Some(vec![]));
+        // Only the draft up to the caret counts, and only as one token.
+        assert_eq!(names(matches_preview("/model x", 6)), Some(vec!["model"]));
+        assert_eq!(matches_preview("/model x", 8), None);
+        assert_eq!(matches_preview("ask /model", 10), None);
+        assert_eq!(matches_preview("", 0), None);
+    }
+
+    /// D48: the preview advertises no deferred command, so each command it
+    /// samples is one a live session runs. `bake-tui`'s live tests check
+    /// both catalogs against its list of deferred commands.
+    #[test]
+    fn the_preview_lists_only_commands_a_live_session_runs() {
+        for command in CATALOG {
+            assert!(
+                LIVE_CATALOG.iter().any(|live| live.name == command.name),
+                "/{} is not run",
+                command.name
+            );
+        }
+    }
+
+    #[test]
+    fn a_choice_fills_in_its_name_and_a_space() {
+        let thinking = CATALOG.iter().find(|c| c.name == "thinking").unwrap();
+        assert_eq!(complete("/th", thinking), ("/thinking ".into(), 10));
+        // What followed the token stays, with no second space.
+        assert_eq!(
+            complete("/th high", thinking),
+            ("/thinking high".into(), 10)
+        );
+        assert!(!requires_input(thinking));
+        // No catalog command takes a required argument now; a `<…>` hint
+        // is one, and a leading space before it is ignored.
+        let required = command("stage", Some(" <path>"), "Stage a file");
+        assert!(requires_input(&required));
+        assert_eq!(complete("/st", &required), ("/stage ".into(), 7));
+        assert!(!requires_input(&command("bare", None, "Takes nothing")));
+    }
+
+    #[test]
+    fn a_typed_command_with_a_hint_shows_its_usage() {
+        assert_eq!(usage_preview("/model ").map(|c| c.name), Some("model"));
+        assert_eq!(usage_preview("/model x/y").map(|c| c.name), Some("model"));
+        // Without a separator the menu is still open; `new` takes nothing.
+        assert_eq!(usage_preview("/model"), None);
+        assert_eq!(usage_preview("/new "), None);
+        assert_eq!(usage_preview("/nope "), None);
+    }
+}

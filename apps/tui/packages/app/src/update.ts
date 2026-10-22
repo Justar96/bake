@@ -2,19 +2,19 @@
  * The terminal app's updates: the status line's notice, known at launch from
  * the check cache and refreshed in the background for the life of the
  * process, and the `/update` command that installs a newer release.
- * @module @dsh-tui/app/update
+ * @module bake-tui-app/update
  */
 
 import { setTimeout as sleep } from 'node:timers/promises'
-import type { CommandResult } from '@deepseek-ai/dsh-commands'
-import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
+import type { CommandResult } from 'bake-commands'
+import { resolveDshHome } from 'bake-home-paths'
 import {
   cachedUpdate, checksDisabled, compareVersions, currentVersion, detectInstall, FAILED_CHECK_RETRY_MS, hostTarget,
   refreshCheck, releaseSource, selfUpdate, UpdateError, type InstallProgress,
-} from '@deepseek-ai/dsh-updater'
-import { assertNever } from '@deepseek-ai/dsh-util-values'
-import type { TuiCopy } from '@dsh-tui/ui/copy.ts'
-import type { InstallStep } from '@dsh-tui/ui/install-progress.ts'
+} from 'bake-updater'
+import { assertNever } from 'bake-util-values'
+import type { TuiCopy } from 'bake-tui-ui/copy.ts'
+import type { InstallStep } from 'bake-tui-ui/install-progress.ts'
 
 /** What the check reads besides the network; injected so tests own it. */
 export interface UpdatesOptions {

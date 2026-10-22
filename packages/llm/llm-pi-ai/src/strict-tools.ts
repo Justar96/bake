@@ -13,10 +13,10 @@
  * property, not a `null` one, so each completed call to a strict tool drops
  * the `null`s that conversion introduced before the call is recorded.
  *
- * @module dsh-llm-pi-ai/strict-tools
+ * @module bake-llm-pi-ai/strict-tools
  */
 
-import type { StreamChunk, ToolSchema } from '@deepseek-ai/dsh-llm'
+import type { StreamChunk, ToolSchema } from 'bake-llm'
 import type { Api, Context as PiContext, Model, Tool as PiTool } from '@earendil-works/pi-ai'
 import { resolveJsonSchemaStrictSampling } from '@earendil-works/pi-ai/api/constrained-sampling'
 

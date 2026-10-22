@@ -9,7 +9,7 @@
  * wherever the frame does. Reverse video carries no colour, and the runner's
  * `NO_COLOR` filter keeps these two codes.
  *
- * @module @dsh-tui/ui/caret
+ * @module bake-tui-ui/caret
  */
 
 /** Reverse video on (SGR 7). */

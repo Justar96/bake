@@ -1,0 +1,833 @@
+{
+  "title": "Background compaction with terminal accounting",
+  "version": "0.4.0-dev+0454597aee-background",
+  "arms": {
+    "base": {
+      "version": "0.4.0-dev+0454597aee-default",
+      "revision": {
+        "root": "/home/jt-devnet/bake-background-accounting",
+        "agent": "native",
+        "prebuilt": false,
+        "commit": "0454597aee9462f40e33528e7ea53645da59b95e",
+        "dirty": false,
+        "bin": "/home/jt-devnet/bake-background-accounting/rust/target/release/bake-rs",
+        "version": "bake-rs 0.4.0-dev",
+        "binarySha256": "35cb7de15da5434f4fb4cf3683ef30ea24506f74e5aafbd60fb309cb8e2a0d0a"
+      }
+    },
+    "candidate": {
+      "version": "0.4.0-dev+0454597aee-background",
+      "revision": {
+        "root": "/home/jt-devnet/bake-background-accounting",
+        "agent": "native",
+        "prebuilt": false,
+        "commit": "0454597aee9462f40e33528e7ea53645da59b95e",
+        "dirty": false,
+        "bin": "/home/jt-devnet/bake-background-accounting/rust/target/release/bake-rs",
+        "version": "bake-rs 0.4.0-dev",
+        "binarySha256": "35cb7de15da5434f4fb4cf3683ef30ea24506f74e5aafbd60fb309cb8e2a0d0a"
+      }
+    }
+  },
+  "candidate": "candidate",
+  "bases": [
+    "0.4.0-dev+0454597aee-default"
+  ],
+  "models": [
+    "claude-opus-5-5",
+    "claude-sonnet-5-5",
+    "deepseek-flash",
+    "deepseek-v4-pro",
+    "gemini-3.8-flash-high",
+    "gpt-6.1-sol"
+  ],
+  "scenarios": [
+    "background_compaction"
+  ],
+  "trials": 3,
+  "startedAt": "2026-10-17T22:26:40.094Z",
+  "harness": "evals/agent-loop/run.ts",
+  "note": "This paired run retains all 36 samples from six available models and three trials of background_compaction. Both arms use clean 0454597aee9462f40e33528e7ea53645da59b95e, binary SHA-256 35cb7de15da5434f4fb4cf3683ef30ea24506f74e5aafbd60fb309cb8e2a0d0a. The candidate enables backgroundCompaction and the base disables it. Both use the same 40000-token window, 16384-token reserve, 2560-token recent tail, 46-request cap, and 540000 ms cap. Evaluator commit 033f047f3348b8a58bda953da55766ab7e61e605 requires final Anthropic message_delta counters and message_stop. These are measurements of the recorded binary and settings, not the later integrated source. The earlier initial-background record is a separate paired run; comparing their absolute counts would not isolate the accounting fix.\n\nAll 18 baseline samples pass the artifact predicate; the candidate passes 14/18. Flash candidate trial 2 fixes the code and passes its check but omits required codes.txt, printing the codes in its answer instead. Gemini candidate trial 0 reaches the wall-clock cap during recursive search outside the fixture. GPT candidate trials 1 and 2 stop on the existing streamed write/edit whitespace guard. The GPT failure increase from zero to two remains a regression flag. These failures are retained without claiming that background compaction caused their frequency. Two artifact-successful controls are excluded as evaluator-invalid in separate derived inputs, as described below; every failed sample is retained.\n\nThe candidate records 57 background starts, 44 commits, 12 discards, and 56 dispatched attempt observations. Six discards are attributed to foreground compaction and six to print completion. Every sample that reaches normal or model-error completion has terminal observations for its starts. Gemini's externally interrupted trial has two starts but only one terminal observation: signal handling cancels stdout delivery, so it cannot provide a complete terminal log. Eight observed attempts lack usage; four cancelled Anthropic attempts retain only partial initial counters. Unknown usage is not replaced with zero, and missing observations are not synthesized from proxy traffic. The measured policy can start speculative work that is later cancelled at print completion; its overhead remains in the record.\n\nOnly two valid pairs have successful artifacts and complete usage: Sonnet trials 0 and 2. Sonnet trial 0 extracts checkpoint lines with shell commands and has no background start in either arm. Sonnet trial 2 traverses notes in both arms and has four committed candidate summaries: 307467 to 330398 tokens (+7.46%), 23 to 26 requests, and 47708 to 58173 ms. Together these two pairs produce the reported Sonnet token flag of +6.9% [0.5, 7.5], but only one exercises the feature. That is insufficient evidence of repeatable performance.\n\nGemini baseline trial 1 inspects evaluator source and earlier raw logs outside the fixture; trial 2 inspects evaluator source. Both use the discovered checkpoint generator to construct answers. Their artifact predicates pass, but those classifications do not establish instruction compliance or independent fact retention. Separate hashed derived inputs mark only those two controls invalid while preserving their original artifact success, usage completeness, counters, and every failure. This mechanically excludes both paired cells from policy and cost comparisons. Before that validity exclusion, Gemini trial 2 would have shown 22 to 31 requests (+40.9%) and 276517 to 267380 tokens; its control is contaminated, so these are diagnostic counts rather than an eligible regression or efficiency estimate. The invalidated control makes three read calls and 19 bash calls; its candidate makes 24 reads and three bash calls. The fixture runs with danger-full-access and its instruction to remain inside the workspace does not enforce isolation. No fixture was retuned or sample rerun for this record.\n\nAll 36 accounting objects were reconciled with the corrected evaluator and matched exactly. The derived inputs change only the invalid field for the two demonstrated oracle-exposed controls; accounting, usage eligibility, outcomes, and all other fields remain unchanged. This is evaluator contamination, not a production defect or evidence of a model benefit. Paired token comparisons require both tasks to succeed and both usage records to be complete. Candidate-only means include successful samples with incomplete usage and are diagnostic, not complete costs. Pricing was not established; this record supplies no dollar-cost conclusion or basis for enabling background compaction by default. The user-approved Gemini high-effort substitution leaves the unavailable required Gemini medium model unmeasured. DeepSeek runs at high effort and the other models at medium. provenance.json preserves measured settings, revisions and binaries, all 156 original/derived sample, event, and design hashes, exact non-sensitive evidence for the two invalid controls, and accounting verification. observations.json retains lifecycle and activation counters without transcripts. Raw evidence and earlier committed records remain unchanged.",
+  "settings": {
+    "effort": "medium where the model offers it; DeepSeek runs at high, its default, having no medium",
+    "maxOutputTokens": 8192,
+    "capMs": 180000,
+    "maxRequests": {
+      "default": 14,
+      "delegation": 40,
+      "delegation_auto": 40,
+      "explore_answer": 20,
+      "test_fix_loop": 20,
+      "noisy_failure": 16,
+      "background_test": 20,
+      "edit_recovery": 16,
+      "long_session": 30,
+      "background_compaction": 46,
+      "context_masking": 46
+    },
+    "roster": "headless",
+    "capMsByScenario": {
+      "default": 180000,
+      "background_test": 240000,
+      "long_session": 360000,
+      "background_compaction": 540000,
+      "context_masking": 540000
+    },
+    "requestFloors": {
+      "no_tools": 1,
+      "ordinary_edit": 3,
+      "path_discovery": 4,
+      "stale_edit": 3,
+      "unprompted_edit": 3,
+      "multi_site_edit": 3,
+      "multi_file_edit": 3,
+      "shell_then_edit": 3,
+      "delegation": 3,
+      "delegation_auto": 3,
+      "duplicate_recovery": 5,
+      "large_file_edit": 4,
+      "explore_answer": 2,
+      "test_fix_loop": 3,
+      "unprompted_verify": 3,
+      "noisy_failure": 3,
+      "background_test": 4,
+      "instructions_file": 3,
+      "skill_check": 3,
+      "skill_distractors": 3,
+      "edit_recovery": 3,
+      "long_session": 13,
+      "background_compaction": 22,
+      "independent_reads": 3,
+      "context_masking": 22
+    },
+    "contextWindows": {
+      "long_session": 16000
+    },
+    "piContextWindows": {
+      "long_session": 29184,
+      "background_compaction": 40000,
+      "context_masking": 40000
+    },
+    "piCompaction": {
+      "long_session": {
+        "reserveTokens": 16384,
+        "keepRecentTokens": 2560
+      },
+      "background_compaction": {
+        "reserveTokens": 16384,
+        "keepRecentTokens": 2560
+      },
+      "context_masking": {
+        "reserveTokens": 16384,
+        "keepRecentTokens": 2560
+      }
+    },
+    "armSettings": {
+      "base": "{\"backgroundCompaction\":false}",
+      "candidate": "{\"backgroundCompaction\":true}"
+    },
+    "nativeSessionModes": {
+      "base": "memory",
+      "candidate": "memory"
+    }
+  },
+  "regressionRule": "all tasks, per model: total tokens with the 95% interval above zero; requests up more than 10% with the 95% interval above zero; failures +2 or more; any tool-error increase",
+  "regressions": [
+    "claude-sonnet-5-5 vs 0.4.0-dev+0454597aee-default: total tokens 6.9% [0.5, 7.5]",
+    "gpt-6.1-sol vs 0.4.0-dev+0454597aee-default: failures 0 -> 2"
+  ],
+  "perModel": {
+    "claude-opus-5-5": {
+      "samples": 3,
+      "successes": 3,
+      "firstRequestBytes": null,
+      "toolSchemaChars": null,
+      "meanTotalTokensPerTask": 318322,
+      "meanRequestsPerTask": 25.33,
+      "cacheReadShare": 0.712,
+      "toolErrors": 0,
+      "loop": {
+        "measured": 3,
+        "excessRequests": 11,
+        "belowFloor": 1,
+        "editCheckSplits": 0,
+        "orientationCalls": 0,
+        "verifiedBeforeFinal": [
+          3,
+          3
+        ],
+        "runaways": 0,
+        "compositionFailures": 0
+      },
+      "skills": {},
+      "comparisons": {
+        "0.4.0-dev+0454597aee-default": {
+          "all tasks": {
+            "cells": 3,
+            "invalidCells": 0,
+            "pairs": 0,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": null,
+            "logicalInputTokens": null,
+            "uncachedInputTokens": null,
+            "requests": [
+              0,
+              0
+            ],
+            "requestsChange": null,
+            "excessRequests": [
+              0,
+              0
+            ],
+            "editCheckSplits": [
+              0,
+              0
+            ],
+            "orientationCalls": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              0,
+              0
+            ],
+            "toolErrors": [
+              0,
+              0
+            ],
+            "cacheReadShare": [
+              null,
+              null
+            ]
+          },
+          "background_compaction": {
+            "cells": 3,
+            "invalidCells": 0,
+            "pairs": 0,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": null,
+            "logicalInputTokens": null,
+            "uncachedInputTokens": null,
+            "requests": [
+              0,
+              0
+            ],
+            "requestsChange": null,
+            "excessRequests": [
+              0,
+              0
+            ],
+            "editCheckSplits": [
+              0,
+              0
+            ],
+            "orientationCalls": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              0,
+              0
+            ],
+            "toolErrors": [
+              0,
+              0
+            ],
+            "cacheReadShare": [
+              null,
+              null
+            ]
+          }
+        }
+      }
+    },
+    "claude-sonnet-5-5": {
+      "samples": 3,
+      "successes": 3,
+      "firstRequestBytes": null,
+      "toolSchemaChars": null,
+      "meanTotalTokensPerTask": 236328,
+      "meanRequestsPerTask": 19,
+      "cacheReadShare": 0.746,
+      "toolErrors": 0,
+      "loop": {
+        "measured": 3,
+        "excessRequests": 8,
+        "belowFloor": 1,
+        "editCheckSplits": 0,
+        "orientationCalls": 0,
+        "verifiedBeforeFinal": [
+          3,
+          3
+        ],
+        "runaways": 0,
+        "compositionFailures": 0
+      },
+      "skills": {},
+      "comparisons": {
+        "0.4.0-dev+0454597aee-default": {
+          "all tasks": {
+            "cells": 3,
+            "invalidCells": 0,
+            "pairs": 2,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": 6.9,
+              "lo": 0.5,
+              "hi": 7.5
+            },
+            "logicalInputTokens": {
+              "pct": 5,
+              "lo": 0.3,
+              "hi": 5.5
+            },
+            "uncachedInputTokens": {
+              "pct": 63.2,
+              "lo": 2.5,
+              "hi": 69.2
+            },
+            "requests": [
+              28,
+              31
+            ],
+            "requestsChange": {
+              "pct": 10.7,
+              "lo": 0,
+              "hi": 13
+            },
+            "excessRequests": [
+              1,
+              4
+            ],
+            "editCheckSplits": [
+              0,
+              0
+            ],
+            "orientationCalls": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              30,
+              30
+            ],
+            "toolErrors": [
+              0,
+              0
+            ],
+            "cacheReadShare": [
+              0.84,
+              0.751
+            ]
+          },
+          "background_compaction": {
+            "cells": 3,
+            "invalidCells": 0,
+            "pairs": 2,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": 6.9,
+              "lo": 0.5,
+              "hi": 7.5
+            },
+            "logicalInputTokens": {
+              "pct": 5,
+              "lo": 0.3,
+              "hi": 5.5
+            },
+            "uncachedInputTokens": {
+              "pct": 63.2,
+              "lo": 2.5,
+              "hi": 69.2
+            },
+            "requests": [
+              28,
+              31
+            ],
+            "requestsChange": {
+              "pct": 10.7,
+              "lo": 0,
+              "hi": 13
+            },
+            "excessRequests": [
+              1,
+              4
+            ],
+            "editCheckSplits": [
+              0,
+              0
+            ],
+            "orientationCalls": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              30,
+              30
+            ],
+            "toolErrors": [
+              0,
+              0
+            ],
+            "cacheReadShare": [
+              0.84,
+              0.751
+            ]
+          }
+        }
+      }
+    },
+    "deepseek-flash": {
+      "samples": 3,
+      "successes": 2,
+      "firstRequestBytes": null,
+      "toolSchemaChars": null,
+      "meanTotalTokensPerTask": 292027,
+      "meanRequestsPerTask": 27.5,
+      "cacheReadShare": 0.813,
+      "toolErrors": 0,
+      "loop": {
+        "measured": 3,
+        "excessRequests": 21,
+        "belowFloor": 0,
+        "editCheckSplits": 2,
+        "orientationCalls": 0,
+        "verifiedBeforeFinal": [
+          3,
+          3
+        ],
+        "runaways": 0,
+        "compositionFailures": 0
+      },
+      "skills": {},
+      "comparisons": {
+        "0.4.0-dev+0454597aee-default": {
+          "all tasks": {
+            "cells": 3,
+            "invalidCells": 0,
+            "pairs": 0,
+            "failures": [
+              0,
+              1
+            ],
+            "totalTokens": null,
+            "logicalInputTokens": null,
+            "uncachedInputTokens": null,
+            "requests": [
+              0,
+              0
+            ],
+            "requestsChange": null,
+            "excessRequests": [
+              0,
+              0
+            ],
+            "editCheckSplits": [
+              0,
+              0
+            ],
+            "orientationCalls": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              0,
+              0
+            ],
+            "toolErrors": [
+              0,
+              0
+            ],
+            "cacheReadShare": [
+              null,
+              null
+            ]
+          },
+          "background_compaction": {
+            "cells": 3,
+            "invalidCells": 0,
+            "pairs": 0,
+            "failures": [
+              0,
+              1
+            ],
+            "totalTokens": null,
+            "logicalInputTokens": null,
+            "uncachedInputTokens": null,
+            "requests": [
+              0,
+              0
+            ],
+            "requestsChange": null,
+            "excessRequests": [
+              0,
+              0
+            ],
+            "editCheckSplits": [
+              0,
+              0
+            ],
+            "orientationCalls": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              0,
+              0
+            ],
+            "toolErrors": [
+              0,
+              0
+            ],
+            "cacheReadShare": [
+              null,
+              null
+            ]
+          }
+        }
+      }
+    },
+    "deepseek-v4-pro": {
+      "samples": 3,
+      "successes": 3,
+      "firstRequestBytes": null,
+      "toolSchemaChars": null,
+      "meanTotalTokensPerTask": 313973,
+      "meanRequestsPerTask": 27,
+      "cacheReadShare": 0.818,
+      "toolErrors": 0,
+      "loop": {
+        "measured": 3,
+        "excessRequests": 15,
+        "belowFloor": 0,
+        "editCheckSplits": 3,
+        "orientationCalls": 0,
+        "verifiedBeforeFinal": [
+          3,
+          3
+        ],
+        "runaways": 0,
+        "compositionFailures": 0
+      },
+      "skills": {},
+      "comparisons": {
+        "0.4.0-dev+0454597aee-default": {
+          "all tasks": {
+            "cells": 3,
+            "invalidCells": 0,
+            "pairs": 0,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": null,
+            "logicalInputTokens": null,
+            "uncachedInputTokens": null,
+            "requests": [
+              0,
+              0
+            ],
+            "requestsChange": null,
+            "excessRequests": [
+              0,
+              0
+            ],
+            "editCheckSplits": [
+              0,
+              0
+            ],
+            "orientationCalls": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              0,
+              0
+            ],
+            "toolErrors": [
+              0,
+              0
+            ],
+            "cacheReadShare": [
+              null,
+              null
+            ]
+          },
+          "background_compaction": {
+            "cells": 3,
+            "invalidCells": 0,
+            "pairs": 0,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": null,
+            "logicalInputTokens": null,
+            "uncachedInputTokens": null,
+            "requests": [
+              0,
+              0
+            ],
+            "requestsChange": null,
+            "excessRequests": [
+              0,
+              0
+            ],
+            "editCheckSplits": [
+              0,
+              0
+            ],
+            "orientationCalls": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              0,
+              0
+            ],
+            "toolErrors": [
+              0,
+              0
+            ],
+            "cacheReadShare": [
+              null,
+              null
+            ]
+          }
+        }
+      }
+    },
+    "gemini-3.8-flash-high": {
+      "samples": 3,
+      "successes": 2,
+      "firstRequestBytes": null,
+      "toolSchemaChars": null,
+      "meanTotalTokensPerTask": 263355,
+      "meanRequestsPerTask": 30.5,
+      "cacheReadShare": 0.008,
+      "toolErrors": 1,
+      "loop": {
+        "measured": 3,
+        "excessRequests": 17,
+        "belowFloor": 1,
+        "editCheckSplits": 0,
+        "orientationCalls": 0,
+        "verifiedBeforeFinal": [
+          2,
+          2
+        ],
+        "runaways": 0,
+        "compositionFailures": 0
+      },
+      "skills": {},
+      "comparisons": {
+        "0.4.0-dev+0454597aee-default": {
+          "all tasks": {
+            "cells": 1,
+            "invalidCells": 2,
+            "pairs": 0,
+            "failures": [
+              0,
+              1
+            ],
+            "totalTokens": null,
+            "logicalInputTokens": null,
+            "uncachedInputTokens": null,
+            "requests": [
+              0,
+              0
+            ],
+            "requestsChange": null,
+            "excessRequests": [
+              0,
+              0
+            ],
+            "editCheckSplits": [
+              0,
+              0
+            ],
+            "orientationCalls": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              0,
+              0
+            ],
+            "toolErrors": [
+              0,
+              0
+            ],
+            "cacheReadShare": [
+              null,
+              null
+            ]
+          },
+          "background_compaction": {
+            "cells": 1,
+            "invalidCells": 2,
+            "pairs": 0,
+            "failures": [
+              0,
+              1
+            ],
+            "totalTokens": null,
+            "logicalInputTokens": null,
+            "uncachedInputTokens": null,
+            "requests": [
+              0,
+              0
+            ],
+            "requestsChange": null,
+            "excessRequests": [
+              0,
+              0
+            ],
+            "editCheckSplits": [
+              0,
+              0
+            ],
+            "orientationCalls": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              0,
+              0
+            ],
+            "toolErrors": [
+              0,
+              0
+            ],
+            "cacheReadShare": [
+              null,
+              null
+            ]
+          }
+        }
+      }
+    },
+    "gpt-6.1-sol": {
+      "samples": 3,
+      "successes": 1,
+      "firstRequestBytes": null,
+      "toolSchemaChars": null,
+      "meanTotalTokensPerTask": 299752,
+      "meanRequestsPerTask": 28,
+      "cacheReadShare": 0.783,
+      "toolErrors": 0,
+      "loop": {
+        "measured": 3,
+        "excessRequests": 13,
+        "belowFloor": 0,
+        "editCheckSplits": 1,
+        "orientationCalls": 0,
+        "verifiedBeforeFinal": [
+          1,
+          2
+        ],
+        "runaways": 2,
+        "compositionFailures": 0
+      },
+      "skills": {},
+      "comparisons": {
+        "0.4.0-dev+0454597aee-default": {
+          "all tasks": {
+            "cells": 3,
+            "invalidCells": 0,
+            "pairs": 0,
+            "failures": [
+              0,
+              2
+            ],
+            "totalTokens": null,
+            "logicalInputTokens": null,
+            "uncachedInputTokens": null,
+            "requests": [
+              0,
+              0
+            ],
+            "requestsChange": null,
+            "excessRequests": [
+              0,
+              0
+            ],
+            "editCheckSplits": [
+              0,
+              0
+            ],
+            "orientationCalls": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              0,
+              0
+            ],
+            "toolErrors": [
+              0,
+              0
+            ],
+            "cacheReadShare": [
+              null,
+              null
+            ]
+          },
+          "background_compaction": {
+            "cells": 3,
+            "invalidCells": 0,
+            "pairs": 0,
+            "failures": [
+              0,
+              2
+            ],
+            "totalTokens": null,
+            "logicalInputTokens": null,
+            "uncachedInputTokens": null,
+            "requests": [
+              0,
+              0
+            ],
+            "requestsChange": null,
+            "excessRequests": [
+              0,
+              0
+            ],
+            "editCheckSplits": [
+              0,
+              0
+            ],
+            "orientationCalls": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              0,
+              0
+            ],
+            "toolErrors": [
+              0,
+              0
+            ],
+            "cacheReadShare": [
+              null,
+              null
+            ]
+          }
+        }
+      }
+    }
+  }
+}

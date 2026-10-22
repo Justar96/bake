@@ -1,4 +1,4 @@
-# The terminal bundle applied after dsh-base by the shipped tui profile.
+# The terminal bundle applied after bake-base by the shipped tui profile.
 # Build with `bun run build` before starting the Node launcher.
 
 # Presets mount their own `tool-jobs`; the host row would notify twice.
@@ -57,25 +57,25 @@
 
 - insert:
     - id: file-reference-local
-      name: '@deepseek-ai/dsh-file-reference-local'
+      name: 'bake-file-reference-local'
 
     # The process-wide `cordisInspect` registry the `cordis` preset's tools use.
     - id: cordis-host-runner
-      name: '@deepseek-ai/dsh-cordis-host-runner'
+      name: 'bake-cordis-host-runner'
 
     - id: agent-presets
-      name: '@deepseek-ai/dsh-agent-presets'
+      name: 'bake-agent-presets'
       config:
         default: standard
 
     - id: subagent-model-selection-settings
-      name: '@deepseek-ai/dsh-tool-subagent/model-selection-settings'
+      name: 'bake-tool-subagent/model-selection-settings'
 
     # The authorization seam: `llm-pi-ai` registers one sign-in flow per
     # provider pi-ai ships a login for (OAuth or an interactive key prompt),
     # and `/login` runs them. The credential it stores needs `credentials`.
     - id: authorization
-      name: '@deepseek-ai/dsh-authorization'
+      name: 'bake-authorization'
 
     - id: tui-startup
       name: ./lib/startup.js

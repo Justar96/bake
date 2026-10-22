@@ -13,7 +13,7 @@
  * install does, and moves `current` with the same atomic pointer move, so
  * any failure leaves `current` where it was. It removes nothing.
  *
- * @module @deepseek-ai/dsh-updater/rollback
+ * @module bake-updater/rollback
  */
 
 import { existsSync } from 'node:fs'

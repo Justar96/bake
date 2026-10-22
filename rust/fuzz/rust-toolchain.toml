@@ -1,0 +1,8 @@
+# cargo-fuzz needs nightly for `-Zsanitizer` and SanitizerCoverage. A dated
+# nightly keeps sanitizer builds reproducible; 2026-10-22 is rustc
+# 1.101.0-nightly (1a2c4797e 2026-10-21), at or above the workspace's
+# `rust-version` (1.99) and edition 2024. Bump it deliberately, with the
+# fuzz lock, as the stable pin in `../rust-toolchain.toml` is bumped.
+[toolchain]
+channel = "nightly-2026-10-22"
+profile = "minimal"

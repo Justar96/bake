@@ -1,6 +1,6 @@
 /** The terminal app's command line: `--resume` and its `--session-id` alias name the Session to adopt. */
 import { Context } from '@deepseek-ai/cordis'
-import { internals as cmdlineInternals, provideCmdline } from '@deepseek-ai/dsh-cmdline'
+import { internals as cmdlineInternals, provideCmdline } from 'bake-cmdline'
 import { afterEach, describe, expect, it } from 'vitest'
 import { apply, TUI_STARTUP_SERVICE, type TuiStartupValues } from '../src/startup.ts'
 

@@ -1,7 +1,7 @@
 /** Live-output polling shared by the foreground shell executors. */
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { SubprocessOutputReader } from '@deepseek-ai/dsh-subprocess'
-import { LIVE_OUTPUT_MAX_CHARS, LIVE_OUTPUT_POLL_MS, watchOutput } from '@deepseek-ai/dsh-shell'
+import type { SubprocessOutputReader } from 'bake-subprocess'
+import { LIVE_OUTPUT_MAX_CHARS, LIVE_OUTPUT_POLL_MS, watchOutput } from 'bake-shell'
 
 afterEach(() => { vi.useRealTimers() })
 

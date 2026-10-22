@@ -3,7 +3,7 @@ description: "The SQLite FTS5 full-text search backend for session history, for 
 kind: "package-reference"
 ---
 
-# @deepseek-ai/dsh-session-query-sqlite
+# bake-session-query-sqlite
 
 ## Summary
 
@@ -27,13 +27,13 @@ Mount this package when a composition needs ranked full-text search over session
 
 ### When to choose it
 
-Choose it when you want full-text recall over prior sessions with ranking and paging. Choose it together with `dsh-session-query` and the session service; a persistence backend is optional but recommended so persisted history is searchable after restarts. Avoid pointing `path` at the session-persistence database — this package owns a separate derived index.
+Choose it when you want full-text recall over prior sessions with ranking and paging. Choose it together with `bake-session-query` and the session service; a persistence backend is optional but recommended so persisted history is searchable after restarts. Avoid pointing `path` at the session-persistence database — this package owns a separate derived index.
 
 ### Minimal configuration
 
 ```yaml
-- name: '@deepseek-ai/dsh-session'
-- name: '@deepseek-ai/dsh-session-query-sqlite'
+- name: 'bake-session'
+- name: 'bake-session-query-sqlite'
   config:
     path: /absolute/path/to/session-search.db
 ```
@@ -50,7 +50,7 @@ Choose it when you want full-text recall over prior sessions with ranking and pa
 | `persistedReadConcurrency` | `4` | Concurrent persisted-log reads for inherited batch reads |
 | `preparedSessionCacheSize` | `5` | Cold prepared-Session observations the inherited `observeSession` reader retains for reuse |
 
-The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-session-query-sqlite) is the exhaustive source for every accepted field and its JSDoc.
+The generated [configuration catalog](../../../docs/config-catalog.md#bake-session-query-sqlite) is the exhaustive source for every accepted field and its JSDoc.
 
 ### Search behavior
 
@@ -116,7 +116,7 @@ The database carries an application id and schema version 8. Opening refuses a f
 Read these pages when the package-level contract is not enough. They move from the shared query service to the type-level contract and the design evidence.
 
 - [Session Query subsystem reference](../../../docs/subsystems/session-query.md) — the full type-level contract this backend implements.
-- [dsh-session-query](../session-query/README.md) — the service definition: exact reads and filters this backend inherits.
+- [bake-session-query](../session-query/README.md) — the service definition: exact reads and filters this backend inherits.
 - [SQLite FTS5 session search](../../../.agents/notes/archived/feature/2026-07-10-sqlite-session-query-provider.md) — search semantics, reconciliation, and the tokenizer decision.
 - [JSONL session persistence](../../session/session-persistence-jsonl/README.md) — the authoritative Session store this disposable index observes; keep its root separate from this package's database path.
 

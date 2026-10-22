@@ -3,11 +3,11 @@ description: "JSON storage backend for hosts and maintainers choosing, configuri
 kind: "package-reference"
 ---
 
-# @deepseek-ai/dsh-storage-json
+# bake-storage-json
 
 ## Summary
 
-`dsh-storage-json` stores domain data as readable JSON under a configured root and registers as backend `json`. Its default `single` layout keeps one complete `<unit>.json` file per unit; its `per-record` layout keeps one version-stamped document per record. Both layouts publish each changed file atomically, while the domain layer orders calls. Choose it when operators need inspectable files and the selected layout fits the write volume; choose SQLite for larger or highly concurrent data. The backend is host-side only and contributes no prompt, tool, or schema.
+`bake-storage-json` stores domain data as readable JSON under a configured root and registers as backend `json`. Its default `single` layout keeps one complete `<unit>.json` file per unit; its `per-record` layout keeps one version-stamped document per record. Both layouts publish each changed file atomically, while the domain layer orders calls. Choose it when operators need inspectable files and the selected layout fits the write volume; choose SQLite for larger or highly concurrent data. The backend is host-side only and contributes no prompt, tool, or schema.
 
 ## Table of Contents
 
@@ -34,11 +34,11 @@ Choose the default `single` layout for small units that benefit from one complet
 The only plugin field is `root`, which holds the unit files and directories. It is required because the backend does not fall back to `process.cwd()`. The backend creates the root with mode `0o700` on demand. A domain specification selects its layout; this plugin has no layout override.
 
 ```yaml
-- name: '@deepseek-ai/dsh-storage'
-- name: '@deepseek-ai/dsh-storage-json'
+- name: 'bake-storage'
+- name: 'bake-storage-json'
   config:
     root: /var/lib/dsh/data
-- name: '@deepseek-ai/dsh-storage-domain'
+- name: 'bake-storage-domain'
   config:
     backend: json
 ```
@@ -47,7 +47,7 @@ The only plugin field is `root`, which holds the unit files and directories. It 
 |---|---|---|
 | `root` | required | Directory holding `<unit>.json` files and `<unit>/` trees; created `0o700` on demand |
 
-The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-storage-json) is the exhaustive source for every accepted field and its JSDoc.
+The generated [configuration catalog](../../../docs/config-catalog.md#bake-storage-json) is the exhaustive source for every accepted field and its JSDoc.
 
 ### Observable behavior
 

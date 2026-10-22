@@ -1,0 +1,874 @@
+{
+  "schema": "bake/rust-migration/qualification-attempt",
+  "version": 1,
+  "id": "2026-10-19-session-work-gate",
+  "scope": "05",
+  "status": "partial",
+  "recordedOn": "2026-10-19",
+  "summary": "Session WorkGate for write, edit, grep, and find at candidate 50079d17c2, the squash of rust/s05-work-gate. HEAD 519a202b13 contains the candidate. There, from a clean checkout, the Linux preflight passed 33 gates under umask 022, with actionlint and runtime skipped, and the Intel x86_64 macOS native preflight passed 4 gates. Their rust gates ran 2422 and 2378 Cargo tests, with 6 ignored on each. Both hosts ran the slice's ownership_tests, both mutation_shutdown cases, and the schedule-look case; tests/session_job_reap.rs ran on Linux only. A Linux preflight under umask 077 at the same commit failed scripts-unit and rust-package because the unpacked bake-rs had mode 0700; no slice touched that code. On the slice branch, the crate and workspace suites passed on Linux. Cross-target Clippy there failed only on bake-cli's print_mode dead code, which the native process slice fixed. No test ran on Windows or Apple Silicon, and the worker's negative controls kept no logs. This record does not supersede 2026-10-14-persistent-settings-credentials, which covers settings and credential storage APIs, not session work ownership. Before push the stack was rebased onto develop c5f02c476a (scope 12 web tools and hooks, scope 15 commands), which changed every hash: this record's candidate 50079d17c2 became 8c3ba99a6e and its base 4fa5f118f1 became ec58dc9375, with the fixture bytes unchanged. The runs above at 519a202b13 are pre-rebase. A second run set at bfdbbcb875, the rebased stack with three integration commits on top (Windows lint fixes in the scope 12 and 15 code, D41's inconclusive loopback timeout, and Never replay classes for web_search and web_fetch), passed: the Linux preflight's 33 gates (actionlint and the TypeScript runtime skipped; 2534 Cargo tests, 6 ignored; PTY 58/58), the Intel macOS native preflight's 4 gates (2512, 6 ignored; PTY 56/56), and cross-target Clippy for Windows and Apple Silicon. A dispatched CI run of the scratch branch ci/qualify-win-mac (https://github.com/Justar96/bake/actions/runs/39206590298) then ran the whole workspace with --no-fail-fast at 9111a94546, which is develop's later fix commit 54e9a05872 plus one commit changing only .github/workflows/ci.yml: windows-latest passed 2397 tests with 7 ignored, and macos-latest (Apple Silicon) 2554 with 6 ignored; that commit's own fixes are named in its history. The same run's native preflight failed only Windows rust-pty, on five inline ConPTY scenarios that failed on every earlier Windows run too.",
+  "supersedes": [],
+  "provenance": {
+    "base": "ec58dc93750fb97f74808c172d551ba0cda0d8b9",
+    "candidate": "8c3ba99a6e93b5822bf864900386e9ec9a95bfd3",
+    "oracle": {
+      "notApplicable": "No Pi code was adapted. In Pi v1.3.0 (71023aec1546d6d677a65669c5665c0927ce0dd0), AgentSession.dispose() in packages/coding-agent/src/core/agent-session.ts is synchronous: it aborts and disconnects but awaits no pending tool work. Awaiting owned work at shutdown is Bake's own rule (AGENTS.md, docs/defensive-patterns.md, durable-execution rule 3), and no TypeScript arm applies."
+    }
+  },
+  "support": [
+    {
+      "id": "durable-execution-rule-3",
+      "reference": "docs/roadmap/rust-0.4/durable-execution.md"
+    },
+    {
+      "id": "dispose-reaches-quiescence",
+      "reference": "docs/defensive-patterns.md"
+    },
+    {
+      "id": "teardown-awaits-owned-work",
+      "reference": "AGENTS.md"
+    }
+  ],
+  "fixtures": {
+    "files": [
+      {
+        "path": "rust/crates/bake-coding-agent/src/agent_session/schedules/tests.rs",
+        "role": "fixture-definition-source",
+        "sha256": "d37cc1baa762fcc11adfd84ca2749f53e69b9e96f43166dc8c0160bb8b879e91"
+      },
+      {
+        "path": "rust/crates/bake-coding-agent/src/agent_session/tests/mutation_shutdown.rs",
+        "role": "fixture-definition-source",
+        "sha256": "640b466f999c64cbec66dcd1b65b931f6e15ea037b482b6ae963629488150e7f"
+      },
+      {
+        "path": "rust/crates/bake-coding-agent/src/tools/definition.rs",
+        "role": "fixture-definition-source",
+        "sha256": "591db8be611eaab562db40779fc4c4b76969c2c6811db704ce3456e2a16fd936"
+      },
+      {
+        "path": "rust/crates/bake-coding-agent/tests/session_job_reap.rs",
+        "role": "fixture-definition-source",
+        "sha256": "85708510ea0f3f1b1228b8b99bd94aca3021c792ef9a8caaf81ebc543002d05f"
+      }
+    ],
+    "digest": "5a868a0c618c9d86e790b40df255a76f1466ccff036959e55752faf2db4d43e0"
+  },
+  "artifacts": {
+    "notApplicable": "Tests only; no shipped artifact is qualified by this record. The preflights' rust-package gate packed and ran bake-rs, but no artifact hash was kept."
+  },
+  "commands": [
+    {
+      "id": "linux-preflight-umask077",
+      "argv": [
+        "env",
+        "BAKE_CARGO_ABOUT=<cargo-about 0.9.2 built into a temporary root>",
+        "bun",
+        "run",
+        "preflight"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local Fedora Linux 44; kernel 7.2.11-200.fc44.x86_64; 32 threads"
+      },
+      "tools": {
+        "rust-toolchain": "1.99.0 (pinned by rust/rust-toolchain.toml; rustc and cargo 1.99.0 observed in rust/ on this host after the run)",
+        "bun": "1.4.2 (observed after the run)",
+        "node": "v26.10.0 (observed after the run)",
+        "git": "2.56.0 (observed after the run)",
+        "cargo-about": "0.9.2 (built into a temporary root and named by BAKE_CARGO_ABOUT)"
+      },
+      "testedCommit": "519a202b1344066f9247506bbbac264b67da1bb8",
+      "expectedExit": 0,
+      "actualExit": 1,
+      "counts": {
+        "passed": 31,
+        "failed": 2,
+        "skipped": 2,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/linux-preflight-519a202b13.log",
+        "sha256": "11df1132b7f5e008d689cfbbf6be64bfb5e86fb0156c2e946f55ada0241d61fc"
+      }
+    },
+    {
+      "id": "linux-umask077-scripts-unit",
+      "argv": [
+        "bun",
+        "test",
+        "--parallel",
+        "--timeout=30000",
+        "<the 53 scripts test files named by scripts/preflight.ts, listed on the gate log's first line>"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local Fedora Linux 44; kernel 7.2.11-200.fc44.x86_64; 32 threads"
+      },
+      "tools": {
+        "bun": "1.4.2 (printed by bun test in the gate log)"
+      },
+      "testedCommit": "519a202b1344066f9247506bbbac264b67da1bb8",
+      "expectedExit": 0,
+      "actualExit": {
+        "missing": "The gate log ends with bun test's summary and has no exit line; the preflight trace marks scripts-unit FAIL after 11.1 s."
+      },
+      "counts": {
+        "passed": 705,
+        "failed": 1,
+        "skipped": 8,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/linux-519a202b13-umask077/scripts-unit.log",
+        "sha256": "98b2eda9491ee6a4d947743d013f7f1dbc166c638078b1e70723c471d0024372"
+      }
+    },
+    {
+      "id": "linux-umask077-rust-package",
+      "argv": [
+        "bun",
+        "run",
+        "test:rust:package"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local Fedora Linux 44; kernel 7.2.11-200.fc44.x86_64; 32 threads"
+      },
+      "tools": {
+        "bun": "1.4.2 (printed by bun test in the gate log)",
+        "cargo-about": "0.9.2 (built into a temporary root and named by BAKE_CARGO_ABOUT)"
+      },
+      "testedCommit": "519a202b1344066f9247506bbbac264b67da1bb8",
+      "expectedExit": 0,
+      "actualExit": 1,
+      "counts": {
+        "passed": 4,
+        "failed": 1,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/linux-519a202b13-umask077/rust-package.log",
+        "sha256": "0abf6cbe414f7d3abd48515cb9bb188855b0f52b72c9dfc02e52925c3f9a827f"
+      }
+    },
+    {
+      "id": "linux-preflight-umask022",
+      "argv": [
+        "env",
+        "BAKE_CARGO_ABOUT=<cargo-about 0.9.2 built into a temporary root>",
+        "bun",
+        "run",
+        "preflight"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local Fedora Linux 44; kernel 7.2.11-200.fc44.x86_64; 32 threads"
+      },
+      "tools": {
+        "rust-toolchain": "1.99.0 (pinned by rust/rust-toolchain.toml; rustc and cargo 1.99.0 observed in rust/ on this host after the run)",
+        "bun": "1.4.2 (observed after the run)",
+        "node": "v26.10.0 (observed after the run)",
+        "git": "2.56.0 (observed after the run)",
+        "cargo-about": "0.9.2 (built into a temporary root and named by BAKE_CARGO_ABOUT)"
+      },
+      "testedCommit": "519a202b1344066f9247506bbbac264b67da1bb8",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 33,
+        "failed": 0,
+        "skipped": 2,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/linux-preflight-519a202b13-umask022.log",
+        "sha256": "0bc28b3cadae0625e50a027064b6eb3fe9cd1dc1b55878538f384b119ea899b0"
+      }
+    },
+    {
+      "id": "linux-rust-gate",
+      "argv": [
+        "bun",
+        "run",
+        "check:rust"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local Fedora Linux 44; kernel 7.2.11-200.fc44.x86_64; 32 threads"
+      },
+      "tools": {
+        "rust-toolchain": "1.99.0 (pinned by rust/rust-toolchain.toml; rustc and cargo 1.99.0 observed in rust/ on this host after the run)",
+        "bun": "1.4.2 (observed after the run)"
+      },
+      "testedCommit": "519a202b1344066f9247506bbbac264b67da1bb8",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 2422,
+        "failed": 0,
+        "skipped": 6,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/linux-519a202b13/rust.log",
+        "sha256": "ac3210dc53425f3aa1f08f1ac9e65e5afafa240a822d7a93aeb30001a195ff6a"
+      }
+    },
+    {
+      "id": "mac-preflight",
+      "argv": [
+        "env",
+        "BAKE_MAC_DIR=bake-ci-s05",
+        "bun",
+        "run",
+        "preflight:mac",
+        "ulimit -n 65536; BAKE_CARGO_ABOUT=<cargo-about 0.9.2 on the Mac> bun run preflight --only native"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "darwin",
+        "arch": "x64",
+        "runner": "macpro over SSH; Intel x86_64; macOS 26.7.1 (25G241)"
+      },
+      "tools": {
+        "rust-toolchain": "1.99.0 (pinned by rust/rust-toolchain.toml; rustc and cargo 1.99.0 recorded in the Mac checkout by host.txt)",
+        "bun": "1.4.3 (recorded by host.txt; package.json pins bun@1.4.2)",
+        "node": "v26.9.0 (recorded by host.txt)"
+      },
+      "testedCommit": "519a202b1344066f9247506bbbac264b67da1bb8",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 4,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/mac-519a202b13.log",
+        "sha256": "3ebfab8a2d30ad3e5de33da03dc8c69101985a52defd139450f6d759ade05762"
+      }
+    },
+    {
+      "id": "mac-rust-gate",
+      "argv": [
+        "bun",
+        "run",
+        "check:rust"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "darwin",
+        "arch": "x64",
+        "runner": "macpro over SSH; Intel x86_64; macOS 26.7.1 (25G241)"
+      },
+      "tools": {
+        "rust-toolchain": "1.99.0 (pinned by rust/rust-toolchain.toml; rustc and cargo 1.99.0 recorded in the Mac checkout by host.txt)",
+        "bun": "1.4.3 (recorded by host.txt; package.json pins bun@1.4.2)"
+      },
+      "testedCommit": "519a202b1344066f9247506bbbac264b67da1bb8",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 2378,
+        "failed": 0,
+        "skipped": 6,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/mac-519a202b13/rust.log",
+        "sha256": "0c4d78572015d82426955ef1b0e4be2da24027ace43a9182b8379b96cbc3af58"
+      }
+    },
+    {
+      "id": "cross-target-clippy",
+      "argv": [
+        "/tmp/opencode/xcc/xclippy"
+      ],
+      "cwd": "rust",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local Fedora Linux 44; kernel 7.2.11-200.fc44.x86_64; 32 threads"
+      },
+      "tools": {
+        "rust-toolchain": "1.99.0 (pinned by rust/rust-toolchain.toml)",
+        "zig": "0.16.0 (zig cc for C build scripts; observed after the run)"
+      },
+      "testedCommit": "519a202b1344066f9247506bbbac264b67da1bb8",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "missing": "Clippy runs no tests. The log shows both target passes finishing with no warning or error."
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/xclippy-519a202b13.log",
+        "sha256": "3ba750274cd4937e072094133b011aa0552b3dde5396a07af5d3374284fbe974"
+      }
+    },
+    {
+      "id": "slice-crate-tests",
+      "argv": [
+        "env",
+        "CARGO_BUILD_JOBS=8",
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "bake-coding-agent"
+      ],
+      "cwd": "rust",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local Fedora Linux 44; kernel 7.2.11-200.fc44.x86_64; 32 threads"
+      },
+      "tools": {
+        "rust-toolchain": "1.99.0 (pinned by rust/rust-toolchain.toml; the worker report names toolchain 1.99.0)"
+      },
+      "testedCommit": "548b3baeeddba7530d09077cf8d157f1465a31d4",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 1176,
+        "failed": 0,
+        "skipped": 5,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/scope-work-2026-10-18/D-test-crate.log",
+        "sha256": "55b95ada0cc2656fbb37298cbe4414c41d27412beb9a896af7433b2fa2e0e4d9"
+      }
+    },
+    {
+      "id": "slice-workspace-tests",
+      "argv": [
+        "env",
+        "CARGO_BUILD_JOBS=8",
+        "cargo",
+        "test",
+        "--workspace",
+        "--locked"
+      ],
+      "cwd": "rust",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local Fedora Linux 44; kernel 7.2.11-200.fc44.x86_64; 32 threads"
+      },
+      "tools": {
+        "rust-toolchain": "1.99.0 (pinned by rust/rust-toolchain.toml; the worker report names toolchain 1.99.0)"
+      },
+      "testedCommit": "548b3baeeddba7530d09077cf8d157f1465a31d4",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 2333,
+        "failed": 0,
+        "skipped": 6,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/scope-work-2026-10-18/D-test-workspace.log",
+        "sha256": "1691ed7b62509a2aa80818d1d5558ae361af9c596b73e79865edaf58263a19ad"
+      }
+    },
+    {
+      "id": "slice-cross-target-clippy",
+      "argv": [
+        "env",
+        "CARGO_BUILD_JOBS=8",
+        "/tmp/opencode/xcc/xclippy"
+      ],
+      "cwd": "rust",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local Fedora Linux 44; kernel 7.2.11-200.fc44.x86_64; 32 threads"
+      },
+      "tools": {
+        "rust-toolchain": "1.99.0 (pinned by rust/rust-toolchain.toml; the worker report names toolchain 1.99.0)"
+      },
+      "testedCommit": "548b3baeeddba7530d09077cf8d157f1465a31d4",
+      "expectedExit": 0,
+      "actualExit": 1,
+      "counts": {
+        "missing": "Clippy runs no tests. The log shows four errors for x86_64-pc-windows-gnu and a clean aarch64-apple-darwin pass."
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/scope-work-2026-10-18/D-xclippy.log",
+        "sha256": "150adf18f51a2ea8e51cb35d3e0a60c2a3e65b1d2108f2075cca7d97e3ef4d62"
+      }
+    },
+    {
+      "id": "rebased-linux-preflight",
+      "argv": [
+        "bun",
+        "run",
+        "preflight"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local Fedora Linux 44; kernel 7.2.11-200.fc44.x86_64; 32 threads"
+      },
+      "tools": {
+        "rust-toolchain": "1.99.0 (pinned by rust/rust-toolchain.toml; rustc 1.99.0 observed in rust/ after the run)",
+        "bun": "1.4.2 (observed after the run)",
+        "node": "v26.10.0 (observed after the run)",
+        "git": "2.56.0 (observed after the run)",
+        "cargo-about": "0.9.2, built into a temporary root and named by BAKE_CARGO_ABOUT"
+      },
+      "testedCommit": "bfdbbcb875aabba88d676ef9308a183e8389e8fc",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 33,
+        "failed": 0,
+        "skipped": 2,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/linux-preflight-bfdbbcb875.log",
+        "sha256": "c516b82cb769110824c640672cdad5663215ef7198c2a7e4f18cb866806e0f61"
+      }
+    },
+    {
+      "id": "rebased-linux-rust-gate",
+      "argv": [
+        "bun",
+        "run",
+        "preflight"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local Fedora Linux 44; kernel 7.2.11-200.fc44.x86_64; 32 threads"
+      },
+      "tools": {
+        "rust-toolchain": "1.99.0 (pinned by rust/rust-toolchain.toml; rustc 1.99.0 observed in rust/ after the run)",
+        "bun": "1.4.2 (observed after the run)",
+        "node": "v26.10.0 (observed after the run)",
+        "git": "2.56.0 (observed after the run)",
+        "cargo-about": "0.9.2, built into a temporary root and named by BAKE_CARGO_ABOUT"
+      },
+      "testedCommit": "bfdbbcb875aabba88d676ef9308a183e8389e8fc",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 2534,
+        "failed": 0,
+        "skipped": 6,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/linux-bfdbbcb875/rust.log",
+        "sha256": "7abced60c063c9cf3c604358da13fd3649bde6861b3988423e4bcbc3e14c8956"
+      }
+    },
+    {
+      "id": "rebased-mac-preflight",
+      "argv": [
+        "bun",
+        "run",
+        "preflight:mac",
+        "BAKE_CARGO_ABOUT=<cargo-about 0.9.2 on the Mac> bun run preflight --only native"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "darwin",
+        "arch": "x64",
+        "runner": "macpro over SSH; Intel x86_64; macOS 26.7.1"
+      },
+      "tools": {
+        "rust-toolchain": "1.99.0 (pinned by rust/rust-toolchain.toml)",
+        "cargo-about": "0.9.2 on the Mac, named by BAKE_CARGO_ABOUT in the command"
+      },
+      "testedCommit": "bfdbbcb875aabba88d676ef9308a183e8389e8fc",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 4,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/mac-bfdbbcb875.log",
+        "sha256": "8f62d65f3e20235ca4f520d41fb3b98d48925077116b07a1c3684f11e679de94"
+      }
+    },
+    {
+      "id": "rebased-mac-rust-gate",
+      "argv": [
+        "bun",
+        "run",
+        "preflight:mac",
+        "BAKE_CARGO_ABOUT=<cargo-about 0.9.2 on the Mac> bun run preflight --only native"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "darwin",
+        "arch": "x64",
+        "runner": "macpro over SSH; Intel x86_64; macOS 26.7.1"
+      },
+      "tools": {
+        "rust-toolchain": "1.99.0 (pinned by rust/rust-toolchain.toml)"
+      },
+      "testedCommit": "bfdbbcb875aabba88d676ef9308a183e8389e8fc",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 2512,
+        "failed": 0,
+        "skipped": 6,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/mac-bfdbbcb875/rust.log",
+        "sha256": "fdd9da35dae9a490726934f36a18195e35bb7e2ba78d311d83b15512e6b11edf"
+      }
+    },
+    {
+      "id": "rebased-xclippy",
+      "argv": [
+        "cargo",
+        "clippy",
+        "--workspace",
+        "--all-targets",
+        "--locked",
+        "--target",
+        "<x86_64-pc-windows-gnu, then aarch64-apple-darwin>",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "cwd": "rust",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local Fedora Linux 44; kernel 7.2.11-200.fc44.x86_64; 32 threads"
+      },
+      "tools": {
+        "rust-toolchain": "1.99.0 (pinned by rust/rust-toolchain.toml)",
+        "zig": "zig cc as the C compiler for ring, one target per pass"
+      },
+      "testedCommit": "bfdbbcb875aabba88d676ef9308a183e8389e8fc",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 2,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/xclippy-bfdbbcb875.log",
+        "sha256": "9eecce6c7ab6f1fcdc5e72eabcbdeae39ec87fc914f30ed94d65be7a0ce661ea"
+      }
+    },
+    {
+      "id": "ci-windows-tests",
+      "argv": [
+        "cargo",
+        "test",
+        "--locked",
+        "--workspace",
+        "--no-fail-fast",
+        "--",
+        "--nocapture"
+      ],
+      "cwd": "rust",
+      "host": {
+        "os": "win32",
+        "arch": "x64",
+        "runner": "GitHub Actions windows-latest, https://github.com/Justar96/bake/actions/runs/39206590298/job/117910662354"
+      },
+      "tools": {
+        "rust-toolchain": "1.99.0 (pinned by rust/rust-toolchain.toml, installed by the job)"
+      },
+      "testedCommit": "9111a94546cbc20974e0c88a75ae5c3be58622fd",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 2397,
+        "failed": 0,
+        "skipped": 7,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/ci-39206590298/rust-failures-windows-latest/all-tests.log",
+        "sha256": "d49ea6d2cde5b62fb98e89afce4ed6f0e193b5dcb8d114821f8a65d68fdbc69e"
+      }
+    },
+    {
+      "id": "ci-apple-silicon-tests",
+      "argv": [
+        "cargo",
+        "test",
+        "--locked",
+        "--workspace",
+        "--no-fail-fast",
+        "--",
+        "--nocapture"
+      ],
+      "cwd": "rust",
+      "host": {
+        "os": "darwin",
+        "arch": "arm64",
+        "runner": "GitHub Actions macos-latest, https://github.com/Justar96/bake/actions/runs/39206590298/job/117910662270"
+      },
+      "tools": {
+        "rust-toolchain": "1.99.0 (pinned by rust/rust-toolchain.toml, installed by the job)"
+      },
+      "testedCommit": "9111a94546cbc20974e0c88a75ae5c3be58622fd",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 2554,
+        "failed": 0,
+        "skipped": 6,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/ci-39206590298/rust-log-macos-latest/all-tests.log",
+        "sha256": "69272563cba352dbe358c0f574240e021dea0952019c8c9c5842fae9e53a5634"
+      }
+    }
+  ],
+  "results": [
+    {
+      "id": "head-native-gates",
+      "behavior": "At HEAD 519a202b13, which contains the candidate, the Linux preflight under umask 022 passed 33 gates in 342 s and skipped actionlint (1.7.12 or later not on PATH) and runtime (no runtime source changed). Its log begins with the commit and the umask, and no git status --short line follows them, so the run started from a clean checkout. Its rust gate (76.3 s) ran cargo fmt --check, Clippy -D warnings, the workspace tests, and the build: 2422 Cargo tests passed and 6 were ignored. The Intel macOS native preflight passed its rust (193.7 s), rust-pty, rust-package, and rust-eval gates in 302 s: 2378 Cargo tests passed and 6 were ignored. The Mac trace names commit 519a202b13 without the '+ working tree' marker that a snapshot run prints, and host.txt names the same commit. Preflight counts are gates; rust-gate counts are Cargo tests. Each count is taken from each test binary's or doc-test run's own final result line, so the nested subprocess line in bake-coding-agent's tests/bash.rs is excluded. In both rust.log files, the final lines of mcp.rs, mcp_session.rs, and enforcement.rs lack their ignored field, and stdio.rs's line reads only 'test result: ok.'. Its 20 Linux and 19 macOS passes are counted from its 'running N tests' line and its ok lines, and none of those sections lists an ignored test. Off Windows, windows_job_rundown prints only its skip line.",
+      "owner": "scripts/preflight.ts",
+      "report": ".preflight/rust-orchestration/linux-519a202b13/rust.log",
+      "commands": [
+        "linux-preflight-umask022",
+        "linux-rust-gate",
+        "mac-preflight",
+        "mac-rust-gate",
+        "rebased-linux-rust-gate",
+        "rebased-mac-rust-gate"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "blocking-work-ownership",
+      "behavior": "All 7 tests of tools::definition::ownership_tests passed in both rust gates at HEAD, Linux and Intel macOS, and in the slice head's Linux crate and workspace runs. dropped_mutation_waiter_keeps_work_owned_through_file_cleanup covers run_blocking, the write and edit worker. dropped_shared_permit_waiter_keeps_work_owned_through_file_cleanup covers blocking_under with a share of the call's permit, the grep and find path. Each aborts the waiter while the work holds a file open, shows the gate's close pending until the work is released, and shows the work's write complete when close returns. dropped_blocking_waiter_keeps_work_owned_through_file_cleanup does the same for read and ls. In admit_refuses_a_closing_owner, no owner admits without a permit and a closing gate refuses; a permit taken before the close holds the drain. In owned_write_and_edit_refuse_a_closed_owner_without_an_effect, write and edit refuse a closed owner with 'the session is shut down' in their create_tool_definition and owned_sandbox_file_tools forms. The existing file stays unchanged, and a write to a new nested path creates no directory. native_read_and_ls_refuse_a_closed_owner also passed. grep_and_find_refuse_a_closed_owner keeps the texts 'Failed to run ripgrep: the session is shut down' and 'Failed to run fd: the session is shut down'. That test prints a skip and continues when rg or fd is not on PATH, and Cargo captured its output, so no log shows whether either tool ran. rg and fd are in /usr/bin on the Linux host, observed after the run; the Mac's PATH was not recorded. The slice-branch runs tested 548b3baeed, whose tree differs from the candidate's: develop had gained other commits since the branch point 568a6acfa1. The fixture files are byte-identical at HEAD, the candidate, and 548b3baeed. The two slice-branch logs have no exit line; slice-workspace-tests' exit 0 is from its log ('workspace exit 0'), and slice-crate-tests' exit 0 is from the worker report, consistent with every result line being ok. Counts describe Cargo tests.",
+      "owner": "rust/crates/bake-coding-agent/src/tools/definition.rs",
+      "report": ".preflight/rust-orchestration/mac-519a202b13/rust.log",
+      "commands": [
+        "linux-preflight-umask022",
+        "linux-rust-gate",
+        "mac-preflight",
+        "mac-rust-gate",
+        "slice-crate-tests",
+        "slice-workspace-tests",
+        "rebased-linux-rust-gate",
+        "rebased-mac-rust-gate"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "sandboxed-mutation-shutdown",
+      "behavior": "Both Unix tests of agent_session::tests::mutation_shutdown passed: on Linux and Intel macOS at HEAD, and on Linux at the slice head. hard_agent_shutdown_keeps_sandboxed_write_owned_until_the_worker_returns and its edit counterpart run a real AgentSession with the faux model, which calls the sandboxed tool built by owned_sandbox_file_tools(.., Some(work)). The sandbox's test seam, seam::on_after_check, holds the worker inside the file's mutation queue after the containment check. After the Agent task's hard shutdown and the prompt's end, the gate's close is still pending. Once the worker is released, session.shutdown() returns and the file is unchanged. The tests are cfg(unix) and are not compiled for Windows.",
+      "owner": "rust/crates/bake-coding-agent/src/agent_session/tests/mutation_shutdown.rs",
+      "report": ".preflight/rust-orchestration/linux-519a202b13/rust.log",
+      "commands": [
+        "linux-preflight-umask022",
+        "linux-rust-gate",
+        "mac-preflight",
+        "mac-rust-gate",
+        "slice-crate-tests",
+        "slice-workspace-tests",
+        "rebased-linux-rust-gate",
+        "rebased-mac-rust-gate"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "background-job-group-reap",
+      "behavior": "shutdown_stops_a_background_job_and_waits_for_its_group passed in the Linux rust gate at HEAD and in the slice head's Linux runs. The test process is a child subreaper (PR_SET_CHILD_SUBREAPER). A real session's bash starts a background job that holds a descendant in its group ('sleep 1000 & ...; exec sleep 1000'). AgentSession::shutdown does not return within the 500 ms EARLY window while the killed descendant is an unreaped zombie of the test, and it returns once the test reaps that descendant. The job ends Killed with StopCause::Shutdown, and jobs().start is then refused with StartError::Closed. The file is cfg(target_os = \"linux\"): the Mac rust gate ran its binary with 0 tests, and Windows compiles nothing of it.",
+      "owner": "rust/crates/bake-coding-agent/tests/session_job_reap.rs",
+      "report": ".preflight/rust-orchestration/linux-519a202b13/rust.log",
+      "commands": [
+        "linux-preflight-umask022",
+        "linux-rust-gate",
+        "slice-crate-tests",
+        "slice-workspace-tests",
+        "rebased-linux-rust-gate"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "schedule-look-shutdown",
+      "behavior": "agent_session::schedules::tests::shutdown_waits_for_a_look_and_nothing_is_delivered_after passed on Linux and Intel macOS at HEAD, and on Linux at the slice head. The test clock makes a reminder due, and a look held in the clock, inside the session's I/O permit, keeps the gate's close pending after shutdown begins. Shutdown then returns with the gate closed. No dispatch is written, no reminder is posted, and no request reaches the model. The case has no single-point negative control (see missingEvidence).",
+      "owner": "rust/crates/bake-coding-agent/src/agent_session/schedules/tests.rs",
+      "report": ".preflight/rust-orchestration/mac-519a202b13/rust.log",
+      "commands": [
+        "linux-preflight-umask022",
+        "linux-rust-gate",
+        "mac-preflight",
+        "mac-rust-gate",
+        "slice-crate-tests",
+        "slice-workspace-tests",
+        "rebased-linux-rust-gate",
+        "rebased-mac-rust-gate"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "cross-target-lint",
+      "behavior": "At HEAD, cargo clippy --keep-going --locked --all-targets --workspace -- -D warnings finished with no warning or error for x86_64-pc-windows-gnu and for aarch64-apple-darwin (log line 1 is the commit, last line 'exit 0'). The slice's code and its tests compile and lint for Windows and Apple Silicon. This covers compilation and lints only; nothing ran on either target.",
+      "owner": "rust/crates/bake-coding-agent",
+      "report": ".preflight/rust-orchestration/xclippy-519a202b13.log",
+      "commands": [
+        "cross-target-clippy"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "windows-work-gate",
+      "behavior": "The slice's ownership tests on Windows. ownership_tests compile for Windows, except the Unix-only grep_and_find case. mutation_shutdown (Unix) and session_job_reap (Linux) are not compiled there. On the slice branch at 548b3baeed, cross-target Clippy exited 1 (worker report). The log shows only four dead-code errors for x86_64-pc-windows-gnu, in bake-cli's tests/print_mode/schedules.rs (outputs, declared) and tests/print_mode/subagents.rs (two_models, is_child). It shows no error for bake-coding-agent or any other crate on Windows, and a clean aarch64-apple-darwin pass. Those helpers belong to the native process slice, whose cfg fix landed on develop in candidate c2144d52a5, before this candidate; the HEAD run is clean (cross-target-lint).",
+      "owner": "rust/crates/bake-coding-agent/src/tools/definition.rs",
+      "report": ".preflight/rust-orchestration/ci-39206590298/rust-failures-windows-latest/all-tests.log",
+      "commands": [
+        "ci-windows-tests"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "umask-077-preflight",
+      "behavior": "A Linux preflight at HEAD ran under umask 077 from a clean checkout; its log begins with the commit and 'umask 0077', and no git status --short line follows them. It passed 31 gates, failed 2, and skipped 2 (actionlint and runtime) in 366 s. Both failures are the same mode: the unpacked bake-rs binary had mode 448 (0700) where 493 (0755) is expected, because tar -x applied the process umask. scripts-unit's gate log shows 705 bun tests passed, 8 skipped, and 1 failed: pack-rust.test.ts's 'packing > archives exactly the payload with its modes, and the archive unpacks and runs'. rust-package's gate log shows 4 passed and 1 failed: pack-rust.native.ts's 'the packed bake-rs unpacks and runs without Node, Bun, or a usable Bake home'. No commit since origin/develop 4703b27537 changed scripts/release. The run's rust gate passed in 95.0 s, with 2422 Cargo tests passed and 6 ignored (.preflight/rust-orchestration/linux-519a202b13-umask077/rust.log). The run under umask 022 at the same commit passed every gate (head-native-gates).",
+      "owner": "scripts/release/pack-rust.native.ts",
+      "report": ".preflight/rust-orchestration/linux-519a202b13-umask077/rust-package.log",
+      "commands": [
+        "linux-preflight-umask077",
+        "linux-umask077-scripts-unit",
+        "linux-umask077-rust-package"
+      ],
+      "outcome": "fail",
+      "reason": "The host's umask caused it, not the candidate: the umask 022 run at the same commit passed scripts-unit and rust-package."
+    },
+    {
+      "id": "apple-silicon",
+      "behavior": "The slice's tests on Apple Silicon macOS.",
+      "owner": "docs/roadmap/rust-0.4/verification.md",
+      "report": ".preflight/rust-orchestration/ci-39206590298/rust-log-macos-latest/all-tests.log",
+      "commands": [
+        "ci-apple-silicon-tests"
+      ],
+      "outcome": "pass"
+    }
+  ],
+  "negativeControls": {
+    "missing": "The worker ran three negative controls on its Linux worktree and reverted each one, but kept no log, exit code, or mutated bytes. The schedule case has only a positive control. Each one is listed under missingEvidence."
+  },
+  "missingEvidence": [
+    {
+      "what": "Negative control: run_blocking's permit released before the spawn",
+      "reason": "The worker report says it failed dropped_mutation_waiter_keeps_work_owned_through_file_cleanup and both mutation_shutdown cases, and was reverted. No log, exit code, or diff was kept.",
+      "owner": "rust/crates/bake-coding-agent/src/tools/definition.rs"
+    },
+    {
+      "what": "Negative control: blocking_under run without its permit",
+      "reason": "The worker report says it failed dropped_shared_permit_waiter_keeps_work_owned_through_file_cleanup, and was reverted. No log, exit code, or diff was kept.",
+      "owner": "rust/crates/bake-coding-agent/src/tools/definition.rs"
+    },
+    {
+      "what": "Negative control: begin_shutdown skipping the teardown's drained.await",
+      "reason": "The worker report says it failed session_job_reap with 'shutdown returned while the job's group was alive', and that ps then showed no sleep 1000 left. No log, exit code, or diff was kept.",
+      "owner": "rust/crates/bake-coding-agent/src/agent_session.rs"
+    },
+    {
+      "what": "Single-point negative control for the schedule-look case",
+      "reason": "None exists. The timer's task and its look's I/O each hold a gate permit, and close_writer also waits on the session lock the look holds, so no one removal fails the test. The only control the worker reported is a positive one, without a log: the held look, released without a shutdown, posts the reminder.",
+      "owner": "rust/crates/bake-coding-agent/src/agent_session/schedules/tests.rs"
+    },
+    {
+      "what": "The worker's targeted and repeated runs",
+      "reason": "The worker reports these runs passing on Linux, but kept no logs: the ownership_tests, mutation_shutdown, and read_shutdown filter (10 passed), session_job_reap in 5 of 5 runs, and agent_session::schedules::tests in 5 of 5 runs.",
+      "owner": "rust/crates/bake-coding-agent/tests/session_job_reap.rs"
+    },
+    {
+      "what": "Merged-tree crate run named in the commit message",
+      "reason": "The candidate's commit message says the bake-coding-agent suite passed 1215 tests, with 5 ignored, on the merged tree. No log of that run exists, so this record does not cite it.",
+      "owner": "rust/crates/bake-coding-agent"
+    },
+    {
+      "what": "Owned forms of the public file-tool constructors",
+      "reason": "create_write_tool_definition, create_write_tool, write::execute_guarded, create_edit_tool_definition, create_edit_tool, edit::execute_guarded, sandbox_file_tools, and create_sandboxed_write_tool_definition and create_sandboxed_edit_tool_definition stay unowned for embedders. Owning them needs a public signature change. The worker report says only tests call them.",
+      "owner": "rust/crates/bake-coding-agent/src/tools/write.rs"
+    },
+    {
+      "what": "A config_value command's stdout reader thread and backgrounded descendants",
+      "reason": "The shell runs inside the gate-owned request task's awaited auth thread and is killed and reaped on cancel or timeout. Its detached stdout reader std::thread and any backgrounded descendants are not owned or awaited.",
+      "owner": "rust/crates/bake-coding-agent/src/config_value.rs"
+    },
+    {
+      "what": "A dropped sandbox probe",
+      "reason": "A timed-out probe is killed and awaited. A probe whose future is dropped is killed by kill_on_drop and reaped by Tokio's orphan reaper, but no drain awaits it.",
+      "owner": "rust/crates/bake-sandbox/src/backends/mod.rs"
+    },
+    {
+      "what": "Escaped descendants, a normal exit's backgrounded processes, and bubblewrap namespace teardown",
+      "reason": "Every drain leaves these out, unchanged by this slice. tests/process_reap.rs documents the first two.",
+      "owner": "docs/roadmap/rust-0.4/durable-execution.md"
+    },
+    {
+      "what": "Job journal writes under their own permit",
+      "reason": "job_journal.rs uses a raw spawn_blocking that the gate-owned job driver awaits, so it is owned only transitively. The driver is never aborted, and no dedicated test covers this.",
+      "owner": "rust/crates/bake-coding-agent/src/job_journal.rs"
+    },
+    {
+      "what": "The session-lifetime audit as tested evidence",
+      "reason": "The worker's audit of every session-lifetime spawn site and its owner exists only in its report. It found MCP server tasks, background jobs, and the Wasm plugin keeper already gate-owned, so the candidate drops roadmap row 05's stale claim. The audit itself is not a test.",
+      "owner": "docs/roadmap/rust-0.4/README.md"
+    },
+    {
+      "what": "actionlint and the runtime gate",
+      "reason": "Both Linux preflights skipped actionlint (1.7.12 or later not on PATH) and runtime (no runtime source changed).",
+      "owner": "unassigned"
+    },
+    {
+      "what": "Commit hooks on the slice commits",
+      "reason": "lefthook was not on PATH in the worker's worktree, so the repository hooks did not run on these commits; --no-verify was not used.",
+      "owner": "unassigned"
+    },
+    {
+      "what": "Auto review",
+      "reason": "The user chose to skip Auto review for this slice; it stays open.",
+      "owner": "unassigned"
+    }
+  ],
+  "evalRecords": {
+    "notApplicable": "Nothing the model sees changes. Tool names, schemas, descriptions, results, and refusal texts are unchanged. The only new refusal path is write or edit under a closing gate, which the gate reaches only at shutdown, after the run is aborted, and it returns the existing read and ls text 'the session is shut down'."
+  },
+  "performanceRecords": {
+    "notApplicable": "No performance qualification attempted."
+  },
+  "rollback": {
+    "observed": "The Mac trace names commit 519a202b13 with no working-tree snapshot, and host.txt names the Mac checkout at that commit after the run. Both Linux preflight logs begin with commit 519a202b13 and their umask, and no git status --short line follows, so each run started from a clean checkout. The worker reports each negative control reverted and its worktree clean, with no sleep 1000 left after the job control; neither claim has a log.",
+    "commands": [
+      "linux-preflight-umask077",
+      "linux-preflight-umask022",
+      "mac-preflight"
+    ]
+  },
+  "review": {
+    "missing": "No reviewer has accepted scope 05. The orchestrating session reviewed the slice branch before squash-merging it, which is not scope acceptance. Auto review was skipped by the user's choice and stays open."
+  }
+}

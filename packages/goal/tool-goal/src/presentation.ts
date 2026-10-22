@@ -6,10 +6,10 @@
  * model-facing result, so a replayed session draws the same card, and none
  * changes the JSON the model receives. A failure, or text that is not the
  * canonical goal JSON, keeps the generic rendering of the raw result.
- * @module @deepseek-ai/dsh-tool-goal/src/presentation
+ * @module bake-tool-goal/src/presentation
  */
 
-import type { GenericResultView, ToolResult } from '@deepseek-ai/dsh-tools'
+import type { GenericResultView, ToolResult } from 'bake-tools'
 
 /** The goal fields a summary reads from one canonical result. */
 interface GoalSummary {

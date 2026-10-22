@@ -3,11 +3,11 @@ description: "Cooperative time limit for cancellation-aware tool calls, mapping 
 kind: "package-reference"
 ---
 
-# @deepseek-ai/dsh-tool-call-timeout-policy
+# bake-tool-call-timeout-policy
 
 ## Summary
 
-Use this package to give tool calls their configured cooperative time limits and return a clear timeout error to the model after cancellation settles. Calls that finish in time are unchanged. A tool that ignores or slowly handles cancellation can keep the caller waiting because the package cannot hard-stop downstream work. Each tool supplies its own limit; the package has no configuration and is enabled in the `dsh` base bundle.
+Use this package to give tool calls their configured cooperative time limits and return a clear timeout error to the model after cancellation settles. Calls that finish in time are unchanged. A tool that ignores or slowly handles cancellation can keep the caller waiting because the package cannot hard-stop downstream work. Each tool supplies its own limit; the package has no configuration and is enabled in the `bake` base bundle.
 
 ## Table of Contents
 
@@ -23,7 +23,7 @@ Use this package to give tool calls their configured cooperative time limits and
 <a id="use-this-package"></a>
 ## Use this package
 
-The common path is one line: add the plugin to the composition — the `dsh` base bundle already has it. Tools that have a limit configured are protected automatically; every other tool is untouched.
+The common path is one line: add the plugin to the composition — the `bake` base bundle already has it. Tools that have a limit configured are protected automatically; every other tool is untouched.
 
 ### When to choose it
 
@@ -34,10 +34,10 @@ Choose it when the model calls tools that can take a long time, those tools hono
 Mount the plugin with no configuration:
 
 ```yaml
-- name: '@deepseek-ai/dsh-tool-call-timeout-policy'
+- name: 'bake-tool-call-timeout-policy'
 ```
 
-The limit is set where the tool is configured. For example, `dsh-tool-web`'s `fetchTimeoutMs`/`searchTimeoutMs` settings (default 30,000 ms) put the limit on `web_fetch` and `web_search`. Tools without a limit — the shipped `bash`, `read`, `write`, and `edit` — are never cut off. The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-tool-web) lists the tool settings that produce limits.
+The limit is set where the tool is configured. For example, `bake-tool-web`'s `fetchTimeoutMs`/`searchTimeoutMs` settings (default 30,000 ms) put the limit on `web_fetch` and `web_search`. Tools without a limit — the shipped `bash`, `read`, `write`, and `edit` — are never cut off. The generated [configuration catalog](../../../docs/config-catalog.md#bake-tool-web) lists the tool settings that produce limits.
 
 ### What you get
 
@@ -57,7 +57,7 @@ This section explains how the plugin arms a deadline around each dispatch and ma
 
 The wrapper is built on four commitments:
 
-- **Enforcement home, not a library.** `dsh-timeout` owns timing and classification (`deadline`, `timeoutOf`); this plugin owns the per-call wiring over `tools/execute`; each capability owns termination. The split is recorded in the [timeout-deadline-library Agent Note](../../../.agents/notes/implemented/architecture/2026-07-06-timeout-deadline-library.md).
+- **Enforcement home, not a library.** `bake-timeout` owns timing and classification (`deadline`, `timeoutOf`); this plugin owns the per-call wiring over `tools/execute`; each capability owns termination. The split is recorded in the [timeout-deadline-library Agent Note](../../../.agents/notes/implemented/architecture/2026-07-06-timeout-deadline-library.md).
 - **The tool declares its own budget.** `timeoutMs` lives on the tool's `ToolDefinition`, read from the registry (`ctx.tools.get(exec.name, exec.agent)?.timeoutMs`), so a mistyped tool name is impossible and undeclared tools delegate untouched.
 - **Scoped classification.** `TOOL_TIMEOUT` serves as both the internal `deadline` classification code and the structured error `code`; scoping `timeoutOf` to it keeps a nested outer deadline (another wrapper's timer that fired first) from being misread as this plugin's timeout — it reads as an ordinary upstream cancel.
 - **Signal swap, then restore.** Cordis `next()` ignores passed arguments, so the wrapper mutates the shared `exec` in place: it swaps the derived deadline signal onto `exec` for dispatch and restores the caller's signal in a `finally`, so `tools/post-execute` listeners never see this plugin's possibly-aborted signal.
@@ -88,7 +88,7 @@ Read these pages when the package-level contract is not enough. They move from t
 
 - [Tools subsystem reference](../../../docs/subsystems/tools.md) — the `tools/execute` waterfall and decision shapes this wrapper hooks.
 - [Timeout deadline library Agent Note](../../../.agents/notes/implemented/architecture/2026-07-06-timeout-deadline-library.md) — the timing/termination split and why the deadline only notifies.
-- [Generated configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-tool-web) — `dsh-tool-web`'s `fetchTimeoutMs`/`searchTimeoutMs` budgets the policy enforces.
+- [Generated configuration catalog](../../../docs/config-catalog.md#bake-tool-web) — `bake-tool-web`'s `fetchTimeoutMs`/`searchTimeoutMs` budgets the policy enforces.
 - [guard group map](../README.md) — the sibling guard packages and the loop-hygiene family.
 
 -----
@@ -128,6 +128,6 @@ These limits define when the policy is a poor fit. They are current package cons
 
 This Dev Note is working context for maintainers: open questions and directions that are not decided. It is explicitly non-authoritative — shipped behavior, limits, and accepted rationale live in the sections above, the package code, and the linked Agent Notes.
 
-The `src/index.ts` FIXME asks to settle a `@deepseek-ai/dsh-timeout-guard` rename; the [naming ledger](../../../.agents/notes/archived/architecture/2026-08-11-repository-naming-contract-and-rename-ledger.md) already records `@deepseek-ai/dsh-tool-call-timeout-policy` as the decided name, so the FIXME is stale pending a code cleanup.
+The `src/index.ts` FIXME asks to settle a `@deepseek-ai/dsh-timeout-guard` rename; the [naming ledger](../../../.agents/notes/archived/architecture/2026-08-11-repository-naming-contract-and-rename-ledger.md) already records `bake-tool-call-timeout-policy` as the decided name, so the FIXME is stale pending a code cleanup.
 
 </details>

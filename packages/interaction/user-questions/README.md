@@ -3,7 +3,7 @@ description: "Waterfall-based question and answer service for tools, permission 
 kind: "package-reference"
 ---
 
-# @deepseek-ai/dsh-user-questions
+# bake-user-questions
 
 ## Summary
 
@@ -40,12 +40,12 @@ When a request carries an agent, `ask()` authenticates its exact identity throug
 <a id="role"></a>
 ## Role
 
-This is the Service Definition package. Consumers such as `@deepseek-ai/dsh-tool-ask-user` depend on this service; an interactive UI such as the terminal app contributes the answerer. The loop stays unchanged: a tool call awaits the waterfall result, and that result resumes the normal agent loop.
+This is the Service Definition package. Consumers such as `bake-tool-ask-user` depend on this service; an interactive UI such as the terminal app contributes the answerer. The loop stays unchanged: a tool call awaits the waterfall result, and that result resumes the normal agent loop.
 
 <a id="model-experience"></a>
 ## Model Experience
 
-Indirectly, through `dsh-tool-ask-user`, which retains a successful answer as compact JSON or one of these failures: `Error: ask_user_question was aborted before the user answered`, `Error: ask_user_question requires at least one question`, `Error: human interaction requires the exact live calling agent when an agent is supplied`, `Error: human interaction is unavailable while the calling agent is owned by another live agent; include the unresolved question or decision in the child agent's final result`, `Error: no user-questions answerer accepted the request`, or `Error: <message>`. Waiting for the human adds no tokens.
+Indirectly, through `bake-tool-ask-user`, which retains a successful answer as compact JSON or one of these failures: `Error: ask_user_question was aborted before the user answered`, `Error: ask_user_question requires at least one question`, `Error: human interaction requires the exact live calling agent when an agent is supplied`, `Error: human interaction is unavailable while the calling agent is owned by another live agent; include the unresolved question or decision in the child agent's final result`, `Error: no user-questions answerer accepted the request`, or `Error: <message>`. Waiting for the human adds no tokens.
 
 #### KV Cache effect
 

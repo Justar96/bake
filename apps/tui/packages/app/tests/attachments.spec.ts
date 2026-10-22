@@ -2,11 +2,11 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
-import Attachments, { type Config as StoreConfig } from '@deepseek-ai/dsh-attachment-local'
-import FileSystem from '@deepseek-ai/dsh-fs-local'
-import { formatRow, transcriptRows } from '@dsh-tui/ui'
-import { dictionaries } from '@dsh-tui/ui/copy.ts'
-import { inputHistory } from '@dsh-tui/ui/history.ts'
+import Attachments, { type Config as StoreConfig } from 'bake-attachment-local'
+import FileSystem from 'bake-fs-local'
+import { formatRow, transcriptRows } from 'bake-tui-ui'
+import { dictionaries } from 'bake-tui-ui/copy.ts'
+import { inputHistory } from 'bake-tui-ui/history.ts'
 import type { AttachmentOptions } from '../src/attachments.ts'
 import type { ClipboardImage } from '../src/clipboard.ts'
 import { SessionNavigation } from '../src/navigation.ts'
@@ -242,7 +242,7 @@ it('reads Agent activity at admission time and shows queued attachment metadata'
   model.response = async function* () { await streaming.wait(); yield* textResponse('Done') }
   const followup = vi.spyOn(controller.agent, 'followup')
   const steer = vi.spyOn(controller.agent, 'steer')
-  const { createUserMessage } = await import('@deepseek-ai/dsh-llm')
+  const { createUserMessage } = await import('bake-llm')
   controller.agent.followup(createUserMessage({ content: [{ type: 'text', text: 'Start' }], source: { kind: 'user' } }))
   await streaming.entered
   saving.release()

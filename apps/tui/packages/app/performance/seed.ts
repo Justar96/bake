@@ -2,7 +2,7 @@
 import { mkdir, writeFile, stat, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
-import Persistence from '@deepseek-ai/dsh-session-persistence-jsonl'
+import Persistence from 'bake-session-persistence-jsonl'
 import { history, reply } from './history.ts'
 import { WORKLOADS } from './report.ts'
 

@@ -1,25 +1,25 @@
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { createUserMessage } from 'bake-llm'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context, type Fiber } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
-import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
-import { defineContentToolFixture } from '@deepseek-ai/dsh-tools'
-import type { Agent } from '@deepseek-ai/dsh-agent'
-import AgentLoop from '@deepseek-ai/dsh-agent-loop'
-import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
-import { LocalBashExecutor } from '@deepseek-ai/dsh-bash-local'
-import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
-import { scopeTarget } from '@deepseek-ai/dsh-scope'
-import SubagentRuntime, { SubagentRunId } from '@deepseek-ai/dsh-subagent'
-import * as HooksClaude from '@deepseek-ai/dsh-hooks-claude-code'
+import { SessionId, type SessionEvent } from 'bake-session'
+import { defineContentToolFixture } from 'bake-tools'
+import type { Agent } from 'bake-agent'
+import AgentLoop from 'bake-agent-loop'
+import { mountAgentLoopTestDependencies } from 'bake-agent-loop-testkit'
+import { LocalBashExecutor } from 'bake-bash-local'
+import LocalSubprocessRuntime from 'bake-subprocess-local'
+import { scopeTarget } from 'bake-scope'
+import SubagentRuntime, { SubagentRunId } from 'bake-subagent'
+import * as HooksClaude from 'bake-hooks-claude-code'
 import { MockAdapter, textResponse, toolCallResponse } from '../../../core/agent-loop/tests/mock-adapter.ts'
 
 /**
  * Full-loop bridge tests: a scripted mock MODEL drives the REAL agent loop + REAL
- * bash executor, and the REAL `dsh-hooks-claude-code` bridge runs REAL shell hook
+ * bash executor, and the REAL `bake-hooks-claude-code` bridge runs REAL shell hook
  * scripts written to a temp dir — only the model is mocked (the "prefer the real
  * implementation" rule). Each test writes a `hooks.json` + executable scripts,
  * loads the bridge pointed at them, and asserts the hook's effect on the loop.

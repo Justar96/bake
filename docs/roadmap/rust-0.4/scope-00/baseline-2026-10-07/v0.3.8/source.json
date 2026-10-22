@@ -1,0 +1,931 @@
+{
+  "schema": "bake/rust-migration/source-provenance",
+  "schemaVersion": 1,
+  "scope": "00",
+  "kind": "source-provenance",
+  "qualification": "not-evaluated",
+  "statement": "Identifies source inputs only. It is not build, test, or performance evidence, and its existence does not show that any check passed.",
+  "sourceDigest": "933773046a7c1c0e4f49bfe0db1406fac2dfc88c449bd190f72f57f88c6bfcb7",
+  "source": {
+    "commit": "dcb26d756e008a3d17c057a6b153933c018c275d",
+    "tree": "a3fdd1bfba1a9372bba5152274204cfab01d15c1",
+    "product": {
+      "version": "0.3.8",
+      "manifests": {
+        "package.json": "0.3.8",
+        "apps/cli/package.json": "0.3.8"
+      }
+    },
+    "sessionFormatVersion": 3,
+    "lockfile": {
+      "path": "bun.lock",
+      "sha256": "51a03fbd3fa03997145081b11c5ed387fd91f5b13202c1aa99c46f319561463b"
+    },
+    "inputs": [
+      {
+        "id": "lockfile",
+        "description": "Bun dependency lockfile",
+        "patterns": [
+          "bun.lock"
+        ],
+        "digest": "9665df95d863a303dc3606a7abff9873cc615096862dce8899247da86fd34eec",
+        "files": [
+          {
+            "path": "bun.lock",
+            "mode": "100644",
+            "blob": "13f503b54bd8814c7fa138ae78ca8ecccb411948",
+            "sha256": "51a03fbd3fa03997145081b11c5ed387fd91f5b13202c1aa99c46f319561463b",
+            "bytes": 380560
+          }
+        ]
+      },
+      {
+        "id": "product-manifests",
+        "description": "Product version manifests",
+        "patterns": [
+          "package.json",
+          "apps/cli/package.json"
+        ],
+        "digest": "19ac07d7a00654585eb2ded783809aaae855eddfc71005db3fee81931cae2d6a",
+        "files": [
+          {
+            "path": "apps/cli/package.json",
+            "mode": "100644",
+            "blob": "b49e6dbf5a8637476cf7396800d1b0040bba814f",
+            "sha256": "afcf588784af74d1facc5ef5a17df46f057abac6a0b417b1c2349f4a618299f5",
+            "bytes": 5652
+          },
+          {
+            "path": "package.json",
+            "mode": "100644",
+            "blob": "d21c84cc51b2b19061cfbc1350be3d5163416364",
+            "sha256": "d4b548cb8cdaf5be146d91e3644512ca17fd35b9910b515205abb46bebf66cdd",
+            "bytes": 5616
+          }
+        ]
+      },
+      {
+        "id": "profiles",
+        "description": "Shipped profile compositions",
+        "patterns": [
+          "packages/bundle/*/cordis.patch.yml",
+          "apps/tui/packages/app/cordis.patch.yml",
+          "apps/tui/packages/app/cordis.built.patch.yml"
+        ],
+        "digest": "4b937ed860bd82feb9c2897856dce7b466039e9506d1bc2d0bff052d79343717",
+        "files": [
+          {
+            "path": "apps/tui/packages/app/cordis.built.patch.yml",
+            "mode": "100644",
+            "blob": "64037c78fe9e6a57ba72d2033d51317598b6adb0",
+            "sha256": "a6cf3d490f91892d92ad69ac38b019294adfed5d529cdf5df66b07bbac533fe2",
+            "bytes": 3532
+          },
+          {
+            "path": "apps/tui/packages/app/cordis.patch.yml",
+            "mode": "100644",
+            "blob": "00d7b10c69648490927e73b313cc20943227f27d",
+            "sha256": "678f51ef8f16b36996850156c8377b23bfd47ec6e1dc8cb1a9328c571122f2e0",
+            "bytes": 6378
+          },
+          {
+            "path": "packages/bundle/base/cordis.patch.yml",
+            "mode": "100644",
+            "blob": "17e3ad769bd07d82caf5669784a02c0f37383dea",
+            "sha256": "a2b18632071b884fa8e686e13042748f44cfa2cedde49d93efb5a2841cb3de1f",
+            "bytes": 18915
+          },
+          {
+            "path": "packages/bundle/desktop/cordis.patch.yml",
+            "mode": "100644",
+            "blob": "01c6827b44338330679d27642fb6cde23b8bcf79",
+            "sha256": "4405a980223007629ab7e4dc94561624bce0c0f7a8df98fc0836e04842cc353a",
+            "bytes": 1454
+          },
+          {
+            "path": "packages/bundle/headless/cordis.patch.yml",
+            "mode": "100644",
+            "blob": "19aedd04d75f9dfc7d47c5ee722fbc3e1664c335",
+            "sha256": "e7b33cd44d355cdbfa54aea9dcce6a859ef9b8671d93e7521293ba534d1e7704",
+            "bytes": 2588
+          }
+        ]
+      },
+      {
+        "id": "presets",
+        "description": "Agent presets",
+        "patterns": [
+          "packages/preset/agent-presets/presets/**"
+        ],
+        "digest": "9df3cb6931abb18bf324977acadda53b130aaa34cbd5c9d6ed9d5dbbfbc2bb2a",
+        "files": [
+          {
+            "path": "packages/preset/agent-presets/presets/cordis/agent.cordis.yml",
+            "mode": "100644",
+            "blob": "1ae3f16e214c186b89fb1d93df498a39fc73f3d4",
+            "sha256": "38732bc006bf3ee78c75287be9d0fe0b944ec1de78fd2bf31bba3ce884c7af50",
+            "bytes": 10311
+          },
+          {
+            "path": "packages/preset/agent-presets/presets/cordis/preset.yml",
+            "mode": "100644",
+            "blob": "6ec1cab3f899e1eda3766e48026248bba2c5f68f",
+            "sha256": "c27225229ffb6521d9054be5437618a3b0de30fc084a66a173ca9147737ea84d",
+            "bytes": 202
+          },
+          {
+            "path": "packages/preset/agent-presets/presets/cordis/skills/cordis-plugin-development/SKILL.md",
+            "mode": "100644",
+            "blob": "bcf474edfc5d09595ae08f490656a5643db22f03",
+            "sha256": "b95fdbab3d6e4b39f2daf89435d5c264e9d8be5472052c5ea6d6c247621f56d6",
+            "bytes": 7045
+          },
+          {
+            "path": "packages/preset/agent-presets/presets/cordis/skills/editing-cordis-compositions/SKILL.md",
+            "mode": "100644",
+            "blob": "7e943ae1ae626a9d41b453f25d318adecd31f316",
+            "sha256": "0e7417151bb739342381523554832ed9bba1060a20ae3a98df5e7c894f47b7fa",
+            "bytes": 5971
+          },
+          {
+            "path": "packages/preset/agent-presets/presets/minimal/agent.cordis.yml",
+            "mode": "100644",
+            "blob": "549a73cba28ee20932d34007a1e329891c71c048",
+            "sha256": "e75af996ab8c4cc966f8c5b54cd8dc354d7ac71bfcedbe07c8896f63bb7f073b",
+            "bytes": 3119
+          },
+          {
+            "path": "packages/preset/agent-presets/presets/minimal/preset.yml",
+            "mode": "100644",
+            "blob": "c4152618d8cd513d90dcc9cb6ade8ce9dc7dfb7d",
+            "sha256": "60258fad772ee067529e6fa5af43d8c77558949d47308a6d585a88874b1cecfa",
+            "bytes": 96
+          },
+          {
+            "path": "packages/preset/agent-presets/presets/ptc/agent.cordis.yml",
+            "mode": "100644",
+            "blob": "07dca3e59ad65b782322e3fb8848bc54ab0ab20c",
+            "sha256": "59c1fe95f2adca3f89c1bd9f514fbfb1dafaa52ecfaefb38c08da25db6be5a84",
+            "bytes": 9447
+          },
+          {
+            "path": "packages/preset/agent-presets/presets/ptc/preset.yml",
+            "mode": "100644",
+            "blob": "1df689fd46875df5f39749c83209fc5dc6c66c75",
+            "sha256": "f04ee2db31a0be2dfb120a22647f0f818ed1fe55d1dfbf9b9f86f031ed366c82",
+            "bytes": 182
+          },
+          {
+            "path": "packages/preset/agent-presets/presets/standard/agent.cordis.yml",
+            "mode": "100644",
+            "blob": "bef5b46ba51757971500f77ffb2a29fbd62814be",
+            "sha256": "6a3405682c1b7cf9acab58a22fa0cd460e6999c2ac3e4d500943e7944c719380",
+            "bytes": 8656
+          },
+          {
+            "path": "packages/preset/agent-presets/presets/standard/preset.yml",
+            "mode": "100644",
+            "blob": "25a488a58a4c67fca7afd85606d8f06abcf1ecaa",
+            "sha256": "f0bd954cfce14402a955cc62f14d78885a75d8cf4aae285fb32aa416cf2950e9",
+            "bytes": 153
+          }
+        ]
+      },
+      {
+        "id": "config-catalog",
+        "description": "Generated configuration catalog",
+        "patterns": [
+          "docs/config-catalog.md"
+        ],
+        "digest": "5039402912aa2ee380d21891d65f5d51255c0458c5cebccc76fa2d695a912e87",
+        "files": [
+          {
+            "path": "docs/config-catalog.md",
+            "mode": "100644",
+            "blob": "5718c56f4d120ca4d8f7f815d1a9e22d410d8b94",
+            "sha256": "2f4c93a31eecf2007b65ce3361319438c62fd5aeaa802c6405e728ab12595a10",
+            "bytes": 112986
+          }
+        ]
+      },
+      {
+        "id": "tool-catalog",
+        "description": "Generated tool catalog",
+        "patterns": [
+          "docs/tool-catalog.md"
+        ],
+        "digest": "266e5bf04975fd824c5a608fd513e09078d29255c534b2526929036477b9944f",
+        "files": [
+          {
+            "path": "docs/tool-catalog.md",
+            "mode": "100644",
+            "blob": "ca5cff36ca60ae8b4bb88e233d1e6bceda8298d0",
+            "sha256": "2a311f29590c54afdd872489c0665df236469f9cdbac8869a36cb5d5c18ac9e2",
+            "bytes": 44218
+          }
+        ]
+      },
+      {
+        "id": "persistence",
+        "description": "Persistence catalog, schema, change records, and Session format catalog",
+        "patterns": [
+          "docs/persistence-catalog.md",
+          "docs/persistence-schema.json",
+          "docs/persistence-changes/**",
+          "packages/session/session-format-catalog/src/**"
+        ],
+        "digest": "0cec63bd0d9b61c4b487ab6f8a2cd60d7a6debd215665c2e543d327c68fd100b",
+        "files": [
+          {
+            "path": "docs/persistence-catalog.md",
+            "mode": "100644",
+            "blob": "3d965ef062ebc26a77e384d0f89d2dbc4893e398",
+            "sha256": "238fd5e51fc8372140fa110452bd0377d1c977ba7086e34a9e5b22cff86fa551",
+            "bytes": 243194
+          },
+          {
+            "path": "docs/persistence-changes/2026-09-11-initial.md",
+            "mode": "100644",
+            "blob": "525339a424064622c9cf6935151aa40326e29f64",
+            "sha256": "62c5d7ac69a56c3440ec44ae3a71fdb1e88203e2817930a48d0acd12b2a414fe",
+            "bytes": 10610
+          },
+          {
+            "path": "docs/persistence-changes/2026-09-11-initial.schema.json",
+            "mode": "100644",
+            "blob": "f91e925cfada572f32fc00c0f75df34c2080e99c",
+            "sha256": "3055d97459140e156fc6cf7cd8d03f992e188c98bec106f15fad22b42a8d241d",
+            "bytes": 319585
+          },
+          {
+            "path": "docs/persistence-changes/2026-09-12-auto-review-error-metadata.md",
+            "mode": "100644",
+            "blob": "ecd6efad80e51aa9b9620cbf345410c2051a47c7",
+            "sha256": "31bde42b0280f0cb428b5c432475f6eb4386721a069b2ab17a0e4e36ecd42483",
+            "bytes": 2329
+          },
+          {
+            "path": "docs/persistence-changes/2026-09-12-auto-review-error-metadata.schema.json",
+            "mode": "100644",
+            "blob": "679e459a9340c3d1ac71be3cda4f3f7b8d579aa7",
+            "sha256": "e1c5f68fea0b4353c87ac1f5c60dbc3d371a8019ebd03f96358f31cf4af4118d",
+            "bytes": 21231
+          },
+          {
+            "path": "docs/persistence-changes/2026-09-14-image-offload.md",
+            "mode": "100644",
+            "blob": "634e62004811a80d75faeb6a6bf5ab9893803ce0",
+            "sha256": "3e66face16b5aa6fd18cc87f1fd49f650ca33d076d85f49f0ab2f2732b619f2d",
+            "bytes": 3669
+          },
+          {
+            "path": "docs/persistence-changes/2026-09-14-image-offload.schema.json",
+            "mode": "100644",
+            "blob": "66fb67e45ef2ddaa6a16d4ad0053c813892a4f99",
+            "sha256": "424f118d123d7393f18ce0c94826219309af5a4a2cb653c7f542264e3da589a4",
+            "bytes": 200046
+          },
+          {
+            "path": "docs/persistence-changes/2026-09-14-workspace-changes-event.md",
+            "mode": "100644",
+            "blob": "d75d0728e4a11e8a4c6e01be3edba125e574eda8",
+            "sha256": "b675302d3d9eaa89489b0f198e696a45b9ad869d9e3ded5090786f39d606b63c",
+            "bytes": 1425
+          },
+          {
+            "path": "docs/persistence-changes/2026-09-14-workspace-changes-event.schema.json",
+            "mode": "100644",
+            "blob": "befaf7f1ec2e33321015f3c2e6dbf430f0454e4e",
+            "sha256": "62a95a593a46f70d7b8b2193197fd74e0cc7e712fb9656a640b6568884909a90",
+            "bytes": 1621
+          },
+          {
+            "path": "docs/persistence-changes/2026-10-02-tool-update-and-routing-decision.md",
+            "mode": "100644",
+            "blob": "6a098ae757a6fadc857bb8eb5bb4b3da35bbc472",
+            "sha256": "8af148cb5c7d2416b91854d8f772670a452eedcfaf96d53b3e87a88e9b70a37a",
+            "bytes": 1919
+          },
+          {
+            "path": "docs/persistence-changes/2026-10-02-tool-update-and-routing-decision.schema.json",
+            "mode": "100644",
+            "blob": "57c886a1bc82f0c2baf9548ca5fc77c21c3035fd",
+            "sha256": "1e3a2a533273efeebd974327c5709f344f19fb581ac0d3f491675a03a6d26dac",
+            "bytes": 7158
+          },
+          {
+            "path": "docs/persistence-changes/README.md",
+            "mode": "100644",
+            "blob": "719169d793f607097cc61bbd8daadce83139afb8",
+            "sha256": "4c9d13a1cce49aa26bdd58dfdce034fbf7c7736a26b39ab2a8c929fc1b8bc9ed",
+            "bytes": 5659
+          },
+          {
+            "path": "docs/persistence-changes/historical-formats/README.i18n.yaml",
+            "mode": "100644",
+            "blob": "b60b927322d6928b0428d080847862dad9041302",
+            "sha256": "24c150935ae304d2387b09ea99f6b66b082f7c06dda25bfd72e44b7a1050ffc2",
+            "bytes": 453
+          },
+          {
+            "path": "docs/persistence-changes/historical-formats/README.md",
+            "mode": "100644",
+            "blob": "fda6ac3b4fc3e52ef215dc0a2fca00576cd4ef0c",
+            "sha256": "43c5775343ab46d948d3fa498b18a76682336c8ba10cd73f3b71b541dbae6114",
+            "bytes": 5270
+          },
+          {
+            "path": "docs/persistence-changes/historical-formats/README.zh.md",
+            "mode": "100644",
+            "blob": "792f47e532d6ebfdbb745c1bc2703c7b5f4fcc17",
+            "sha256": "24f2aa2f22b108ec0fff6ac23c8ff3e3e314d03491398ca75673357477b154ce",
+            "bytes": 4665
+          },
+          {
+            "path": "docs/persistence-changes/historical-formats/v0.i18n.yaml",
+            "mode": "100644",
+            "blob": "53935b02a0e61e9391cd41028bf205825fd68225",
+            "sha256": "e914421aa2c0e44728d8a11cff95a0e911aec2b954afd261c2095febf820bb2e",
+            "bytes": 441
+          },
+          {
+            "path": "docs/persistence-changes/historical-formats/v0.md",
+            "mode": "100644",
+            "blob": "91b8c239307c2ac721aa4879a4cb9857cd0396ce",
+            "sha256": "a3f8894d5a32bd94f32df9b4575339dd9eb05b24a3b5135ab1004554d036fd02",
+            "bytes": 171785
+          },
+          {
+            "path": "docs/persistence-changes/historical-formats/v0.schema.json",
+            "mode": "100644",
+            "blob": "bc6cbb8e598eb5e979dc083c4453ae31425f3be2",
+            "sha256": "4f5e6bcc78354fd685b48534faae3fcb53e7cb771ea89797664f3ff87bf4b87b",
+            "bytes": 1154545
+          },
+          {
+            "path": "docs/persistence-changes/historical-formats/v0.zh.md",
+            "mode": "100644",
+            "blob": "735ac81c461e7dcb89aac05cf1ae3997e5e0fd25",
+            "sha256": "89f65d7aff03aa0019116eefe939007a73088dbede8e65ff11a7208a00a5c1ba",
+            "bytes": 170502
+          },
+          {
+            "path": "docs/persistence-changes/historical-formats/v1.i18n.yaml",
+            "mode": "100644",
+            "blob": "707343c7f5b982b3bf613fe29ee800c0dae01308",
+            "sha256": "c3dbdd1cd9ea1d3d4fcfc3345e2e3af05112e82f819b08ced76e10b2e22d0805",
+            "bytes": 441
+          },
+          {
+            "path": "docs/persistence-changes/historical-formats/v1.md",
+            "mode": "100644",
+            "blob": "2cac9741d03659ef7afa80de4dae4e609b1b730e",
+            "sha256": "0cdc10773fdebbe67b8c461926047165ad06ad6be9e1f651d335d960c79954c8",
+            "bytes": 171830
+          },
+          {
+            "path": "docs/persistence-changes/historical-formats/v1.schema.json",
+            "mode": "100644",
+            "blob": "02afebf3c2d5ded816d733f38167a4a0fe25baee",
+            "sha256": "ff0c7eb3de71aed9e46ab61bf1895112129e9537e00dc2e44787efbfa9bf61dc",
+            "bytes": 1157402
+          },
+          {
+            "path": "docs/persistence-changes/historical-formats/v1.zh.md",
+            "mode": "100644",
+            "blob": "6eb7a5bc6fef32df2b6182f35272a9d237ffde16",
+            "sha256": "484a4a5d417cdc187f5a616f8fdff759119887c42a1fdefef78befd184df224a",
+            "bytes": 170564
+          },
+          {
+            "path": "docs/persistence-changes/historical-formats/v2.i18n.yaml",
+            "mode": "100644",
+            "blob": "880df63a56a209b157392ef99dbdebb6bc2ae7ad",
+            "sha256": "8785730a68ebb7746a2484df8a1de1496d15181a0f5a4ea8a3c3f7b24be3b20a",
+            "bytes": 441
+          },
+          {
+            "path": "docs/persistence-changes/historical-formats/v2.md",
+            "mode": "100644",
+            "blob": "e37a81da6c34dd5936898d9c87c7f1d31e0b03b9",
+            "sha256": "e2768d39799e7b934c9f0eff8d28d50a4dfcae9ca463a02f876df459fb60f846",
+            "bytes": 181825
+          },
+          {
+            "path": "docs/persistence-changes/historical-formats/v2.schema.json",
+            "mode": "100644",
+            "blob": "d3ef07b065003abfecf071e35074bd452bb2c0c8",
+            "sha256": "fd40b054aab469cd98e7707a59bfd872b5092e9e12f30bd9212472cde9fc465f",
+            "bytes": 1323945
+          },
+          {
+            "path": "docs/persistence-changes/historical-formats/v2.zh.md",
+            "mode": "100644",
+            "blob": "c54170ff050f64c998a4ad3eeeeac216b0dfa913",
+            "sha256": "0892dec43f92a8d431da7395e13f8049f04a41df3c065d3badf7700d8d9f8d81",
+            "bytes": 180486
+          },
+          {
+            "path": "docs/persistence-changes/releases/README.md",
+            "mode": "100644",
+            "blob": "54bbc7df219ec7eec2d6f2a32102d6669b3035ab",
+            "sha256": "2a86f21c41860adfb579e0c955398d6ce1e1487dc23dedd52c5b35ca18d7bda9",
+            "bytes": 7072
+          },
+          {
+            "path": "docs/persistence-changes/releases/dsh-v0.0.1-rc.1.md",
+            "mode": "100644",
+            "blob": "cc9e4f72f08385a3e7ce094e6c17c17c56ee5c45",
+            "sha256": "2e3acb37bff5c5e8a36f58ca7ff2c6a5c5d5a27db2631c129a173305e55ec3de",
+            "bytes": 7510
+          },
+          {
+            "path": "docs/persistence-changes/releases/dsh-v0.0.1-rc.1.schema.json",
+            "mode": "100644",
+            "blob": "f2af6379293dd1702c3adfb3ae2ca258c0567642",
+            "sha256": "3c53670e671e25cb2605aae6cc17f6da929ad00a505039aa7c4d9f570a0db9b7",
+            "bytes": 929546
+          },
+          {
+            "path": "docs/persistence-changes/releases/dsh-v0.0.1-rc.2.md",
+            "mode": "100644",
+            "blob": "b6c49180e9c0c578e84eaa7914f6b2dbb115d374",
+            "sha256": "dca4b58ad4ec2df6a563d95885375b8a9eb39d21816facc962b33e93bef5ea14",
+            "bytes": 14323
+          },
+          {
+            "path": "docs/persistence-changes/releases/dsh-v0.0.1-rc.2.schema.json",
+            "mode": "100644",
+            "blob": "8a01aecd6b3f5cbe118bc310bad73137fc180742",
+            "sha256": "dd3c40dfe62d92544b1b4571276b5ec9022b329ff1f46ba72667c473e5a99918",
+            "bytes": 1011889
+          },
+          {
+            "path": "docs/persistence-changes/releases/dsh-v0.0.1-rc.3.md",
+            "mode": "100644",
+            "blob": "4063f8118d3e54423d1e326b0043fdbd05dab8ff",
+            "sha256": "d976df553670d0dd728bc57a0c5a63eeed388bf25930d09f9cbe2059fe518fbc",
+            "bytes": 5079
+          },
+          {
+            "path": "docs/persistence-changes/releases/dsh-v0.0.1-rc.3.schema.json",
+            "mode": "100644",
+            "blob": "d881f34d52d079af2d4277cd9b75783d8f3b1931",
+            "sha256": "4f889c1a6d5013019615eb72b9df362cc13e0ae66f1c29e1095174591c796c04",
+            "bytes": 458135
+          },
+          {
+            "path": "docs/persistence-changes/releases/dsh-v0.0.1-rc.4.md",
+            "mode": "100644",
+            "blob": "b17d78c4caf2f3b9d0b23e50b698352bbe930f0e",
+            "sha256": "a41b032ceb9d3afd198f7d1904a8fa6c5512ffef3f23d7da474b855f0da663e3",
+            "bytes": 2186
+          },
+          {
+            "path": "docs/persistence-changes/releases/dsh-v0.0.1-rc.4.schema.json",
+            "mode": "100644",
+            "blob": "40cf319d3b0d1fad4a12ef45e8681a63425f63d8",
+            "sha256": "ff50a6dd573d300874883914ce683edfdf8c118c852cd7bf0eeba8d8898e6ba6",
+            "bytes": 55
+          },
+          {
+            "path": "docs/persistence-changes/releases/dsh-v0.0.1-rc.5.md",
+            "mode": "100644",
+            "blob": "88304568d798edfa9d173bde7915777a851fb999",
+            "sha256": "bcd303e0462d616f1ee697d661436dcbff0d7b5527a53556e3467098992252d8",
+            "bytes": 2186
+          },
+          {
+            "path": "docs/persistence-changes/releases/dsh-v0.0.1-rc.5.schema.json",
+            "mode": "100644",
+            "blob": "40cf319d3b0d1fad4a12ef45e8681a63425f63d8",
+            "sha256": "ff50a6dd573d300874883914ce683edfdf8c118c852cd7bf0eeba8d8898e6ba6",
+            "bytes": 55
+          },
+          {
+            "path": "docs/persistence-changes/releases/dsh-v0.1.0-rc.1.md",
+            "mode": "100644",
+            "blob": "bc01d426ef9d9623c6837809446e1722fc528dd9",
+            "sha256": "bc3df03fb3e7451815e3194b9168ac4c4c9e8e13f572585f23baeb5eb24754eb",
+            "bytes": 2186
+          },
+          {
+            "path": "docs/persistence-changes/releases/dsh-v0.1.0-rc.1.schema.json",
+            "mode": "100644",
+            "blob": "40cf319d3b0d1fad4a12ef45e8681a63425f63d8",
+            "sha256": "ff50a6dd573d300874883914ce683edfdf8c118c852cd7bf0eeba8d8898e6ba6",
+            "bytes": 55
+          },
+          {
+            "path": "docs/persistence-changes/releases/dsh-v0.1.0-rc.2.md",
+            "mode": "100644",
+            "blob": "48eaac8e55970d47187e5a5cf390716ba1294b4c",
+            "sha256": "1f1d9d8fea611ed13a6b37a8747633d33fe5a18bdc795a7ca102e548f803c606",
+            "bytes": 2186
+          },
+          {
+            "path": "docs/persistence-changes/releases/dsh-v0.1.0-rc.2.schema.json",
+            "mode": "100644",
+            "blob": "40cf319d3b0d1fad4a12ef45e8681a63425f63d8",
+            "sha256": "ff50a6dd573d300874883914ce683edfdf8c118c852cd7bf0eeba8d8898e6ba6",
+            "bytes": 55
+          },
+          {
+            "path": "docs/persistence-changes/releases/dsh-v0.1.0-rc.3.md",
+            "mode": "100644",
+            "blob": "5fdc17173263db341d7b107614cc2fb6c9dc62af",
+            "sha256": "e8200961725e1bf8357213b762b31b46a7a092c19ca6467241d47570ff8a4f0a",
+            "bytes": 2186
+          },
+          {
+            "path": "docs/persistence-changes/releases/dsh-v0.1.0-rc.3.schema.json",
+            "mode": "100644",
+            "blob": "40cf319d3b0d1fad4a12ef45e8681a63425f63d8",
+            "sha256": "ff50a6dd573d300874883914ce683edfdf8c118c852cd7bf0eeba8d8898e6ba6",
+            "bytes": 55
+          },
+          {
+            "path": "docs/persistence-changes/releases/dsh-v0.1.0-rc.5.md",
+            "mode": "100644",
+            "blob": "649eacaadeac6ecd540cdda21e110d20bf4b4920",
+            "sha256": "818b2f4fc9146c791a7f0650b45f2f575c8688aeb63748d13dcd139de45e27b2",
+            "bytes": 2186
+          },
+          {
+            "path": "docs/persistence-changes/releases/dsh-v0.1.0-rc.5.schema.json",
+            "mode": "100644",
+            "blob": "40cf319d3b0d1fad4a12ef45e8681a63425f63d8",
+            "sha256": "ff50a6dd573d300874883914ce683edfdf8c118c852cd7bf0eeba8d8898e6ba6",
+            "bytes": 55
+          },
+          {
+            "path": "docs/persistence-changes/releases/dsh-v0.1.0-rc.6.md",
+            "mode": "100644",
+            "blob": "89cd2b85ffc761e715e080d8a2878d47d75fdd86",
+            "sha256": "64e6d2f4e2c211231394ba49cb8594493f212465ae5f42caca8739379e80fc46",
+            "bytes": 2186
+          },
+          {
+            "path": "docs/persistence-changes/releases/dsh-v0.1.0-rc.6.schema.json",
+            "mode": "100644",
+            "blob": "40cf319d3b0d1fad4a12ef45e8681a63425f63d8",
+            "sha256": "ff50a6dd573d300874883914ce683edfdf8c118c852cd7bf0eeba8d8898e6ba6",
+            "bytes": 55
+          },
+          {
+            "path": "docs/persistence-changes/releases/dsh-v0.1.0-rc.7.md",
+            "mode": "100644",
+            "blob": "85dd6e66351ae9aa3b635a2782eea58a946d16d5",
+            "sha256": "96ef20fa246cc3d8ec51b671f8038d31544bca7399a123e18bf60fb9586b580a",
+            "bytes": 2656
+          },
+          {
+            "path": "docs/persistence-changes/releases/dsh-v0.1.0-rc.7.schema.json",
+            "mode": "100644",
+            "blob": "a24be1f54057b71a4ee16b82c3860c8e27b843d1",
+            "sha256": "82df0bb35d0d3b1171a4bb6b9545d9790dc4cf4664f1600a965f94581815fbdd",
+            "bytes": 124115
+          },
+          {
+            "path": "docs/persistence-changes/releases/dsh-v0.1.0-rc.8.md",
+            "mode": "100644",
+            "blob": "cd74fa967c77edc5536083d85208abe56b13de2c",
+            "sha256": "5926e555fd3715a5133634f7216c8cf449b2233d8edfdfe9d3a7c8a44fd7899d",
+            "bytes": 4279
+          },
+          {
+            "path": "docs/persistence-changes/releases/dsh-v0.1.0-rc.8.schema.json",
+            "mode": "100644",
+            "blob": "e6eb05d7050e006225df99bc109a2ded271be2f5",
+            "sha256": "542372c0fc877bada3bfcaaaf4c312a20feaaa52d3c60b6deaea2d2e8e1090c0",
+            "bytes": 499611
+          },
+          {
+            "path": "docs/persistence-changes/releases/dsh-v0.1.1-rc.1.md",
+            "mode": "100644",
+            "blob": "58e086155e15d3faa552c76a0580d51328d4973b",
+            "sha256": "be0b6860ea04b92d499f5ebc4f7e1b4cf47c0982851aa5bf00e62c65091bede4",
+            "bytes": 2640
+          },
+          {
+            "path": "docs/persistence-changes/releases/dsh-v0.1.1-rc.1.schema.json",
+            "mode": "100644",
+            "blob": "288fefb8fe38f590418d04c59d80be111a8b7f3f",
+            "sha256": "ea89a23deb9e173d9f4d64f4c9b07405d51babce2359cd5bb9a539056ebb1b66",
+            "bytes": 10227
+          },
+          {
+            "path": "docs/persistence-changes/releases/dsh-v0.1.1-rc.2.md",
+            "mode": "100644",
+            "blob": "4e87f0bc0ff3955e8ce2844febb21cb84b41f504",
+            "sha256": "ac5b8ae39436b29b6e98c822723cccfc90fb1ec9e86c3dd6611a698fbcdc239d",
+            "bytes": 5648
+          },
+          {
+            "path": "docs/persistence-changes/releases/dsh-v0.1.1-rc.2.schema.json",
+            "mode": "100644",
+            "blob": "1b69ac6fef7661bad2553a612e9c1f346c613b49",
+            "sha256": "fe1a46c609df651cd7ae37d6f5915aea7f990de08dd7959f8f9bb8addc4c1601",
+            "bytes": 697372
+          },
+          {
+            "path": "docs/persistence-changes/releases/dsh-v0.1.2-alpha.1.md",
+            "mode": "100644",
+            "blob": "814cba2e36db50e3ccf822bf407fa30f870ea751",
+            "sha256": "e3d24e47f2728a877af4939efc64f1df709b3abb14197639768bfdc27fee8185",
+            "bytes": 16831
+          },
+          {
+            "path": "docs/persistence-changes/releases/dsh-v0.1.2-alpha.1.schema.json",
+            "mode": "100644",
+            "blob": "e9019de049ad9f3402b0f0a952d43f1b4f2cebff",
+            "sha256": "cfab5b20601c3be8a28a9d5e2a8b59124177bbd5e81f3b5bc8877812cfe1bf7c",
+            "bytes": 1133518
+          },
+          {
+            "path": "docs/persistence-changes/releases/dsh-v0.1.2-alpha.2.md",
+            "mode": "100644",
+            "blob": "20f19d2039eb2e79e464fd26edbcb7bae9a33daa",
+            "sha256": "8bf3f6a102cd865cec9b52ecb7c3b2fd85426f1085835e5d93a366c770c0f866",
+            "bytes": 16390
+          },
+          {
+            "path": "docs/persistence-changes/releases/dsh-v0.1.2-alpha.2.schema.json",
+            "mode": "100644",
+            "blob": "0ef37cc38eda019bf10238d24cf76b5b0580dc40",
+            "sha256": "9b9df3bf87aaf4067c6086256fe79ec8a405c67205fc5e1e3b7ccea9755096de",
+            "bytes": 1155435
+          },
+          {
+            "path": "docs/persistence-changes/releases/dsh-v0.1.2-alpha.3.md",
+            "mode": "100644",
+            "blob": "511aa1abe9ab7c3381de557ba39bb4732dcabc78",
+            "sha256": "e81f84e4915b8e494c5e531f35c535b89138ca8b4e1ec61a8d16e16bdf5e79ca",
+            "bytes": 2205
+          },
+          {
+            "path": "docs/persistence-changes/releases/dsh-v0.1.2-alpha.3.schema.json",
+            "mode": "100644",
+            "blob": "40cf319d3b0d1fad4a12ef45e8681a63425f63d8",
+            "sha256": "ff50a6dd573d300874883914ce683edfdf8c118c852cd7bf0eeba8d8898e6ba6",
+            "bytes": 55
+          },
+          {
+            "path": "docs/persistence-changes/releases/dsh-v0.1.2-alpha.4.md",
+            "mode": "100644",
+            "blob": "9a1a1cfc2edb0c188b3cd7866489b8eafbe27feb",
+            "sha256": "fc4cbaa348b7595b0e1c5cac1729ec2e2f8c4122f2185fcc4d3750eaf220cd07",
+            "bytes": 3705
+          },
+          {
+            "path": "docs/persistence-changes/releases/dsh-v0.1.2-alpha.4.schema.json",
+            "mode": "100644",
+            "blob": "e31d43c99cf1484137d191666b1b9a30ab50d3fa",
+            "sha256": "0ac61b1f68404cb618fb642c5a4d7d3ae9d6a5691e70e34ebd1789f7bfa49be0",
+            "bytes": 417106
+          },
+          {
+            "path": "docs/persistence-changes/releases/dsh-v0.1.2-alpha.5.md",
+            "mode": "100644",
+            "blob": "e6ca604edafeb72347b70bb6c9518328472e0687",
+            "sha256": "3d45d7a67465c655c83e5cc13b1f373c97565bb1dbdb7bc2f832dc2c7d83e76a",
+            "bytes": 2208
+          },
+          {
+            "path": "docs/persistence-changes/releases/dsh-v0.1.2-alpha.5.schema.json",
+            "mode": "100644",
+            "blob": "40cf319d3b0d1fad4a12ef45e8681a63425f63d8",
+            "sha256": "ff50a6dd573d300874883914ce683edfdf8c118c852cd7bf0eeba8d8898e6ba6",
+            "bytes": 55
+          },
+          {
+            "path": "docs/persistence-changes/releases/dsh-v0.1.2-rc.1.md",
+            "mode": "100644",
+            "blob": "25fdf08907306563167fd76be6bb68ff1eed6651",
+            "sha256": "1a0deb195aeb1b07b6ad8a52f2a1cd272a115d965aa6dd9ab0d381dd0d2f238b",
+            "bytes": 2190
+          },
+          {
+            "path": "docs/persistence-changes/releases/dsh-v0.1.2-rc.1.schema.json",
+            "mode": "100644",
+            "blob": "40cf319d3b0d1fad4a12ef45e8681a63425f63d8",
+            "sha256": "ff50a6dd573d300874883914ce683edfdf8c118c852cd7bf0eeba8d8898e6ba6",
+            "bytes": 55
+          },
+          {
+            "path": "docs/persistence-changes/releases/dsh-v0.1.3-alpha.1.md",
+            "mode": "100644",
+            "blob": "f30336fadb2306282ae4c7d557fae1b843f2bf42",
+            "sha256": "64f4da46baba6ac8a3d8c1e03214e25c611cf0a9bec0e395cff8fcafadb3df0e",
+            "bytes": 8016
+          },
+          {
+            "path": "docs/persistence-changes/releases/dsh-v0.1.3-alpha.1.schema.json",
+            "mode": "100644",
+            "blob": "3da5e474162e1407733b3942ef1d3dca91737ca7",
+            "sha256": "80b688ffe03e90e2622366f8368fefb50f7f6981660e656ab366d9a4d736eca0",
+            "bytes": 910508
+          },
+          {
+            "path": "docs/persistence-changes/releases/dsh-v0.1.3-alpha.2.md",
+            "mode": "100644",
+            "blob": "6a06994ba32532f61bd79c4c95f36d3691266ff3",
+            "sha256": "a75c138215f318ca175027ce30e9428b1d1cfc17b86942be9725b37f1a6118b1",
+            "bytes": 2820
+          },
+          {
+            "path": "docs/persistence-changes/releases/dsh-v0.1.3-alpha.2.schema.json",
+            "mode": "100644",
+            "blob": "07b745e19dffc158884aa182cd4342a20e3366cd",
+            "sha256": "ec5c6620252490e78e67b9cf658f9fc2def8e3fba7c24bb4925bdf38d7b58360",
+            "bytes": 19642
+          },
+          {
+            "path": "docs/persistence-changes/releases/dsh-v0.1.5-alpha.1.md",
+            "mode": "100644",
+            "blob": "43eb627d2e8def176874f078f8a77865b48a56b8",
+            "sha256": "91a753b30e181f7531f253098666992bf4a0aa47f1a06e67ab03ef22230799c2",
+            "bytes": 6414
+          },
+          {
+            "path": "docs/persistence-changes/releases/dsh-v0.1.5-alpha.1.schema.json",
+            "mode": "100644",
+            "blob": "77cea12863cc6384ca7108cf717beed220c23f80",
+            "sha256": "b94140772419b6765a33ef051e78bab2436fd3e77206d0b27e7a28b14666975c",
+            "bytes": 577671
+          },
+          {
+            "path": "docs/persistence-changes/releases/dsh-v0.1.5-alpha.2.md",
+            "mode": "100644",
+            "blob": "ac739c7d246a56f473de307dd68df72d5fdecfd3",
+            "sha256": "2cba5111aa2156bd385fd0226f00b534a3d530aa3db1feb36bb4b6e49247133c",
+            "bytes": 3475
+          },
+          {
+            "path": "docs/persistence-changes/releases/dsh-v0.1.5-alpha.2.schema.json",
+            "mode": "100644",
+            "blob": "ffabdff76f17d07c7735e3e88b93fb3448653547",
+            "sha256": "3454c17c30f8355fbffc49fa4e2a266366015d27a99377aa88a403957f16ad00",
+            "bytes": 50568
+          },
+          {
+            "path": "docs/persistence-changes/releases/dsh-v0.1.5-rc.1.md",
+            "mode": "100644",
+            "blob": "aa96f7941c1a671ebb5cd404b0439db6b2865a8d",
+            "sha256": "bbcba9b8cd0daecb3f9ee38239c86badeadc6b4e9a5a600b3f695c24d5535ddd",
+            "bytes": 2190
+          },
+          {
+            "path": "docs/persistence-changes/releases/dsh-v0.1.5-rc.1.schema.json",
+            "mode": "100644",
+            "blob": "40cf319d3b0d1fad4a12ef45e8681a63425f63d8",
+            "sha256": "ff50a6dd573d300874883914ce683edfdf8c118c852cd7bf0eeba8d8898e6ba6",
+            "bytes": 55
+          },
+          {
+            "path": "docs/persistence-changes/releases/dsh-v0.1.5-rc.2.md",
+            "mode": "100644",
+            "blob": "a1fc2d7e6dafb51d29e7f09f439537b482d09825",
+            "sha256": "cac5f20504783d169fe884be8565206bf0508af3457f9bd673e22b310e88f2f8",
+            "bytes": 2181
+          },
+          {
+            "path": "docs/persistence-changes/releases/dsh-v0.1.5-rc.2.schema.json",
+            "mode": "100644",
+            "blob": "40cf319d3b0d1fad4a12ef45e8681a63425f63d8",
+            "sha256": "ff50a6dd573d300874883914ce683edfdf8c118c852cd7bf0eeba8d8898e6ba6",
+            "bytes": 55
+          },
+          {
+            "path": "docs/persistence-changes/releases/manifest.json",
+            "mode": "100644",
+            "blob": "c1524c48e3ef5bc11835f614de406b8becb44e49",
+            "sha256": "a22568e2b823a0af172a24567c315c0ed4b56811539e97789fc71175232fd312",
+            "bytes": 4342
+          },
+          {
+            "path": "docs/persistence-schema.json",
+            "mode": "100644",
+            "blob": "312ecfebadc761f23d42be98cc320ef6dc1fd4b0",
+            "sha256": "0a2fe667e196ad7d3072034ba668c75fda7980b7a7dca26b015f68e7980e9a37",
+            "bytes": 1469867
+          },
+          {
+            "path": "packages/session/session-format-catalog/src/current.ts",
+            "mode": "100644",
+            "blob": "70fb574590dd685183be268ab65e3878b962759c",
+            "sha256": "20e66609c38e3b6128dfd7be18423e86c4d7d5886d0c183f5e12d2a2dc62bb3a",
+            "bytes": 1842
+          },
+          {
+            "path": "packages/session/session-format-catalog/src/generated.ts",
+            "mode": "100644",
+            "blob": "f726d954d9ad640a0caad1c7437002de03dd9654",
+            "sha256": "1dc0c962ae13bd8c3ea7e15631980797a7c32e2916886f2b3736156c7fe600da",
+            "bytes": 1729
+          },
+          {
+            "path": "packages/session/session-format-catalog/src/index.ts",
+            "mode": "100644",
+            "blob": "45681aa6af3b5583f98847810d1460a883da79a2",
+            "sha256": "6810d83541f60a83f04f22193bd75f5845ab547846ed9cf1d4c116c3b70c5e3f",
+            "bytes": 354
+          },
+          {
+            "path": "packages/session/session-format-catalog/src/message-projections.ts",
+            "mode": "100644",
+            "blob": "d011783c12ef31fe23d405c67e1ec30ebd0b039e",
+            "sha256": "55440dba1a74e200d303d9653e069f2c49d226860d91159eb17e65262e0b8d89",
+            "bytes": 507
+          },
+          {
+            "path": "packages/session/session-format-catalog/src/retired-vocabulary.ts",
+            "mode": "100644",
+            "blob": "8e08fcdc4cc786788faabe08dbf6cfe3b9449b34",
+            "sha256": "45fa1d42636479da80f232654c92271fea779c79e0586fd74aaf25b56aad7b13",
+            "bytes": 9285
+          }
+        ]
+      },
+      {
+        "id": "session-writer",
+        "description": "Session writer format constant",
+        "patterns": [
+          "packages/core/session/src/types.ts"
+        ],
+        "digest": "e6cb87d728d7e2470d1a99529de4e9ee169f6156e0bc2ead8ee846ef080a3948",
+        "files": [
+          {
+            "path": "packages/core/session/src/types.ts",
+            "mode": "100644",
+            "blob": "631334b2ec1788c233c97665bb8878ac03bfe9c8",
+            "sha256": "c1fbecf0a6e7d970d276ad25c702c421ac886bc017b5c57202be0a723a104501",
+            "bytes": 22897
+          }
+        ]
+      },
+      {
+        "id": "model-surface",
+        "description": "Model-surface snapshots of the shipped profiles and presets",
+        "patterns": [
+          "apps/cli/tests/profiles/expected/model-surface/*.md",
+          "apps/tui/packages/app/tests/expected/model-surface/*.md"
+        ],
+        "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "files": []
+      },
+      {
+        "id": "release-targets",
+        "description": "Release manifest and artifact targets",
+        "patterns": [
+          "packages/boot/updater/src/manifest.ts"
+        ],
+        "digest": "3bce9b88c272bdfb29df3d13049c86171f97fcc041cea48650f8442e3b1f50b2",
+        "files": [
+          {
+            "path": "packages/boot/updater/src/manifest.ts",
+            "mode": "100644",
+            "blob": "b0864fbf89590ba32264d946e386f796b86bc858",
+            "sha256": "4acfd09392d683448e97ca6d2f08bf5e4b1ecde32eff138b325366a8ea821584",
+            "bytes": 6927
+          }
+        ]
+      }
+    ],
+    "absent": [
+      {
+        "input": "model-surface",
+        "pattern": "apps/cli/tests/profiles/expected/model-surface/*.md",
+        "reason": "v0.3.8 predates the model-surface snapshots, which eac853e9940b6c2f5c35236e3a003d055eaf310d and e408faf28c71408f0c14dc5246113a3c3a6c9860 added afterwards; no snapshot of the release exists to pin"
+      },
+      {
+        "input": "model-surface",
+        "pattern": "apps/tui/packages/app/tests/expected/model-surface/*.md",
+        "reason": "v0.3.8 predates the model-surface snapshots, which eac853e9940b6c2f5c35236e3a003d055eaf310d and e408faf28c71408f0c14dc5246113a3c3a6c9860 added afterwards; no snapshot of the release exists to pin"
+      }
+    ]
+  },
+  "environment": {
+    "platform": "linux",
+    "arch": "x64",
+    "osRelease": "7.2.8-200.fc44.x86_64",
+    "tools": {
+      "bun": "1.4.2",
+      "node": "v26.10.0",
+      "git": "git version 2.56.0"
+    }
+  },
+  "evidence": {
+    "build": "not-recorded",
+    "tests": "not-recorded",
+    "performance": "not-recorded"
+  },
+  "missingEvidence": [
+    "model-surface: nothing matches apps/cli/tests/profiles/expected/model-surface/*.md at dcb26d756e008a3d17c057a6b153933c018c275d; v0.3.8 predates the model-surface snapshots, which eac853e9940b6c2f5c35236e3a003d055eaf310d and e408faf28c71408f0c14dc5246113a3c3a6c9860 added afterwards; no snapshot of the release exists to pin",
+    "model-surface: nothing matches apps/tui/packages/app/tests/expected/model-surface/*.md at dcb26d756e008a3d17c057a6b153933c018c275d; v0.3.8 predates the model-surface snapshots, which eac853e9940b6c2f5c35236e3a003d055eaf310d and e408faf28c71408f0c14dc5246113a3c3a6c9860 added afterwards; no snapshot of the release exists to pin",
+    "build: no build was run or observed by source provenance",
+    "tests: no test was run or observed by source provenance",
+    "performance: no measurement was taken by source provenance",
+    "publication: whether this commit was released is verified separately"
+  ]
+}

@@ -1,8 +1,8 @@
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { createAssistantMessage } from '@deepseek-ai/dsh-llm'
-import { SESSION_FORMAT_VERSION, SessionSeq, type SessionEvent } from '@deepseek-ai/dsh-session'
-import { parseSessionLog } from '@deepseek-ai/dsh-llm-replay'
+import { createAssistantMessage } from 'bake-llm'
+import { SESSION_FORMAT_VERSION, SessionSeq, type SessionEvent } from 'bake-session'
+import { parseSessionLog } from 'bake-llm-replay'
 import {
   canonicalSessionFixture,
   inspectSessionFixtureLayouts,
@@ -202,6 +202,12 @@ describe('isPhysicalSessionFixture', () => {
       'scripts/snapshots/python-sdk-single-exe/advanced/requests.jsonl',
     )).toBe(false)
     expect(isPhysicalSessionFixture('apps/web/tests/snapshots/example/session.jsonl')).toBe(false)
+    expect(isPhysicalSessionFixture('packages/core/agent-loop/tests/fixtures/request-reconstruction/tool-call-turn/session.v3.jsonl')).toBe(true)
+    expect(isPhysicalSessionFixture('packages/core/agent-loop/tests/fixtures/request-reconstruction/dynamic-tools/session.v3.jsonl')).toBe(true)
+    expect(isPhysicalSessionFixture('packages/core/agent-loop/tests/fixtures/request-reconstruction/dynamic-tools/expected-requests.json')).toBe(false)
+    expect(isPhysicalSessionFixture('packages/core/agent-loop/tests/fixtures/request-reconstruction/retry-attempt/session.v3.jsonl')).toBe(true)
+    expect(isPhysicalSessionFixture('packages/core/agent-loop/tests/fixtures/request-reconstruction/unknown/session.jsonl')).toBe(false)
+    expect(isPhysicalSessionFixture('packages/core/agent-loop/tests/fixtures/request-reconstruction/tool-call-turn/requests.jsonl')).toBe(false)
   })
 })
 

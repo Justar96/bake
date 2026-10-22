@@ -9,7 +9,7 @@
  * Deferred resolution retains their diagnostics so stored catalog drift does
  * not prevent inspection, repair, or requests to independently valid models.
  *
- * @module dsh-llm-pi-ai/catalog
+ * @module bake-llm-pi-ai/catalog
  */
 
 import { builtinProviders, getBuiltinModels, getBuiltinProviders } from '@earendil-works/pi-ai/providers/all'

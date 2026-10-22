@@ -1,15 +1,15 @@
 /**
  * `bake update`: replace a managed install with the newest signed release,
  * or with `--rollback`, return it to an earlier release still installed.
- * @module @deepseek-ai/dsh/update
+ * @module bake-cli/update
  */
 
 import { fileURLToPath } from 'node:url'
-import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
+import { resolveDshHome } from 'bake-home-paths'
 import { startProgress, type ProgressTerminal } from './progress.ts'
 import {
   detectInstall, markLaunched, rollbackRelease, selfUpdate, UpdateError, versionDirectory, type InstallLayout, type InstallProgress,
-} from '@deepseek-ai/dsh-updater'
+} from 'bake-updater'
 
 /** `--check` exit status when a newer release is available, so a script can tell it from "up to date" (0) and failure (1). */
 export const UPDATE_AVAILABLE_EXIT = 10

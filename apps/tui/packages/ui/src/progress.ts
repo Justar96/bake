@@ -10,10 +10,10 @@
  *
  * Pure over the events it is handed. The application owns the subscriptions.
  *
- * @module @dsh-tui/ui/progress
+ * @module bake-tui-ui/progress
  */
 
-import type { SessionEvent } from '@deepseek-ai/dsh-session'
+import type { SessionEvent } from 'bake-session'
 import { SETTLES } from './actions.ts'
 import type { Row, ToolCallLive, ToolCallRow } from './rows.ts'
 

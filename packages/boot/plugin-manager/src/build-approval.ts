@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { isAlias, isMap, isNode, isScalar, isSeq, parseDocument, visit } from 'yaml'
 import { ManagementFailure } from './failure.ts'
-import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
+import { writeFileAtomic } from 'bake-atomic-write'
 
 async function readIgnoredBuilds(dir: string): Promise<string[]> {
   let text: string

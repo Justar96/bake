@@ -4,12 +4,12 @@
  * compaction, and agent services; only the model is scripted.
  */
 import { afterEach, expect, it } from 'vitest'
-import TokenMeter from '@deepseek-ai/dsh-token-meter'
-import BasicCompaction from '@deepseek-ai/dsh-compaction-basic'
-import * as CommandCompact from '@deepseek-ai/dsh-command-compact'
-import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
-import type { SessionEvent } from '@deepseek-ai/dsh-session'
-import { dictionaries } from '@dsh-tui/ui/copy.ts'
+import TokenMeter from 'bake-token-meter'
+import BasicCompaction from 'bake-compaction-basic'
+import * as CommandCompact from 'bake-command-compact'
+import type { GenerateOptions, StreamChunk } from 'bake-llm'
+import type { SessionEvent } from 'bake-session'
+import { dictionaries } from 'bake-tui-ui/copy.ts'
 import { SessionController } from '../src/controller.ts'
 import { openSession } from '../src/session.ts'
 import { harness, textResponse, type ScriptedModel } from './harness.ts'

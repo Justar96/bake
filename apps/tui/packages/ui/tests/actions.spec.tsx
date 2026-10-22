@@ -2,7 +2,7 @@
 import React from 'react'
 import { renderToString } from 'ink'
 import { describe, expect, it } from 'vitest'
-import type { SessionEvent } from '@deepseek-ai/dsh-session'
+import type { SessionEvent } from 'bake-session'
 import { RowView } from '../src/app.tsx'
 import { dictionaries } from '../src/copy.ts'
 import { ICON } from '../src/icons.ts'

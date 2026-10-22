@@ -3,11 +3,11 @@ description: "Runtime invariant checks for live compositions: the registry servi
 kind: "package-reference"
 ---
 
-# @deepseek-ai/dsh-invariants
+# bake-invariants
 
 ## Summary
 
-`dsh-invariants` runs package-owned runtime checks — invariants — inside a DeepSeek Harness composition: any package can ship a `./invariant` companion that verifies its own durable relationships (authoritative event streams and mutable snapshots) while the composition runs. Checks run automatically, and a failed check reports an `InvariantError` attributed to the package that owns the violated relationship. Choose it for compositions that want self-checking diagnostics with a global switch and package-name filters; the standard agent composition already mounts it with the four core companions, and loading the service alone installs no checks.
+`bake-invariants` runs package-owned runtime checks — invariants — inside a DeepSeek Harness composition: any package can ship a `./invariant` companion that verifies its own durable relationships (authoritative event streams and mutable snapshots) while the composition runs. Checks run automatically, and a failed check reports an `InvariantError` attributed to the package that owns the violated relationship. Choose it for compositions that want self-checking diagnostics with a global switch and package-name filters; the standard agent composition already mounts it with the four core companions, and loading the service alone installs no checks.
 
 ## Table of Contents
 
@@ -27,18 +27,18 @@ Mount the registry when a composition should verify its own runtime contracts, t
 
 ### When to use it
 
-Use the registry for compositions that want live diagnostics. `dsh-base` omits runtime diagnostics. Custom compositions mount the registry and companions for loaded packages whose contracts they want checked. Loading the registry alone installs no checks.
+Use the registry for compositions that want live diagnostics. `bake-base` omits runtime diagnostics. Custom compositions mount the registry and companions for loaded packages whose contracts they want checked. Loading the registry alone installs no checks.
 
 ### Enabling checks and selecting packages
 
 The registry is enabled by default and checks every registered package unless filters say otherwise. Use `enabled` as a global switch, `package_allowlist` to admit only named packages, and `package_blocklist` to exclude packages after allowlist matching — a blocklist match overrides an allowlist match. Patterns are case-sensitive JavaScript regular-expression sources (unanchored unless they supply `^` and `$`), and an invalid, blank, or duplicate entry fails service startup instead of being skipped.
 
 ```yaml
-- name: '@deepseek-ai/dsh-invariants'
+- name: 'bake-invariants'
   config:
     enabled: true
     package_allowlist:
-      - '^@deepseek-ai/dsh-'
+      - '^bake-'
 ```
 
 | Field | Default | Meaning |
@@ -47,7 +47,7 @@ The registry is enabled by default and checks every registered package unless fi
 | `package_allowlist` | `[]` | Regex sources admitting package names; empty admits all |
 | `package_blocklist` | `[]` | Regex sources excluding package names after allowlist matching |
 
-The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-invariants) is the exhaustive source for every accepted field and its JSDoc.
+The generated [configuration catalog](../../../docs/config-catalog.md#bake-invariants) is the exhaustive source for every accepted field and its JSDoc.
 
 ### Which checks run
 
@@ -56,14 +56,14 @@ Each companion protects relationships its package owns, and a companion installs
 | Companion | Checks |
 |---|---|
 | `dsh-session`, `dsh-agent`, `dsh-scope`, `dsh-agent-loop` | Session log enclosure and call/result trace, agent-status transitions, scope-filtered dispatch subjects, loop-built request reconstruction |
-| `dsh-llm`, `dsh-llm-retry`, `dsh-tools`, `dsh-system-prompt` | LLM stream grammar, retry-failure shape, tool-pipeline stage pairing and frozen results, prompt-assembly section names |
-| `dsh-compaction`, `dsh-hook-protocol`, `dsh-sandbox-policy` | Compaction stream pairing, hook invocation/result pairing, sandbox mode values |
-| `dsh-fs`, `dsh-subagent` | Filesystem event identity, subagent provider and start/end pairing |
-| `dsh-goal`, `dsh-goal-round-driver` | Durable goal-stream folds and reconstructed continuation prompts |
-| `dsh-permission-presets`, `dsh-user-approval`, `dsh-commands` | Preset references to live presets, approval asked/decided pairing, command run/done pairing |
-| `dsh-jobs` | Job snapshot field relationships |
-| `dsh-credentials`, `dsh-settings`, `dsh-storage-domain` | Commit events against the live service or memory state, entity-cache mirroring |
-| `dsh-agent-presets`, `dsh-session-title`, `dsh-schedule` | Preset mount placement, title source citation, schedule stream |
+| `bake-llm`, `bake-llm-retry`, `dsh-tools`, `dsh-system-prompt` | LLM stream grammar, retry-failure shape, tool-pipeline stage pairing and frozen results, prompt-assembly section names |
+| `bake-compaction`, `bake-hook-protocol`, `bake-sandbox-policy` | Compaction stream pairing, hook invocation/result pairing, sandbox mode values |
+| `bake-fs`, `bake-subagent` | Filesystem event identity, subagent provider and start/end pairing |
+| `bake-goal`, `bake-goal-round-driver` | Durable goal-stream folds and reconstructed continuation prompts |
+| `bake-permission-presets`, `bake-user-approval`, `bake-commands` | Preset references to live presets, approval asked/decided pairing, command run/done pairing |
+| `bake-jobs` | Job snapshot field relationships |
+| `bake-credentials`, `bake-settings`, `bake-storage-domain` | Commit events against the live service or memory state, entity-cache mirroring |
+| `bake-agent-presets`, `bake-session-title`, `bake-schedule` | Preset mount placement, title source citation, schedule stream |
 | `dsh-client-hmr`, `dsh-client-modules`, `dsh-client-runtime` | Browser/node-half stat-watcher lifecycle, boot entry graph, slot mutation versioning |
 
 Every other workspace package omits the companion and states the package-specific reason in its README.
@@ -74,8 +74,8 @@ A companion is a normal plugin you mount beside the registry. It declares any se
 
 ```ts
 import type { Context } from '@deepseek-ai/cordis'
-import InvariantRegistry from '@deepseek-ai/dsh-invariants'
-import * as SessionInvariant from '@deepseek-ai/dsh-session/invariant'
+import InvariantRegistry from 'bake-invariants'
+import * as SessionInvariant from 'bake-session/invariant'
 
 declare const ctx: Context
 
@@ -125,7 +125,7 @@ This section explains the design behind the registry; the observable behavior is
 Read these pages when the package-level contract is not enough. They move from the generated service reference to the decision evidence and the group map.
 
 - [Runtime invariants subsystem](../../../docs/subsystems/invariants.md) — the generated reference for `Config`, the installer, the service, and the companion contract.
-- [Generated configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-invariants) — every accepted config field and its source declaration.
+- [Generated configuration catalog](../../../docs/config-catalog.md#bake-invariants) — every accepted config field and its source declaration.
 - [Invariant runtime contracts Agent Note](../../../.agents/notes/implemented/architecture/2026-07-19-package-invariant-runtime-contracts.md) — what a runtime invariant may assert and the mechanical gate that enforces companion wiring.
 - [Runtime-diagnostics group map](../../README.md) — adjacent diagnostics packages.
 

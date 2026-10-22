@@ -1,6 +1,6 @@
 /**
  * The workspace's git branch and uncommitted changes, as one status-line field.
- * @module @dsh-tui/ui/git
+ * @module bake-tui-ui/git
  */
 
 import { PALETTE } from './palette.ts'

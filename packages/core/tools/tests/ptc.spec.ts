@@ -1,21 +1,21 @@
 import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { createUserMessage, ToolCallId  } from '@deepseek-ai/dsh-llm'
-import type { ToolSchema } from '@deepseek-ai/dsh-llm'
-import { createScope } from '@deepseek-ai/dsh-scope'
-import type { Scope } from '@deepseek-ai/dsh-scope'
-import SystemPrompt, { renderPrompt } from '@deepseek-ai/dsh-system-prompt'
-import { PtcRuntime } from '@deepseek-ai/dsh-ptc-runtime'
-import type { PtcRunRequest, PtcRunResult } from '@deepseek-ai/dsh-ptc-runtime'
-import ToolRuntime, { CodeRunFailedError, RUN_CODE_NAME, TOOL_ABORTED_BEFORE_DISPATCH, defineContentToolFixture, defineTool } from '@deepseek-ai/dsh-tools'
-import type { Config, JsonSchemaNode, PostToolDecision, ToolExecutionResult } from '@deepseek-ai/dsh-tools'
-import type { Agent } from '@deepseek-ai/dsh-agent'
-import { Session, SessionId } from '@deepseek-ai/dsh-session'
-import ApprovalService, { type ApprovalOutcome, type ApprovalRequest } from '@deepseek-ai/dsh-user-approval'
-import type { SessionEventMap } from '@deepseek-ai/dsh-session'
-import type { JsonValue } from '@deepseek-ai/dsh-util-values'
-import SandboxPolicy from '@deepseek-ai/dsh-sandbox-policy'
-import SessionProjections from '@deepseek-ai/dsh-session-projection'
+import { createUserMessage, ToolCallId  } from 'bake-llm'
+import type { ToolSchema } from 'bake-llm'
+import { createScope } from 'bake-scope'
+import type { Scope } from 'bake-scope'
+import SystemPrompt, { renderPrompt } from 'bake-system-prompt'
+import { PtcRuntime } from 'bake-ptc-runtime'
+import type { PtcRunRequest, PtcRunResult } from 'bake-ptc-runtime'
+import ToolRuntime, { CodeRunFailedError, RUN_CODE_NAME, TOOL_ABORTED_BEFORE_DISPATCH, defineContentToolFixture, defineTool } from 'bake-tools'
+import type { Config, JsonSchemaNode, PostToolDecision, ToolExecutionResult } from 'bake-tools'
+import type { Agent } from 'bake-agent'
+import { Session, SessionId } from 'bake-session'
+import ApprovalService, { type ApprovalOutcome, type ApprovalRequest } from 'bake-user-approval'
+import type { SessionEventMap } from 'bake-session'
+import type { JsonValue } from 'bake-util-values'
+import SandboxPolicy from 'bake-sandbox-policy'
+import SessionProjections from 'bake-session-projection'
 
 const testToolSignal = new AbortController().signal
 
@@ -29,7 +29,7 @@ const testToolSignal = new AbortController().signal
 
 /** A scriptable in-repo PtcRuntime: each test sets `behavior` to drive the bindings however it needs. */
 class FakeRuntime extends PtcRuntime {
-  resolve(request: import('@deepseek-ai/dsh-ptc-runtime').PtcRunRequest): import('@deepseek-ai/dsh-ptc-runtime').PtcRunSpec { return { ...request, cwd: request.cwd ?? process.cwd(), timeoutMs: request.timeoutMs ?? 120_000 } }
+  resolve(request: import('bake-ptc-runtime').PtcRunRequest): import('bake-ptc-runtime').PtcRunSpec { return { ...request, cwd: request.cwd ?? process.cwd(), timeoutMs: request.timeoutMs ?? 120_000 } }
 
   readonly language: string
   readonly isolation = 'fake'
@@ -1579,7 +1579,11 @@ describe('the run_code dispatch bridge', () => {
     await ctx.plugin(ToolRuntime, { mode: 'ptc' })
     const result = await runCode(ctx, 'program')
     expect(result.isError).toBe(true)
-    expect((result.content[0] as { text: string }).text).toContain('requires a PTC runtime')
+    // Model-visible tool error text: keep it byte-identical to released builds.
+    expect((result.content[0] as { text: string }).text).toContain(
+      'dsh-tools: mode "ptc" requires a PTC runtime — load a ctx.ptcRuntime implementation'
+      + ' (e.g. @deepseek-ai/dsh-ptc-runtime-codemode) or set tools mode to "native"',
+    )
   })
 
   it.each(['typescript', 'python'])('presents the description over the program with its runtime language (%s)', async (language) => {
@@ -2047,7 +2051,7 @@ describe('per-agent presentation', () => {
   })
 
   it('inherits a STANDING preset scope\'s mode down the chain, agents beside it unaffected', async () => {
-    const { bindScopeParent } = await import('@deepseek-ai/dsh-scope')
+    const { bindScopeParent } = await import('bake-scope')
     const { ctx, systemPrompt } = await setup({ mode: 'native' })
     const calls = registerEcho(ctx)
     // The preset's standing scope declares once; the agent only PARENTS to it

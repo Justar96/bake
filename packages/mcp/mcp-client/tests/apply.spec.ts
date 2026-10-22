@@ -5,10 +5,10 @@
 import assert from 'node:assert/strict'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import SystemPrompt, { renderPrompt } from '@deepseek-ai/dsh-system-prompt'
-import ToolRuntime from '@deepseek-ai/dsh-tools'
-import { createScope } from '@deepseek-ai/dsh-scope'
-import type { Config } from '@deepseek-ai/dsh-mcp-client'
+import SystemPrompt, { renderPrompt } from 'bake-system-prompt'
+import ToolRuntime from 'bake-tools'
+import { createScope } from 'bake-scope'
+import type { Config } from 'bake-mcp-client'
 
 // ---- Mock pi-mcp ----
 
@@ -69,7 +69,7 @@ vi.mock('@earendil-works/pi-mcp', () => ({
 
 // vi.mock is hoisted above static imports, so the module under test sees the
 // mocked client even through a static import.
-import { apply, name, inject, Config as ConfigSchema } from '@deepseek-ai/dsh-mcp-client/src/index.ts'
+import { apply, name, inject, Config as ConfigSchema } from 'bake-mcp-client/src/index.ts'
 
 // ---- Helpers ----
 

@@ -1,14 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
-import AgentRegistry from '@deepseek-ai/dsh-agent'
-import type { Agent, AgentStatus } from '@deepseek-ai/dsh-agent'
-import CommandRuntime from '@deepseek-ai/dsh-commands'
-import SessionStore, { foldSurface, Session, SessionId } from '@deepseek-ai/dsh-session'
-import * as commandFeedback from '@deepseek-ai/dsh-command-feedback'
-import type { FeedbackRecord } from '@deepseek-ai/dsh-command-feedback/types'
-import { remoteMethods } from '@deepseek-ai/dsh-typert-protocol'
-import { unsupportedInbox } from '@deepseek-ai/dsh-agent-loop-testkit'
+import AgentRegistry from 'bake-agent'
+import type { Agent, AgentStatus } from 'bake-agent'
+import CommandRuntime from 'bake-commands'
+import SessionStore, { foldSurface, Session, SessionId } from 'bake-session'
+import * as commandFeedback from 'bake-command-feedback'
+import type { FeedbackRecord } from 'bake-command-feedback/types'
+import { remoteMethods } from 'bake-typert-protocol'
+import { unsupportedInbox } from 'bake-agent-loop-testkit'
 
 const { USER_ID, getOrCreateAnonymousUserId } = vi.hoisted(() => {
   const USER_ID = '01234567-89ab-4cde-8f01-23456789abcd'
@@ -17,7 +17,7 @@ const { USER_ID, getOrCreateAnonymousUserId } = vi.hoisted(() => {
 
 const LOCAL = commandFeedback.sharingNotice(undefined)
 
-vi.mock('@deepseek-ai/dsh-anonymous-user-id', () => ({
+vi.mock('bake-anonymous-user-id', () => ({
   getOrCreateAnonymousUserId,
 }))
 
@@ -87,7 +87,7 @@ function feedbackTexts(session: Session): (string | undefined)[] {
   return feedbackRecords(session).map(record => record.text)
 }
 
-describe('@deepseek-ai/dsh-command-feedback registration', () => {
+describe('bake-command-feedback registration', () => {
   it('registers one global command with Loader-safe exports and disposes it', async () => {
     const test = await harness()
     expect(commandFeedback.name).toBe('command-feedback')

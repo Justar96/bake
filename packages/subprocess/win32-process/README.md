@@ -3,7 +3,7 @@ description: "Low-level Win32 process primitives for maintainers implementing or
 kind: "package-library"
 ---
 
-# @deepseek-ai/dsh-win32-process
+# bake-win32-process
 
 ## Summary
 

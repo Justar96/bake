@@ -1,21 +1,21 @@
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { createUserMessage } from 'bake-llm'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { execFileSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
-import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
-import type { Agent } from '@deepseek-ai/dsh-agent'
-import AgentLoop from '@deepseek-ai/dsh-agent-loop'
-import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
-import LocalJobRegistry from '@deepseek-ai/dsh-jobs-local'
-import * as ToolJobs from '@deepseek-ai/dsh-tool-jobs'
-import { LocalBashExecutor } from '@deepseek-ai/dsh-bash-local'
-import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
-import * as ToolBash from '@deepseek-ai/dsh-tool-bash'
-import * as BashEnvPlugin from '@deepseek-ai/dsh-shell-env'
+import { SessionId, type SessionEvent } from 'bake-session'
+import JsonlSessionPersistence from 'bake-session-persistence-jsonl'
+import type { Agent } from 'bake-agent'
+import AgentLoop from 'bake-agent-loop'
+import { mountAgentLoopTestDependencies } from 'bake-agent-loop-testkit'
+import LocalJobRegistry from 'bake-jobs-local'
+import * as ToolJobs from 'bake-tool-jobs'
+import { LocalBashExecutor } from 'bake-bash-local'
+import LocalSubprocessRuntime from 'bake-subprocess-local'
+import * as ToolBash from 'bake-tool-bash'
+import * as BashEnvPlugin from 'bake-shell-env'
 import { MockAdapter, textResponse, toolCallResponse } from '../../../core/agent-loop/tests/mock-adapter.ts'
 
 /**
@@ -94,14 +94,17 @@ async function pollUntil(predicate: () => boolean, timeoutMs = 5_000): Promise<v
 }
 
 describe('bash tool through the agent loop', () => {
-  it('first-turn bash receives session identity in a scrubbed DSH_* namespace', async () => {
+  it('first-turn bash receives session identity in scrubbed DSH_* and BAKE_* namespaces', async () => {
     const root = mkdtempSync(join(tmpdir(), 'dsh-bash-session-env-'))
     dirs.push(root)
     const dshHome = join(root, 'dsh-home')
     vi.stubEnv('DSH_STALE_PARENT', 'stale')
+    // An outer terminal's PTY id is a managed fact this bash call does not set.
+    vi.stubEnv('BAKE_PTY_SESSION_ID', 'stale')
     const adapter = new MockAdapter([
       toolCallResponse('call-1', 'bash', {
-        command: 'printf \'%s\\n%s\\n%s\\n%s\\n\' "$DSH_HOME" "$DSH_SHELL" "$DSH_SESSION_ID" "${DSH_STALE_PARENT-unset}"',
+        command: 'printf \'%s\\n\' "$DSH_HOME" "$DSH_SHELL" "$DSH_SESSION_ID" "${DSH_STALE_PARENT-unset}" '
+          + '"$BAKE_HOME" "$BAKE_SHELL" "$BAKE_SESSION_ID" "${BAKE_PTY_SESSION_ID-unset}"',
         description: 'inspect session environment',
       }),
       textResponse('Session environment inspected.'),
@@ -117,7 +120,7 @@ describe('bash tool through the agent loop', () => {
     await waitForIdle(ctx, agent)
 
     const result = findEvent(events(agent), 'tool/result')
-    expect(resultText(result)).toBe(`${dshHome}\n1\nsession-env-id\nunset\n`)
+    expect(resultText(result)).toBe(`${dshHome}\n1\nsession-env-id\nunset\n`.repeat(2))
     await handle.dispose()
   })
 

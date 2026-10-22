@@ -2,7 +2,7 @@
  * The bridge's two carriers for the same protocol messages: the Electron
  * utility process's message port when the desktop launches Bake, or
  * newline-delimited stdin/stdout under plain Node (tests and benchmarks).
- * @module @deepseek-ai/dsh-desktop/transport
+ * @module bake-desktop/transport
  */
 
 import { createInterface } from 'node:readline'

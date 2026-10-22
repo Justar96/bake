@@ -8,12 +8,12 @@
  * and publish it with `MoveFileExW(..., MOVEFILE_WRITE_THROUGH)` without
  * replacement or cross-volume copy fallback.
  *
- * @module dsh-session-persistence-jsonl/win32
+ * @module bake-session-persistence-jsonl/win32
  */
 
 import { mkdtemp, rm, stat } from 'node:fs/promises'
 import { join, parse, resolve, toNamespacedPath } from 'node:path'
-import { isENOENT } from '@deepseek-ai/dsh-util-values'
+import { isENOENT } from 'bake-util-values'
 
 type MoveFileExW = (existing: string, replacement: string, flags: number) => number
 type NativeHandle = bigint

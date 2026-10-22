@@ -2,7 +2,7 @@
  * The editable fields of a registered settings namespace, read from the
  * serialized schema its owner registered, so `/settings` can offer every
  * plugin's settings without knowing the plugin.
- * @module @dsh-tui/app/schema-fields
+ * @module bake-tui-app/schema-fields
  */
 
 /** How the panel edits a field. */

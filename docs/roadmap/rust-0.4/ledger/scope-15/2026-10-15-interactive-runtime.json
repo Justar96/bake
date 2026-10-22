@@ -1,0 +1,593 @@
+{
+  "schema": "bake/rust-migration/qualification-attempt",
+  "version": 1,
+  "id": "2026-10-15-interactive-runtime",
+  "scope": "15",
+  "status": "partial",
+  "recordedOn": "2026-10-15",
+  "summary": "The existing Rust preview frontend now runs real AgentSession interactions. Linux full preflight, Intel macOS native gates over SSH, native Windows Cargo checks, and an Opus 5.5 medium live smoke passed. Counts distinguish gates, Cargo tests, PTY scenarios, and the two live screen-mode runs. Supplemental Pi queue characterization tests were added in a test-only follow-up and passed on all three hosts. The initial test synchronization failure is retained. The paired eval covers shared CLI/session paths; interactive steering is covered separately by session and PTY tests. Scopes 14 and 15 remain open. The paired eval records 288 samples with no flagged regressions and 144 passing candidate samples; the Gemini alias substitution remains explicit.",
+  "supersedes": [],
+  "provenance": {
+    "base": "b68aa56aabeebacd82e1f151368ecd283992ccb7",
+    "candidate": "8961e64b0d1d1c42b87c4742c6981bc95baf3c37",
+    "oracle": {
+      "notApplicable": "Pi v1.2.0 06a466935536f8c9bcacb2d5efc0fc021be1bdff supplied core/agent-session.ts, modes/interactive/interactive-mode.ts and core/slash-commands.ts. NOTICE files name adapted methods and retain MIT. No TypeScript comparison arm applies to this Pi-first port."
+    }
+  },
+  "support": [
+    {
+      "id": "d22",
+      "reference": "docs/roadmap/rust-0.4/scope-00/support.md"
+    },
+    {
+      "id": "d24",
+      "reference": "docs/roadmap/rust-0.4/scope-00/support.md"
+    },
+    {
+      "id": "d25",
+      "reference": "docs/roadmap/rust-0.4/scope-00/support.md"
+    },
+    {
+      "id": "d32",
+      "reference": "docs/roadmap/rust-0.4/scope-00/support.md"
+    }
+  ],
+  "fixtures": {
+    "files": [
+      {
+        "path": "rust/crates/bake-coding-agent/src/agent_session/tests.rs",
+        "role": "fixture-definition-source",
+        "sha256": "386afd48f8d51f700c5181da59e0dba8e71d88447f9174ddc2bd22e3913bdeaf"
+      },
+      {
+        "path": "rust/crates/bake-tui-view/src/state.rs",
+        "role": "fixture-definition-source",
+        "sha256": "8eb7363a704be8c7096f37c5dfedcfe5b9eb2fef1a1dac6a6745009fb83cc855"
+      },
+      {
+        "path": "rust/crates/bake-tui/src/live/projection.rs",
+        "role": "fixture-definition-source",
+        "sha256": "0d2f41c5f5d73ee4eb107da8dcc88402f31cb51748f67b7dbe4f6e86253638a9"
+      },
+      {
+        "path": "rust/crates/bake-tui/src/live/tests.rs",
+        "role": "fixture-definition-source",
+        "sha256": "b27d552360fd7ea97196a43ffeb724b419abbb0c0f54d3be567fb509def1d4eb"
+      },
+      {
+        "path": "scripts/rust-preview-pty.ts",
+        "role": "fixture-definition-source",
+        "sha256": "86c071f70aa2c0f5a8bc2e40bb7f9b2f7832b95a957072a14f76556e8e18ecd5"
+      }
+    ],
+    "digest": "dc66c51face838080fcf01b5641226bd42aafe53c270664669e46ba51d01bac2"
+  },
+  "artifacts": [
+    {
+      "id": "live-linux-binary",
+      "description": "Local debug bake-rs used for the live fullscreen/inline smoke; not a release artifact.",
+      "sha256": "ba6f5af4a797e5d6ce160519a4379abaa38ff52d1c63506d53428557c8ef2d61",
+      "command": "live-opus"
+    }
+  ],
+  "commands": [
+    {
+      "id": "linux-preflight",
+      "argv": [
+        "bun",
+        "run",
+        "preflight"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "Linux WSL2 x86_64"
+      },
+      "tools": {
+        "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)"
+      },
+      "testedCommit": "8961e64b0d1d1c42b87c4742c6981bc95baf3c37",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 34,
+        "failed": 0,
+        "warned": 0,
+        "skipped": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/interactive/evidence/linux-preflight.log",
+        "sha256": "bfe863f42c3725aa627bf3e272a8c173e990170bbb7cc87addb262520f33d474"
+      }
+    },
+    {
+      "id": "linux-rust",
+      "argv": [
+        "bun",
+        "run",
+        "check:rust"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "Linux WSL2 x86_64"
+      },
+      "tools": {
+        "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)"
+      },
+      "testedCommit": "8961e64b0d1d1c42b87c4742c6981bc95baf3c37",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 1322,
+        "failed": 0,
+        "skipped": 2,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/interactive/evidence/linux-rust-final.log",
+        "sha256": "a52bfcf51078827636b6adb88e780763a55b7f7d3fc16f957a892f847a9d4252"
+      }
+    },
+    {
+      "id": "mac-native",
+      "argv": [
+        "bun",
+        "run",
+        "preflight:mac"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "darwin",
+        "arch": "x64",
+        "runner": "Intel Mac over SSH alias macpro; macOS 26.7.1"
+      },
+      "tools": {
+        "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)"
+      },
+      "testedCommit": "8961e64b0d1d1c42b87c4742c6981bc95baf3c37",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 3,
+        "failed": 0,
+        "warned": 0,
+        "skipped": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/interactive/evidence/mac-final.log",
+        "sha256": "1d305d211c25f2d3624a349efab2f33472bac35c9a890781ce7b5c3732f2ddd1"
+      }
+    },
+    {
+      "id": "mac-rust",
+      "argv": [
+        "bun",
+        "run",
+        "check:rust"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "darwin",
+        "arch": "x64",
+        "runner": "Intel Mac over SSH alias macpro; macOS 26.7.1"
+      },
+      "tools": {
+        "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)"
+      },
+      "testedCommit": "8961e64b0d1d1c42b87c4742c6981bc95baf3c37",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 1317,
+        "failed": 0,
+        "skipped": 2,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/interactive/evidence/mac-rust.log",
+        "sha256": "ab749102e41cb55c404f55ab7a36eb31e32474cf9dedd8e32ae1a14c4b78c39c"
+      }
+    },
+    {
+      "id": "windows-native",
+      "argv": [
+        "powershell.exe",
+        "-Command",
+        "cargo clippy --locked --workspace --all-targets -- -D warnings; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; cargo test --locked --workspace; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; cargo build --locked --workspace"
+      ],
+      "cwd": "rust",
+      "host": {
+        "os": "win32",
+        "arch": "x64",
+        "runner": "Native Windows x86_64; NTFS copy matching all 327 tracked Rust files; isolated TEMP"
+      },
+      "tools": {
+        "missing": "Pinned Rust 1.99 toolchain used; tool version output was not captured in this run."
+      },
+      "testedCommit": "8961e64b0d1d1c42b87c4742c6981bc95baf3c37",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 1233,
+        "failed": 0,
+        "skipped": 2,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/interactive/evidence/windows-final.log",
+        "sha256": "0499565d221da517780336fc11ad5204f281303134c07cb4f501103c0cf9d1db"
+      }
+    },
+    {
+      "id": "linux-pty",
+      "argv": [
+        "bun",
+        "run",
+        "test:rust:pty"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "Linux WSL2 x86_64"
+      },
+      "tools": {
+        "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)"
+      },
+      "testedCommit": "8961e64b0d1d1c42b87c4742c6981bc95baf3c37",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 30,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/interactive/evidence/linux-rust-pty.log",
+        "sha256": "099eed50d09c593a436da4c22567c8f97e25b833d52f6a11051c74376cdaddd1"
+      }
+    },
+    {
+      "id": "mac-pty",
+      "argv": [
+        "bun",
+        "run",
+        "test:rust:pty"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "darwin",
+        "arch": "x64",
+        "runner": "Intel Mac over SSH alias macpro; macOS 26.7.1"
+      },
+      "tools": {
+        "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)"
+      },
+      "testedCommit": "8961e64b0d1d1c42b87c4742c6981bc95baf3c37",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 28,
+        "failed": 0,
+        "skipped": 2,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/interactive/evidence/mac-rust-pty.log",
+        "sha256": "ef1a38f09d3e91859c2ef3f8e096a724394da4418094c8d268232a9369a71d35"
+      }
+    },
+    {
+      "id": "live-opus",
+      "argv": [
+        "bun",
+        ".preflight/rust-orchestrator/interactive/live-smoke.ts"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "Linux WSL2 x86_64"
+      },
+      "tools": {
+        "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)"
+      },
+      "testedCommit": "8961e64b0d1d1c42b87c4742c6981bc95baf3c37",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 2,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/interactive/evidence/live-smoke-final.log",
+        "sha256": "8f445b1a4aaa521661413d814ba3b151f2e8d3327bc6a2c602a2476b0c0b2291"
+      }
+    },
+    {
+      "id": "initial-steering-race",
+      "argv": [
+        "cargo",
+        "test",
+        "--workspace",
+        "--locked",
+        "--no-fail-fast"
+      ],
+      "cwd": "rust",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "Linux WSL2 x86_64"
+      },
+      "tools": {
+        "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)"
+      },
+      "testedCommit": {
+        "missing": "Uncommitted implementation before the steering test waited for the provider request. The initial test incorrectly used is_streaming as readiness, allowing the steer to join the first request; final tests wait for the held provider request."
+      },
+      "expectedExit": 0,
+      "actualExit": 101,
+      "counts": {
+        "passed": 1320,
+        "failed": 1,
+        "skipped": 2,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/interactive/evidence/worker-workspace-initial.log",
+        "sha256": "b8b31bd560e23e42a67b933f86d2bbce9e57d778b67bcc736ec76008994f008b"
+      }
+    },
+    {
+      "id": "gemini-config-attempt",
+      "argv": [
+        "env",
+        "EVAL_MODELS=gemini-3.8-flash-medium",
+        "EVAL_ARMS=base=native:/home/jt-devnet/bake-interactive-base-b68aa56,candidate=native:/home/jt-devnet/bake",
+        "bun",
+        "run",
+        "eval"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "Linux WSL2 x86_64"
+      },
+      "tools": {
+        "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)"
+      },
+      "testedCommit": "8961e64b0d1d1c42b87c4742c6981bc95baf3c37",
+      "expectedExit": 0,
+      "actualExit": 1,
+      "counts": {
+        "missing": "Route resolution failed before any sample or request ran."
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/interactive/evidence/gemini-config-error.log",
+        "sha256": "7e355e99e6b88cd8d913713b4acffff8852a5ad10e0345dacbf2f0f30c134586"
+      }
+    },
+    {
+      "id": "pi-queue-linux",
+      "argv": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "bake-coding-agent",
+        "pi_queue_modes_and_pending_message_start"
+      ],
+      "cwd": "rust",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "Linux WSL2 x86_64"
+      },
+      "tools": {
+        "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)"
+      },
+      "testedCommit": {
+        "missing": "The tested coding-agent source equals f5753041043b367b6f93144096eb9e19fbd5ba42; unrelated CLI/README documentation was uncommitted. Exact test bytes are bound by .preflight/rust-orchestrator/interactive/evidence/pi-queue-source.json and the fixture manifest."
+      },
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/interactive/evidence/pi-queue-linux.log",
+        "sha256": "4b26b0f4b16e6c24a05bfa23af81d956e97b0dbb78c169c553748f885a66766d"
+      }
+    },
+    {
+      "id": "pi-queue-mac",
+      "argv": [
+        "bun",
+        "run",
+        "preflight:mac",
+        "cd rust && cargo clippy --locked -p bake-coding-agent --all-targets -- -D warnings && cargo test --locked -p bake-coding-agent --lib pi_queue_modes_and_pending_message_start"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "darwin",
+        "arch": "x64",
+        "runner": "Intel Mac over SSH alias macpro; macOS 26.7.1"
+      },
+      "tools": {
+        "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)"
+      },
+      "testedCommit": "531671f11d3cecbac44c6f354684d9d0abf5e5ee",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/interactive/evidence/pi-queue-mac.log",
+        "sha256": "6e0d2fd13d7cdd0a32a6e71cc02770b7f1d1a7dea1aafde38e57d8ab9b353603"
+      }
+    },
+    {
+      "id": "pi-queue-windows",
+      "argv": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "bake-coding-agent",
+        "--lib",
+        "pi_queue_modes_and_pending_message_start"
+      ],
+      "cwd": "rust",
+      "host": {
+        "os": "win32",
+        "arch": "x64",
+        "runner": "Native Windows x86_64; NTFS copy matching all 327 tracked Rust files; isolated TEMP"
+      },
+      "tools": {
+        "missing": "Pinned Rust 1.99 toolchain used; tool version output was not captured in this run."
+      },
+      "testedCommit": {
+        "missing": "The tested coding-agent source equals f5753041043b367b6f93144096eb9e19fbd5ba42; unrelated CLI/README documentation was uncommitted. Exact test bytes are bound by .preflight/rust-orchestrator/interactive/evidence/pi-queue-source.json and the fixture manifest."
+      },
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/interactive/evidence/windows-pi-queue.log",
+        "sha256": "dc789cb68332d5f1889e1a8dd5a454d7778a29addb756f5d107d8e5979044384"
+      }
+    }
+  ],
+  "results": [
+    {
+      "id": "interactive-session",
+      "behavior": "The compiled agent streams model text and thinking, renders tools, accepts later prompts and images, persists and resumes Pi sessions, and validates model/auth before terminal setup.",
+      "owner": "scope 15",
+      "report": "docs/roadmap/rust-0.4/ledger/scope-15/2026-10-15-interactive-runtime.json",
+      "commands": [
+        "linux-pty",
+        "mac-pty",
+        "live-opus"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "admission-and-shutdown",
+      "behavior": "Refusal restores editable drafts and images; reentrant queue listeners see ordered updates; cancellation returns undelivered input, waits for abort before a later run, and shuts owned work down before terminal restoration.",
+      "owner": "scope 15",
+      "report": "docs/roadmap/rust-0.4/ledger/scope-15/2026-10-15-interactive-runtime.json",
+      "commands": [
+        "linux-rust",
+        "mac-rust",
+        "windows-native",
+        "linux-pty",
+        "mac-pty"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "workspace-gates",
+      "behavior": "All 34 Linux repository gates and all three Intel macOS native gates passed; native Windows lint, tests, and build passed. Gate counts and test-case counts are distinct.",
+      "owner": "scope 15",
+      "report": "docs/roadmap/rust-0.4/ledger/scope-15/2026-10-15-interactive-runtime.json",
+      "commands": [
+        "linux-preflight",
+        "mac-native",
+        "windows-native"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "steering-test-race",
+      "behavior": "Initial steering regression failed because is_streaming becomes true before the first provider request; synchronization now waits for the held request.",
+      "owner": "scope 15",
+      "report": "docs/roadmap/rust-0.4/ledger/scope-15/2026-10-15-interactive-runtime.json",
+      "commands": [
+        "initial-steering-race"
+      ],
+      "outcome": "fail",
+      "reason": "The initial failure is retained. Final Linux, Mac, and Windows workspace tests include the corrected regression and pass."
+    },
+    {
+      "id": "pi-queue-characterization",
+      "behavior": "Pi queue-mode and pre-message_start bookkeeping cases, added in test-only commit f5753041043b367b6f93144096eb9e19fbd5ba42, pass on Linux, Intel macOS and Windows. The one test covers steering and follow-up in both one-at-a-time and batched modes.",
+      "owner": "scope 15",
+      "report": "docs/roadmap/rust-0.4/ledger/scope-15/2026-10-15-interactive-runtime.json",
+      "commands": [
+        "pi-queue-linux",
+        "pi-queue-mac",
+        "pi-queue-windows"
+      ],
+      "outcome": "pass"
+    }
+  ],
+  "negativeControls": {
+    "missing": "No new temporary broken-implementation mutation was executed. Regression tests cover reentrant queue mutation, late cancellation, missing credentials, rejected commands, vanished receivers and driver panic; the existing native eval gate also exercises tamper rejection."
+  },
+  "missingEvidence": [
+    {
+      "what": "Remaining interactive controls",
+      "reason": "Approval prompts, slash commands, model/thinking/settings controls, and session navigation are not implemented. Approval-required effects stay refused.",
+      "owner": "scope 15"
+    },
+    {
+      "what": "Complete platform terminal matrix",
+      "reason": "Windows Cargo checks do not exercise ConPTY. Apple Silicon was not tested; the SSH Mac is Intel. Complete kept-workflow mapping and release qualification remain.",
+      "owner": "scopes 14, 15 and 17"
+    },
+    {
+      "what": "Exact standard Gemini eval model",
+      "reason": "The local evaluator catalog lacks gemini-3.8-flash-medium. Its attempt failed before any sample. gemini-3.8-flash-high at medium effort was used instead, as in prior native records; this is not the exact standard alias.",
+      "owner": "eval configuration"
+    },
+    {
+      "what": "Windows confined process execution",
+      "reason": "The prior ACL deletion/move gap is unchanged; the default Windows backend remains fail-closed. Passing TUI and storage checks do not qualify that boundary.",
+      "owner": "scope 04"
+    }
+  ],
+  "evalRecords": [
+    "evals/agent-loop/versions/unreleased/2026-10-15-interactive-runtime/REPORT.md"
+  ],
+  "performanceRecords": {
+    "notApplicable": "No performance optimization or comparative latency claim is made."
+  },
+  "rollback": {
+    "notApplicable": "This is an opt-in development binary, not a release or install/update migration. The existing TypeScript launcher remains in place."
+  },
+  "review": {
+    "reviewer": "Codex orchestration review of the requested Pi Opus 5.5 medium worker",
+    "state": "commented",
+    "reference": "docs/roadmap/rust-0.4/README.md"
+  }
+}

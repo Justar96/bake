@@ -1,0 +1,562 @@
+{
+  "schema": "bake/rust-migration/qualification-attempt",
+  "version": 1,
+  "id": "2026-10-07-native-fixture-evidence",
+  "scope": "01",
+  "status": "partial",
+  "recordedOn": "2026-10-07",
+  "summary": "Synthetic harness and fake native eval-arm evidence only. A clean checkout of merged PR 57 passed local checks. Final CI used synthetic merge 3e99536f331431857da82032d0dbee90d3c88f0c; its tree, final PR head 02917f6549bf571bfcdc1ac9bb6c3a1a537566d6, and this candidate all equal 5c448cfbbdce48cb9912d24d0c0ac542c9dd3c98. The corrected macOS assertion permits only the runtime-added __CF_USER_TEXT_ENCODING setting. This is not agent-runtime parity or scope acceptance.",
+  "supersedes": [
+    "2026-10-07-native-fixture-macos-failure"
+  ],
+  "provenance": {
+    "base": "996eae9ca6ddd24f876e5430aba38442bb2cb404",
+    "candidate": "71805dfe1f1e7a9aef7088bd4043740e0d5b4d34",
+    "oracle": {
+      "missing": "Scope 00 has not accepted a final frozen TypeScript oracle."
+    }
+  },
+  "support": {
+    "notApplicable": "Development-only comparison tooling; this attempt changes no shipped support entry."
+  },
+  "fixtures": {
+    "files": [
+      {
+        "path": "conformance/fixtures/allow-write.json",
+        "role": "shared-fixture-bytes",
+        "sha256": "84db72b5b65b7bca26f1e120cd36c53a55dc34f4c69dcb036f8a1bf194177fb0"
+      },
+      {
+        "path": "conformance/fixtures/deny-write.json",
+        "role": "shared-fixture-bytes",
+        "sha256": "72d92331e5b6726f8c289519db681755d03e0663bf09ca8b78e90262df2e41de"
+      },
+      {
+        "path": "conformance/fixtures/ordered-writes.json",
+        "role": "shared-fixture-bytes",
+        "sha256": "e29c6a0318bd2de6f2d2261ad6f94b9ae90a835c6921ce36d8f6224b0657aa0c"
+      },
+      {
+        "path": "evals/agent-loop/scenarios.ts",
+        "role": "fixture-definition-source",
+        "sha256": "0e27b791a4334dc36364a26acc29e3d2c55337d05e31c7ea56e8b4b54f1a4353"
+      }
+    ],
+    "digest": "ca3ed455f26a1c4f229596237e22e183695e151673e94f41e8c8e1203bd17553"
+  },
+  "artifacts": [
+    {
+      "id": "local-fake-arm",
+      "description": "Linux debug bake-eval-fake-arm used by native-eval; local build only.",
+      "sha256": "a4d2ac018ae3677f6d1f70608af0b0bfde10e84a7e9b8e9495b73f417aa5cdd9",
+      "command": "native-eval"
+    },
+    {
+      "id": "local-prompt",
+      "description": "UTF-8 ordinary_edit prompt actually delivered by native-eval.",
+      "sha256": "577f1a9ce7f6f2163262d0d403dabb71b32ffd1a504a49f87abb6460b8b004f9",
+      "command": "native-eval"
+    },
+    {
+      "id": "local-typescript-0",
+      "description": "scripts/rust-conformance/runner.ts used by local conformance.",
+      "sha256": "50e1afe3120b5a52c6fece27b11ff6fcf7cef0248b53d1fdf6cc2e722ed6fdb6",
+      "command": "conformance"
+    },
+    {
+      "id": "local-typescript-1",
+      "description": "scripts/rust-conformance/fixture.ts used by local conformance.",
+      "sha256": "b9f390794fc1540ade4a8fc1e32b03a2cff506f51daed5fb78df89e42d3f7ff9",
+      "command": "conformance"
+    },
+    {
+      "id": "local-rust-0",
+      "description": "rust/target/debug/bake-conformance-runner used by local conformance.",
+      "sha256": "9b088b9638eab45c1b779da1254c9b67440faf4dc80b9e5a3ecfbfd3efeb16a8",
+      "command": "conformance"
+    },
+    {
+      "id": "mutated-predicate",
+      "description": "Isolated scenarios.ts after removing only testsUnchanged from the validated predicate; original source hash is the fixture manifest entry.",
+      "sha256": "b40712870a0a3c79ef6d188341527328cfd2333b02dd96cc8c54b4a1d00da13e",
+      "command": "tamper-control"
+    },
+    {
+      "id": "ci-native-linux",
+      "description": "Compiled native artifacts on linux.",
+      "sha256": {
+        "missing": "Successful native jobs retain gate summaries only; their binary hashes were not captured in the downloadable job log."
+      },
+      "command": "ci-native-linux"
+    },
+    {
+      "id": "ci-native-macos",
+      "description": "Compiled native artifacts on macos.",
+      "sha256": {
+        "missing": "Successful native jobs retain gate summaries only; their binary hashes were not captured in the downloadable job log."
+      },
+      "command": "ci-native-macos"
+    },
+    {
+      "id": "ci-native-windows",
+      "description": "Compiled native artifacts on windows.",
+      "sha256": {
+        "missing": "Successful native jobs retain gate summaries only; their binary hashes were not captured in the downloadable job log."
+      },
+      "command": "ci-native-windows"
+    }
+  ],
+  "commands": [
+    {
+      "id": "native-check",
+      "argv": [
+        "bun",
+        "run",
+        "check:rust"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local; kernel 7.2.8-200.fc44.x86_64"
+      },
+      "tools": {
+        "bun": "1.4.2",
+        "node": "v26.10.0",
+        "git": "2.56.0",
+        "rustc": "1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "1.99.0 (5f94df478 2026-08-27)"
+      },
+      "testedCommit": "71805dfe1f1e7a9aef7088bd4043740e0d5b4d34",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 60,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/ledger/ledger-native-check.json",
+        "sha256": "c1c85a21e0c7b27558c3335fbf80737fb6a027bcbd3ffde2ae5444133edf3593"
+      }
+    },
+    {
+      "id": "native-eval",
+      "argv": [
+        "bun",
+        "run",
+        "test:rust:eval"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local; kernel 7.2.8-200.fc44.x86_64"
+      },
+      "tools": {
+        "bun": "1.4.2",
+        "node": "v26.10.0",
+        "git": "2.56.0",
+        "rustc": "1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "1.99.0 (5f94df478 2026-08-27)"
+      },
+      "testedCommit": "71805dfe1f1e7a9aef7088bd4043740e0d5b4d34",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 4,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/ledger/ledger-native-eval.json",
+        "sha256": "d81c402942860a859417769ce58051377a6e0ba134b35068528aa855bc14555b"
+      }
+    },
+    {
+      "id": "conformance",
+      "argv": [
+        "bun",
+        "run",
+        "test:rust:conformance"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local; kernel 7.2.8-200.fc44.x86_64"
+      },
+      "tools": {
+        "bun": "1.4.2",
+        "node": "v26.10.0",
+        "git": "2.56.0",
+        "rustc": "1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "1.99.0 (5f94df478 2026-08-27)"
+      },
+      "testedCommit": "71805dfe1f1e7a9aef7088bd4043740e0d5b4d34",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 3,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/ledger/ledger-conformance.json",
+        "sha256": "3fcee2ab8f344e2936c75854c8699f765a5878b39156bbd46809d572916f139a"
+      }
+    },
+    {
+      "id": "ci-native-linux",
+      "argv": [
+        "bun",
+        "run",
+        "preflight",
+        "--only",
+        "native"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "ubuntu-latest; image ubuntu-24.04 20260927.320.1"
+      },
+      "tools": {
+        "bun": "1.4.2",
+        "node": "v24.21.0",
+        "rust-toolchain": "1.99.0-x86_64-unknown-linux-gnu"
+      },
+      "testedCommit": "3e99536f331431857da82032d0dbee90d3c88f0c",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 4,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": "https://github.com/Justar96/bake/actions/runs/37554504104/job/112577497117",
+        "sha256": "d45c508f54731af1654e1cec36b90d7e120ce05b8e7de1be179f2dd9da4acf6f"
+      }
+    },
+    {
+      "id": "ci-native-macos",
+      "argv": [
+        "bun",
+        "run",
+        "preflight",
+        "--only",
+        "native"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "darwin",
+        "arch": "arm64",
+        "runner": "macos-latest; image macos-26-arm64 20260907.0351.1"
+      },
+      "tools": {
+        "bun": "1.4.2",
+        "node": "v24.20.0",
+        "rust-toolchain": "1.99.0-aarch64-apple-darwin"
+      },
+      "testedCommit": "3e99536f331431857da82032d0dbee90d3c88f0c",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 4,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": "https://github.com/Justar96/bake/actions/runs/37554504104/job/112577496944",
+        "sha256": "a1866225722d8ce7b99903b07ffd0fde52a63d2ae746406fa6267c8d6f7866bb"
+      }
+    },
+    {
+      "id": "ci-native-windows",
+      "argv": [
+        "bun",
+        "run",
+        "preflight",
+        "--only",
+        "native"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "win32",
+        "arch": "x64",
+        "runner": "windows-latest; image windows-2025-vs2026 20260925.250.1"
+      },
+      "tools": {
+        "bun": "1.4.2",
+        "node": "v24.21.0",
+        "rust-toolchain": "1.99.0-x86_64-pc-windows-msvc"
+      },
+      "testedCommit": "3e99536f331431857da82032d0dbee90d3c88f0c",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 3,
+        "failed": 0,
+        "skipped": 1,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": "https://github.com/Justar96/bake/actions/runs/37554504104/job/112577496915",
+        "sha256": "a61fcb8c3320364f2c5fb0dd212cf3e88575f3164579fd174739c73dda492aa1"
+      }
+    },
+    {
+      "id": "ci-checks-linux",
+      "argv": [
+        "bun",
+        "run",
+        "preflight",
+        "--full",
+        "--skip",
+        "runtime,native"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "ubuntu-latest"
+      },
+      "tools": {
+        "bun": "1.4.2",
+        "node": "v24.21.0"
+      },
+      "testedCommit": "3e99536f331431857da82032d0dbee90d3c88f0c",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 26,
+        "failed": 0,
+        "skipped": 8,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": "https://github.com/Justar96/bake/actions/runs/37554504104/job/112577497057",
+        "sha256": "da71a47c5ec7923b3e119754d8c921c9eaef189e2733d4a44710dc8e8276f478"
+      }
+    },
+    {
+      "id": "ci-checks-macos",
+      "argv": [
+        "bun",
+        "run",
+        "preflight",
+        "--full",
+        "--skip",
+        "runtime,native"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "darwin",
+        "arch": "arm64",
+        "runner": "macos-latest"
+      },
+      "tools": {
+        "bun": "1.4.2",
+        "node": "v24.20.0"
+      },
+      "testedCommit": "3e99536f331431857da82032d0dbee90d3c88f0c",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 26,
+        "failed": 0,
+        "skipped": 8,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": "https://github.com/Justar96/bake/actions/runs/37554504104/job/112577497067",
+        "sha256": "b09264e833544e5131a76b0cbb44aee0f908b6c77a78af291c209c3e3076c9cc"
+      }
+    },
+    {
+      "id": "tamper-control",
+      "argv": [
+        "bun",
+        "evals/agent-loop/native-smoke.ts"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local; kernel 7.2.8-200.fc44.x86_64"
+      },
+      "tools": {
+        "bun": "1.4.2",
+        "node": "v26.10.0",
+        "git": "2.56.0",
+        "rustc": "1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "1.99.0 (5f94df478 2026-08-27)"
+      },
+      "testedCommit": {
+        "missing": "Temporary copy of 71805dfe1f1e7a9aef7088bd4043740e0d5b4d34 with one deliberate predicate mutation; not a committed checkout."
+      },
+      "expectedExit": 1,
+      "actualExit": 1,
+      "counts": {
+        "passed": 1,
+        "failed": 1,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/ledger/native-tamper-control.log",
+        "sha256": "ce72991460e43cc99843532a3eaaa420169dc6c92be2d0ea0a3941b6a0905b21"
+      }
+    }
+  ],
+  "results": [
+    {
+      "id": "native-unit",
+      "behavior": "Local formatting, clippy, build and 60 Cargo tests passed. Counts describe Cargo tests; the other checks also exited successfully.",
+      "owner": "package.json",
+      "report": ".preflight/ledger/ledger-native-check.json",
+      "commands": [
+        "native-check"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "compiled-fixture",
+      "behavior": "Four compiled-arm cases passed: correct edit accepted; tampered checks, claim-only output and exit 1 rejected. Counts describe smoke cases.",
+      "owner": "evals/agent-loop/native-smoke.ts",
+      "report": ".preflight/ledger/ledger-native-eval.json",
+      "commands": [
+        "native-eval"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "synthetic-comparison",
+      "behavior": "All three shared synthetic fixtures passed both arms and all four independent comparators. Counts describe fixtures.",
+      "owner": "scripts/rust-conformance/driver.ts",
+      "report": ".preflight/ledger/ledger-conformance.json",
+      "commands": [
+        "conformance"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "ci-native",
+      "behavior": "Native preflight gate summaries passed on Linux and macOS (4 each), and Windows (3 with 1 PTY skip). Counts describe gates, not internal tests.",
+      "owner": "scripts/preflight.ts",
+      "report": "https://github.com/Justar96/bake/actions/runs/37554504104",
+      "commands": [
+        "ci-native-linux",
+        "ci-native-macos",
+        "ci-native-windows"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "ci-app-checks",
+      "behavior": "Corrected macOS environment assertion and Linux checks passed in final app preflight. Each command reports 26 passed gates and 8 configured or unavailable skips.",
+      "owner": "scripts/preflight.ts",
+      "report": "https://github.com/Justar96/bake/actions/runs/37554504104",
+      "commands": [
+        "ci-checks-linux",
+        "ci-checks-macos"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "windows-conpty",
+      "behavior": "Windows terminal lifecycle and console restoration.",
+      "owner": "scripts/rust-preview-pty.ts",
+      "report": "https://github.com/Justar96/bake/actions/runs/37554504104/job/112577496915",
+      "commands": [
+        "ci-native-windows"
+      ],
+      "outcome": "skip",
+      "reason": "The Windows native job skips the POSIX PTY gate; no ConPTY implementation exists."
+    },
+    {
+      "id": "actionlint",
+      "behavior": "Workflow syntax lint.",
+      "owner": "scripts/preflight.ts",
+      "report": "https://github.com/Justar96/bake/actions/runs/37554504104",
+      "commands": [
+        "ci-checks-linux",
+        "ci-checks-macos"
+      ],
+      "outcome": "skip",
+      "reason": "actionlint was not installed on either app CI runner or the local host."
+    }
+  ],
+  "negativeControls": [
+    {
+      "id": "remove-test-integrity",
+      "defect": "In a private copy of candidate 71805dfe1f1e7a9aef7088bd4043740e0d5b4d34, removed testsUnchanged from the existing validated predicate. No original source changed; the copy was removed.",
+      "assertion": "native-smoke.ts rejects tamper-tests when verdict.validated and success become true. The first edit case passed, then this assertion failed; command counts are those two reached cases.",
+      "observed": "rejected",
+      "commands": [
+        "tamper-control"
+      ]
+    }
+  ],
+  "missingEvidence": [
+    {
+      "what": "Scope 00 decisions and accepted full baseline",
+      "reason": "Owner decisions, fixed qualification budgets, minimum supported hosts, and complete baseline qualification remain open.",
+      "owner": "docs/roadmap/rust-0.4/scope-00/support.md"
+    },
+    {
+      "what": "Real runtime fixtures and live native eval arm",
+      "reason": "Both comparison runners are synthetic; the Rust executable is a fake arm with no agent loop, model route, session replay or usage metrics.",
+      "owner": "unassigned"
+    },
+    {
+      "what": "Complete release-target qualification",
+      "reason": "These jobs cover Linux x64, macOS arm64 and Windows x64 only; no Linux arm64, macOS x64 or all minimum-version release/install/rollback runs.",
+      "owner": "unassigned"
+    },
+    {
+      "what": "Windows ConPTY and process-tree lifecycle",
+      "reason": "Windows terminal coverage and hostile or normal-exit descendant ownership are outside this trusted single-process adapter.",
+      "owner": "unassigned"
+    },
+    {
+      "what": "CI artifact digests and durable local logs",
+      "reason": "Successful CI logs contain gate summaries; local raw logs live in ignored .preflight and are not published. Recorded local digests do not identify CI binaries.",
+      "owner": "scripts/preflight.ts"
+    },
+    {
+      "what": "actionlint execution",
+      "reason": "The tool was unavailable locally and in Linux/macOS app CI.",
+      "owner": "scripts/preflight.ts"
+    },
+    {
+      "what": "Scope acceptance",
+      "reason": "No qualification reviewer or product-owner acceptance is recorded.",
+      "owner": "unassigned"
+    }
+  ],
+  "evalRecords": {
+    "notApplicable": "No model-visible runtime change; these checks run deterministic fake arms without a model."
+  },
+  "performanceRecords": {
+    "notApplicable": "No performance qualification attempted; command duration is not a performance baseline."
+  },
+  "rollback": {
+    "observed": "The baseline command wrapper observed unchanged source and no command-owned surviving descendants after each of the three clean candidate commands: native-check, native-eval and conformance. Separately, the tamper-control copy was removed and its original source hash remained unchanged; that control did not measure surviving descendants. These checks touch no user install or session storage.",
+    "commands": [
+      "native-check",
+      "native-eval",
+      "conformance",
+      "tamper-control"
+    ]
+  },
+  "review": {
+    "missing": "No reviewer has accepted scope 01 qualification. Code review and green CI do not establish scope acceptance."
+  }
+}

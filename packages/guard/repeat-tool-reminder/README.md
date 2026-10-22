@@ -3,11 +3,11 @@ description: "Advisory loop-hygiene guard that nudges the model out of identical
 kind: "package-reference"
 ---
 
-# @deepseek-ai/dsh-repeat-tool-reminder
+# bake-repeat-tool-reminder
 
 ## Summary
 
-This package helps a model escape loops in which it calls the same tool with identical arguments without making progress. At configured repeat counts, it asks the model to inspect the previous result and change approach or finish. The reminder is advisory: it never blocks or delays a legitimate repeated call. Repeats are tracked separately for each agent and cleared by a new user message. The `dsh` base bundle enables the package with reminders at 3, 5, and 8 repeats.
+This package helps a model escape loops in which it calls the same tool with identical arguments without making progress. At configured repeat counts, it asks the model to inspect the previous result and change approach or finish. The reminder is advisory: it never blocks or delays a legitimate repeated call. Repeats are tracked separately for each agent and cleared by a new user message. The `bake` base bundle enables the package with reminders at 3, 5, and 8 repeats.
 
 ## Table of Contents
 
@@ -23,7 +23,7 @@ This package helps a model escape loops in which it calls the same tool with ide
 <a id="use-this-package"></a>
 ## Use this package
 
-Mount this plugin when the model should catch itself looping on identical tool calls. There is nothing to learn or wire: the `dsh` base bundle already runs it, and the defaults work for most sessions — tune the thresholds and tool scope below when you want the nudge sooner, later, or on fewer tools.
+Mount this plugin when the model should catch itself looping on identical tool calls. There is nothing to learn or wire: the `bake` base bundle already runs it, and the defaults work for most sessions — tune the thresholds and tool scope below when you want the nudge sooner, later, or on fewer tools.
 
 ### When to choose it
 
@@ -34,7 +34,7 @@ Choose it when the model works autonomously for long stretches and a stuck loop 
 When you want to change when reminders fire or which tools they cover, mount the plugin with configuration:
 
 ```yaml
-- name: '@deepseek-ai/dsh-repeat-tool-reminder'
+- name: 'bake-repeat-tool-reminder'
   config:
     thresholds: [3, 5, 8]        # remind at 3, 5, and 8 consecutive repeats
     include: []                  # track every tool; list patterns to track only some
@@ -49,7 +49,7 @@ When you want to change when reminders fire or which tools they cover, mount the
 | `exclude` | `[]` | These tools are never tracked; calls to them neither count nor reset |
 | `argumentsPreviewChars` | `500` | How many characters of the repeated arguments the detailed reminder shows |
 
-Invalid configuration fails at startup with a clear error — an empty `thresholds` list, a repeat count below 2, or a duplicate — never a silent change of behavior. The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-repeat-tool-reminder) documents every accepted value.
+Invalid configuration fails at startup with a clear error — an empty `thresholds` list, a repeat count below 2, or a duplicate — never a silent change of behavior. The generated [configuration catalog](../../../docs/config-catalog.md#bake-repeat-tool-reminder) documents every accepted value.
 
 ### What you get
 
@@ -105,7 +105,7 @@ Reminders ride the post-execute decision's `additionalContexts` (source `{kind: 
 Read these pages when the package-level contract is not enough. They move from the tools waterfall to exhaustive configuration and the guard group map.
 
 - [Tools subsystem reference](../../../docs/subsystems/tools.md) — the `tools/execute` waterfall, `additionalContexts`, and decision shapes this guard consumes.
-- [Generated configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-repeat-tool-reminder) — every accepted config field and its source declaration.
+- [Generated configuration catalog](../../../docs/config-catalog.md#bake-repeat-tool-reminder) — every accepted config field and its source declaration.
 - [guard group map](../README.md) — the sibling guard packages and the loop-hygiene family.
 
 -----

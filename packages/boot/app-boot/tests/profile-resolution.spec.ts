@@ -1506,6 +1506,64 @@ describe('profile resolution generation', { concurrent: false }, () => {
     expect(getEnvironmentData(key)).toBe(previous)
   })
 
+  /** An installation whose `bake-llm` replaced `@deepseek-ai/dsh-llm`, with one export subpath. */
+  function renamedFixture(): ReturnType<typeof fixture> {
+    const f = fixture('bake-llm')
+    file(join(f.installed, 'package.json'), JSON.stringify({
+      name: 'bake-llm',
+      version: '1.0.0',
+      type: 'module',
+      exports: {
+        '.': { import: './index.js', require: './index.cjs' },
+        './types': { import: './types.js', require: './types.cjs' },
+      },
+    }))
+    file(join(f.installed, 'types.js'), 'export const marker = 2\n')
+    file(join(f.installed, 'types.cjs'), 'module.exports = { marker: 2 }\n')
+    return f
+  }
+
+  it('resolves a legacy package name as the installed package that replaced it', async () => {
+    const f = renamedFixture()
+    const generation = await generationOf(f)
+    const current = generation.entries.find(entry => entry.name === 'bake-llm')
+    expect(current).toBeDefined()
+    expect(current?.renamedTo).toBeUndefined()
+    expect(generation.entries.find(entry => entry.name === '@deepseek-ai/dsh-llm')).toEqual({
+      ...current, name: '@deepseek-ai/dsh-llm', renamedTo: 'bake-llm',
+    })
+    expect(generation.entries.some(entry => entry.name === '@deepseek-ai/dsh-tools')).toBe(false)
+    const registration = installProfileResolution(generation)
+    registrations.push(registration)
+
+    const require = createRequire(join(f.profile.dir, 'entry.cjs'))
+    expect(require.resolve('@deepseek-ai/dsh-llm')).toBe(join(f.installed, 'index.cjs'))
+    expect(require.resolve('@deepseek-ai/dsh-llm/types')).toBe(join(f.installed, 'types.cjs'))
+    expect(require('@deepseek-ai/dsh-llm')).toBe(require('bake-llm'))
+    const parent = pathToFileURL(join(f.profile.dir, 'entry.mjs')).href
+    expect(resolveFrom('@deepseek-ai/dsh-llm', parent)).toBe(pathToFileURL(join(f.installed, 'index.js')).href)
+    expect(resolveFrom('@deepseek-ai/dsh-llm/types', parent)).toBe(pathToFileURL(join(f.installed, 'types.js')).href)
+    expect(await importFrom('@deepseek-ai/dsh-llm', parent)).toBe(await importFrom('bake-llm', parent))
+    expect(registration.packageDir('@deepseek-ai/dsh-llm', parent)).toBe(f.installed)
+  })
+
+  it('links a legacy package name to its replacement in the materialized fallback', async () => {
+    const f = renamedFixture()
+    const generation = await healProfilesModuleFallback({
+      installAnchor: f.installAnchor,
+      profile: f.profile,
+      home: f.root,
+    })
+    expect(realpathSync(join(generation.profilesDir, 'node_modules', '@deepseek-ai', 'dsh-llm'))).toBe(f.installed)
+    const registration = installProfileResolution(generation, 'verify')
+    registrations.push(registration)
+
+    const require = createRequire(join(f.profile.dir, 'dual-entry.cjs'))
+    expect(require.resolve('@deepseek-ai/dsh-llm/types')).toBe(join(f.installed, 'types.cjs'))
+    const parent = pathToFileURL(join(f.profile.dir, 'dual-entry.mjs')).href
+    expect(resolveFrom('@deepseek-ai/dsh-llm', parent)).toBe(pathToFileURL(join(f.installed, 'index.js')).href)
+  })
+
   it('restores CommonJS resolution when the registration is disposed', async () => {
     const f = fixture()
     const registration = installProfileResolution(await generationOf(f))

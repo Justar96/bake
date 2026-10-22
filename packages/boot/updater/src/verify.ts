@@ -12,7 +12,7 @@
  * directory inside a scratch directory removed afterwards, whether the check
  * finished, failed, or was stopped at its time limit.
  *
- * @module @deepseek-ai/dsh-updater/verify
+ * @module bake-updater/verify
  */
 
 import { spawn } from 'node:child_process'
@@ -84,7 +84,7 @@ export async function launchProblem(check: LaunchCheck): Promise<string | undefi
     const result = await runBounded(check.node, [
       '--report-exclude-env', '--report-exclude-network', `--diagnostic-dir=${diagnostics}`, command, argument,
     ], {
-      ...process.env, DSH_HOME: home, TMPDIR: temporary, TMP: temporary, TEMP: temporary,
+      ...process.env, BAKE_HOME: home, DSH_HOME: home, TMPDIR: temporary, TMP: temporary, TEMP: temporary,
       // A cache written under the scratch directory would be thrown away with it.
       NODE_DISABLE_COMPILE_CACHE: '1',
     }, timeout, check.signal)

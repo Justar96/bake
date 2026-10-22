@@ -1,0 +1,96 @@
+{
+  "schema": "bake/rust-migration/qualification-attempt",
+  "version": 1,
+  "id": "2026-10-07-native-fixture-macos-failure",
+  "scope": "01",
+  "status": "failed",
+  "recordedOn": "2026-10-07",
+  "summary": "PR 57 first CI attempt: macOS evals-unit failed because CoreFoundation adds __CF_USER_TEXT_ENCODING after exec, contradicting the exact environment-name assertion. Preflight counts are gates, not tests. The later evidence record retains this failure and records the correction.",
+  "supersedes": [],
+  "provenance": {
+    "base": "996eae9ca6ddd24f876e5430aba38442bb2cb404",
+    "candidate": "d3d5635fd0f9a77695f4e4bc82e81991f7f05067",
+    "oracle": {
+      "missing": "Scope 00 has not accepted a final frozen TypeScript oracle."
+    }
+  },
+  "support": {
+    "notApplicable": "Development-only comparison tooling; this attempt changes no shipped support entry."
+  },
+  "fixtures": {
+    "missing": "No fixture manifest captured for this attempt."
+  },
+  "artifacts": {
+    "missing": "No artifact hashes retained for this attempt."
+  },
+  "commands": [
+    {
+      "id": "macos-checks",
+      "argv": [
+        "bun",
+        "run",
+        "preflight",
+        "--full",
+        "--skip",
+        "runtime,native"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "darwin",
+        "arch": "arm64",
+        "runner": "macos-latest; image macos-26-arm64 20260907.0351.1"
+      },
+      "tools": {
+        "bun": "1.4.2",
+        "node": "v24.20.0"
+      },
+      "testedCommit": "1b6c95588f813ae4eb2abfb577a6630e7eda0858",
+      "expectedExit": 0,
+      "actualExit": 1,
+      "counts": {
+        "passed": 25,
+        "failed": 1,
+        "skipped": 8,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": "https://github.com/Justar96/bake/actions/runs/37553741838/job/112575024276",
+        "sha256": "2f03f0551bc31ff2f066c0bb46781880195c057826f8f0f85f3fb10da07da3a1"
+      }
+    }
+  ],
+  "results": [
+    {
+      "id": "minimal-environment",
+      "behavior": "Exact environment-name assertion in native fixture adapter test failed on the macOS runtime-added setting.",
+      "owner": "evals/agent-loop/native-fixture.test.ts",
+      "report": "https://github.com/Justar96/bake/actions/runs/37553741838/job/112575024276",
+      "commands": [
+        "macos-checks"
+      ],
+      "outcome": "fail"
+    }
+  ],
+  "negativeControls": {
+    "notApplicable": "This attempt records an unintended CI failure, not a deliberate defect."
+  },
+  "missingEvidence": [
+    {
+      "what": "Passing macOS environment-isolation assertion",
+      "reason": "The first attempt did not account for the runtime-added CoreFoundation setting.",
+      "owner": "evals/agent-loop/native-fixture.test.ts"
+    }
+  ],
+  "evalRecords": {
+    "notApplicable": "No model-visible runtime change; these checks run deterministic fake arms without a model."
+  },
+  "performanceRecords": {
+    "notApplicable": "No performance qualification attempted; command duration is not a performance baseline."
+  },
+  "rollback": {
+    "notApplicable": "Private test workspaces only; no user install or session storage boundary changes."
+  },
+  "review": {
+    "missing": "No reviewer has accepted scope 01 qualification. Code review and green CI do not establish scope acceptance."
+  }
+}

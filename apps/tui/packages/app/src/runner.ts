@@ -2,12 +2,12 @@
 import React, { useEffect, type ComponentType } from 'react'
 import { render, useApp, type Instance } from 'ink'
 import type { Context } from '@deepseek-ai/cordis'
-import { compactPath } from '@dsh-tui/ui/present.ts'
-import type { Highlight } from '@dsh-tui/ui/present.ts'
-import { dictionaries, type TuiCopy } from '@dsh-tui/ui/copy.ts'
-import type { FrameStyle } from '@dsh-tui/ui/layout.ts'
-import type { Clock } from '@dsh-tui/ui/activity.ts'
-import { wheelReports } from '@dsh-tui/ui/wheel.ts'
+import { compactPath } from 'bake-tui-ui/present.ts'
+import type { Highlight } from 'bake-tui-ui/present.ts'
+import { dictionaries, type TuiCopy } from 'bake-tui-ui/copy.ts'
+import type { FrameStyle } from 'bake-tui-ui/layout.ts'
+import type { Clock } from 'bake-tui-ui/activity.ts'
+import { wheelReports } from 'bake-tui-ui/wheel.ts'
 import { resolveFrame } from './frame.ts'
 import { writeClipboardText } from './clipboard.ts'
 import { frameOutput, type FrameOutput } from './output.ts'
@@ -16,7 +16,7 @@ import { Preferences } from './preferences.ts'
 import type { Syntax } from './syntax.ts'
 import type { SessionOptions } from './session.ts'
 import type { AttachmentOptions } from './attachments.ts'
-import type { AppProps } from '@dsh-tui/ui/app.tsx'
+import type { AppProps } from 'bake-tui-ui/app.tsx'
 import { SessionNavigation } from './navigation.ts'
 import { bakeVersion, releaseRoot } from './release.ts'
 import { Updates } from './update.ts'
@@ -25,7 +25,7 @@ import { cliProxyModelsInUse, cliProxyUpgradeNotice, refreshCliProxyModels, upgr
 import type { CredentialTargetConfig, LoginSources, SignInFlowConfig } from './login.ts'
 import type {} from '@deepseek-ai/cordis-plugin-loader'
 // Declares the launcher's `app/unhandled-rejection` event.
-import type {} from '@deepseek-ai/dsh-cmdline'
+import type {} from 'bake-cmdline'
 
 /** The renderer component is loaded from its own artifact after the runner starts. */
 type AppComponent = ComponentType<AppProps>
@@ -101,7 +101,7 @@ export interface TuiIo {
 export async function run(ctx: Context, config: RunnerOptions, io: TuiIo): Promise<void> {
   if (io.in.isTTY !== true || io.out.isTTY !== true) {
     // Before the `try` below, which reports the failures it catches.
-    const message = 'tui needs an interactive terminal; use dsh --profile headless for scripted runs'
+    const message = 'tui needs an interactive terminal; use bake --profile headless for scripted runs'
     io.err.write(`dsh: ${message}\n`)
     throw new Error(message)
   }

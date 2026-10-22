@@ -1,43 +1,8 @@
 ---
-description: "The experimental group map: publicly installable pre-stable prototypes."
+description: "Historical WebWorker session fixtures retained for persistence checks."
 kind: "package-group"
 ---
 
-# packages/experimental
+# Historical session fixtures
 
-## Summary
-
-The experimental group holds publicly installable pre-stable prototypes. It currently contains no packages. A package placed here can change its contract without a stability promise, and released products outside this group do not depend on it.
-
-## Table of Contents
-
-- [Packages](#packages)
-- [Related documentation](#related-documentation)
-- [Dev Note](#dev-note)
-
------
-
-<a id="packages"></a>
-## Packages
-
-None.
-
------
-
-<a id="related-documentation"></a>
-## Related documentation
-
-- [Experimental publication decision](../../.agents/notes/implemented/process/2026-09-12-experimental-publication-denylist.md) — public defaults and private exceptions.
-- [Experimental subtree rules](AGENTS.md) — what experimental status does and does not relax.
-
------
-
-<a id="dev-note"></a>
-## Dev Note
-
-<details>
-<summary>Working context for maintainers — click to expand</summary>
-
-None.
-
-</details>
+This directory retains six committed JSONL generations under `webworker-runtime/` for persistence checks. It contains no package manifests or runtime implementation. [The fixture classifier](../../scripts/session-fixture-layout.ts) identifies these files as physical persistence artifacts. Preserve their paths and bytes.

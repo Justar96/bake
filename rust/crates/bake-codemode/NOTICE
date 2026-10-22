@@ -1,0 +1,82 @@
+bake-codemode includes code ported from the following MIT-licensed projects,
+and embeds a WebAssembly binary built from them. Bake's own changes are under
+the workspace's MIT license.
+
+================================================================================
+Pi (packages/codemode and packages/coding-agent)
+https://github.com/earendil-works/pi
+Release v1.3.0, revision 71023aec1546d6d677a65669c5665c0927ce0dd0.
+Ported: the VM driver contract of packages/codemode/src/runtime/vm.ts (job
+batches, stall detection, deterministic mode and its fingerprint), the host
+decoding and checks of src/runtime/execution.ts, the messages of
+src/runtime/protocol.ts, the source format of src/source.ts, the declarations
+of src/declarations.ts, src/identifier.ts, and the types of src/types.ts, with
+the cases of test/sandbox.test.ts, test/deterministic.test.ts,
+test/declarations.test.ts, test/source.test.ts, and
+test/worker-lifetime.test.ts; the BM25 tool-search ranker of
+packages/coding-agent/src/extensions/tool-search/tool.ts with its cases in
+test/tool-search.test.ts. assets/prelude.js is the text of
+src/runtime/prelude-source.ts, copied verbatim with this notice.
+Not ported: the worker, inline, remote, and Cloudflare sandboxes and their
+transports, the Lark grammar, and the tool_search tool.
+--------------------------------------------------------------------------------
+MIT License
+
+Copyright (c) 2025 Mario Zechner
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+================================================================================
+quickjs-wasi
+https://github.com/vercel-labs/quickjs-wasi
+Release 3.6.2 (npm quickjs-wasi@3.6.2).
+Ported: the subset of dist/index.js that Pi's vm.ts uses (VM creation and
+limits, the host-call trampoline's contract, strings in and out with WTF-8
+decoding, function calls, properties, and exceptions) and the WASI shim of
+dist/wasi-shim.js. engine/quickjs.wasm is the package's binary, unchanged;
+engine/LICENSE-quickjs-wasi is its license file and engine/PROVENANCE its
+record.
+--------------------------------------------------------------------------------
+MIT License
+
+Copyright (c) 2026 Vercel, Inc.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+================================================================================
+QuickJS-NG
+https://github.com/quickjs-ng/quickjs
+Version 0.17.0, compiled into engine/quickjs.wasm by quickjs-wasi; its MIT
+license is engine/LICENSE-QuickJS-NG.

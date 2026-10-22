@@ -19,12 +19,12 @@
  * Every other protocol reports that it cannot be interrogated so the surface
  * falls back to hand-entry rather than guessing its response fields.
  *
- * @module dsh-llm-pi-ai/discovery
+ * @module bake-llm-pi-ai/discovery
  */
 
-import { INVALID_CREDENTIAL_CODE, LlmError, normalizeApiKey } from '@deepseek-ai/dsh-llm'
-import type { LlmDiscoveredModel, LlmModelDiscoveryOperation } from '@deepseek-ai/dsh-llm'
-import { attributionHeaders } from '@deepseek-ai/dsh-llm'
+import { INVALID_CREDENTIAL_CODE, LlmError, normalizeApiKey } from 'bake-llm'
+import type { LlmDiscoveredModel, LlmModelDiscoveryOperation } from 'bake-llm'
+import { attributionHeaders } from 'bake-llm'
 import { catalogModels } from './catalog.ts'
 
 /**

@@ -1,7 +1,7 @@
 /**
  * Verify that no package builds its own undici agent or hands `fetch` an explicit dispatcher.
  *
- * Node's built-in `fetch` routes through undici's global dispatcher, which `@deepseek-ai/dsh-http-proxy`
+ * Node's built-in `fetch` routes through undici's global dispatcher, which `bake-http-proxy`
  * installs at launch. An explicitly supplied `dispatcher` overrides that global one, so a call site
  * that constructs `new Agent(...)` itself connects directly no matter what proxy the user configured
  * — the exact defect `web-fetch-http` carried before proxy support existed, where its DNS-pinning
@@ -204,7 +204,20 @@ export function scanRepository(): DispatcherViolation[] {
     ...globSync('apps/*/src/**/*.ts', { cwd: root }),
   ]
   if (files.length === 0) throw new Error('verify-no-bare-dispatcher: scanned an empty corpus; the globs no longer match.')
-  return files.flatMap(file => findDispatcherViolations(file, readFileSync(resolve(root, file), 'utf8')))
+  return files.flatMap((file) => {
+    const text = readIfPresent(resolve(root, file))
+    return text === undefined ? [] : findDispatcherViolations(file, text)
+  })
+}
+
+/** A file deleted after the glob listed it, such as another test's temporary file, has nothing to scan. */
+function readIfPresent(path: string): string | undefined {
+  try {
+    return readFileSync(path, 'utf8')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
+    throw error
+  }
 }
 
 function main(): void {
@@ -213,12 +226,12 @@ function main(): void {
     console.log(`verify-no-bare-dispatcher: no bare dispatcher outside ${DISPATCHER_OWNER}.`)
     return
   }
-  console.error('verify-no-bare-dispatcher: a dispatcher built outside @deepseek-ai/dsh-http-proxy bypasses the configured proxy.\n')
+  console.error('verify-no-bare-dispatcher: a dispatcher built outside bake-http-proxy bypasses the configured proxy.\n')
   for (const violation of violations) {
     console.error(`  ${relative('.', violation.file)}:${String(violation.line)} ${violation.what}`)
     console.error(`    ${violation.text}`)
   }
-  console.error('\nUse `proxyRouteFor(url)` from @deepseek-ai/dsh-http-proxy, or annotate the line')
+  console.error('\nUse `proxyRouteFor(url)` from bake-http-proxy, or annotate the line')
   console.error(`with a \`${ALLOW_MARKER} <reason>\` comment when the request must genuinely ignore the proxy.`)
   process.exit(1)
 }

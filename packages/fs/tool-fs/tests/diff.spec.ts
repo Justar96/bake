@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { computeHunkDiffs, diffsFromMeta, DIFF_CONTEXT, MAX_DIFF_EDIT_LENGTH } from '../src/diff.ts'
-import type { JsonValue } from '@deepseek-ai/dsh-util-values'
+import type { JsonValue } from 'bake-util-values'
 
 const lines = (n: number): string => Array.from({ length: n }, (_, i) => `line${i + 1}`).join('\n') + '\n'
 

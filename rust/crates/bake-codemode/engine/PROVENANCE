@@ -1,0 +1,48 @@
+quickjs.wasm: QuickJS-NG 0.17.0 compiled to a WASI preview 1 reactor by
+quickjs-wasi, copied unchanged from its npm package.
+
+Package:   quickjs-wasi@3.6.2 (npm), file quickjs.wasm
+Integrity: sha512-FCqGtGOrMgzUiIrMNMA2YnsOxCNwo31dzqXvclXUC6xeT35NJLKXQJsvbeCTjvoFAwZgEAPg8U6+KAPDGXn8Mg==
+           (the npm tarball's)
+Size:      637405 bytes
+SHA-256:   d4c9375f2b1ca4dc95f72c8aa2982a7a9951ac8011490d79c6582df732b4bbd9
+Source:    https://github.com/vercel-labs/quickjs-wasi (wrapper and C glue)
+           https://github.com/quickjs-ng/quickjs (the engine)
+           https://github.com/WebAssembly/wasi-libc (the C library linked in)
+Used by:   Pi v1.3.0's packages/codemode, which pins quickjs-wasi 3.6.2.
+
+Licenses, each copied byte for byte (SHA-256 of the file here):
+
+LICENSE-quickjs-wasi  The package's own LICENSE file.
+                      f7735da3b2531ddf451937117343cfadb853fd8054b499e7a70695dc57ffd184
+LICENSE-QuickJS-NG    quickjs-ng's LICENSE at tag v0.17.0, the engine version,
+                      https://raw.githubusercontent.com/quickjs-ng/quickjs/v0.17.0/LICENSE
+                      96f73f9d2a16c21a36b418f06073be26e7d6d5e7c1bc99756b21a4f2c74ef171
+                      Its second line holds one space, as upstream's does.
+
+The binary is a wasi-libc reactor (it imports wasi_snapshot_preview1 and
+exports wasm_malloc), so it carries wasi-libc and the musl and cloudlibc code
+wasi-libc is built from. These files were fetched from WebAssembly/wasi-libc's
+main branch when it was at commit 165235bc467d.
+The wasi-sdk and wasi-libc revisions the binary was built with are unknown:
+it has no producers or name section, only target_features.
+
+LICENSE-wasi-libc     wasi-libc's LICENSE, then a blank line, then its
+                      LICENSE-MIT, the license of the three Bake takes it under.
+                      a46435711a535b347ce30879f9959f07939a4e139319df2554f51e48e3a36d41
+LICENSE-musl          libc-top-half/musl/COPYRIGHT.
+                      b870108ec5e7790e9f9919064f1b9421d62d5f9b0e6c230c6adf7ea2da62e97b
+LICENSE-cloudlibc     libc-bottom-half/cloudlibc/LICENSE.
+                      c8b789cf5a746611e6300a0cc7750dbf92b61912a709d04e639245f7290656d0
+
+wasi-libc's LICENSE also names dlmalloc (CC0, which asks for no notice),
+emmalloc, and musl-fts. Neither emmalloc, an allocator wasi-libc builds only
+when asked to instead of dlmalloc, nor fts, a file-tree walker a reactor with
+no file system does not call, is bundled; without a producers section that is
+an assumption about the build, not a verified fact.
+
+The binary is not rebuilt from source; a unit test (`src/engine.rs`) checks
+the embedded bytes against the SHA-256 above and that this record names it. To
+update, replace the file, this record, and `QUICKJS_WASM_SHA256`, then
+re-check the driver's ABI (the exports `src/guest.rs` names and their
+signatures) and the license files against the new versions.

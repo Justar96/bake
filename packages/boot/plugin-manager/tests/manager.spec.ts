@@ -10,9 +10,9 @@ import { expect, it, onTestFinished, vi } from 'vitest'
 import {
   boot, composeEntries, initProfile, readProfilePatches, readProfileManifest, reconcileProfilePatches,
   type ProfileContext,
-} from '@deepseek-ai/dsh-app-boot'
+} from 'bake-app-boot'
 import PluginManager, { type Config, type PluginChange, type PluginInstallLogChunk, type PluginInstallProgress, type PluginInstallRequestId } from '../src/index.ts'
-import Hmr from '@deepseek-ai/dsh-hmr'
+import Hmr from 'bake-hmr'
 import Timer from '@deepseek-ai/cordis-plugin-timer'
 import type { PatchOptions } from '@deepseek-ai/cordis-plugin-include'
 import { Group } from '@deepseek-ai/cordis-plugin-loader'
@@ -126,7 +126,7 @@ it('retains installed dependencies when toggling a bundle and appends it when re
   expect(readProfileManifest('test', dir).dependencies).toEqual({ extra: '1.0.0' })
   expect((await manager.listPlugins()).some(row => row.patchId === 'managed')).toBe(false)
   await manager.setBundleEnabled('extra', true)
-  expect(readProfileManifest('test', dir).dsh?.profile?.bundles).toEqual(['core', 'third', 'extra'])
+  expect(readProfileManifest('test', dir).bake?.profile?.bundles).toEqual(['core', 'third', 'extra'])
 })
 
 it('reports an overlay overriding a saved plugin toggle', async () => {
@@ -206,7 +206,7 @@ it('reports blocked scripts after a failed installation and retries only after e
   expect(await manager.installBundle('addon', { approvedBuilds: ['native'], enabled: false })).toMatchObject({
     application: 'applied', changed: true, approvedBuilds: ['native'],
   })
-  expect(readProfileManifest('test', dir).dsh?.profile?.bundles).not.toContain('addon')
+  expect(readProfileManifest('test', dir).bake?.profile?.bundles).not.toContain('addon')
 })
 
 it('retains approved policy and reports it as changed when the registry fails before adding a dependency', async () => {
@@ -355,8 +355,8 @@ it('refuses management bundle disablement and permits repeated bundle selections
 })
 
 it.each([
-  '@deepseek-ai/dsh-host-plugin-inventory',
-  '@deepseek-ai/dsh-typert-registry',
+  'bake-host-plugin-inventory',
+  'bake-typert-registry',
   '@deepseek-ai/dsh-api-remotes',
 ])('protects the management dependency %s and its containing bundle', async (name) => {
   const { ctx, manager, bundle, profile, dir } = await fixture('startup')
@@ -415,7 +415,7 @@ it('restores the manifest when the package pnpm added declares no bundle', async
   })
   // The manifest is put back rather than cleaned through another pnpm run.
   expect(install).toHaveBeenCalledOnce()
-  expect(readProfileManifest('test', dir)).toMatchObject({ dependencies: { extra: '1.0.0' }, dsh: { profile: { bundles: ['core', 'extra'] } } })
+  expect(readProfileManifest('test', dir)).toMatchObject({ dependencies: { extra: '1.0.0' }, bake: { profile: { bundles: ['core', 'extra'] } } })
   expect((await manager.listBundles()).some(row => row.name === 'plain')).toBe(false)
 })
 
@@ -755,6 +755,6 @@ it('applies watched configuration while pnpm installation is still running', asy
   expect(pnpm).toHaveBeenCalledOnce()
   release.resolve(undefined)
   expect(await installing).toMatchObject({ application: 'applied', changed: true })
-  expect(readProfileManifest('test', dir).dsh?.profile?.bundles).toEqual(['core', 'extra', 'new-bundle'])
+  expect(readProfileManifest('test', dir).bake?.profile?.bundles).toEqual(['core', 'extra', 'new-bundle'])
   expect(ctx.get('managedProbe')).toBeUndefined()
 })

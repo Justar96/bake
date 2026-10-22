@@ -6,7 +6,7 @@
  * the arithmetic out of the components is what lets the geometry be tested
  * without a terminal.
  *
- * @module @dsh-tui/ui/line
+ * @module bake-tui-ui/line
  */
 
 import React from 'react'

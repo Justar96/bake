@@ -3,11 +3,11 @@ description: "Pure Ink presentation of committed session rows, live output, pend
 kind: "package-library"
 ---
 
-# @dsh-tui/ui
+# bake-tui-ui
 
 ## Summary
 
-This library renders terminal state supplied by `@dsh-tui/app`. `App` displays committed history, live response text, pending input, status, and one human request. Components use typed locale dictionaries and callbacks. They do not access Cordis, Node services, storage, or a clock; the composer's rule is timed only from an optional `clock` prop, which `App` ignores under a screen reader, and animates only while the `motion` prop is not false. The runner always passes the clock and turns motion off under `NO_COLOR`, which leaves the elapsed seconds counting and nothing else moving.
+This library renders terminal state supplied by `bake-tui-app`. `App` displays committed history, live response text, pending input, status, and one human request. Components use typed locale dictionaries and callbacks. They do not access Cordis, Node services, storage, or a clock; the composer's rule is timed only from an optional `clock` prop, which `App` ignores under a screen reader, and animates only while the `motion` prop is not false. The runner always passes the clock and turns motion off under `NO_COLOR`, which leaves the elapsed seconds counting and nothing else moving.
 
 ## Table of Contents
 

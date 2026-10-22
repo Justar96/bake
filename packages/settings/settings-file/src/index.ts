@@ -4,7 +4,7 @@
  * through the seam, and every write re-reads the document under a
  * cross-process writer lock before patching it as a comment-preserving
  * leaf-level diff.
- * @module @deepseek-ai/dsh-settings-file
+ * @module bake-settings-file
  */
 
 import { Context, Service } from '@deepseek-ai/cordis'
@@ -13,16 +13,16 @@ import { watch as chokidarWatch } from 'chokidar'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, extname, join, resolve } from 'node:path'
 import { Document, parseDocument } from 'yaml'
-import { withFileLock, writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
-import { canonicalizeWatchPath, resolveDshHome } from '@deepseek-ai/dsh-home-paths'
-import { SettingsProvider, type SettingsNamespace } from '@deepseek-ai/dsh-settings'
-import { deepEqualJson, isENOENT } from '@deepseek-ai/dsh-util-values'
+import { withFileLock, writeFileAtomic } from 'bake-atomic-write'
+import { canonicalizeWatchPath, resolveDshHome } from 'bake-home-paths'
+import { SettingsProvider, type SettingsNamespace } from 'bake-settings'
+import { deepEqualJson, isENOENT } from 'bake-util-values'
 
 /** Plugin config: file location and hot-reload behavior. */
 export interface Config {
   /** Settings document path; defaults to `settings.yaml` under the harness home. */
   path?: string
-  /** Harness home used when `path` is omitted; defaults to `$DSH_HOME` or `~/.dsh`. */
+  /** Harness home used when `path` is omitted; defaults to `$BAKE_HOME`, `$DSH_HOME`, or `~/.dsh`. */
   dshHome?: string
   /** Watch the document and hot-publish external edits; defaults to true. */
   watch?: boolean

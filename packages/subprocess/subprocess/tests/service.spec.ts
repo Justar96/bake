@@ -1,14 +1,14 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { PassThrough } from 'node:stream'
 import { Context } from '@deepseek-ai/cordis'
-import { INHERITED_NODE_ENV, scrubbedParentEnv, SubprocessRuntime } from '@deepseek-ai/dsh-subprocess'
+import { INHERITED_NODE_ENV, scrubbedParentEnv, SubprocessRuntime, withBakeEnvironmentNames } from 'bake-subprocess'
 import type {
   SubprocessHandle,
   SubprocessOutputRead,
   SubprocessSpawnSpec,
   SubprocessTerminalHandle,
   SubprocessTerminalSpawnSpec,
-} from '@deepseek-ai/dsh-subprocess'
+} from 'bake-subprocess'
 
 /**
  * Minimal concrete service: a hand-built handle. The seam is spawn-only —
@@ -98,6 +98,32 @@ describe('SubprocessRuntime seam', () => {
       delete process.env.SCRUB_PROBE_TOKEN
       delete process.env.SCRUB_PROBE_PASSWORD
       delete process.env.SCRUB_PROBE_PLAIN
+    }
+  })
+
+  it.each(['BAKE_SESSION_ID', 'bake_session_id'])('scrubbedParentEnv drops managed facts (%s) and passes BAKE_ user settings through', (sessionKey) => {
+    const settings = {
+      BAKE_RELEASE_BASE_URL: 'https://releases.example.test',
+      BAKE_NO_UPDATE_CHECK: '1',
+      BAKE_NO_ANIMATION: '1',
+      BAKE_BIN_DIR: '/opt/bake/bin',
+      BAKE_LAUNCHER: '/opt/bake/bin/bake',
+    }
+    const facts = ['BAKE_HOME', 'BAKE_SHELL', sessionKey, 'BAKE_PTY_SESSION_ID']
+    // A fact a plugin contributes is managed once a child has received it under both names.
+    const contributed = Object.keys(withBakeEnvironmentNames({ DSH_SCRUB_CONTRIBUTED_PROBE: 'x' }))
+    expect(contributed).toEqual(['DSH_SCRUB_CONTRIBUTED_PROBE', 'BAKE_SCRUB_CONTRIBUTED_PROBE'])
+    try {
+      for (const [name, value] of Object.entries(settings)) vi.stubEnv(name, value)
+      vi.stubEnv('BAKE_RELEASE_PUBLIC_KEY', 'public-key')
+      for (const name of [...facts, 'BAKE_SCRUB_CONTRIBUTED_PROBE']) vi.stubEnv(name, 'outer')
+      const env = scrubbedParentEnv()
+      for (const [name, value] of Object.entries(settings)) expect(env[name]).toBe(value)
+      // Credential-shaped, so removed as it was before the BAKE_ names, by SENSITIVE_ENV_PATTERN.
+      expect(env.BAKE_RELEASE_PUBLIC_KEY).toBeUndefined()
+      for (const name of [...facts, 'BAKE_SCRUB_CONTRIBUTED_PROBE']) expect(env[name]).toBeUndefined()
+    } finally {
+      vi.unstubAllEnvs()
     }
   })
 

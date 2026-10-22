@@ -1,0 +1,421 @@
+{
+  "schema": "bake/rust-migration/qualification-attempt",
+  "version": 1,
+  "id": "2026-10-22-linux-crash-matrix",
+  "scope": "03",
+  "status": "partial",
+  "recordedOn": "2026-10-22",
+  "summary": "Linux crash matrix at candidate 31513cd9a7, the head of lane/crash-matrix-linux, which branched from develop bfce3d9249: nine lane commits from a57aa4dbbb to 1b145022df, then two review-fix commits, 53ffd23b94 (a new session directory is synced into its parent, and the power-loss model works at byte granularity) and 31513cd9a7 (crash children bounded, and each claimed kill point required). Two full Linux preflights ran on this Fedora Linux 44 host, x86_64 only. The first, at bd1562f911 (lane/integrate-03-05: this lane and the process-ownership lane merged on bfce3d9249 with their docs), passed 39 gates with actionlint skipped; its rust-test gate ran 3024 nextest cases, all passed with 8 skipped, plus the codemode harness's 98. The second, at the 0.4 Linux integration head 3421fd94ce, passed 39 gates with actionlint skipped; its rust-test gate ran 3092 nextest cases, all passed with 8 skipped, plus the codemode harness's 98. Each log names the commit and umask 022; the orchestrating session reports that both ran with BAKE_REQUIRE_KERNEL_FAULTS=1 and BAKE_REQUIRE_SANDBOX_BACKENDS=bwrap,landlock on a clean tree, which the logs do not record. Under that variable the seccomp and tmpfs cases fail instead of skipping; nextest does not print a passing test's output, so the logs could not show a skip note either way, and a ran-not-skipped claim rests on the reported environment. No file under rust/crates/bake-coding-agent/src/session/ or any fixture source below differs between the candidate, bd1562f911, and 3421fd94ce. Both rust-test logs list every new case passing: simulated power loss over the writer's logged operations, a real EIO from a seccomp filter, ENOSPC on a size-capped tmpfs, kills of the in-place rewrite, and parent SIGKILLs mid-stream, inside the compaction summary request, between the approval entries, inside a Safe tool's read, and of a real bake -p --recoverable. The lane's 15 mutation checks and its stress loops left no logs. This record covers another part of scope 03: it fills rows that the 2026-10-19 writer-kills record lists as missing (EIO, a file system filling up, power loss, the in-place rewrite) without correcting what that record observed, so it supersedes nothing. The in-place rewrite keeps Pi's truncating behavior by D49. A physical power cut, the child-agent row's process clause, any macOS, Windows, or aarch64 run, and reviewer acceptance are missing.",
+  "supersedes": [],
+  "provenance": {
+    "base": "bfce3d92499e8c8476121be6a6c85848327546e0",
+    "candidate": "31513cd9a7463f3fcee6ccb86b746b06e59b179f",
+    "oracle": {
+      "notApplicable": "D32: no TypeScript runtime arm. Pi v1.3.0 (71023aec15) has no durable-write or crash tests to port; these tests are Bake's own, and their loader assertions encode Pi's loadEntriesFromFile behavior as Bake's load_entries_from_file ports it. The in-place rewrite's truncation is Pi's _rewriteFile behavior, kept by D49. Pi's source was read, not run."
+    }
+  },
+  "support": [
+    {
+      "id": "d32-pi-session-format",
+      "reference": "docs/roadmap/rust-0.4/scope-00/support.md"
+    },
+    {
+      "id": "d47-linux-only-0-4-0",
+      "reference": "docs/roadmap/rust-0.4/scope-00/support.md"
+    },
+    {
+      "id": "d49-linux-edge-behavior",
+      "reference": "docs/roadmap/rust-0.4/scope-00/support.md"
+    },
+    {
+      "id": "durable-execution-crash-matrix",
+      "reference": "docs/roadmap/rust-0.4/durable-execution.md"
+    },
+    {
+      "id": "pi-v1-3-0-session-loader",
+      "reference": "https://github.com/earendil-works/pi/blob/71023aec1546d6d677a65669c5665c0927ce0dd0/packages/coding-agent/src/core/session-manager.ts"
+    }
+  ],
+  "fixtures": {
+    "files": [
+      {
+        "path": "rust/crates/bake-cli/tests/print_mode/recovery.rs",
+        "role": "fixture-definition-source",
+        "sha256": "3c671e147c36982a025531c5ca1280cacb68c3f00b994580d2b7962fa8eebd12"
+      },
+      {
+        "path": "rust/crates/bake-coding-agent/src/agent_session/approval_tests.rs",
+        "role": "fixture-definition-source",
+        "sha256": "24ae91276b48518362680a5aba4736c99dc16737996df39711f703b9a92b1093"
+      },
+      {
+        "path": "rust/crates/bake-coding-agent/src/agent_session/run_journal_eio_tests.rs",
+        "role": "fixture-definition-source",
+        "sha256": "1ec91fd5b378d6c8b02f8fd394e7600b4408491f9e488d04a748fc050e7aa933"
+      },
+      {
+        "path": "rust/crates/bake-coding-agent/src/agent_session/run_journal_kill_tests.rs",
+        "role": "fixture-definition-source",
+        "sha256": "11a963786f538c892b82a85e51ff248eb84abfacb3e00fce5b2aa201ee3932fe"
+      },
+      {
+        "path": "rust/crates/bake-coding-agent/src/agent_session/run_journal_tests.rs",
+        "role": "fixture-definition-source",
+        "sha256": "22604f519feea51b20decfa7cc5ebfc89971dd4da1656a1a18564f66a3c64ef3"
+      },
+      {
+        "path": "rust/crates/bake-coding-agent/src/session/durable.rs",
+        "role": "fixture-definition-source",
+        "sha256": "7cd2ca7ee16a20a5c4a87fdd6165fc935ab1837a725d6ce1dc1bbe49dd6a79a1"
+      },
+      {
+        "path": "rust/crates/bake-coding-agent/src/session/durable/disk_log.rs",
+        "role": "fixture-definition-source",
+        "sha256": "255141dbb4f4e8c6bb613790708e1061459998fca62fb011b88759823103ad00"
+      },
+      {
+        "path": "rust/crates/bake-coding-agent/src/session/manager/crash_support.rs",
+        "role": "fixture-definition-source",
+        "sha256": "d63e17d06a3bb2da920e0a9a2eab1e00c5d43ac184d2c0b6d33d8f5e54596541"
+      },
+      {
+        "path": "rust/crates/bake-coding-agent/src/session/manager/full_filesystem_tests.rs",
+        "role": "fixture-definition-source",
+        "sha256": "58b72e14346854c16caa36b9a2fde2e9909f525d0d21cef3cd1478a6c8366259"
+      },
+      {
+        "path": "rust/crates/bake-coding-agent/src/session/manager/kernel_faults.rs",
+        "role": "fixture-definition-source",
+        "sha256": "e7719ad34f5a96ce8838ad610c1c42ce0a0d79bc418329e138d2407da9f2ef5c"
+      },
+      {
+        "path": "rust/crates/bake-coding-agent/src/session/manager/power_loss_tests.rs",
+        "role": "fixture-definition-source",
+        "sha256": "a7f9d8ee39babfcf22abb27ad45e8b54d34b4c6e04a55e74a9cb6364366c8d97"
+      },
+      {
+        "path": "rust/crates/bake-coding-agent/src/session/manager/rewrite_tests.rs",
+        "role": "fixture-definition-source",
+        "sha256": "e1f9c126a23adc05bf4240fc03cd5f37ec51413b7d892845f3c296d1f35e46a2"
+      },
+      {
+        "path": "rust/crates/bake-coding-agent/src/session/manager/seccomp_write_tests.rs",
+        "role": "fixture-definition-source",
+        "sha256": "2a47c875697a519eaddd99d20bde55af6c1ed92a72c6aaceed4d702577b21f2f"
+      }
+    ],
+    "digest": "392e54543d96e22369582fa6cbf5c0a8f61c356a00a216405c705f141948d1bc"
+  },
+  "artifacts": {
+    "notApplicable": "Library, integration, and binary tests only; no shipped artifact is qualified by this record."
+  },
+  "commands": [
+    {
+      "id": "linux-preflight-bd1562f911",
+      "argv": [
+        "env",
+        "BAKE_REQUIRE_KERNEL_FAULTS=1",
+        "BAKE_REQUIRE_SANDBOX_BACKENDS=bwrap,landlock",
+        "bun",
+        "run",
+        "preflight",
+        "--full"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local Fedora Linux 44; kernel 7.2.11-200.fc44.x86_64; 32 threads"
+      },
+      "tools": {
+        "rust-toolchain": "1.99.0 (pinned by rust/rust-toolchain.toml; rustc 1.99.0 (b940084d7 2026-09-28) and cargo 1.99.0 (5f94df478 2026-08-27) observed in rust/ on this host after the run)",
+        "cargo-nextest": "0.9.148 (observed after the run)",
+        "bun": "1.4.3 (the gate logs print bun test v1.4.3; package.json pins bun@1.4.2)",
+        "node": "v26.10.0 (observed after the run)",
+        "git": "2.56.0 (observed after the run)",
+        "cargo-about": "0.9.2 on PATH (observed after the run)"
+      },
+      "testedCommit": "bd1562f911e94f8cc152753933f0fb25e687282c",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 39,
+        "failed": 0,
+        "skipped": 1,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/linux-preflight-full-bd1562f911.log",
+        "sha256": "085c64e6d8a65870e0711351cdf87e5627124ed9c5bd70ebd2aa7e93107d85e4"
+      }
+    },
+    {
+      "id": "linux-rust-test-bd1562f911",
+      "argv": [
+        "bun",
+        "run",
+        "test:rust"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local Fedora Linux 44; kernel 7.2.11-200.fc44.x86_64; 32 threads"
+      },
+      "tools": {
+        "rust-toolchain": "1.99.0 (pinned by rust/rust-toolchain.toml; rustc and cargo 1.99.0 observed in rust/ after the run)",
+        "cargo-nextest": "0.9.148 (observed after the run)",
+        "bun": "1.4.3 (observed after the run)"
+      },
+      "testedCommit": "bd1562f911e94f8cc152753933f0fb25e687282c",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 3122,
+        "failed": 0,
+        "skipped": 8,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/linux-bd1562f911/rust-test.log",
+        "sha256": "442baf149307257d3c6ae908ab7160355bc50af789736dc74cc6925475e4a420"
+      }
+    },
+    {
+      "id": "linux-preflight-3421fd94ce",
+      "argv": [
+        "env",
+        "BAKE_REQUIRE_KERNEL_FAULTS=1",
+        "BAKE_REQUIRE_SANDBOX_BACKENDS=bwrap,landlock",
+        "bun",
+        "run",
+        "preflight",
+        "--full"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local Fedora Linux 44; kernel 7.2.11-200.fc44.x86_64; 32 threads"
+      },
+      "tools": {
+        "rust-toolchain": "1.99.0 (pinned by rust/rust-toolchain.toml; rustc 1.99.0 (b940084d7 2026-09-28) and cargo 1.99.0 (5f94df478 2026-08-27) observed in rust/ on this host after the run)",
+        "cargo-nextest": "0.9.148 (observed after the run)",
+        "bun": "1.4.3 (the gate logs print bun test v1.4.3; package.json pins bun@1.4.2)",
+        "node": "v26.10.0 (observed after the run)",
+        "git": "2.56.0 (observed after the run)",
+        "cargo-about": "0.9.2 on PATH (observed after the run)"
+      },
+      "testedCommit": "3421fd94ced0aa38ea72d0a2917cfd763a462805",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 39,
+        "failed": 0,
+        "skipped": 1,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/linux-preflight-full-3421fd94ce.log",
+        "sha256": "1ab428e65afe5e82aeb78b05aa67f662c28a8cf71e1f85a7c2904472229dde29"
+      }
+    },
+    {
+      "id": "linux-rust-test-3421fd94ce",
+      "argv": [
+        "bun",
+        "run",
+        "test:rust"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local Fedora Linux 44; kernel 7.2.11-200.fc44.x86_64; 32 threads"
+      },
+      "tools": {
+        "rust-toolchain": "1.99.0 (pinned by rust/rust-toolchain.toml; rustc and cargo 1.99.0 observed in rust/ after the run)",
+        "cargo-nextest": "0.9.148 (observed after the run)",
+        "bun": "1.4.3 (observed after the run)"
+      },
+      "testedCommit": "3421fd94ced0aa38ea72d0a2917cfd763a462805",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 3190,
+        "failed": 0,
+        "skipped": 8,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/linux-3421fd94ce/rust-test.log",
+        "sha256": "6bb857056eea2909f19a3562e2e7d50e372ec0bfafb2f175bfebd0a2c297ef0f"
+      }
+    }
+  ],
+  "results": [
+    {
+      "id": "simulated-power-loss",
+      "behavior": "session::manager::power_loss_tests passed in both rust-test gates, 8 tests: a_power_loss_during_an_append_keeps_the_file_or_the_whole_entry, a_power_loss_during_a_group_keeps_a_prefix_of_its_lines, a_power_loss_during_a_first_write_leaves_no_file_or_a_prefix, a_power_loss_during_a_migration_keeps_the_old_or_the_new_file, a_power_loss_during_a_branch_rewrite_keeps_no_branch_or_a_whole_one, a_power_loss_during_an_in_place_rewrite_can_leave_a_truncated_file, a_new_session_directory_without_its_parent_sync_can_be_lost, and long_unsynced_runs_are_cut_at_lines_pages_and_inside_their_ends. The durable writes log each directory creation, write, sync, creation, truncation, rename, removal, and directory sync under cfg(test) (durable/disk_log.rs); the model replays every prefix and keeps any byte prefix of unsynced data, or a zero-filled tail of each kept length, and names as of their directory's last sync or all of them. Every state loads as Pi's loader loads it, rebuilds a provider-valid request, and is taken over with the next entry on a line of its own; rewrites through a temporary file leave the old or the new file. This is a model, not a physical power cut. Counts describe nextest test cases.",
+      "owner": "rust/crates/bake-coding-agent/src/session/manager/power_loss_tests.rs",
+      "report": ".preflight/rust-orchestration/linux-3421fd94ce/rust-test.log",
+      "commands": [
+        "linux-preflight-bd1562f911",
+        "linux-rust-test-bd1562f911",
+        "linux-preflight-3421fd94ce",
+        "linux-rust-test-3421fd94ce"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "seccomp-eio",
+      "behavior": "session::manager::seccomp_write_tests passed in both gates: an_append_whose_write_fails_with_eio_leaves_the_file_as_it_was, an_append_whose_sync_fails_with_eio_reports_the_unsynced_line, a_group_whose_line_write_fails_with_eio_keeps_the_lines_before_it, a_group_whose_sync_fails_with_eio_stops_at_the_unsynced_line, and a_migration_whose_temporary_file_fails_with_eio_keeps_the_old_file, plus eio_writer_child, the child entry point. A child installs a seccomp filter (kernel_faults.rs, libc only) that returns EIO for write and pwrite64, or fsync and fdatasync, on the descriptors the writer opens next; the writer reports SessionError::Io or GroupWriteError naming EIO without a panic, and the parent checks the bytes left, the load, a provider-valid request, and takeover. agent_session's run_journal_tests::eio::a_session_write_failing_with_eio_stops_the_session also passed: with the filter on every thread, the session makes no further provider request and refuses later prompts. This shows the writer's handling of a returned EIO, not a failing device.",
+      "owner": "rust/crates/bake-coding-agent/src/session/manager/seccomp_write_tests.rs",
+      "report": ".preflight/rust-orchestration/linux-3421fd94ce/rust-test.log",
+      "commands": [
+        "linux-preflight-bd1562f911",
+        "linux-rust-test-bd1562f911",
+        "linux-preflight-3421fd94ce",
+        "linux-rust-test-3421fd94ce"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "full-tmpfs-enospc",
+      "behavior": "session::manager::full_filesystem_tests::a_session_on_a_full_tmpfs_keeps_a_loadable_prefix_and_refuses_later_writes passed in both gates, with full_filesystem_child, its child entry point. The child runs in a user and mount namespace of its own, mounts a tmpfs a few pages large, and grows a session until the kernel's ENOSPC stops a write part way through a line; later appends and groups are refused, the file loads to its whole lines with a provider-valid request, and the next writer takes it over once space returns. Under BAKE_REQUIRE_KERNEL_FAULTS=1 the case fails rather than skips where namespaces or the mount are refused.",
+      "owner": "rust/crates/bake-coding-agent/src/session/manager/full_filesystem_tests.rs",
+      "report": ".preflight/rust-orchestration/linux-3421fd94ce/rust-test.log",
+      "commands": [
+        "linux-preflight-bd1562f911",
+        "linux-rust-test-bd1562f911",
+        "linux-preflight-3421fd94ce",
+        "linux-rust-test-3421fd94ce"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "in-place-rewrite-kills",
+      "behavior": "session::manager::rewrite_tests passed in both gates, 3 tests plus rewrite_holder_child: the existing a_migration_killed_at_each_rewrite_step_leaves_the_old_or_the_new_file and a_branch_killed_at_each_rewrite_step_leaves_no_file_or_a_whole_one, and the new a_hard_linked_migration_killed_in_place_can_leave_a_truncated_file. A test-only hold (Faults::hold_in_place: truncated, half written, written, synced) stops a migration of a hard-linked session at each step, where the parent SIGKILLs it. After the truncation the file is empty and the next writer starts a new session in it; half way it holds a prefix of the new lines. This pins Pi's in-place behavior, which D49 keeps for 0.4.0.",
+      "owner": "rust/crates/bake-coding-agent/src/session/manager/rewrite_tests.rs",
+      "report": ".preflight/rust-orchestration/linux-3421fd94ce/rust-test.log",
+      "commands": [
+        "linux-preflight-bd1562f911",
+        "linux-rust-test-bd1562f911",
+        "linux-preflight-3421fd94ce",
+        "linux-rust-test-3421fd94ce"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "agent-level-kills",
+      "behavior": "agent_session's run_journal_tests::kill passed in both gates, 7 tests, among them the new a_kill_mid_stream_keeps_the_admission_and_no_partial_message (a parent SIGKILL after the first streamed text of a real Chat Completions response from a loopback server leaves the file at the request's admission with no partial assistant, and the debit is kept), a_kill_inside_the_compaction_summary_request_leaves_no_compaction, and a_kill_inside_a_safe_tools_read_reruns_it_once (a Safe tool blocked inside a read of a FIFO, confirmed through /proc, reruns once under selected recovery). agent_session::approval_tests::a_writer_killed_between_the_asked_and_decided_entries_reopens_unanswered also passed: the reopened file holds the request without an outcome, grants nothing, leaves the call unanswered for Pi's synthetic result, and the effect never ran.",
+      "owner": "rust/crates/bake-coding-agent/src/agent_session/run_journal_kill_tests.rs",
+      "report": ".preflight/rust-orchestration/linux-3421fd94ce/rust-test.log",
+      "commands": [
+        "linux-preflight-bd1562f911",
+        "linux-rust-test-bd1562f911",
+        "linux-preflight-3421fd94ce",
+        "linux-rust-test-3421fd94ce"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "killed-print-run",
+      "behavior": "bake-cli's print_mode recovery::a_killed_print_run_reruns_its_safe_read_once and recovery::a_killed_print_run_refuses_to_rerun_its_effect passed in both gates (8 recovery tests in all): a real bake -p --recoverable killed at its dispatch checkpoint, after a reader is waiting on the FIFO, reruns its read once under --resume-run with one more request; one killed after its bash effect exits 1 needing reconciliation, with no request and the effect counted once.",
+      "owner": "rust/crates/bake-cli/tests/print_mode/recovery.rs",
+      "report": ".preflight/rust-orchestration/linux-3421fd94ce/rust-test.log",
+      "commands": [
+        "linux-preflight-bd1562f911",
+        "linux-rust-test-bd1562f911",
+        "linux-preflight-3421fd94ce",
+        "linux-rust-test-3421fd94ce"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "earlier-kernel-cases-still-pass",
+      "behavior": "The 2026-10-19 record's session::manager::kernel_write_tests (7 tests plus limited_writer_child, including the /dev/full ENOSPC case) passed again in both gates after durable.rs moved its writes and syncs into the logging helpers and gained create_dir_all's parent sync.",
+      "owner": "rust/crates/bake-coding-agent/src/session/durable.rs",
+      "report": ".preflight/rust-orchestration/linux-bd1562f911/rust-test.log",
+      "commands": [
+        "linux-preflight-bd1562f911",
+        "linux-rust-test-bd1562f911",
+        "linux-preflight-3421fd94ce",
+        "linux-rust-test-3421fd94ce"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "physical-power-cut",
+      "behavior": "A machine's power is cut, or a device drops its write cache, during a session write, and the file left loads.",
+      "owner": "docs/roadmap/rust-0.4/durable-execution.md",
+      "report": {
+        "missing": "No test cuts power; power_loss_tests is a model of the logged operations."
+      },
+      "commands": [],
+      "outcome": "missing",
+      "reason": "Needs hardware or a fault-injecting block device; owner decision 2 for wave 1 accepted the simulation for 0.4.0, and verification.md still lists the physical cut as unproven."
+    }
+  ],
+  "negativeControls": {
+    "missing": "The lane worker reports 15 one-line production mutations (M1 to M14 and M12cli), applied with target/tmp/mutate.py on its uncommitted lane worktree before the review fixes and each caught by the targeted new tests, and a bwrap --unshare-user --disable-userns run in which the tmpfs case skipped with a note and failed under BAKE_REQUIRE_KERNEL_FAULTS=1. Its report does not list the mutations themselves, and none of these runs saved output, an exit status, or a tree. The review fixes 53ffd23b94 and 31513cd9a7 report no controls of their own."
+  },
+  "missingEvidence": [
+    {
+      "what": "A physical power cut",
+      "reason": "Power loss is simulated by replaying the writer's logged operations at byte granularity; no machine loses power and no device drops a write cache.",
+      "owner": "docs/roadmap/rust-0.4/durable-execution.md"
+    },
+    {
+      "what": "The child-agent row's process clause",
+      "reason": "A child's bash and job processes lead their own process groups with no parent-death signal, so a host SIGKILL leaves them running; no orphan-process guarantee is claimed for a killed host (durable-execution.md, While a child agent runs).",
+      "owner": "docs/roadmap/rust-0.4/durable-execution.md"
+    },
+    {
+      "what": "A kill inside a real write of the compaction entry",
+      "reason": "The compaction summary request is killed, not the write of the entry that follows it; durable-execution.md lists that write as not tested.",
+      "owner": "rust/crates/bake-coding-agent/src/agent_session/run_journal_kill_tests.rs"
+    },
+    {
+      "what": "A recovery path for the in-place rewrite",
+      "reason": "D49 keeps Pi's truncating in-place rewrite for 0.4.0; a synced backup before truncation is a 0.4.x candidate. The tests pin the truncation rather than prove it away.",
+      "owner": "docs/roadmap/rust-0.4/scope-00/support.md"
+    },
+    {
+      "what": "CI runs with BAKE_REQUIRE_KERNEL_FAULTS=1, including aarch64 Linux",
+      "reason": "No CI run of these commits was dispatched. The lane worker notes that Ubuntu 24.04 runners restrict unprivileged user namespaces through AppArmor, so the tmpfs case may fail there under the variable until the job relaxes kernel.apparmor_restrict_unprivileged_userns; the ubuntu-24.04-arm job has not run.",
+      "owner": "unassigned"
+    },
+    {
+      "what": "Kills inside write, and every new test, on macOS and Windows",
+      "reason": "Only Linux x86_64 ran; the kernel cases are Linux-only, and power_loss_tests and the in-place kill test are Unix-gated. D47 moves macOS and Windows crash qualification to 0.4.x. The lane ran no cross-target Clippy (no mingw or Apple C toolchain for ring).",
+      "owner": "docs/roadmap/rust-0.4/scope-00/support.md"
+    },
+    {
+      "what": "Logs of the lane's own runs and controls",
+      "reason": "The worker reports iterate:rust (1986 passed, 5 skipped), scoped nextest and cargo test runs, a 25-run stress loop of the new seccomp, tmpfs, approval, mid-stream, and summary tests, and the mutation run; none saved a log, and the preflights above stand in for them.",
+      "owner": "unassigned"
+    },
+    {
+      "what": "actionlint",
+      "reason": "Both preflights skipped it: actionlint 1.7.12 or later is not on PATH.",
+      "owner": "unassigned"
+    }
+  ],
+  "evalRecords": {
+    "notApplicable": "Test-only seams and one durability fix: the lane report and 53ffd23b94 change no tool schema, description, result, error, prompt, context assembly, or loop behavior. Outside cfg(test) the writes and syncs only moved into helpers, and create_dir_all adds a best-effort parent sync; no byte a request carries changes."
+  },
+  "performanceRecords": {
+    "notApplicable": "No performance qualification attempted."
+  },
+  "rollback": {
+    "observed": "Every test writes session files only under its own TempDir and kills only the child processes it starts, each re-running the test binary under TestChild, whose 30 s PATIENCE fails a hung child instead of hanging the run, and whose exit codes 3 (watchdog) and 4 (a returned write) cannot pass for a kill. The seccomp filter is installed in the child alone, and the tmpfs mount lives in the child's own user and mount namespace and vanishes with it. No user home is touched. Each preflight log opens with its commit and umask 022; neither records git status, and the orchestrating session reports that both trees were clean. The fixture files above have the same bytes at the candidate, at bd1562f911, and at 3421fd94ce.",
+    "commands": [
+      "linux-preflight-bd1562f911",
+      "linux-preflight-3421fd94ce"
+    ]
+  },
+  "review": {
+    "missing": "No reviewer has accepted scope 03. The orchestrating session's review agents reviewed the lane and a fix worker fixed their findings in 53ffd23b94 and 31513cd9a7; that is not scope acceptance."
+  }
+}

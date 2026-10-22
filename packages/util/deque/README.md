@@ -3,11 +3,11 @@ description: "Circular deque for Host and browser packages that need amortized c
 kind: "package-library"
 ---
 
-# @deepseek-ai/dsh-deque
+# bake-deque
 
 ## Summary
 
-`dsh-deque` lets Host and browser packages drain long-lived in-process queues without moving every remaining entry after each removal. Callers append or prepend entries and remove them from the front with amortized constant-time operations. The deque owns entry order and backing-storage release; each consumer still owns wake-up, failure, cancellation, capacity, and overload behavior.
+`bake-deque` lets Host and browser packages drain long-lived in-process queues without moving every remaining entry after each removal. Callers append or prepend entries and remove them from the front with amortized constant-time operations. The deque owns entry order and backing-storage release; each consumer still owns wake-up, failure, cancellation, capacity, and overload behavior.
 
 ## Table of Contents
 
@@ -32,7 +32,7 @@ Use `Deque<T>` when entries can accumulate across asynchronous work and the cons
 Import the deque, append entries at the tail, and check `size` before removing an entry whose type may include `undefined`:
 
 ```ts
-import { Deque } from '@deepseek-ai/dsh-deque'
+import { Deque } from 'bake-deque'
 
 const frames = new Deque<string>()
 frames.pushBack('first')

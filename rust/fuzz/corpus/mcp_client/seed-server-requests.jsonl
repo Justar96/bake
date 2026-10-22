@@ -1,0 +1,8 @@
+{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-06-18","capabilities":{"tools":{"listChanged":true},"resources":{"subscribe":false}},"serverInfo":{"name":"fuzz","version":"1.0.0"},"instructions":"Be careful."}}
+{"jsonrpc":"2.0","id":"s-1","method":"ping"}
+{"jsonrpc":"2.0","method":"notifications/tools/list_changed"}
+{"jsonrpc":"2.0","id":2,"result":{"tools":[],"nextCursor":"c"}}
+{"jsonrpc":"2.0","id":3,"result":{"tools":[],"nextCursor":"c"}}
+{"jsonrpc":"2.0","method":"notifications/message","params":{"level":"info","data":"started"}}
+
+{"jsonrpc":"2.0","id":4,"result":{"content":[{"type":"image","data":"AAAA","mimeType":"image/png"}]}}

@@ -1,6 +1,6 @@
 /** In-memory credentials for sign-in specs: one always-writable `memory` source, as the credentials package's own double. */
 import type { Context } from '@deepseek-ai/cordis'
-import { CredentialProvider } from '@deepseek-ai/dsh-credentials'
+import { CredentialProvider } from 'bake-credentials'
 import type {
   CredentialInfo,
   CredentialKey,
@@ -9,7 +9,7 @@ import type {
   CredentialRecordInfo,
   CredentialRef,
   ResolvedCredential,
-} from '@deepseek-ai/dsh-credentials'
+} from 'bake-credentials'
 
 export class MemoryCredentials extends CredentialProvider {
   private readonly store = new Map<string, string>()

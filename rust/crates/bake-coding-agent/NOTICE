@@ -1,0 +1,361 @@
+bake-coding-agent includes code ported from the following projects, each under
+the license reproduced below. Bake's own changes are under the workspace's MIT
+license.
+
+================================================================================
+Pi (packages/coding-agent)
+https://github.com/earendil-works/pi
+Release v1.1.0, revision abe508e1b89912adde45528136c3221eb69acdd7.
+Ported: the session manager (src/core/session-manager.ts), the session
+working-directory checks (src/core/session-cwd.ts), the coding-agent message
+types and converters (src/core/messages.ts), the path helpers the session
+manager uses (src/utils/paths.ts), Pi's UUIDv7 generator
+(packages/ai/src/utils/uuid.ts), and the session-manager tests under test/;
+tool-output truncation and accumulation (src/core/tools/truncate.ts, output-accumulator.ts), exclusive
+output files (src/utils/output-files.ts), and the output cases of
+test/tools.test.ts and test/mcp-extension.test.ts;
+file-mutation ordering (src/core/tools/file-mutation-queue.ts) and
+test/file-mutation-queue.test.ts, whose callback cancellation pattern follows
+src/core/tools/write.ts and edit.ts;
+the headless agent session (src/core/agent-session.ts, src/core/sdk.ts), the
+system prompt (src/core/system-prompt.ts) and context-file loading
+(src/core/resource-loader.ts), the model registry and resolver
+(src/core/model-runtime.ts, provider-composer.ts, model-config.ts,
+model-resolver.ts), credential reading (src/core/auth-storage.ts), config
+values (src/core/resolve-config-value.ts), settings
+(src/core/settings-manager.ts), print mode and its JSON events
+(src/modes/print-mode.ts, json-event.ts), the command line (src/main.ts,
+src/cli/args.ts, src/cli/initial-message.ts), JSON comment stripping
+(src/utils/json.ts), the login guidance (src/core/auth-guidance.ts), the
+file tools (src/core/tools/read.ts, write.ts, edit.ts, edit-diff.ts, ls.ts,
+find.ts, grep.ts, path-utils.ts, index.ts, tool-definition-wrapper.ts), the
+tool selection of src/core/settings-manager.ts, sdk.ts, agent-session.ts, and
+mcp-servers.ts, the image helpers (src/utils/mime.ts, exif-orientation.ts,
+image-convert.ts, image-resize-core.ts, image-resize.ts, image-process.ts,
+tool-result-images.ts), the bash tool and its process handling
+(src/core/tools/bash.ts, src/core/exec.ts, src/utils/shell.ts, src/utils/child-process.ts,
+BASH_UPDATE_THROTTLE_MS from src/core/tools/renderers/bash.ts), compaction
+(src/core/compaction/compaction.ts, branch-summarization.ts, utils.ts) with
+auto-compaction and auto-retry from src/core/agent-session.ts, and the tests
+under test/ that the Rust tests name. From release v1.2.0, revision
+06a466935536f8c9bcacb2d5efc0fc021be1bdff: skills (src/core/skills.ts,
+src/utils/frontmatter.ts, the .agents skill discovery of
+src/core/package-manager.ts, and the skill-command expansion of
+src/core/agent-session.ts), the linked-worktree fix of
+src/core/resource-loader.ts, Pi's skill fixtures under
+test/fixtures/skills and test/fixtures/skills-collision, and the settings and
+credential writes: the locked file backends and global-scope setters of
+src/core/settings-manager.ts and src/core/auth-storage.ts, the runtime-key
+overlay of src/core/runtime-credentials.ts, and the cases of
+test/auth-storage.test.ts, test/runtime-credentials.test.ts,
+test/settings-manager.test.ts, and test/settings-manager-bug.test.ts that the
+Rust tests name; the steering and follow-up queue of src/core/agent-session.ts
+(steer, followUp, _queueUserInput, _queueSteer, _queueFollowUp, clearQueue,
+_emitQueueUpdate, and the queue bookkeeping on message_start), its
+queue_update event, and its pre-prompt model and API-key check.
+The queue-mode and pre-message_start bookkeeping cases of
+test/suite/agent-session-queue.test.ts are adapted in agent_session/tests.rs;
+extension-command, input-handler, and custom-message cases remain deferred.
+Also from v1.2.0: the session controls of src/core/agent-session.ts
+(setModel, setThinkingLevel, setSteeringMode, setFollowUpMode, and
+_installAgentNextTurnRefresh, the next request reading the current model),
+the model runtime's snapshot and update of src/core/model-runtime.ts, and the
+cases of those files' tests that agent_session/control_tests.rs and
+model_registry/tests.rs name. Also from v1.2.0: setSessionName, its
+session_info_changed event, and getSessionStats of src/core/agent-session.ts,
+with regression tests
+test/suite/regressions/5996-session-name-newlines.test.ts and
+test/suite/regressions/3686-session-name-event.test.ts adapted in
+agent_session/control_tests.rs (their extension variants are not adapted);
+and the session construction of src/core/agent-session-runtime.ts
+(newSession and switchSession building the next session) adapted in
+src/cli/mod.rs as SessionFactory. Also from v1.2.0, tree navigation and
+forking: navigateTree (without branch summaries or extension events),
+getUserMessagesForForking, and the leaf rules and context refresh of
+src/core/agent-session.ts, adapted in agent_session/navigation.rs; and the
+runtime fork of src/core/agent-session-runtime.ts (its default position
+before a user message, createBranchedSession and newSession with a parent
+session) adapted in agent_session/navigation.rs, session/manager.rs
+(branched_copy), and src/cli/mod.rs (SessionFactory::fork). Cases of
+test/agent-session-tree-navigation.test.ts,
+test/agent-session-branching.test.ts,
+test/suite/regressions/tree-during-streaming.test.ts,
+test/suite/regressions/9178-tree-during-compaction.test.ts, and
+test/suite/regressions/8724-in-memory-fork-active-tool.test.ts are adapted
+in agent_session/navigation_tests.rs.
+Also from v1.2.0, session search: src/modes/interactive/components/
+session-selector-search.ts (parseSearchQuery, matchSession,
+filterAndSortSessions, hasSessionName, without the threaded sort), adapted in
+src/session/search.rs, with the cases of
+test/session-selector-search.test.ts in src/session/search_tests.rs; and the
+fuzzy matching of packages/tui/src/fuzzy.ts (fuzzyMatch, fuzzyFilter) in
+src/cli/list_models.rs, with the cases of packages/tui/test/fuzzy.test.ts.
+Also from v1.2.0, interactive compaction: src/core/agent-session.ts (compact,
+abortCompaction, and the prompt's refusal during compaction), adapted as
+AgentSession::compact_when_idle in src/agent_session.rs and
+src/agent_session/recovery.rs, with cases of
+test/agent-session-compaction.test.ts,
+test/suite/regressions/7150-rpc-prompt-during-compaction.test.ts, and
+test/suite/regressions/9340-9777-auto-compaction-cancellation.test.ts in
+src/agent_session/idle_compaction_tests.rs.
+From release v1.3.0, revision 71023aec1546d6d677a65669c5665c0927ce0dd0:
+the orphaned tool-call rule of transformMessages
+(packages/ai/src/api/transform-messages.ts, its second pass), adapted as the
+unanswered-call projection in src/session/unanswered.rs.
+
+From release v1.3.0, revision 71023aec1546d6d677a65669c5665c0927ce0dd0, the
+tool-call veto: ExtensionRunner.emitToolCall in
+src/core/extensions/runner.ts (handlers in order, the first block returned)
+and AgentSession._beforeToolCall in src/core/agent-session.ts (a failing
+handler blocks the call), adapted in src/plugins/veto.rs and
+src/agent_session/plugin_veto.rs; ToolCallEventResult in
+src/core/extensions/types.ts, adapted as ToolCallVeto in src/plugins/mod.rs;
+and examples/extensions/protected-paths.ts, ported as ProtectedPaths in
+src/plugins/protected_paths.rs, with its cases in src/plugins/tests.rs and
+src/agent_session/plugin_tests.rs.
+
+From release v1.3.0, revision 71023aec1546d6d677a65669c5665c0927ce0dd0, the
+object disposal of packages/chord/src/object.ts (a memoized dispose that runs
+whether or not a caller waits, aborting tasks before awaiting them), adapted
+in src/owned_work.rs, with cases of packages/chord/test/host.test.ts (forced
+disposal aborts in-flight calls) and test/review.test.ts (an aborted task
+context cannot start fresh calls) in src/owned_work/tests.rs.
+
+From release v1.3.0, revision 71023aec1546d6d677a65669c5665c0927ce0dd0, the
+MCP integration: the configuration of src/extensions/mcp/config.ts (the
+mcpServers shape, server names, transports, exposures, timeouts, and its
+messages), the connection and tool lifecycle of src/extensions/mcp/runtime.ts
+and src/extensions/mcp/index.ts, the tool wrapping and result conversion of
+src/extensions/mcp/tools.ts (convertMcpResult, toModelContent,
+readableResources, binary resources saved to
+files, and middle truncation), the resource tools of
+src/extensions/mcp/resources.ts (list_mcp_resources,
+list_mcp_resource_templates, and read_mcp_resource with their parameter and
+output schemas, descriptions, payloads, and messages, isMcpAppResource,
+listed, stringArgument, findServer, and jsonResult) with their registration
+and the server instructions and mcp_servers section of
+src/extensions/mcp/index.ts (serversWithResources, syncResourceTools,
+registerTools, serverSummary, and renderServersSection) over the names of
+src/core/mcp-servers.ts, and the startup wait and tool declaration of
+src/core/mcp-servers.ts and src/core/agent-session.ts, adapted in src/mcp/,
+with the cases of test/mcp-extension.test.ts and
+test/suite/agent-session-mcp.test.ts that src/mcp/ and tests/mcp_session.rs
+name.
+
+From release v1.3.0, revision 71023aec1546d6d677a65669c5665c0927ce0dd0, the
+session export and bug report: the HTML export of src/core/export-html/
+(index.ts's generateHtml, generateThemeVars, and deriveExportColors, and
+template.html, template.css, and template.js, embedded verbatim with the
+dark theme of src/modes/interactive/theme/dark.json resolved), in
+src/export_html/; the branch serialization of src/core/session-export.ts and
+createShareTrailingEntries of src/modes/interactive/session-share.ts, in
+src/session_export.rs; the redaction, metadata, diagnostics, and files of
+src/core/bug-report.ts and the archive layout of src/utils/zip.ts, in
+src/bug_report.rs; and exportSessionToHtml's checks with buildBundle and
+recordInSession of src/modes/interactive/bug-report.ts, in
+src/agent_session/share.rs; with the cases of test/bug-report.test.ts,
+test/export-jsonl-share.test.ts, and test/export-html-xss.test.ts that those
+files name.
+
+From release v1.3.0, revision 71023aec1546d6d677a65669c5665c0927ce0dd0, RPC
+mode: the command loop, commands, responses, and shutdown of
+src/modes/rpc/rpc-mode.ts, the protocol records of
+src/modes/rpc/rpc-types.ts, and the strict JSONL framing of
+src/modes/rpc/jsonl.ts, adapted in src/rpc/; docs/rpc.md,
+docs/rpc-commands.md, and docs/rpc-extension-ui.md as the protocol's
+description; and the cases of test/rpc-jsonl.test.ts,
+test/rpc-prompt-response-semantics.test.ts, test/rpc.test.ts,
+test/rpc-client-clear-queue.test.ts, test/rpc-client-clone.test.ts, and
+test/rpc-client-process-exit.test.ts that src/rpc/ and
+crates/bake-cli/tests/rpc.rs name. Approvals (D24) are Bake's own, carried
+over Pi's extension_ui_request.
+
+From release v1.4.0, revision 4a080252f06caf63a525d7873c5d94d3c23887e0:
+summaries without a fixed output limit in src/core/compaction/compaction.ts
+and branch-summarization.ts, a split turn's prefix summary that takes the
+custom instructions, and v1.2.0's serialization without thinking blocks in
+src/core/compaction/utils.ts, in src/compaction/; the recovery of
+src/core/agent-session.ts that omits a recovered attempt's tool results, in
+src/agent_session/recovery.rs; grep's --no-config in src/core/tools/grep.ts;
+the byte-order mark tolerance of src/extensions/mcp/config.ts; the default
+models of src/core/model-resolver.ts; the WSL launcher and Microsoft Store
+alias checks of src/utils/shell.ts, in src/tools/bash/shell.rs; the script
+slot queue of src/extensions/codemode/execute.ts, in
+src/tools/codemode/execute.rs; and the CJK emphasis of src/core/export-html/,
+in src/export_html/; with the cases of test/compaction-summary-reasoning.test.ts,
+test/mcp-extension.test.ts, test/windows-shell-config.test.ts,
+test/codemode-worker-admission.test.ts, and test/export-html-cjk.test.ts that
+those files name.
+--------------------------------------------------------------------------------
+MIT License
+
+Copyright (c) 2025 Mario Zechner
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+================================================================================
+jsdiff (diff)
+https://github.com/kpdecker/jsdiff
+Release 8.0.4, the version Pi v1.1.0 locks.
+Ported: the line diff (src/diff/line.ts, src/diff/base.ts) and
+createTwoFilesPatch (src/patch/create.ts), which Pi's edit tool uses for its
+diff and patch.
+--------------------------------------------------------------------------------
+BSD 3-Clause License
+
+Copyright (c) 2009-2015, Kevin Decker <kpdecker@gmail.com>
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its
+   contributors may be used to endorse or promote products derived from
+   this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+================================================================================
+marked
+https://github.com/markedjs/marked
+Release 18.0.11, as Pi v1.4.0 vendors it.
+Embedded verbatim as src/export_html/vendor/marked.min.js, the Markdown
+renderer of the exported HTML page.
+--------------------------------------------------------------------------------
+MIT License
+
+Copyright (c) 2018+, MarkedJS (https://github.com/markedjs/)
+Copyright (c) 2011-2018, Christopher Jeffrey (https://github.com/chjj/)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+Markdown
+
+Copyright © 2004, John Gruber
+http://daringfireball.net/
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
+
+* Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer.
+* Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation and/or other materials provided with the distribution.
+* Neither the name “Markdown” nor the names of its contributors may be used to endorse or promote products derived from this software without specific prior written permission.
+
+This software is provided by the copyright holders and contributors “as is” and any express or implied warranties, including, but not limited to, the implied warranties of merchantability and fitness for a particular purpose are disclaimed. In no event shall the copyright owner or contributors be liable for any direct, indirect, incidental, special, exemplary, or consequential damages (including, but not limited to, procurement of substitute goods or services; loss of use, data, or profits; or business interruption) however caused and on any theory of liability, whether in contract, strict liability, or tort (including negligence or otherwise) arising in any way out of the use of this software, even if advised of the possibility of such damage.
+
+================================================================================
+marked-cjk-friendly
+https://github.com/tats-u/markdown-cjk-friendly/tree/main/packages/marked-cjk-friendly
+Release 0.1.2, as Pi v1.4.0 vendors it.
+Embedded verbatim as src/export_html/vendor/marked-cjk-friendly.min.js, which
+lets the exported page's Markdown emphasis sit next to CJK punctuation.
+--------------------------------------------------------------------------------
+MIT License
+
+Copyright (c) 2024 Tatsunori Uchino, and authors and contributors of original packages
+
+Permission is hereby granted, free of charge, to any person
+obtaining a copy of this software and associated documentation
+files (the "Software"), to deal in the Software without
+restriction, including without limitation the rights to use,
+copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the
+Software is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
+OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+OTHER DEALINGS IN THE SOFTWARE.
+
+================================================================================
+highlight.js
+https://github.com/highlightjs/highlight.js
+Release 11.9.0, as Pi v1.3.0 vendors it.
+Embedded verbatim as src/export_html/vendor/highlight.min.js, the syntax
+highlighter of the exported HTML page.
+--------------------------------------------------------------------------------
+BSD 3-Clause License
+
+Copyright (c) 2006, Ivan Sagalaev.
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+* Redistributions of source code must retain the above copyright notice, this
+  list of conditions and the following disclaimer.
+
+* Redistributions in binary form must reproduce the above copyright notice,
+  this list of conditions and the following disclaimer in the documentation
+  and/or other materials provided with the distribution.
+
+* Neither the name of the copyright holder nor the names of its
+  contributors may be used to endorse or promote products derived from
+  this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
