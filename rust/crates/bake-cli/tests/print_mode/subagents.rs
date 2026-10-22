@@ -448,7 +448,8 @@ fn a_killed_print_run_reports_its_running_subagent_once_after_continue() {
 // every opt-in on and goal-shaped settings present, neither the parent's
 // nor a child's request declares one, nor does the default composition;
 // RPC has no goal command. The task-document tool's `goal` document kind
-// (D37) is a separate, open question and is not checked here.
+// is D37's opt-in goal document, which D48 does not defer, and is not
+// checked here.
 #[cfg(unix)]
 #[test]
 fn no_goal_surface_is_reachable_from_any_composition() {
