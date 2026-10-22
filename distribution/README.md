@@ -71,15 +71,17 @@ The manifest is UTF-8 JSON with exactly those members: `version` is canonical Se
 
 ### The native signing key
 
-`distribution/host/native-release-key.pub` holds the native public key, base64 DER SubjectPublicKeyInfo as `release-key.pub` does, and is a different key: the 0.3 updater's trusted keys never include it, so no 0.3 install can be moved by a native manifest. It is a **placeholder** today, generated in a throwaway process that discarded the private half, and `distribution/host/native-release-key.placeholder` marks it. While that marker exists, `bun run release:preflight` fails, `release:assemble:rust` refuses to sign with the committed key, and the host's native gate refuses a staged native manifest, so nothing can be published under a key nobody holds. Tests sign with ephemeral keys only.
+`distribution/host/native-release-key.pub` holds the native public key, base64 DER SubjectPublicKeyInfo as `release-key.pub` does, and is a different key: the 0.3 updater's trusted keys never include it, so no 0.3 install can be moved by a native manifest. It is the release owner's key, generated on 2026-10-22 with the command below. Its private half never enters the repository; the release workflow reads it from the `release` environment's `BAKE_NATIVE_RELEASE_SIGNING_KEY` secret. Both installers and `bake` embed the same public key, so a native install trusts it alone. Tests sign with ephemeral keys only.
 
-The release owner replaces it once, before 0.4.0. Generate the key where the private half will stay, keep it out of the repository, and print the public half:
+A key nobody holds must never sign: a `distribution/host/native-release-key.placeholder` file beside the public key marks it as a placeholder, and while that marker exists, `bun run release:preflight` fails, `release:assemble:rust` refuses to sign with the committed key, and the host's native gate refuses a staged native manifest.
+
+The key was generated where its private half stays, printing the public half:
 
 ```sh
 umask 077 && node -e "const { generateKeyPairSync } = require('node:crypto'); const key = generateKeyPairSync('ed25519'); require('node:fs').writeFileSync(process.argv[1], key.privateKey.export({ type: 'pkcs8', format: 'pem' })); console.log(key.publicKey.export({ type: 'spki', format: 'der' }).toString('base64'))" ~/.config/bake/native-release-signing-key.pem
 ```
 
-Write that printed line, with a trailing newline, into `distribution/host/native-release-key.pub`, delete `native-release-key.placeholder`, and commit both; `bake` embeds the same file. Name the private file with `BAKE_NATIVE_RELEASE_SIGNING_KEY_FILE` or `--key-file` when assembling. Rotation needs the new key trusted by a native release signed with the old one, as the 0.3 key's section describes.
+That printed line, with a trailing newline, is `distribution/host/native-release-key.pub`, and the `native_release_key` line of `install.sh` and the `$nativeReleaseKey` line of `install.ps1` repeat it. Name the private file with `BAKE_NATIVE_RELEASE_SIGNING_KEY_FILE` or `--key-file` when assembling, and keep an offline copy of it: once a native release is out, installs trust this key alone, so losing it leaves them no signed update. Rotation needs the new key trusted by a native release signed with the old one, as the 0.3 key's section describes.
 
 ### Assembling and verifying a native release
 
@@ -89,12 +91,12 @@ Pack each platform on its own host, collect every archive of the version in `.ar
 bun run release:pack:rust      # on linux-x64 and on linux-arm64
 BAKE_NATIVE_RELEASE_SIGNING_KEY_FILE=~/.config/bake/native-release-signing-key.pem \
   bun run release:assemble:rust 0.4.0
-node distribution/host/verify-native-manifest.mjs   # once the key is no longer a placeholder
+node distribution/host/verify-native-manifest.mjs
 ```
 
 `release:assemble:rust <version>` hashes each archive, copies it to `distribution/host/public/native/releases/<version>/`, and writes the manifest and its signature to `public/native/`. It refuses an archive whose name is not that version's archive for a release platform, a `darwin-*` or `win32-x64` archive, which 0.4.0 does not publish, an archive that is not a native archive — one lacking the native executable with `licenses/inventory.json` and `notices/`, or holding a TypeScript release's Node launcher, `node_modules`, or `apps/cli/lib/bin.js` — an empty set of archives, and a link or escaping path inside an archive. `--complete` also requires both `linux-x64` and `linux-arm64` archives. `--ephemeral-key` signs a local check with a throwaway key and leaves its public half beside the archives as `ephemeral-native-release-key.pub`; `--offline` publishes without reading the live channel. The signing key is resolved, and the channel checked, before anything is staged. These generated paths are ignored by Git.
 
-`verify-native-manifest.mjs` is the native gate the service's image build runs, mirroring `verify-manifest.mjs`: it verifies the signature against the committed native key alone, applies every member rule above, refuses a manifest naming a macOS or Windows archive whatever its flags, and checks each archive's size and SHA-256. `--complete` requires exactly `linux-arm64` and `linux-x64`, `--allow-missing-archives` accepts an archive the image does not hold, because the server redirects those to the version's GitHub release, and `--required` refuses a payload with no native manifest, which otherwise reports that none is published. A local check names a throwaway key with `BAKE_NATIVE_RELEASE_PUBLIC_KEY`, which the image build never sets, as the 0.3 gate's `BAKE_RELEASE_PUBLIC_KEY` does. While `native-release-key.placeholder` exists the gate refuses any staged native manifest before it reads a key, so an ephemeral round trip can only run it in a copy of `distribution/host/` without that marker, as [`native-manifest.test.ts`](../scripts/release/native-manifest.test.ts) does; the command below reads the gate as written once the owner has replaced the key.
+`verify-native-manifest.mjs` is the native gate the service's image build runs, mirroring `verify-manifest.mjs`: it verifies the signature against the committed native key alone, applies every member rule above, refuses a manifest naming a macOS or Windows archive whatever its flags, and checks each archive's size and SHA-256. `--complete` requires exactly `linux-arm64` and `linux-x64`, `--allow-missing-archives` accepts an archive the image does not hold, because the server redirects those to the version's GitHub release, and `--required` refuses a payload with no native manifest, which otherwise reports that none is published. A local check names a throwaway key with `BAKE_NATIVE_RELEASE_PUBLIC_KEY`, which the image build never sets, as the 0.3 gate's `BAKE_RELEASE_PUBLIC_KEY` does. A `native-release-key.placeholder` marker beside the key makes the gate refuse any staged native manifest before it reads a key; [`native-manifest.test.ts`](../scripts/release/native-manifest.test.ts) runs the gate in a copy of `distribution/host/`, with a throwaway key.
 
 ### The glibc floor
 
@@ -185,7 +187,7 @@ Before the first tagged release, the `release` environment, limited to tags matc
 
 | Secret | Value |
 |---|---|
-| `BAKE_NATIVE_RELEASE_SIGNING_KEY` | The whole PEM text of the [native signing key](#the-native-signing-key), whose public half replaces the committed placeholder |
+| `BAKE_NATIVE_RELEASE_SIGNING_KEY` | The whole PEM text of the [native signing key](#the-native-signing-key), whose public half is `distribution/host/native-release-key.pub` |
 | `RAILWAY_TOKEN` | A Railway project token for the `production` environment of the download service's project |
 
 The 0.3 key, `BAKE_RELEASE_SIGNING_KEY`, signs nothing on this route: the frozen `latest.json` keeps the signature its 0.3 release gave it.

@@ -22,7 +22,7 @@ throw 'Bake install: Bake 0.4.0 releases linux-arm64 and linux-x64 only; native 
 # DER SubjectPublicKeyInfo. A release test holds every copy equal. Tests
 # replace this one line in a private copy of the installer, so the published
 # installer takes no key from its environment.
-$nativeReleaseKey = 'MCowBQYDK2VwAyEAj4mvx0643TcPtmjwV4Mmj8PNeAqAF0j9LFWqT/+UDTI='
+$nativeReleaseKey = 'MCowBQYDK2VwAyEAYHdFEaVkRABjXEFzF1WnfoX1MJUcwzgB9oS9kyzF9hY='
 
 # BEGIN ED25519 VERIFIER
 # Ed25519 verification (RFC 8032 section 5.1.7) in PowerShell, because neither

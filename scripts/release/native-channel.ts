@@ -6,9 +6,9 @@
  * is published afterwards
  * ([D13](../../docs/roadmap/rust-0.4/scope-00/support.md#decision-register)),
  * so a published native release of 0.4.0 or later closes the TypeScript route.
- * Until the release owner replaces the committed placeholder key, nothing can
- * sign a native manifest, and release preflight says so instead of letting a
- * release reach that failure later.
+ * A key whose private half nobody holds must never sign: while a placeholder
+ * marker sits beside the committed key, release preflight says so instead of
+ * letting a release reach that failure later.
  */
 
 import { existsSync, readFileSync } from 'node:fs'

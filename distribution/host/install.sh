@@ -27,7 +27,7 @@ replace_command=${BAKE_REPLACE_COMMAND:-}
 # DER SubjectPublicKeyInfo. A release test holds every copy equal. Tests
 # replace this one line in a private copy of the installer, so the published
 # installer takes no key from its environment.
-native_release_key='MCowBQYDK2VwAyEAj4mvx0643TcPtmjwV4Mmj8PNeAqAF0j9LFWqT/+UDTI='
+native_release_key='MCowBQYDK2VwAyEAYHdFEaVkRABjXEFzF1WnfoX1MJUcwzgB9oS9kyzF9hY='
 
 mode=install
 while [ $# -gt 0 ]; do

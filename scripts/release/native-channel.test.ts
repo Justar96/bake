@@ -80,12 +80,15 @@ describe('the 0.3 assembler', () => {
 })
 
 describe('the native signing key', () => {
-  test('is reported as a placeholder while the marker is committed', () => {
-    expect(nativeKeyProblem(ROOT)).toContain('still a placeholder')
+  test('is reported as a placeholder while the marker is present', () => {
+    const root = scratch()
+    mkdirSync(join(root, 'distribution/host'), { recursive: true })
+    writeFileSync(join(root, NATIVE_KEY_PLACEHOLDER), 'placeholder\n')
+    expect(nativeKeyProblem(root)).toContain('still a placeholder')
   })
 
-  test('is accepted once the owner replaces it and deletes the marker', () => {
-    expect(nativeKeyProblem(scratch())).toBeUndefined()
+  test("is the owner's in this repository, which carries no marker", () => {
+    expect(nativeKeyProblem(ROOT)).toBeUndefined()
   })
 })
 
@@ -108,11 +111,5 @@ describe('release preflight', () => {
   test('fails while the native key is a placeholder, and passes once it is not', async () => {
     await expect(preflight({ root: workspace(true), tag: 'v0.4.0' })).rejects.toThrow(/native-release-key\.pub is still a placeholder/)
     await expect(preflight({ root: workspace(false), tag: 'v0.4.0' })).resolves.toMatchObject({ version: '0.4.0' })
-  })
-
-  test('fails in this repository, which still carries the placeholder', async () => {
-    const run = Bun.spawnSync(['bun', 'run', 'release:preflight', '--offline', '--tag', 'v0.4.0'], { cwd: ROOT, stdout: 'pipe', stderr: 'pipe', timeout: 60_000 })
-    expect(run.exitCode).toBe(1)
-    expect(`${run.stdout.toString()}${run.stderr.toString()}`).toContain('native-release-key.pub is still a placeholder')
   })
 })

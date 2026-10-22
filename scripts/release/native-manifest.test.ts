@@ -1,7 +1,7 @@
 /** The native manifest is its own schema on its own key: the host's gate holds it to those rules, and a 0.3 updater refuses it. */
 import { afterEach, describe, expect, test } from 'bun:test'
 import { createHash, generateKeyPairSync, sign } from 'node:crypto'
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { RELEASE_PUBLIC_KEYS } from '../../packages/boot/updater/src/keys.ts'
@@ -86,8 +86,8 @@ describe('the native key', () => {
     expect(native).not.toBe(readFileSync(join(ROOT, 'distribution/host/release-key.pub'), 'utf8').trim())
   })
 
-  test('is a placeholder until the owner replaces it', () => {
-    expect(readFileSync(join(ROOT, 'distribution/host/native-release-key.placeholder'), 'utf8')).toContain('PLACEHOLDER')
+  test("is the owner's, with no placeholder marker beside it", () => {
+    expect(existsSync(join(ROOT, 'distribution/host/native-release-key.placeholder'))).toBe(false)
   })
 })
 
@@ -197,7 +197,7 @@ describe('the host gate', () => {
 
   test('refuses a manifest while the committed key is a placeholder', () => {
     const { root } = fixture()
-    copyFileSync(join(ROOT, 'distribution/host/native-release-key.placeholder'), join(root, 'native-release-key.placeholder'))
+    writeFileSync(join(root, 'native-release-key.placeholder'), 'native-release-key.pub is a PLACEHOLDER.\n')
     expect(verify(root).stderr).toContain('still a placeholder')
   })
 
