@@ -2091,7 +2091,8 @@ for (const inline of [false, true]) {
     await session.wait('info closed', () => !session.screen.includes('Session info') && session.screen.includes('❯ Type a draft'))
     assert.equal(world.model.requests.length, requests, 'a sheet sent a model request')
     session.send('/new\r')
-    await session.wait('new session', () => session.screen.includes('New session started'))
+    // Inline, the new session's saved-to notice can push the note into scrollback.
+    await session.wait('new session', () => (inline ? session.history : session.screen).includes('New session started'))
     await composerReady(session)
     session.send('ECHO beta\r')
     await session.wait('second answer completed', () => session.screen.includes('Echo: beta.')
