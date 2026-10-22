@@ -107,6 +107,18 @@ jobs:
       - name: Install the pinned Rust toolchain
         working-directory: rust
         run: rustup toolchain install --no-self-update
+      # Stable rustc links through its own rust-lld by default only on x86_64.
+      # On the arm64 runner the link otherwise leaves the GLIBC_2.39 need of
+      # the weakly bound pidfd functions unmarked, as GNU ld does, so the
+      # binary would not start below glibc 2.39 (release dry run
+      # 39801454576). rust-lld marks that need weak, so every Linux build
+      # links with the pinned toolchain's own rust-lld.
+      - name: Link with the toolchain's rust-lld
+        working-directory: rust
+        run: |
+          gcc_ld="$(rustc --print sysroot)/lib/rustlib/$(rustc -vV | sed -n 's/^host: //p')/bin/gcc-ld"
+          [ -x "$gcc_ld/ld.lld" ] || { echo "The pinned toolchain ships no $gcc_ld/ld.lld" >&2; exit 1; }
+          echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld -C link-arg=-B$gcc_ld" >> "$GITHUB_ENV"
       # The archive's dependency license text is generated with exactly
       # cargo-about 0.9.2, built here rather than restored from a cache.
       - name: Install cargo-about 0.9.2
