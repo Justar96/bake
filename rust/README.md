@@ -2,9 +2,9 @@
 
 ## Summary
 
-Run Bake's native agent, `bake`, fullscreen or inline with terminal scrollback: edit multiline Unicode drafts, send them to a real agent session that streams answers, thinking, and tool calls, steer or stop a turn, and resume the session later. `bake preview` runs the same components against a scripted fixture runtime with sample agents. Both modes share the same components and styling. This is an opt-in development build for the [Bake 0.4 Rust roadmap](../docs/roadmap/rust-0.4/README.md).
+Run Bake's native agent, `bake`, fullscreen or inline with terminal scrollback: edit multiline Unicode drafts, send them to a real agent session that streams answers, thinking, and tool calls, steer or stop a turn, and resume the session later. `bake preview` runs the same components against a scripted fixture runtime with sample agents. Both modes share the same components and styling. This workspace builds the `bake` that Bake 0.4.0 releases for Linux x86_64 and aarch64; macOS and Windows support comes in later 0.4.x releases ([roadmap](../docs/roadmap/rust-0.4/README.md)).
 
-`bake` in a terminal opens an interactive session over the same setup as print mode (see [Interactive sessions](#interactive-sessions)). `bake preview` shows sample content and scripted fixture turns and connects to nothing. `bake -p` runs a headless Pi print-mode turn: it reads the Bake home's models, credentials, and settings, imports the 0.3 CLIProxyAPI route, key, and default model read-only (D25), connects to a model, and writes Pi-format sessions; it runs Pi's built-in file tools. The shipped TypeScript terminal is unchanged and remains the default. This build does not complete any roadmap scope.
+`bake` in a terminal opens an interactive session over the same setup as print mode (see [Interactive sessions](#interactive-sessions)). `bake preview` shows sample content and scripted fixture turns and connects to nothing. `bake -p` runs a headless Pi print-mode turn: it reads the Bake home's models, credentials, and settings, imports the 0.3 CLIProxyAPI route, key, and default model read-only (D25), connects to a model, and writes Pi-format sessions; it runs Pi's built-in file tools. The installers install this agent from Bake 0.4.0 on; the frozen TypeScript agent is no longer installed.
 
 ## Table of Contents
 

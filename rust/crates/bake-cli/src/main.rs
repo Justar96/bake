@@ -1,4 +1,4 @@
-//! `bake`: Bake's native agent (Rust preview).
+//! `bake`: Bake, a terminal coding agent.
 //!
 //! `bake` in a terminal opens an interactive session in the terminal
 //! frontend ([`bake_tui::run_live`]); `bake -p "prompt"` runs one
@@ -37,7 +37,7 @@ use bake_tui::{LiveSession, PreviewExit, ScreenMode};
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 const HELP: &str = "\
-bake: Bake's native agent (Rust preview)
+bake: Bake, a terminal coding agent
 
 Usage:
   bake [options] [messages...]
