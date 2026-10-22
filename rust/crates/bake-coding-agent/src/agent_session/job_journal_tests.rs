@@ -142,11 +142,18 @@ async fn crash_at(phase: &str) {
     .await;
     // Reap on every path, including a broken checkpoint assertion.
     let _ = child.kill().await;
-    let _ = child.wait().await;
+    let status = child.wait().await;
     let checkpoint = reached
         .expect("checkpoint deadline")
         .expect("checkpoint stream")
         .expect("checkpoint reached");
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        assert_eq!(status.unwrap().signal(), Some(libc::SIGKILL), "{phase}");
+    }
+    #[cfg(not(unix))]
+    drop(status);
     let file = PathBuf::from(checkpoint["file"].as_str().unwrap());
     let reopened = SessionManager::open(&file, None, None).unwrap();
     let jobs = JobRegistry::new(WorkGate::default(), JobLimits::default());
@@ -502,4 +509,216 @@ async fn a_live_custom_job_kind_is_acknowledged_once() {
     assert!(session.jobs().claim_unreported().is_empty());
     session.shutdown().await;
     assert_eq!(h.faux.call_count(), 1);
+}
+
+/// Runs a session with one background job whose producer is a real `sh`
+/// process ([`crate::jobs::process::run_process`]) to the kill point its
+/// mode names and halts there: with the process running, after its durable
+/// start (`process-running`), or once it exited and its terminal fact is
+/// synced, before anything is told of it (`process-exited`). The process
+/// appends a line to `ran` when it starts and writes its pid.
+#[cfg(unix)]
+#[test]
+fn process_job_crash_fixture() {
+    use crate::jobs::crash_fixture::halt;
+    let Some(dir) = std::env::var_os("BAKE_TEST_PROCESS_JOB_DIR") else {
+        return;
+    };
+    let dir = PathBuf::from(dir);
+    let mode = std::env::var("BAKE_TEST_PROCESS_JOB_MODE").unwrap();
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(async move {
+        let h = harness();
+        let manager = SessionManager::create(
+            &dir.to_string_lossy(),
+            Some(&dir.join("sessions")),
+            NewSessionOptions::default(),
+        )
+        .unwrap();
+        let session = h
+            .session(manager, Settings::default(), None, Vec::new())
+            .await;
+        std::fs::write(
+            dir.join("session-path"),
+            session.session_file().unwrap().to_string_lossy().as_bytes(),
+        )
+        .unwrap();
+        let running = mode == "process-running";
+        if !running {
+            let synced = dir.clone();
+            session.core.hooks().after_job_record = Some(Arc::new(move |snapshot| {
+                if snapshot.status.is_terminal() {
+                    halt(&synced);
+                }
+            }));
+        }
+        let script = format!(
+            "echo ran >> '{}'; echo $$ > '{}'; {}",
+            dir.join("ran").display(),
+            dir.join("pid").display(),
+            if running { "exec sleep 1000" } else { "exit 0" }
+        );
+        let spec = bake_process::ProcessSpec {
+            program: "sh".into(),
+            args: vec!["-c".into(), script.into()],
+            cwd: None,
+            env: None,
+            stdin: false,
+        };
+        session
+            .jobs()
+            .start(
+                JobSpec {
+                    kind: "bash",
+                    label: "fixture process".into(),
+                    output: OutputMode::Stream,
+                },
+                move |context| crate::jobs::process::run_process(context, spec),
+            )
+            .unwrap();
+        if running {
+            let pid = dir.join("pid");
+            while !std::fs::read_to_string(&pid).is_ok_and(|text| text.ends_with('\n')) {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+            halt(&dir);
+        }
+        std::future::pending::<()>().await;
+    });
+}
+
+// A host killed with `SIGKILL` while its background job's process runs,
+// after the job's durable start and before any terminal fact, reopens with
+// the job reported once as lost: its outcome is unknown, and the resumed
+// session never starts the process again. A host killed after the process
+// exited and its terminal fact was synced, before any notice, reports the
+// known outcome once. A second resume reports neither. A process running
+// at the kill is not owned by anything after it; the test removes it.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_killed_host_reports_its_process_job_once_and_never_restarts_it() {
+    for (mode, notice) in [
+        (
+            "process-running",
+            "background job bash-1 (bash: fixture process) belongs to an earlier process and has no recorded final outcome [status: lost]. Its output is unavailable. Check whether its effects completed before starting it again.",
+        ),
+        (
+            "process-exited",
+            "background job bash-1 (bash: fixture process) finished in its earlier process [status: completed, exit code: 0]. Its output was not retained across processes and is unavailable.",
+        ),
+    ] {
+        let dir = TempDir::new(&format!("journal-process-{mode}"));
+        // Kills the running process on every path out of this case, a
+        // panic in the fixture's kill included: armed before the fixture
+        // starts, it reads the pid the process wrote when it drops. Only a
+        // process that is to be running at the kill is killed, so no pid
+        // an exited process freed is signalled.
+        struct Orphan(Option<PathBuf>);
+        impl Drop for Orphan {
+            fn drop(&mut self) {
+                let Some(pid) = self.0.as_ref().and_then(|path| {
+                    std::fs::read_to_string(path)
+                        .ok()?
+                        .trim()
+                        .parse::<libc::pid_t>()
+                        .ok()
+                }) else {
+                    return;
+                };
+                // SAFETY: plain syscall with an integer pid and signal.
+                unsafe { libc::kill(pid, libc::SIGKILL) };
+            }
+        }
+        let _orphan = Orphan((mode == "process-running").then(|| dir.join("pid")));
+        crate::jobs::crash_fixture::kill_fixture(
+            "agent_session::job_journal::tests::process_job_crash_fixture",
+            &[
+                ("BAKE_TEST_PROCESS_JOB_DIR", dir.path().as_os_str()),
+                ("BAKE_TEST_PROCESS_JOB_MODE", mode.as_ref()),
+            ],
+            dir.path(),
+        )
+        .await;
+        let path = PathBuf::from(std::fs::read_to_string(dir.join("session-path")).unwrap());
+        let phases: Vec<String> = std::fs::read_to_string(&path)
+            .unwrap()
+            .lines()
+            .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+            .filter(|entry| entry["customType"] == "bake.job.state")
+            .map(|entry| format!("{} {}", entry["data"]["phase"], entry["data"]["status"]))
+            .collect();
+        assert_eq!(
+            phases,
+            if mode == "process-running" {
+                vec!["\"started\" \"running\""]
+            } else {
+                vec!["\"started\" \"running\"", "\"terminal\" \"completed\""]
+            },
+            "{mode}"
+        );
+
+        let h = harness();
+        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let capture = Arc::clone(&seen);
+        h.faux
+            .set_responses(vec![bake_ai::providers::faux::FauxResponseStep::from_fn(
+                move |context, _, _, _| {
+                    capture.lock().unwrap().push(
+                        context
+                            .messages()
+                            .iter()
+                            .filter_map(|message| match message {
+                                bake_ai::Message::User(user) => {
+                                    Some(bake_ai::utils::text::user_content_text(&user.content, ""))
+                                }
+                                _ => None,
+                            })
+                            .collect::<Vec<_>>(),
+                    );
+                    Ok(faux_assistant_message("noted"))
+                },
+            )]);
+        let session = h
+            .session(
+                SessionManager::open(&path, None, None).unwrap(),
+                Settings::default(),
+                None,
+                Vec::new(),
+            )
+            .await;
+        tokio::time::timeout(
+            Duration::from_secs(30),
+            session.prompt("continue", Vec::new()),
+        )
+        .await
+        .expect("the prompt's turn ended")
+        .unwrap();
+        assert!(session.jobs().list().is_empty(), "{mode}: a producer ran");
+        tokio::time::timeout(Duration::from_secs(30), session.shutdown())
+            .await
+            .expect("the session shut down");
+        assert_eq!(
+            seen.lock().unwrap()[0],
+            [notice.to_owned(), "continue".to_owned()],
+            "{mode}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join("ran")).unwrap(),
+            "ran\n",
+            "{mode}: the process started again"
+        );
+        let reopened = SessionManager::open(&path, None, None).unwrap();
+        let jobs = JobRegistry::new(WorkGate::default(), JobLimits::default());
+        assert!(
+            job_notices::recover(&reopened, &jobs).is_empty(),
+            "{mode}: reported twice"
+        );
+        tokio::time::timeout(Duration::from_secs(30), jobs.close())
+            .await
+            .expect("the registry closed");
+    }
 }

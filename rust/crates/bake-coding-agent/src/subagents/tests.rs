@@ -33,11 +33,26 @@ struct Harness {
     runtime: ModelRuntime,
     apis: Arc<ApiRegistry>,
     dir: TempDir,
+    /// The sessions directory: the parent's file and the children's
+    /// directory. `dir` unless a restart test names another.
+    place: PathBuf,
     /// Each request's model and its last user-side text.
     requests: Arc<Mutex<Vec<(String, String)>>>,
+    /// The work gate of each child built, in build order.
+    child_gates: Mutex<Vec<WorkGate>>,
+    /// The job registry of each child built, in build order.
+    child_jobs: Mutex<Vec<JobRegistry>>,
+    /// The settings a parent session runs with; a child's are the default.
+    parent_settings: Mutex<Settings>,
 }
 
 fn harness(name: &str) -> Arc<Harness> {
+    harness_in(name, None)
+}
+
+/// A harness whose sessions are in `place`, a directory the caller owns,
+/// or in its own temporary directory.
+fn harness_in(name: &str, place: Option<PathBuf>) -> Arc<Harness> {
     let faux = Arc::new(FauxProvider::new(FauxProviderOptions::default()));
     let apis = Arc::new(ApiRegistry::new());
     apis.register(faux.clone());
@@ -56,12 +71,17 @@ fn harness(name: &str) -> Arc<Harness> {
             Some("test-key".into()),
         )
         .expect("faux provider");
+    let dir = TempDir::new(name);
     Arc::new(Harness {
         faux,
         runtime: ModelRuntime::new(registry),
         apis,
-        dir: TempDir::new(name),
+        place: place.unwrap_or_else(|| dir.path().to_owned()),
+        dir,
         requests: Arc::default(),
+        child_gates: Mutex::default(),
+        child_jobs: Mutex::default(),
+        parent_settings: Mutex::default(),
     })
 }
 
@@ -158,6 +178,7 @@ impl Harness {
         selection: SessionSelection,
         model: Option<Model>,
         thinking_level: Option<ModelThinkingLevel>,
+        settings: Settings,
     ) -> Result<AgentSession, String> {
         let tools: Vec<Arc<AgentTool>> = tools
             .into_iter()
@@ -167,7 +188,7 @@ impl Harness {
             session: store,
             registry: self.runtime.clone(),
             apis: Arc::clone(&self.apis),
-            settings: Settings::default(),
+            settings,
             settings_store: None,
             selection: Some(selection),
             model,
@@ -197,7 +218,7 @@ fn builder(h: &Arc<Harness>, parent_id: String, parent_file: Option<PathBuf>) ->
             let store = match &spec.source {
                 ChildSource::New { id, label } => new_child_store(
                     "/tmp",
-                    h.dir.path(),
+                    &h.place,
                     true,
                     &parent_id,
                     parent_file.as_deref(),
@@ -205,12 +226,14 @@ fn builder(h: &Arc<Harness>, parent_id: String, parent_file: Option<PathBuf>) ->
                     label,
                 )?,
                 ChildSource::Open { path } => {
-                    SessionManager::open(path, Some(&children_dir(h.dir.path())), None)
+                    SessionManager::open(path, Some(&children_dir(&h.place)), None)
                         .map_err(|error| error.to_string())?
                 }
             };
             let work = WorkGate::default();
+            h.child_gates.lock().expect("gates").push(work.clone());
             let jobs = JobRegistry::new(work.clone(), crate::jobs::JobLimits::default());
+            h.child_jobs.lock().expect("jobs").push(jobs.clone());
             h.session(
                 store,
                 child_tools(&spec.link),
@@ -219,6 +242,7 @@ fn builder(h: &Arc<Harness>, parent_id: String, parent_file: Option<PathBuf>) ->
                 SessionSelection::default(),
                 spec.route.as_ref().map(|route| route.model.clone()),
                 spec.route.and_then(|route| route.thinking_level),
+                Settings::default(),
             )
             .await
         })
@@ -228,13 +252,15 @@ fn builder(h: &Arc<Harness>, parent_id: String, parent_file: Option<PathBuf>) ->
 struct Parent {
     session: Arc<AgentSession>,
     host: SubagentHost,
+    /// The parent's gate, which owns every resident child.
+    work: WorkGate,
 }
 
 /// A persisted parent on faux-1 with the parent tools, opened from
 /// `store` (a new one when `None`).
 async fn parent(h: &Arc<Harness>, store: Option<SessionManager>) -> Parent {
     let store = store.unwrap_or_else(|| {
-        SessionManager::create("/tmp", Some(h.dir.path()), NewSessionOptions::default())
+        SessionManager::create("/tmp", Some(&h.place), NewSessionOptions::default())
             .expect("parent store")
     });
     let work = WorkGate::default();
@@ -253,15 +279,17 @@ async fn parent(h: &Arc<Harness>, store: Option<SessionManager>) -> Parent {
         builder: builder(h, parent_id, parent_file),
         recovered: recover(&store),
     });
+    let settings = h.parent_settings.lock().expect("settings").clone();
     let mut session = h
         .session(
             store,
             parent_tools(&host, true),
-            work,
+            work.clone(),
             jobs,
             selection,
             Some(h.model("faux-1")),
             Some(ModelThinkingLevel::High),
+            settings,
         )
         .await
         .expect("parent");
@@ -269,6 +297,7 @@ async fn parent(h: &Arc<Harness>, store: Option<SessionManager>) -> Parent {
     Parent {
         session: Arc::new(session),
         host,
+        work,
     }
 }
 
@@ -287,11 +316,40 @@ async fn settled(parent: &Parent) {
     })
     .await
     .expect("children settled");
-    parent
-        .session
-        .deliver_job_notices()
+    tokio::time::timeout(
+        Duration::from_secs(20),
+        parent.session.deliver_job_notices(),
+    )
+    .await
+    .expect("the notice turn ended")
+    .expect("notice turn");
+}
+
+/// The settlements the parent's file records ([`SETTLED_TYPE`]), as their
+/// run and stop reason.
+fn file_settled(path: &std::path::Path) -> Vec<(u64, String)> {
+    std::fs::read_to_string(path)
+        .expect("parent file")
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .filter(|entry| entry["type"] == "custom" && entry["customType"] == SETTLED_TYPE)
+        .map(|entry| {
+            (
+                entry["data"]["runId"].as_u64().unwrap_or_default(),
+                entry["data"]["stopReason"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_owned(),
+            )
+        })
+        .collect()
+}
+
+/// Awaits `work`, failing the test if it takes longer than 30 s.
+async fn bounded<T>(what: &str, work: impl std::future::Future<Output = T>) -> T {
+    tokio::time::timeout(Duration::from_secs(30), work)
         .await
-        .expect("notice turn");
+        .unwrap_or_else(|_| panic!("{what} did not finish"))
 }
 
 /// The custom messages of `session` with `custom_type`, as their texts
@@ -979,3 +1037,9 @@ async fn every_subagent_tool_has_a_replay_class() {
     );
     work.close().await;
 }
+
+#[path = "barrier_tests.rs"]
+mod barrier;
+
+#[path = "restart_tests.rs"]
+mod restart;
