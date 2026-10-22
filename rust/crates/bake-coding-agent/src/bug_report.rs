@@ -204,7 +204,8 @@ fn os_release() -> (Option<String>, Option<String>) {
         let bytes: Vec<u8> = raw
             .iter()
             .take_while(|byte| **byte != 0)
-            .map(|byte| *byte as u8)
+            // `c_char` is `i8` or `u8` by target, so no `as` cast suits both.
+            .map(|byte| u8::from_ne_bytes(byte.to_ne_bytes()))
             .collect();
         Some(String::from_utf8_lossy(&bytes).into_owned()).filter(|text| !text.is_empty())
     };

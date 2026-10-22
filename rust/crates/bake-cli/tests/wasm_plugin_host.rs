@@ -1080,13 +1080,15 @@ async fn the_os_memory_limit_stops_an_oversized_compile() {
         }
         other => panic!("expected the limit to stop the compile, got {other:?}"),
     }
-    // The roomy 512 MiB step runs on Linux only: how much address space
-    // this function needs to compile on macOS has not been measured, so
-    // there only the refusal is checked.
+    // The roomy step runs on Linux only: how much address space this
+    // function needs to compile on macOS has not been measured, so there
+    // only the refusal is checked. On Linux it compiles within 384 MiB on
+    // x86_64 but needs more than 512 MiB on aarch64, so the step gives it
+    // 1 GiB.
     #[cfg(target_os = "linux")]
     {
         let roomy = HostLimits {
-            memory_budget: 512 << 20,
+            memory_budget: 1 << 30,
             ..limits
         };
         let host = try_start(&heavy, &roomy)

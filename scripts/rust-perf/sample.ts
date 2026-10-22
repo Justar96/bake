@@ -35,6 +35,8 @@ export const WARMUP_ITERATION = -1
  * hangs up its foreground jobs, and they die a moment later.
  */
 export const LEAK_GRACE_MS = 250
+/** How long a killed leak may take to die before the sample ends anyway. */
+const KILL_SETTLE_MS = 2000
 
 /** What a completed sample measured; every duration is in milliseconds from the monotonic clock. */
 export interface SampleMetrics {
@@ -149,10 +151,12 @@ function kill(pid: number): void {
   try { process.kill(pid, 'SIGKILL') } catch { /* it exited meanwhile */ }
 }
 
-/** Kill `member` and its current descendants if `member` is still the same process. */
-function killTree(member: ProcStat): void {
-  if (readProcStat(member.pid)?.startTime !== member.startTime) return
-  for (const descendant of processTree(member.pid).reverse()) kill(descendant.pid)
+/** Kill `member` and its current descendants if `member` is still the same process; return those signalled. */
+function killTree(member: ProcStat): ProcStat[] {
+  if (readProcStat(member.pid)?.startTime !== member.startTime) return []
+  const tree = processTree(member.pid).reverse()
+  for (const descendant of tree) kill(descendant.pid)
+  return tree
 }
 
 /** Settles after `ms`, or rejects when `signal` aborts. */
@@ -359,7 +363,13 @@ export async function runSample(
       leaked = survivors(leaked, Number.NaN)
     }
     const names = leaked.map(member => commandOf(member.pid))
-    for (const member of leaked) killTree(member)
+    // SIGKILL lands when the target is next scheduled, so a sample ends once its leaks are dead.
+    let killed = leaked.flatMap(killTree)
+    const killEnd = performance.now() + KILL_SETTLE_MS
+    while (killed.length > 0 && performance.now() < killEnd) {
+      await Bun.sleep(10)
+      killed = survivors(killed, Number.NaN)
+    }
     return names
   }
 

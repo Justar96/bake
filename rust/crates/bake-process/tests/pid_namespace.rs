@@ -316,7 +316,11 @@ async fn pid1_case() {
         program: "/bin/sh".into(),
         args: vec![
             "-c".into(),
-            "\"$0\" --exact pid1_parent_helper --ignored --nocapture <&0 & wait".into(),
+            // Through fd 3: dash gives an asynchronous command `/dev/null`
+            // as its input before applying `<&0`, so P would read EOF and
+            // leave the group at once.
+            "exec 3<&0; \"$0\" --exact pid1_parent_helper --ignored --nocapture <&3 3<&- & wait"
+                .into(),
             exe.into_os_string(),
         ],
         cwd: None,
@@ -344,6 +348,11 @@ async fn pid1_case() {
         .into_iter()
         .find(|&pid| stat(pid).is_some_and(|(ppid, _, _, _)| ppid == parent) && is_nested_init(pid))
         .expect("the namespace init");
+    assert_eq!(
+        stat(parent).map(|(_, group, _, _)| group),
+        Some(leader),
+        "P starts in the group"
+    );
     process.terminate();
     stdin.write_all(b"leave\n").await.expect("write");
     let deadline = std::time::Instant::now() + BOUND;
