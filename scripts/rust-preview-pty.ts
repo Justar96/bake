@@ -2847,8 +2847,8 @@ if (windows) {
       const requests = world.model.requests.length
 
       session.send('/changelog\r')
-      // The newest entry, 0.3.8, comes last, so its last words end the transcript.
-      await session.wait('changelog shown', () => session.screen.includes('Option-drag') && session.screen.includes('❯ Type a draft'))
+      // The newest entry, 0.4.0, comes last, so its last words end the transcript.
+      await session.wait('changelog shown', () => session.screen.includes('further slash commands') && session.screen.includes('❯ Type a draft'))
 
       // No is selected first: Enter declines and nothing is uploaded.
       session.send('/share\r')

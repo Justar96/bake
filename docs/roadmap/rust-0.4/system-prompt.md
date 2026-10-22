@@ -6,7 +6,7 @@
 
 The design keeps Pi's prompt machinery (named sections that a session records and later patches) and replaces the text: a one-sentence identity, Bake 0.3's measured rules, the tool-contributed guidelines, a one-line pointer to Bake's own documentation, a run-mode line, the permissions section, and a small environment section last. The prompt states the outcome and the boundaries and leaves the method to the model. A rule stays only when an eval or a cited failure shows that the model behaves worse without it, and the one rule that promises harness behavior, that tool calls in one response run in order, is made true by the harness. One prompt serves every model family until a paired eval shows that a family needs a delta.
 
-**Status: implemented, 2026-10-13.** [D33](scope-00/support.md#decision-register) makes the system prompt Bake's own. `bake` sends the prompt this page designs, measured in the [system prompt record](../../../evals/agent-loop/versions/unreleased/2026-10-13-bake-system-prompt/REPORT.md); the [implementation plan](#implementation-plan) and [evaluation plan](#evaluation-plan) record how it landed.
+**Status: implemented, 2026-10-13.** [D33](scope-00/support.md#decision-register) makes the system prompt Bake's own. `bake` sends the prompt this page designs, measured in the [system prompt record](../../../evals/agent-loop/versions/v0.4.0/2026-10-13-bake-system-prompt/REPORT.md); the [implementation plan](#implementation-plan) and [evaluation plan](#evaluation-plan) record how it landed.
 
 ## Table of Contents
 
@@ -32,14 +32,14 @@ Non-goals: tool descriptions, schemas, results, and repair text keep following P
 
 ### Bake's own measurements
 
-Paired records compare two builds on the same day, models, and scenarios, so they measure an effect rather than drift. The noise floor matters: on identical code, the [eval fidelity record](../../../evals/agent-loop/versions/unreleased/2026-10-06-eval-fidelity/REPORT.md) found paired token changes of up to about 10% for Gemini, DeepSeek Flash, and GPT, and about 2% for Claude.
+Paired records compare two builds on the same day, models, and scenarios, so they measure an effect rather than drift. The noise floor matters: on identical code, the [eval fidelity record](../../../evals/agent-loop/versions/v0.4.0/2026-10-06-eval-fidelity/REPORT.md) found paired token changes of up to about 10% for Gemini, DeepSeek Flash, and GPT, and about 2% for Claude.
 
 | Change | Effect | Record |
 |---|---|---|
 | The round-trip paragraph alone: "Put independent tool calls in one response: read the files you need together, and send an edit with the command that checks it… do not re-read a file to confirm an edit that succeeded" | Gemini 3.8 Flash total tokens −43.3% [−49.7, −36.9], requests 165 → 95. Claude Opus −9.6% [−16.3, −3.2], requests 100 → 90. DeepSeek V4 Pro and GPT-6.1 within noise | [trim-and-batch, step 1](../../../evals/agent-loop/versions/v0.3.4/2026-10-03-trim-and-batch/steps/1-guidance-only/REPORT.md) |
 | Shorter tool descriptions and a `todo_write` note on top of that (tool JSON about 19.7k → 13.1k characters) | Total tokens −22% to −32% on all four models, requests about unchanged; GPT failures 0 → 4, flagged | [trim-and-batch, step 2](../../../evals/agent-loop/versions/v0.3.4/2026-10-03-trim-and-batch/steps/2-trim-and-todo/REPORT.md) |
 | Longer tool guidance (+1,940 first-request bytes) | Gemini +8.8% [3.3, 14.7] total tokens, flagged | [tool recovery](../../../evals/agent-loop/versions/v0.3.0/2026-09-30-tool-recovery/REPORT.md) |
-| `bake-rs` with Pi's prompt against the 0.3 TypeScript agent with Bake's prompt, 2026-10-13 | Claude about 30% fewer tokens (smaller tool surface); DeepSeek's arms used different transports, so its change is confounded. Claude requests +10% to +12%. Gemini requests 77 → 166 | [native arm](../../../evals/agent-loop/versions/unreleased/2026-10-13-native-arm/REPORT.md) |
+| `bake-rs` with Pi's prompt against the 0.3 TypeScript agent with Bake's prompt, 2026-10-13 | Claude about 30% fewer tokens (smaller tool surface); DeepSeek's arms used different transports, so its change is confounded. Claude requests +10% to +12%. Gemini requests 77 → 166 | [native arm](../../../evals/agent-loop/versions/v0.4.0/2026-10-13-native-arm/REPORT.md) |
 
 The native-arm transcripts are consistent with the following causes, though the two arms also differ in tools, permission preset, and transport:
 
@@ -239,7 +239,7 @@ The published evidence is on triggering, not format. Vercel's [AGENTS.md eval](h
 - **No listing budget yet.** The section grows with the skills a user installs. A budget that shortens descriptions before it drops names, as Codex CLI and Claude Code do, is the remedy if a measured skill set makes the section costly.
 - **Cache-stable by construction.** Skills change only between runs, so the section never patches within a session. A mid-session reload, if a later scope adds one, should send the change as a recorded section patch.
 
-The `skill_check` and `skill_distractors` scenarios of the [agent-loop evaluator](../../../evals/README.md) measure the section: whether a model loads the one skill a task needs, and whether it loads skills a task does not need. The [skills section record](../../../evals/agent-loop/versions/unreleased/2026-10-13-skills-section/REPORT.md) pairs `bake` with and without the listing on six models:
+The `skill_check` and `skill_distractors` scenarios of the [agent-loop evaluator](../../../evals/README.md) measure the section: whether a model loads the one skill a task needs, and whether it loads skills a task does not need. The [skills section record](../../../evals/agent-loop/versions/v0.4.0/2026-10-13-skills-section/REPORT.md) pairs `bake` with and without the listing on six models:
 
 - **The listing is what makes skills work.** With it, every model loaded the skill `skill_check` needs and passed, apart from two GPT runaways unrelated to skills. Without it, Gemini 3.8 Flash never found the skill and failed all three trials, and DeepSeek V4 Pro failed two; Claude and DeepSeek Flash found it only by listing `.agents`, sometimes printing every skill.
 - **No model over-triggers.** With the listing, no sample loaded a skill its task did not need, in either scenario.
