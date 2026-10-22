@@ -3,7 +3,8 @@ import { describe, expect, test } from 'bun:test'
 import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import {
-  checkGlibcFloor, compareGlibc, DEFAULT_GLIBC_FLOOR, glibcFloor, parseVersionNeeds, readelfEnvironment, readVersionNeeds,
+  checkGlibcFloor, compareGlibc, DEFAULT_GLIBC_FLOOR, explainFloor, glibcFloor, parseGlibcSymbols, parseVersionNeeds, readelfEnvironment,
+  readGlibcSymbols, readVersionNeeds,
 } from './glibc-floor.ts'
 
 const ROOT = resolve(import.meta.dir, '../..')
@@ -135,6 +136,50 @@ describe('the floor check', () => {
   })
 })
 
+/**
+ * `readelf --dyn-syms --wide` of a binary that imports the weak pidfd
+ * functions, as Rust's standard library does, beside strongly bound glibc
+ * symbols and defined ones that carry a version too.
+ */
+const DYNAMIC_SYMBOLS = `
+Symbol table '.dynsym' contains 7 entries:
+   Num:    Value          Size Type    Bind   Vis      Ndx Name
+     0: 0000000000000000     0 NOTYPE  LOCAL  DEFAULT  UND
+     1: 0000000000000000     0 FUNC    GLOBAL DEFAULT  UND __libc_start_main@GLIBC_2.34 (2)
+     2: 0000000000000000     0 FUNC    WEAK   DEFAULT  UND pidfd_spawnp@GLIBC_2.39 (21)
+     3: 0000000000000000     0 FUNC    WEAK   DEFAULT  UND pidfd_getpid@GLIBC_2.39 (21)
+     4: 0000000000000000     0 FUNC    GLOBAL DEFAULT  UND __isoc23_strtol@GLIBC_2.38 (9)
+     5: 0000000000000000     0 FUNC    GLOBAL DEFAULT  UND _Unwind_Resume@GCC_3.0 (4)
+     6: 00000000004a2b10   120 FUNC    GLOBAL DEFAULT   14 exported@@GLIBC_2.40
+`
+
+describe('the explanation of a floor above the limit', () => {
+  const symbols = parseGlibcSymbols(DYNAMIC_SYMBOLS)
+
+  test('reads the undefined glibc symbols and how each is bound', () => {
+    expect(symbols).toEqual([
+      { name: '__libc_start_main', version: 'GLIBC_2.34', weak: false },
+      { name: 'pidfd_spawnp', version: 'GLIBC_2.39', weak: true },
+      { name: 'pidfd_getpid', version: 'GLIBC_2.39', weak: true },
+      { name: '__isoc23_strtol', version: 'GLIBC_2.38', weak: false },
+    ])
+  })
+
+  test('names the symbols bound above the limit without a weak fallback, newest first', () => {
+    expect(explainFloor(symbols, 'GLIBC_2.38', 'GLIBC_2.34')).toBe('Bound above GLIBC_2.34 without a weak fallback: __isoc23_strtol@GLIBC_2.38')
+    expect(explainFloor(symbols, 'GLIBC_2.38', 'GLIBC_2.33'))
+      .toBe('Bound above GLIBC_2.33 without a weak fallback: __isoc23_strtol@GLIBC_2.38, __libc_start_main@GLIBC_2.34')
+  })
+
+  test('blames the link when every symbol at the required version is weak', () => {
+    expect(explainFloor(symbols, 'GLIBC_2.39', 'GLIBC_2.38')).toBe(
+      'Every symbol bound at GLIBC_2.39 is weak (pidfd_getpid@GLIBC_2.39, pidfd_spawnp@GLIBC_2.39), '
+      + 'but the linker did not mark the GLIBC_2.39 version need weak, so the loader requires it anyway',
+    )
+    expect(explainFloor(symbols, 'GLIBC_2.40', 'GLIBC_2.39')).toBeUndefined()
+  })
+})
+
 /** A `bake` this checkout has built, preferring the release build, or undefined. */
 function builtBake(): string | undefined {
   return ['release', 'debug'].map(profile => join(ROOT, 'rust/target', profile, 'bake')).find(path => existsSync(path))
@@ -166,6 +211,11 @@ describe.skipIf(linuxBake === undefined)('a built bake', () => {
     const refused = run(['--floor', below])
     expect(refused.code).toBe(1)
     expect(refused.stdout).toContain(`needs ${required}, above the ${below} floor`)
+    // A symbol bound at the floor without a weak fallback is what holds the binary there.
+    const holding = readGlibcSymbols(binary).filter(symbol => symbol.version === required && !symbol.weak)
+    expect(holding.length).toBeGreaterThan(0)
+    expect(refused.stdout).toContain(`Bound above ${below} without a weak fallback: `)
+    expect(refused.stdout).toContain(`${holding[0]?.name}@${required}`)
   })
 
   test('finds the same floor when the caller\'s locale translates readelf', () => {

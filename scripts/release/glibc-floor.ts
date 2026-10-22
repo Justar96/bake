@@ -9,7 +9,10 @@
  * such as `pidfd_spawnp` weakly and falls back when they are missing. This
  * reads those needs with `readelf --dynamic --version-info`, reports the
  * highest non-weak `GLIBC_` version, which is the binary's real floor, and
- * the highest weak one, and fails when the floor is above `--floor`.
+ * the highest weak one, and fails when the floor is above `--floor`,
+ * explaining it from the symbols `readelf --dyn-syms` lists: those bound
+ * above the floor without a weak fallback, or else a link that left the
+ * need of weakly bound symbols unmarked.
  *
  * It fails closed: readelf runs in the C locale, since its headings are
  * translated, and a dynamically linked binary whose glibc needs cannot be
@@ -111,6 +114,49 @@ export function parseVersionNeeds(output: string): GlibcNeed[] {
   return needs
 }
 
+/** A glibc function or object a binary imports, as `readelf --dyn-syms` names it. */
+export interface GlibcSymbol {
+  readonly name: string
+  /** `GLIBC_<major>.<minor>[.<patch>]`. */
+  readonly version: string
+  /** Whether the binary binds it weakly, and so starts without it. */
+  readonly weak: boolean
+}
+
+/**
+ * The undefined glibc symbols in `readelf --dyn-syms --wide` output, as the
+ * C locale prints them: `FUNC WEAK DEFAULT UND pidfd_spawnp@GLIBC_2.39 (21)`.
+ */
+export function parseGlibcSymbols(output: string): GlibcSymbol[] {
+  const symbols: GlibcSymbol[] = []
+  for (const line of output.split('\n')) {
+    const symbol = /^\s*\d+:\s+[0-9a-f]+\s+\S+\s+\S+\s+(\S+)\s+\S+\s+UND\s+([^@\s]+)@(GLIBC_\d+(?:\.\d+)*)(?:\s|$)/u.exec(line)
+    if (symbol === null) continue
+    symbols.push({ name: symbol[2] as string, version: symbol[3] as string, weak: symbol[1] === 'WEAK' })
+  }
+  return symbols
+}
+
+/**
+ * Why a binary needs `required`, above `limit`: the glibc symbols it binds
+ * above `limit` without a weak fallback, as `name@version`, newest first.
+ * When every symbol bound at `required` is weak, the cause is the link
+ * instead, which left that version need unmarked, so the loader requires it
+ * all the same.
+ * @returns the explanation, or undefined when the symbols show none.
+ */
+export function explainFloor(symbols: readonly GlibcSymbol[], required: string, limit: string): string | undefined {
+  const named = (list: readonly GlibcSymbol[]): string => list
+    .toSorted((a, b) => compareGlibc(b.version, a.version) || a.name.localeCompare(b.name))
+    .map(symbol => `${symbol.name}@${symbol.version}`)
+    .join(', ')
+  const strong = symbols.filter(symbol => !symbol.weak && compareGlibc(symbol.version, limit) > 0)
+  if (strong.length > 0) return `Bound above ${limit} without a weak fallback: ${named(strong)}`
+  const weak = symbols.filter(symbol => symbol.version === required)
+  if (weak.length === 0) return undefined
+  return `Every symbol bound at ${required} is weak (${named(weak)}), but the linker did not mark the ${required} version need weak, so the loader requires it anyway`
+}
+
 /** The highest required and weak glibc versions among `needs`. */
 export function glibcFloor(needs: readonly GlibcNeed[]): GlibcFloor {
   const highest = (names: string[]): string | undefined => names.sort(compareGlibc).at(-1)
@@ -147,14 +193,13 @@ export function readelfEnvironment(env: Readonly<Record<string, string | undefin
 }
 
 /**
- * Read `binary`'s version needs with `readelf`.
- * @throws when readelf is missing, cannot read the file as ELF, or prints
- * output {@link parseVersionNeeds} refuses.
+ * Run `readelf` on `binary` in the C locale.
+ * @throws when readelf is missing or cannot read the file as ELF.
  */
-export function readVersionNeeds(binary: string): GlibcNeed[] {
+function readelf(args: readonly string[], binary: string): string {
   let result: ReturnType<typeof Bun.spawnSync>
   try {
-    result = Bun.spawnSync(['readelf', '--dynamic', '--version-info', '--wide', binary], {
+    result = Bun.spawnSync(['readelf', ...args, '--wide', binary], {
       stdout: 'pipe', stderr: 'pipe', env: readelfEnvironment(process.env),
     })
   } catch {
@@ -162,11 +207,26 @@ export function readVersionNeeds(binary: string): GlibcNeed[] {
   }
   const stderr = result.stderr?.toString().trim() ?? ''
   if (result.exitCode !== 0 || stderr !== '') throw new Error(`readelf could not read ${binary}: ${stderr || `exit ${String(result.exitCode)}`}`)
+  return result.stdout?.toString() ?? ''
+}
+
+/**
+ * Read `binary`'s version needs with `readelf`.
+ * @throws when readelf is missing, cannot read the file as ELF, or prints
+ * output {@link parseVersionNeeds} refuses.
+ */
+export function readVersionNeeds(binary: string): GlibcNeed[] {
+  const output = readelf(['--dynamic', '--version-info'], binary)
   try {
-    return parseVersionNeeds(result.stdout?.toString() ?? '')
+    return parseVersionNeeds(output)
   } catch (error) {
     throw new Error(`${binary}: ${error instanceof Error ? error.message : String(error)}`)
   }
+}
+
+/** Read the glibc symbols `binary` imports with `readelf --dyn-syms`. */
+export function readGlibcSymbols(binary: string): GlibcSymbol[] {
+  return parseGlibcSymbols(readelf(['--dyn-syms'], binary))
 }
 
 function main(): number {
@@ -176,9 +236,13 @@ function main(): number {
   })
   const [binary, ...extra] = positionals
   if (binary === undefined || extra.length > 0) throw new Error('Usage: bun scripts/release/glibc-floor.ts <binary> [--floor GLIBC_2.34]')
-  const { ok, report } = checkGlibcFloor(binary, glibcFloor(readVersionNeeds(binary)), values.floor)
+  const floor = glibcFloor(readVersionNeeds(binary))
+  const { ok, report } = checkGlibcFloor(binary, floor, values.floor)
   console.log(report)
-  return ok ? 0 : 1
+  if (ok) return 0
+  const explanation = floor.required === undefined ? undefined : explainFloor(readGlibcSymbols(binary), floor.required, values.floor)
+  if (explanation !== undefined) console.log(explanation)
+  return 1
 }
 
 if (import.meta.main) {
