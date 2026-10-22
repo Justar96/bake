@@ -387,8 +387,10 @@ async fn notices_are_admitted_in_settlement_order_once_each() {
 /// Pushes its name onto a log when dropped: when the work holding it ends.
 /// The log's order is the order the pushes took its lock, one sequence for
 /// every event of the test.
+#[cfg(unix)]
 struct Ended(Arc<Mutex<Vec<&'static str>>>, &'static str);
 
+#[cfg(unix)]
 impl Drop for Ended {
     fn drop(&mut self) {
         self.0.lock().expect("log").push(self.1);

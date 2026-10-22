@@ -26,7 +26,9 @@ pub(crate) enum DiskOp {
     Rename(PathBuf, PathBuf),
     /// The name was removed.
     Remove(PathBuf),
-    /// The directory was synced, making its names durable.
+    /// The directory was synced, making its names durable; only Unix syncs
+    /// a directory.
+    #[cfg(unix)]
     DirSync(PathBuf),
 }
 
@@ -35,11 +37,13 @@ thread_local! {
 }
 
 /// Start recording this thread's operations, discarding any earlier log.
+#[cfg(unix)]
 pub(crate) fn start() {
     LOG.with(|log| *log.borrow_mut() = Some(Vec::new()));
 }
 
 /// Stop recording and return this thread's operations since [`start`].
+#[cfg(unix)]
 pub(crate) fn finish() -> Vec<DiskOp> {
     LOG.with(|log| log.borrow_mut().take().unwrap_or_default())
 }

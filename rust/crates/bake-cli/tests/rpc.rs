@@ -30,18 +30,21 @@ use serde_json::{Value, json};
 const TIMEOUT: Duration = Duration::from_secs(60);
 
 /// The text answer the model server streams.
+#[cfg(target_os = "linux")]
 const TEXT_SSE: &str = include_str!("fixtures/openai-responses-text.sse");
 
 /// What the model server answers one request with.
 #[derive(Clone)]
 enum Reply {
-    /// An event stream, written whole.
+    /// An event stream, written whole; only the Linux tests build one.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     Stream(String),
     /// Nothing, with the connection kept open until the client hangs up or
     /// the server stops: a model that never answers.
     Hold,
 }
 
+#[cfg(target_os = "linux")]
 impl Reply {
     fn text() -> Self {
         // The fixture ends with one newline; its last event needs its blank
@@ -443,6 +446,7 @@ impl Client {
     }
 
     /// The session file, as `get_state` names it.
+    #[cfg(target_os = "linux")]
     fn session_file(&mut self) -> PathBuf {
         self.send(json!({ "id": "file", "type": "get_state" }));
         let state = self.response("file");

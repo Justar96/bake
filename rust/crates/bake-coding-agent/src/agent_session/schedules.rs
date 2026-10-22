@@ -108,7 +108,7 @@ impl Schedules {
     }
 
     /// Sets the hook the timer runs as its task ends, for tests.
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(crate) fn set_timer_ended(&self, hook: Arc<dyn Fn() + Send + Sync>) {
         *self
             .timer_ended
