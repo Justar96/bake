@@ -4,6 +4,10 @@ Notable changes to Bake. `bake` compiles this file in, and `/changelog` shows it
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-10-26
+
+Bake 0.4.3 opens with a clearer header, says when an update is published, shows its state in the terminal title, Ghostty, and Herdr, and streams long tool calls faster. Linux remains its only released platform.
+
 - **A clearer opening screen.** An interactive session opens with a header in place of the bare "Session saved to" note: the Bake wordmark in a warm gradient on truecolor terminals, the version, the working directory, the session in plain words (`new`, or `resumed · 6 prompts · 2h ago`), and tags for the sandbox mode, approval policy, and offline mode. `/session` still shows the session file.
 - **Tips in place of the scroll hint.** The scroll keys no longer sit above the status line. In fullscreen, the header shows a dim `tip` row for about 25 seconds after startup, or until the first turn: the scroll keys first, then two other tips that change from launch to launch.
 - **Update notice.** On a native install, an interactive session says, under an `update` tag, when a newer release is published and that `bake update` installs it. The check runs in the background at most once a day, remembers its answer in `update-check.json` in the Bake home, and is left out by `--offline`.
