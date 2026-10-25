@@ -9,6 +9,7 @@ members = [
     "crates/bake-mcp",
     "crates/bake-plugin-sdk",
     "crates/bake-process",
+    "crates/bake-release",
     "crates/bake-sandbox",
     "crates/bake-tui",
     "crates/bake-tui-view",
@@ -21,7 +22,7 @@ members = [
 exclude = ["fuzz"]
 
 [workspace.package]
-version = "0.4.1"
+version = "0.4.2"
 edition = "2024"
 rust-version = "1.99"
 license = "MIT"
@@ -87,6 +88,10 @@ serde-saphyr = { version = "=2.0.0", default-features = false, features = ["dese
 # objects; MIT OR Apache-2.0.
 image = { version = "=0.25.10", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp"] }
 icu_normalizer = { version = "=2.4.0", default-features = false, features = ["compiled_data"] }
+# TOML for the release tool alone (`bake-release`): it reads `Cargo.lock`,
+# `about.toml`, and `licenses/upstream.toml`. MIT OR Apache-2.0; not shipped,
+# since `bake-cli` does not depend on it.
+toml = { version = "=1.1.8", default-features = false, features = ["std", "parse", "serde"] }
 base64 = { version = "=0.23.1", default-features = false, features = ["std"] }
 libc = { version = "=0.2.191", default-features = false }
 windows-sys = { version = "=0.61.2", default-features = false }

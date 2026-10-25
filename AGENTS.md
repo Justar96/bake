@@ -51,7 +51,7 @@ Before pushing to `develop`, run format, Clippy, workspace tests, and build on L
 
 `origin` is Bake's repository. Work lands directly on an up-to-date `develop`, rebased on `origin/develop`; no pull requests go into `develop`, and it is never force-pushed. `main` accepts only merge-commit release pull requests from `develop`. Never commit directly to `main` or `release/0.3`. Do not restore the retired runtime or merge `release/0.3` into `develop` or `main`. Do not merge from or push to an upstream reference automatically.
 
-Release tags require an explicit request from the owner. CI checks the Rust workspace; it does not publish or deploy releases. The Rust updater remains part of the product. Keep existing deployed download routes intact unless changing them is explicitly requested.
+Release tags require an explicit request from the owner. CI checks the Rust workspace. A pushed `v<version>` tag runs the release workflow (`.github/workflows/release.yml`), which builds, signs, and publishes the native release to every install through `bake-release` and the download service in `distribution/`; [distribution/README.md](distribution/README.md) describes it. The Rust updater remains part of the product. Keep existing deployed download routes intact unless changing them is explicitly requested.
 
 ## Agent contracts
 
