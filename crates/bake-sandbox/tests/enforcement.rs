@@ -1393,8 +1393,17 @@ fn assert_kill_leaves_nothing(
             .expect("read");
         assert_eq!(line, "ready\n");
         let init = namespace_init_of(leader).expect("bubblewrap's namespace init");
-        let members = namespace_members(init);
-        // The init, its payload shell, three sleeps, and a subshell.
+        // The init, its payload shell, three sleeps, and a subshell. `ready`
+        // follows the shell's forks, not the subshell's own fork of its
+        // sleep, so the listing waits for the whole payload.
+        let started = std::time::Instant::now();
+        let members = loop {
+            let members = namespace_members(init);
+            if members.len() >= 6 || started.elapsed() >= bound {
+                break members;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        };
         assert!(members.len() >= 6, "{members:?}");
         if stop == Stop::TerminateFirst {
             process.terminate();
