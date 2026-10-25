@@ -4,6 +4,14 @@ Notable changes to Bake. `bake` compiles this file in, and `/changelog` shows it
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-10-25
+
+Bake 0.4.2 is the first release since 0.4.0 that the installers and `bake update` deliver: it carries every change of 0.4.1, which was tagged in source only.
+
+- **Updates are published again.** `curl -fsSL https://bake.justar.dev/install.sh | sh` and `bake update` install 0.4.2 on Linux x64 and arm64.
+- **From 0.4.1:** the shells' and agents' lists open under the input bar with the conversation kept in view, Shift+Tab cycles the thinking level, `/model` is grouped by provider and lab, `/login` is clearer, answers render as Markdown, long bash commands and output are kept to a few rows, Ghostty's Kitty keyboard reporting and Herdr reporting are supported, and a `defaultTools` list of only `+`/`-` entries keeps code mode, the job tools, and the web tools on.
+- **Release tooling:** releases are built, checked, signed, and published by `bake-release`, a Rust tool that checks every step with the updater's own code, in place of the retired Bun scripts. The archives keep the same layout and license bundle.
+
 ## [0.4.1] - 2026-10-25
 
 Bake 0.4.1 polishes the terminal and keeps Linux as its only released platform.
