@@ -50,7 +50,16 @@ const DELETE_DESCRIPTION: &str = "Delete one active reminder in the current sess
 
 /// A replaced wall clock, for tests.
 #[cfg(test)]
-type Clock = Arc<dyn Fn() -> i64 + Send + Sync>;
+pub(crate) type Clock = Arc<dyn Fn() -> i64 + Send + Sync>;
+
+#[cfg(test)]
+tokio::task_local! {
+    /// The clock a session created in this scope starts its reminders on,
+    /// so the timer's first look already reads it: one replaced after
+    /// [`crate::AgentSession::create`] returns can lose that look to the
+    /// wall clock.
+    pub(crate) static START_CLOCK: Clock;
+}
 
 /// What the tools and the timer share: the timer's wake-up, and the clock.
 #[derive(Default)]
@@ -69,6 +78,20 @@ pub(crate) struct Schedules {
 }
 
 impl Schedules {
+    /// The session's reminders state; in tests, on [`START_CLOCK`] when
+    /// created in its scope.
+    pub(crate) fn new() -> Self {
+        let schedules = Self::default();
+        #[cfg(test)]
+        if let Ok(clock) = START_CLOCK.try_with(Arc::clone) {
+            *schedules
+                .clock
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(clock);
+        }
+        schedules
+    }
+
     /// The wall clock in epoch milliseconds.
     fn now(&self) -> i64 {
         #[cfg(test)]

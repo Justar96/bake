@@ -34,12 +34,17 @@ async fn open(
     let mut opts = options(h, session, &dir.path().to_string_lossy());
     opts.settings.schedules = true;
     opts.active_tool_names.extend(NAMES.map(str::to_owned));
-    let session = AgentSession::create(opts).await.expect("session");
     let read = Arc::clone(clock);
-    session
-        .schedules()
-        .set_clock(Arc::new(move || read.load(Ordering::SeqCst)));
-    session
+    // In place before the timer's first look: these reminders are due by
+    // the wall clock, so a look before the clock was replaced would deliver
+    // them at the wrong time.
+    super::START_CLOCK
+        .scope(
+            Arc::new(move || read.load(Ordering::SeqCst)),
+            AgentSession::create(opts),
+        )
+        .await
+        .expect("session")
 }
 
 /// Moves the clock and wakes the timer.

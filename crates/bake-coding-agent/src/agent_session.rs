@@ -1619,7 +1619,7 @@ impl AgentSession {
         }
         let hidden_declarations: codemode::HiddenDeclarations = Arc::default();
         let hidden_in_requests = Arc::clone(&hidden_declarations);
-        let schedules = schedules_enabled.then(|| Arc::new(schedules::Schedules::default()));
+        let schedules = schedules_enabled.then(|| Arc::new(schedules::Schedules::new()));
         if let Some(schedules) = &schedules {
             tools.extend(schedules::tools(&core, schedules));
         }
