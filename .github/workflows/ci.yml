@@ -3,7 +3,21 @@ name: Bake
 on:
   pull_request:
     branches: [main]
+  # A manual run from a scratch branch checks, during development, the
+  # platforms a developer cannot check locally. Linux x86_64 is checked
+  # before every push, so a manual run leaves it out unless asked.
   workflow_dispatch:
+    inputs:
+      platforms:
+        description: Platforms to check
+        type: choice
+        default: windows-and-macos
+        options:
+          - windows-and-macos
+          - windows
+          - macos
+          - linux-arm64
+          - all
 
 permissions:
   contents: read
@@ -12,13 +26,14 @@ concurrency:
   group: bake-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# Release pull requests and manual runs validate the Cargo workspace.
+# A release pull request validates the Cargo workspace on every platform
+# before main merges it; a manual run validates only the platforms it names.
 jobs:
   rust:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, ubuntu-24.04-arm, windows-latest, macos-latest]
+        os: ${{ fromJSON('{"all":["ubuntu-latest","ubuntu-24.04-arm","windows-latest","macos-latest"],"windows-and-macos":["windows-latest","macos-latest"],"windows":["windows-latest"],"macos":["macos-latest"],"linux-arm64":["ubuntu-24.04-arm"]}')[inputs.platforms || 'all'] }}
     name: bake (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     # Cold Wasmtime builds need extra time on Windows and arm64.
