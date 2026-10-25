@@ -1260,14 +1260,17 @@ fn ghostty_and_herdr_follow_a_named_session_through_a_turn() {
     let cleared = screen.rfind("\x1b]9;4;0\x07").expect("progress cleared");
     assert!(started < cleared, "{screen:?}");
     assert!(screen.contains("\x1b]0;◐ bake - auth work - project\x07"));
-    terminal.wait("Herdr's tokens", || {
+    // Herdr's reports run on their own worker, so the turn's idle report
+    // can land after the terminal has already drawn its end.
+    terminal.wait("Herdr's tokens and the turn's idle report", || {
         let calls = recorded();
-        calls.contains("--token model=proxy-model") && calls.contains("--token session=auth work")
+        calls.contains("--token model=proxy-model")
+            && calls.contains("--token session=auth work")
+            && calls
+                .find("--state working")
+                .is_some_and(|working| calls[working..].contains("--state idle"))
     });
-    let calls = recorded();
-    let working = calls.find("--state working").expect("working reported");
-    assert!(calls[working..].contains("--state idle"), "{calls}");
-    assert!(calls.contains("--token activity="), "{calls}");
+    assert!(recorded().contains("--token activity="), "{}", recorded());
 
     let before = terminal.screen().len();
     let output = std::sync::Arc::clone(&terminal.screen);
