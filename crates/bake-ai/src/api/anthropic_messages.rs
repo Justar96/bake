@@ -40,7 +40,9 @@ use crate::types::{
 use crate::utils::abort::is_aborted;
 use crate::utils::error_body::ProviderError;
 use crate::utils::event_stream::{AssistantMessageEventSender, AssistantMessageEventStream};
-use crate::utils::json_parse::{parse_json_with_repair, parse_streaming_json_object};
+use crate::utils::json_parse::{
+    StreamingJsonObject, parse_json_with_repair, parse_streaming_json_object,
+};
 use crate::utils::sse::ServerSentEvent;
 use crate::utils::text::{get_system_message_text, render_system_message_update};
 use crate::utils::tool_argument_guard::{ArgumentScan, DEFAULT_MAX_TOOL_ARGUMENT_WHITESPACE};
@@ -756,7 +758,7 @@ pub struct AnthropicStreamProcessor {
     is_oauth: bool,
     tools: Vec<Tool>,
     /// `(content index, provider index, partial JSON, argument scan)` of open blocks.
-    open: Vec<(usize, i64, String, ArgumentScan)>,
+    open: Vec<(usize, i64, StreamingJsonObject, ArgumentScan)>,
     max_tool_argument_whitespace: usize,
     saw_start: bool,
     saw_stop: bool,
@@ -908,7 +910,7 @@ impl AnthropicStreamProcessor {
                 self.open.push((
                     index,
                     provider_index,
-                    String::new(),
+                    StreamingJsonObject::default(),
                     ArgumentScan::default(),
                 ));
                 match kind {
@@ -973,8 +975,8 @@ impl AnthropicStreamProcessor {
                             return Ok(());
                         };
                         scan.check_delta(&text, max, &model, &tool_name)?;
-                        partial_json.push_str(&text);
-                        let arguments = parse_streaming_json_object(Some(partial_json));
+                        partial_json.push(&text);
+                        let arguments = partial_json.object().clone();
                         if let Some(AssistantContentBlock::ToolCall(call)) =
                             self.output.content.get_mut(index)
                         {
@@ -1018,7 +1020,7 @@ impl AnthropicStreamProcessor {
                         });
                     }
                     Some(AssistantContentBlock::ToolCall(call)) => {
-                        call.arguments = parse_streaming_json_object(Some(&partial_json));
+                        call.arguments = parse_streaming_json_object(Some(partial_json.text()));
                         let tool_call = call.clone();
                         self.emit(sender, |partial| AssistantMessageEvent::ToolCallEnd {
                             content_index: index,

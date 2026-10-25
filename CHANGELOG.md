@@ -4,6 +4,8 @@ Notable changes to Bake. `bake` compiles this file in, and `/changelog` shows it
 
 ## [Unreleased]
 
+- **Faster streaming of long tool calls and answers.** A tool call's arguments are no longer parsed again from the start for every streamed piece, so a file of about 150 KB that a model writes costs about 1 second of CPU instead of 11. Long answers stream with fewer copies, and `--mode json` and RPC output no longer build each update's discarded snapshot.
+
 ## [0.4.2] - 2026-10-25
 
 Bake 0.4.2 is the first release since 0.4.0 that the installers and `bake update` deliver: it carries every change of 0.4.1, which was tagged in source only.

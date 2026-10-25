@@ -433,7 +433,10 @@ struct Shared {
     tools: Vec<Arc<AgentTool>>,
     messages: Vec<AgentMessage>,
     is_streaming: bool,
-    streaming_message: Option<AgentMessage>,
+    /// The streaming message's latest `message_start` or `message_update`,
+    /// shared with its listeners: its message is copied only when read,
+    /// not once per delta.
+    streaming: Option<Arc<AgentEvent>>,
     pending_tool_calls: BTreeSet<String>,
     error_message: Option<String>,
     steering: PendingMessageQueue,
@@ -445,6 +448,17 @@ struct Shared {
     max_concurrent_read_tools: Option<std::num::NonZeroUsize>,
     active: Option<ActiveRun>,
     closed: bool,
+}
+
+impl Shared {
+    fn streaming_message(&self) -> Option<AgentMessage> {
+        match self.streaming.as_deref()? {
+            AgentEvent::MessageStart { message } | AgentEvent::MessageUpdate { message, .. } => {
+                Some(message.clone())
+            }
+            _ => None,
+        }
+    }
 }
 
 struct Hooks {
@@ -569,7 +583,7 @@ impl Agent {
             tools: initial.tools,
             messages,
             is_streaming: false,
-            streaming_message: None,
+            streaming: None,
             pending_tool_calls: BTreeSet::new(),
             error_message: None,
             steering: PendingMessageQueue::new(options.steering_mode),
@@ -672,7 +686,7 @@ impl Agent {
             tools: shared.tools.clone(),
             messages: shared.messages.clone(),
             is_streaming: shared.is_streaming,
-            streaming_message: shared.streaming_message.clone(),
+            streaming_message: shared.streaming_message(),
             pending_tool_calls: shared.pending_tool_calls.clone(),
             error_message: shared.error_message.clone(),
         }
@@ -745,7 +759,7 @@ impl Agent {
 
     /// The partial assistant message being streamed.
     pub fn streaming_message(&self) -> Option<AgentMessage> {
-        self.inner.lock().streaming_message.clone()
+        self.inner.lock().streaming_message()
     }
 
     /// Ids of executing tool calls.
@@ -945,7 +959,7 @@ impl Agent {
         let baseline = get_current_system_message(&system_messages(&shared.messages));
         shared.messages = baseline.map(AgentMessage::from).into_iter().collect();
         shared.is_streaming = false;
-        shared.streaming_message = None;
+        shared.streaming = None;
         shared.pending_tool_calls.clear();
         shared.error_message = None;
         shared.steering.units.clear();
@@ -1064,7 +1078,7 @@ impl Agent {
         let observers = ObserverGate::new();
         let config = self.loop_config(&shared, skip_initial_steering_poll, &signal, &observers);
         shared.is_streaming = true;
-        shared.streaming_message = None;
+        shared.streaming = None;
         shared.error_message = None;
 
         let (idle_sender, idle) = watch::channel(false);
@@ -1224,7 +1238,7 @@ impl Drop for RunGuard {
         {
             let mut shared = self.inner.lock();
             shared.is_streaming = false;
-            shared.streaming_message = None;
+            shared.streaming = None;
             shared.pending_tool_calls.clear();
             shared.active = None;
         }
@@ -1371,17 +1385,18 @@ fn event_sink(inner: Arc<Inner>, signal: AbortSignal) -> AgentEventSink {
 /// listener in subscription order.
 async fn process_event(inner: &Inner, event: AgentEvent, signal: &AbortSignal) {
     let _order = inner.event_order.lock().await;
+    let event = Arc::new(event);
     {
         let mut shared = inner.lock();
         if shared.closed {
             return;
         }
-        match &event {
-            AgentEvent::MessageStart { message } | AgentEvent::MessageUpdate { message, .. } => {
-                shared.streaming_message = Some(message.clone());
+        match &*event {
+            AgentEvent::MessageStart { .. } | AgentEvent::MessageUpdate { .. } => {
+                shared.streaming = Some(Arc::clone(&event));
             }
             AgentEvent::MessageEnd { message } => {
-                shared.streaming_message = None;
+                shared.streaming = None;
                 shared.messages.push(message.clone());
             }
             // Nested calls are not the model's pending calls, as in Pi,
@@ -1408,7 +1423,7 @@ async fn process_event(inner: &Inner, event: AgentEvent, signal: &AbortSignal) {
                     shared.error_message = Some(error);
                 }
             }
-            AgentEvent::AgentEnd { .. } => shared.streaming_message = None,
+            AgentEvent::AgentEnd { .. } => shared.streaming = None,
             AgentEvent::AgentStart
             | AgentEvent::TurnStart
             | AgentEvent::ToolExecutionStart { .. }

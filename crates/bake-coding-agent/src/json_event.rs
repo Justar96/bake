@@ -6,7 +6,9 @@
 //! `toolcall_start`, the call's id and name.
 
 use bake_agent::AgentEvent;
-use bake_ai::{AssistantContentBlock, AssistantMessageEvent};
+use bake_ai::{
+    AssistantContentBlock, AssistantMessage, AssistantMessageEvent, StopReason, ToolCall,
+};
 use serde::Serialize;
 use serde_json::{Map, Value};
 
@@ -22,24 +24,166 @@ fn object(kind: &str) -> Map<String, Value> {
     object
 }
 
+/// An [`AssistantMessageEvent`] as JSON output writes it: its shape and
+/// member order, without `partial`. Serializing the event itself would copy
+/// the response so far once per delta, only to drop it.
+#[derive(Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum JsonAssistantMessageEvent<'a> {
+    Start {},
+    TextStart {
+        #[serde(rename = "contentIndex")]
+        content_index: usize,
+    },
+    TextDelta {
+        #[serde(rename = "contentIndex")]
+        content_index: usize,
+        delta: &'a str,
+    },
+    TextEnd {
+        #[serde(rename = "contentIndex")]
+        content_index: usize,
+        content: &'a str,
+    },
+    ThinkingStart {
+        #[serde(rename = "contentIndex")]
+        content_index: usize,
+    },
+    ThinkingDelta {
+        #[serde(rename = "contentIndex")]
+        content_index: usize,
+        delta: &'a str,
+    },
+    ThinkingEnd {
+        #[serde(rename = "contentIndex")]
+        content_index: usize,
+        content: &'a str,
+    },
+    #[serde(rename = "toolcall_start")]
+    ToolCallStart {
+        #[serde(rename = "contentIndex")]
+        content_index: usize,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        id: Option<&'a str>,
+        #[serde(rename = "toolName", skip_serializing_if = "Option::is_none")]
+        tool_name: Option<&'a str>,
+    },
+    #[serde(rename = "toolcall_delta")]
+    ToolCallDelta {
+        #[serde(rename = "contentIndex")]
+        content_index: usize,
+        delta: &'a str,
+    },
+    #[serde(rename = "toolcall_end")]
+    ToolCallEnd {
+        #[serde(rename = "contentIndex")]
+        content_index: usize,
+        #[serde(rename = "toolCall")]
+        tool_call: &'a ToolCall,
+    },
+    Done {
+        reason: StopReason,
+        message: &'a AssistantMessage,
+    },
+    Error {
+        reason: StopReason,
+        error: &'a AssistantMessage,
+    },
+}
+
 /// Pi's `toJsonAssistantMessageEvent`. Where Pi throws for a
 /// `toolcall_start` whose block is not a tool call, the event is written
 /// without `id` and `toolName`.
 fn json_assistant_message_event(event: &AssistantMessageEvent) -> Value {
-    let mut value = to_value(event);
-    if let Value::Object(object) = &mut value {
-        object.shift_remove("partial");
-        if let AssistantMessageEvent::ToolCallStart {
+    use AssistantMessageEvent as Event;
+    use JsonAssistantMessageEvent as Json;
+    // Every field is named, so a new one cannot be left out unnoticed.
+    let json = match event {
+        Event::Start { partial: _ } => Json::Start {},
+        Event::TextStart {
+            content_index,
+            partial: _,
+        } => Json::TextStart {
+            content_index: *content_index,
+        },
+        Event::TextDelta {
+            content_index,
+            delta,
+            partial: _,
+        } => Json::TextDelta {
+            content_index: *content_index,
+            delta,
+        },
+        Event::TextEnd {
+            content_index,
+            content,
+            partial: _,
+        } => Json::TextEnd {
+            content_index: *content_index,
+            content,
+        },
+        Event::ThinkingStart {
+            content_index,
+            partial: _,
+        } => Json::ThinkingStart {
+            content_index: *content_index,
+        },
+        Event::ThinkingDelta {
+            content_index,
+            delta,
+            partial: _,
+        } => Json::ThinkingDelta {
+            content_index: *content_index,
+            delta,
+        },
+        Event::ThinkingEnd {
+            content_index,
+            content,
+            partial: _,
+        } => Json::ThinkingEnd {
+            content_index: *content_index,
+            content,
+        },
+        Event::ToolCallStart {
             content_index,
             partial,
-        } = event
-            && let Some(AssistantContentBlock::ToolCall(call)) = partial.content.get(*content_index)
-        {
-            object.insert("id".into(), call.id.clone().into());
-            object.insert("toolName".into(), call.name.clone().into());
+        } => {
+            let call = match partial.content.get(*content_index) {
+                Some(AssistantContentBlock::ToolCall(call)) => Some(call),
+                _ => None,
+            };
+            Json::ToolCallStart {
+                content_index: *content_index,
+                id: call.map(|call| call.id.as_str()),
+                tool_name: call.map(|call| call.name.as_str()),
+            }
         }
-    }
-    value
+        Event::ToolCallDelta {
+            content_index,
+            delta,
+            partial: _,
+        } => Json::ToolCallDelta {
+            content_index: *content_index,
+            delta,
+        },
+        Event::ToolCallEnd {
+            content_index,
+            tool_call,
+            partial: _,
+        } => Json::ToolCallEnd {
+            content_index: *content_index,
+            tool_call,
+        },
+        Event::Done { reason, message } => Json::Done {
+            reason: *reason,
+            message,
+        },
+        Event::Error { reason, error } => Json::Error {
+            reason: *reason,
+            error,
+        },
+    };
+    to_value(&json)
 }
 
 /// Pi's `toJsonEvent` over an agent event; `agent_end` carries
@@ -365,6 +509,111 @@ mod tests {
             agent_event_json(&finished)["assistantMessageEvent"]["message"],
             to_value(&done)
         );
+    }
+
+    /// Pi's reduction as written over the whole event: serialize it, drop
+    /// `partial`, and name a started call.
+    fn reduced(event: &AssistantMessageEvent) -> Value {
+        let mut value = to_value(event);
+        if let Value::Object(object) = &mut value {
+            object.shift_remove("partial");
+            if let AssistantMessageEvent::ToolCallStart {
+                content_index,
+                partial,
+            } = event
+                && let Some(AssistantContentBlock::ToolCall(call)) =
+                    partial.content.get(*content_index)
+            {
+                object.insert("id".into(), call.id.clone().into());
+                object.insert("toolName".into(), call.name.clone().into());
+            }
+        }
+        value
+    }
+
+    #[test]
+    fn every_event_is_written_as_its_reduced_serialization() {
+        let partial = partial();
+        let call = match &partial.content[1] {
+            AssistantContentBlock::ToolCall(call) => call.clone(),
+            _ => unreachable!(),
+        };
+        let events = [
+            AssistantMessageEvent::Start {
+                partial: partial.clone(),
+            },
+            AssistantMessageEvent::TextStart {
+                content_index: 0,
+                partial: partial.clone(),
+            },
+            AssistantMessageEvent::TextDelta {
+                content_index: 0,
+                delta: "h\"i\n".into(),
+                partial: partial.clone(),
+            },
+            AssistantMessageEvent::TextEnd {
+                content_index: 0,
+                content: "hi".into(),
+                partial: partial.clone(),
+            },
+            AssistantMessageEvent::ThinkingStart {
+                content_index: 2,
+                partial: partial.clone(),
+            },
+            AssistantMessageEvent::ThinkingDelta {
+                content_index: 2,
+                delta: "hmm".into(),
+                partial: partial.clone(),
+            },
+            AssistantMessageEvent::ThinkingEnd {
+                content_index: 2,
+                content: "hmm".into(),
+                partial: partial.clone(),
+            },
+            AssistantMessageEvent::ToolCallStart {
+                content_index: 1,
+                partial: partial.clone(),
+            },
+            // A block that is not a call, and one that is missing.
+            AssistantMessageEvent::ToolCallStart {
+                content_index: 0,
+                partial: partial.clone(),
+            },
+            AssistantMessageEvent::ToolCallStart {
+                content_index: 9,
+                partial: partial.clone(),
+            },
+            AssistantMessageEvent::ToolCallDelta {
+                content_index: 1,
+                delta: "{\"path\":".into(),
+                partial: partial.clone(),
+            },
+            AssistantMessageEvent::ToolCallEnd {
+                content_index: 1,
+                tool_call: call,
+                partial: partial.clone(),
+            },
+            AssistantMessageEvent::Done {
+                reason: StopReason::ToolUse,
+                message: partial.clone(),
+            },
+            AssistantMessageEvent::Error {
+                reason: StopReason::Aborted,
+                error: partial.clone(),
+            },
+        ];
+        for event in &events {
+            let written = json_assistant_message_event(event);
+            let expected = reduced(event);
+            let keys = |value: &Value| -> Vec<String> {
+                value
+                    .as_object()
+                    .map(|object| object.keys().cloned().collect())
+                    .unwrap_or_default()
+            };
+            assert_eq!(written, expected, "{}", event.kind());
+            assert_eq!(keys(&written), keys(&expected), "{}", event.kind());
+        }
     }
 
     #[test]

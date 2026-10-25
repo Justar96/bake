@@ -114,24 +114,31 @@ impl SseDecoder {
         events
     }
 
+    /// Decodes every complete line, then removes them from the buffer at
+    /// once: removing each line as it is read would move the rest of a
+    /// large chunk once per line.
     fn drain_lines(&mut self, at_end: bool, events: &mut Vec<ServerSentEvent>) {
-        loop {
-            let Some(index) = self.buffer.find(['\r', '\n']) else {
-                return;
-            };
+        let mut start = 0;
+        while let Some(found) = self
+            .buffer
+            .get(start..)
+            .and_then(|rest| rest.find(['\r', '\n']))
+        {
+            let index = start + found;
             let is_cr = self.buffer.as_bytes().get(index) == Some(&b'\r');
             let mut next = index + 1;
             if is_cr {
                 match self.buffer.as_bytes().get(next) {
                     Some(b'\n') => next += 1,
-                    None if !at_end => return,
+                    None if !at_end => break,
                     _ => {}
                 }
             }
-            let line = self.buffer.get(..index).unwrap_or("").to_owned();
-            self.buffer.drain(..next);
+            let line = self.buffer.get(start..index).unwrap_or("").to_owned();
+            start = next;
             events.extend(self.decode_line(line));
         }
+        self.buffer.drain(..start);
     }
 
     fn flush(&mut self) -> Option<ServerSentEvent> {
