@@ -6,6 +6,10 @@ CLAUDE.local.md
 coverage/
 .preflight/
 .artifacts/
+# The download service's staged release and site (distribution/host).
+distribution/host/public/
+distribution/host/site/
+distribution/host/.wrangler/
 .humanize/
 tmp/
 .claude/commands/

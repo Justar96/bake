@@ -25,4 +25,4 @@ Any change to observable semantics names the verification boundary it affects.
 
 Port primarily from Pi's latest official release, recording the revision and adapted files and keeping its MIT attribution and tests. The [support register](docs/roadmap/rust-0.4/scope-00/support.md) owns retained Bake contracts and platform limits. Update the owning README with API changes. Preserve licenses and source attribution. Never commit credentials or `.env` files.
 
-Release tags require an explicit request from the owner. The Cargo CI workflow validates the workspace on supported build hosts; it does not publish releases.
+Release tags require an explicit request from the owner. The Cargo CI workflow validates the workspace on supported build hosts. A pushed `v<version>` tag runs the release workflow, which publishes to every install; [distribution/README.md](distribution/README.md#release-with-github-actions) describes the steps.
