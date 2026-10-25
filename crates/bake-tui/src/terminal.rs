@@ -25,6 +25,12 @@
 //! before the prompt appeared, whether still queued for the loop or not
 //! yet read, reaches the view before the arming and cannot answer it; no
 //! delay stands in for that order.
+//!
+//! A live session also shows its state on the terminal between frames
+//! ([`crate::indicators`]): the title, progress, and notifications that
+//! Ghostty shows. The loop follows the runtime's updates and the focus
+//! reports the input thread forwards; restoration clears the progress and
+//! puts back the title it saved.
 
 use std::io::{self, Stdout};
 use std::mem::ManuallyDrop;
@@ -46,7 +52,8 @@ use crossterm::cursor::{RestorePosition, Show};
 use crossterm::event::{self, DisableBracketedPaste, EnableBracketedPaste};
 #[cfg(unix)]
 use crossterm::event::{
-    KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+    DisableFocusChange, EnableFocusChange, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags,
+    PushKeyboardEnhancementFlags,
 };
 use crossterm::execute;
 use crossterm::style::Print;
@@ -62,6 +69,7 @@ use ratatui::layout::Rect;
 use crate::clipboard::{self, Clipboard, Platform};
 use crate::files::{Ask, Finder};
 use crate::git;
+use crate::indicators::{self, Capabilities, Indicators};
 use crate::inline::{self, Inline};
 use crate::input;
 use crate::live::{LivePort, LiveSession};
@@ -188,6 +196,13 @@ const SYNC: u16 = 1 << 5;
 const MOUSE: u16 = 1 << 6;
 #[cfg(unix)]
 const KEYBOARD: u16 = 1 << 8;
+/// Focus reports (DECSET 1004), which notifications read.
+#[cfg(unix)]
+const FOCUS: u16 = 1 << 9;
+/// A progress indicator shows ([`indicators`]).
+const PROGRESS: u16 = 1 << 10;
+/// The terminal's own title is on its title stack ([`indicators`]).
+const TITLE: u16 = 1 << 11;
 
 /// Report presses, releases, and the wheel (1000), and motion while a button
 /// is held (1002), in SGR encoding (1006), which has no coordinate limit; as
@@ -252,6 +267,8 @@ enum Source {
     // Only Unix forwards signals; elsewhere, only tests send one.
     #[cfg_attr(not(unix), allow(dead_code))]
     Signal(i32),
+    /// The terminal gained (`true`) or lost focus, for the indicators.
+    Focus(bool),
     Failed(io::Error),
 }
 
@@ -262,6 +279,10 @@ trait Screen {
     fn draw(&mut self, state: &mut State, stale: bool) -> io::Result<()>;
     /// Writes an escape sequence that is not part of a frame, such as OSC 52.
     fn write(&mut self, sequence: &str) -> io::Result<()>;
+    /// Writes status indicators, recording what restoration must undo.
+    fn indicate(&mut self, output: &indicators::Output) -> io::Result<()> {
+        self.write(&output.sequence)
+    }
 }
 
 /// Owns raw mode, bracketed paste, autowrap, cursor visibility, synchronized
@@ -344,6 +365,18 @@ impl TerminalSession {
         }
     }
 
+    /// Asks the terminal to report focus changes (DECSET 1004), which
+    /// restoration turns off again. A terminal without them ignores the
+    /// request. Only Unix asks.
+    fn report_focus(&mut self) -> io::Result<()> {
+        #[cfg(unix)]
+        {
+            MODES.fetch_or(FOCUS, Ordering::SeqCst);
+            execute!(self.terminal.backend_mut(), EnableFocusChange)?;
+        }
+        Ok(())
+    }
+
     /// Restores the terminal and returns the first restoration error. Every
     /// step is attempted even if an earlier one fails.
     pub fn close(self) -> io::Result<()> {
@@ -388,6 +421,23 @@ impl Screen for TerminalSession {
     fn write(&mut self, sequence: &str) -> io::Result<()> {
         execute!(self.terminal.backend_mut(), Print(sequence))
     }
+
+    /// Records a saved title and a shown indicator before writing, so a
+    /// failed write still has them undone; an indicator is forgotten once
+    /// its removal is out.
+    fn indicate(&mut self, output: &indicators::Output) -> io::Result<()> {
+        if output.pushed_title {
+            MODES.fetch_or(TITLE, Ordering::SeqCst);
+        }
+        if output.progress == Some(true) {
+            MODES.fetch_or(PROGRESS, Ordering::SeqCst);
+        }
+        self.write(&output.sequence)?;
+        if output.progress == Some(false) {
+            MODES.fetch_and(!PROGRESS, Ordering::SeqCst);
+        }
+        Ok(())
+    }
 }
 
 impl Drop for TerminalSession {
@@ -428,6 +478,16 @@ fn restore() -> io::Result<()> {
     };
     if modes & SYNC != 0 {
         keep(execute!(out, EndSynchronizedUpdate));
+    }
+    if modes & PROGRESS != 0 {
+        keep(execute!(out, Print(indicators::CLEAR_PROGRESS)));
+    }
+    if modes & TITLE != 0 {
+        keep(execute!(out, Print(indicators::POP_TITLE)));
+    }
+    #[cfg(unix)]
+    if modes & FOCUS != 0 {
+        keep(execute!(out, DisableFocusChange));
     }
     // DECRC may restore saved rendition and autowrap as well as position;
     // release the inline save slot before restoring those terminal modes.
@@ -543,11 +603,29 @@ fn run(mode: ScreenMode, runtime: Runtime) -> io::Result<PreviewExit> {
     let herdr = matches!(&runtime, Runtime::Live(_))
         .then(crate::herdr::Reporter::from_env)
         .flatten();
+    let mut indicators = match &runtime {
+        Runtime::Fixture => None,
+        Runtime::Live(live) => Some(Indicators::new(
+            Capabilities::resolve(env, &live.session.settings()),
+            std::env::current_dir()
+                .map(|cwd| indicators::directory(&cwd))
+                .unwrap_or_default(),
+        )),
+    };
     // The session's rows are read before the terminal changes mode.
     let mut state = match &runtime {
         Runtime::Fixture => State::new(frame_style, tones),
         Runtime::Live(live) => State::live(frame_style, tones, live.initial_rows()),
     };
+    // The banner's tips rotate in fullscreen only: inline, the banner is in
+    // scrollback before a tip could change. The wall clock seeds where the
+    // rotation starts, so launches differ.
+    if matches!(runtime, Runtime::Live(_)) && mode == ScreenMode::Fullscreen {
+        let seed = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |time| u64::from(time.subsec_nanos()) ^ time.as_secs());
+        state.start_tips(seed);
+    }
     let (sender, inputs) = mpsc::channel();
     // One clock for the loop's ticks, the reader's timestamps, and the
     // fixture's timeline.
@@ -569,6 +647,9 @@ fn run(mode: ScreenMode, runtime: Runtime) -> io::Result<PreviewExit> {
     // signals stay handled until the terminal is restored.
     let signals = signals::Forwarder::start(sender.clone())?;
     let mut session = TerminalSession::acquire_mode(mode)?;
+    if indicators.as_ref().is_some_and(Indicators::wants_focus) {
+        session.report_focus()?;
+    }
     state.status.cwd = working_directory(env);
     state.wheel = WheelSteps::new(wheel::reports(env, cfg!(target_os = "macos")));
     state.status.branch = std::env::current_dir()
@@ -616,6 +697,7 @@ fn run(mode: ScreenMode, runtime: Runtime) -> io::Result<PreviewExit> {
                 runtime: &|request| port.request(request),
                 files: &|ask| finder.ask(ask),
                 shown: &shown,
+                indicators: indicators.as_mut(),
             },
         );
         // Joined before the terminal leaves raw mode, so it reads nothing
@@ -654,14 +736,16 @@ fn hung_up(err: &io::Error) -> bool {
 }
 
 /// What the loop hands effects to: the clipboard and image jobs, the
-/// runtime port, and path discovery; and the token of the approval
-/// request's latest showing, which the input thread arms.
+/// runtime port, and path discovery; the token of the approval request's
+/// latest showing, which the input thread arms; and a live session's
+/// terminal indicators.
 struct Owners<'a> {
     clipboard: Clipboard,
     home: Option<String>,
     runtime: &'a dyn Fn(Request),
     files: &'a dyn Fn(Ask),
     shown: &'a AtomicU64,
+    indicators: Option<&'a mut Indicators>,
 }
 
 /// Draws, waits for the next message or the view's next timed change, applies
@@ -692,6 +776,7 @@ fn drive(
     owners: Owners,
 ) -> io::Result<PreviewExit> {
     let mut jobs = Jobs::new(owners.clipboard, owners.home);
+    let mut indicators = owners.indicators;
     let mut stale = false;
     // When the last frame was drawn, and whether a runtime-only batch is
     // waiting for its turn to be drawn.
@@ -702,6 +787,9 @@ fn drive(
         let now = clock.elapsed();
         update(state, Msg::Tick(now));
         jobs.settle(screen, state)?;
+        if let Some(output) = indicators.as_deref_mut().and_then(|i| i.flush(now)) {
+            screen.indicate(&output)?;
+        }
         if first_frame || !deferred || now >= drawn + RUNTIME_FRAME {
             screen.draw(state, stale)?;
             // Published only once the frame is out: the input thread arms
@@ -719,6 +807,14 @@ fn drive(
         }
         if deferred {
             let due = (drawn + RUNTIME_FRAME).saturating_sub(clock.elapsed());
+            wait = Some(wait.map_or(due, |wait| wait.min(due)));
+        }
+        // A shown progress indicator is refreshed before the terminal
+        // drops it.
+        if let Some(due) = indicators
+            .as_deref()
+            .and_then(|i| i.next_due(clock.elapsed()))
+        {
             wait = Some(wait.map_or(due, |wait| wait.min(due)));
         }
         let first = match wait {
@@ -742,7 +838,17 @@ fn drive(
                 Source::Signal(signal) => return Ok(PreviewExit::Signal(signal)),
                 Source::Hangup => return Ok(PreviewExit::Hangup),
                 Source::Failed(err) => return Err(err),
+                Source::Focus(focused) => {
+                    if let Some(indicators) = indicators.as_deref_mut() {
+                        indicators.focus(focused);
+                    }
+                }
                 Source::Msg(msg) => {
+                    if let (Some(indicators), Msg::Runtime(update)) =
+                        (indicators.as_deref_mut(), &msg)
+                    {
+                        indicators.observe(update, clock.elapsed());
+                    }
                     input |= !matches!(msg, Msg::Runtime(_));
                     // A finished turn may have changed the tree, so later
                     // bare queries see it once the traversal is rebuilt.
@@ -960,6 +1066,12 @@ fn read_input(
         msgs.into_iter()
             .all(|msg| out.0.send(Source::Msg(msg)).is_ok())
     };
+    // The latest focus change of a sweep, for the indicators; the view
+    // never sees it.
+    let focus = |decoder: &mut input::Decoder| match decoder.take_focus() {
+        Some(focused) => out.0.send(Source::Focus(focused)).is_ok(),
+        None => true,
+    };
     let mut armed = 0;
     let mut decoder = input::Decoder::new();
     while !stop.load(Ordering::SeqCst) {
@@ -974,7 +1086,7 @@ fn read_input(
                     Ok(swept) => swept,
                     Err(err) => return fail(err),
                 };
-                if !send(stamp(sweep)) {
+                if !send(stamp(sweep)) || !focus(&mut decoder) {
                     return;
                 }
                 if dry {
@@ -997,7 +1109,7 @@ fn read_input(
         }
         match sweep(events, &mut decoder, clock) {
             Ok((swept, _)) => {
-                if !send(stamp(swept)) {
+                if !send(stamp(swept)) || !focus(&mut decoder) {
                     return;
                 }
             }
@@ -1369,6 +1481,7 @@ mod tests {
             files: &|_| {},
             // Each loop publishes to its own.
             shown: Box::leak(Box::new(AtomicU64::new(0))),
+            indicators: None,
         }
     }
 
@@ -1633,6 +1746,97 @@ mod tests {
         let (now, started) = screen.frames[2];
         assert_eq!(started, screen.frames[1].1);
         assert!(now >= started.unwrap() + bake_tui_view::activity::BEAT);
+    }
+
+    /// Records the indicators written, and sends the next batch of its
+    /// script after each frame, as [`Scripted`] does.
+    struct Indicated {
+        sender: Sender<Source>,
+        script: Vec<Vec<Source>>,
+        written: Vec<(String, bool, Option<bool>)>,
+    }
+
+    impl Screen for Indicated {
+        fn draw(&mut self, _state: &mut State, _stale: bool) -> io::Result<()> {
+            for source in self.script.pop().unwrap_or_default() {
+                self.sender.send(source).unwrap();
+            }
+            Ok(())
+        }
+
+        fn write(&mut self, _sequence: &str) -> io::Result<()> {
+            Ok(())
+        }
+
+        fn indicate(&mut self, output: &indicators::Output) -> io::Result<()> {
+            self.written.push((
+                output.sequence.clone(),
+                output.pushed_title,
+                output.progress,
+            ));
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn the_loop_shows_runtime_updates_and_focus_changes_as_indicators() {
+        let runtime = |update| Source::Msg(Msg::Runtime(update));
+        let (sender, inputs) = mpsc::channel();
+        let mut screen = Indicated {
+            sender,
+            script: vec![
+                vec![Source::Signal(15)],
+                vec![runtime(RuntimeUpdate::TurnEnded(
+                    bake_tui_view::state::Outcome::Completed,
+                ))],
+                vec![
+                    Source::Focus(false),
+                    runtime(RuntimeUpdate::TurnStarted { seed: "s".into() }),
+                ],
+            ],
+            written: Vec::new(),
+        };
+        let mut indicators = Indicators::new(
+            Capabilities {
+                progress: true,
+                notifications: true,
+            },
+            "repo".into(),
+        );
+        let exit = run_loop(
+            &mut screen,
+            &mut live_state(),
+            &inputs,
+            Instant::now(),
+            Owners {
+                indicators: Some(&mut indicators),
+                ..owners(&|_| {})
+            },
+        );
+        assert_eq!(exit.unwrap(), PreviewExit::Signal(15));
+        assert_eq!(
+            screen.written,
+            [
+                (
+                    format!("{}\x1b]0;bake - repo\x07", indicators::PUSH_TITLE),
+                    true,
+                    None
+                ),
+                (
+                    "\x1b]0;◐ bake - repo\x07\x1b]9;4;3\x07".into(),
+                    false,
+                    Some(true)
+                ),
+                (
+                    format!(
+                        "\x1b]0;bake - repo\x07{}\x1b]777;notify;bake - repo;Ready for your next prompt\x07",
+                        indicators::CLEAR_PROGRESS
+                    ),
+                    false,
+                    Some(false)
+                ),
+            ]
+        );
     }
 
     // ---- Approvals ----

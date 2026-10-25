@@ -55,7 +55,28 @@ Model flags are in `bake docs models`, session flags in `bake docs sessions`, co
 
 On Linux and macOS, Bake enables Kitty keyboard reporting for Ghostty and other terminals that support it. Shift+Enter inserts a newline, Enter submits, and held-key repeats cannot answer an approval. Bake restores the previous keyboard mode on exit, including handled signals. Terminals without this protocol keep their existing key behavior.
 
-Run `bake` inside a [Herdr](https://herdr.dev/docs/add-herdr-support/) pane to report its state automatically: `working` during a turn, `blocked` while an approval or dialog waits, and `idle` when ready. No integration installation is needed. Reporting requires the `HERDR_ENV=1`, `HERDR_PANE_ID`, `HERDR_BIN_PATH`, and `HERDR_SOCKET_PATH` environment Herdr supplies. Reports run in the background with a short timeout; failures do not interrupt Bake. Quitting releases the pane.
+The terminal title reads `bake - <directory>`, or `bake - <name> - <directory>` once `/name` names the session. While a turn runs it starts with `◐`, and while an approval waits, with `?`. Bake saves the previous title on the terminal's title stack and restores it on exit where the terminal keeps one. Ghostty does not keep one; its shell integration sets the title again at the next prompt.
+
+In Ghostty, Bake also uses two status features:
+
+- **Progress bar.** Ghostty's progress bar (OSC 9;4) moves while a turn or `/compact` runs, pauses while an approval waits, and turns to the error state for 10 seconds after a turn fails. Quitting removes it.
+- **Desktop notifications.** A notification (OSC 777) says when a turn completes or fails, or when a tool needs approval. It is sent only while the Ghostty window or tab is out of focus. Bake turns on focus reporting for this and turns it off on exit. Ghostty's `desktop-notifications = false` setting also stops them.
+
+Bake detects Ghostty from `TERM_PROGRAM=ghostty`. Over SSH, where that variable is usually not passed on, it uses `TERM=xterm-ghostty`. Under tmux or Herdr, which set `TERM_PROGRAM` to their own names, both features stay off. The `terminal.showTerminalProgress` and `terminal.notifications` settings (`bake docs settings`) turn them on or off in any terminal. Keep the progress bar off in a terminal that shows every OSC 9 sequence as a notification.
+
+Run `bake` inside a [Herdr](https://herdr.dev/docs/add-herdr-support/) pane to report its state automatically: `working` during a turn, `blocked` while an approval waits, and `idle` when ready. A `blocked` report gives the reason, such as `bash needs approval`. A dialog opened by a command such as `/model` or `/resume` leaves the state unchanged, since you are already answering it. No integration installation is needed. Reporting requires the `HERDR_ENV=1`, `HERDR_PANE_ID`, `HERDR_BIN_PATH`, and `HERDR_SOCKET_PATH` environment Herdr supplies. Reports run in the background with a short timeout; failures do not interrupt Bake. Quitting releases the pane.
+
+Bake also sends Herdr display tokens for its agent sidebar:
+
+| Token | Value |
+|---|---|
+| `$model` | The model, without its provider |
+| `$thinking` | The thinking level, for models that reason |
+| `$context` | How much of the context window the last response used, such as `42%` |
+| `$session` | The session's name |
+| `$activity` | What a turn is doing, such as `running bash`, or what it is waiting for |
+
+Herdr shows a token only when a row in `[ui.sidebar.agents] rows` names it, for example `rows = [["state_icon", "agent", "$model", "$context"], ["$activity"]]`. Reports and tokens contain only these values, never prompts, tool arguments, or answers. Quitting clears the tokens before releasing the pane. Inside Herdr, Bake's title becomes the pane's `terminal_title`; `terminal_title_stripped` leaves out the `◐` marker.
 
 Herdr 0.9.2 and later can reopen a saved session after a server restart. Bake reports `bake --session <file>` with its current model, thinking level, and launch permission, sandbox, tool restrictions, and offline/inline options. Session changes refresh this command. Unsaved sessions reopen as fresh unsaved sessions. Herdr cannot accept restore arguments containing apostrophes or control characters, or oversized commands; those sessions also reopen fresh. If the launch restrictions themselves cannot be represented, the fresh session is offline, read-only, and has no tools. This replaces any older session's restore command. Keep custom environment settings in your shell configuration for restored panes.
 

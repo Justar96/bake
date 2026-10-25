@@ -272,7 +272,9 @@ fn started_harness(
             .into_iter()
             .map(|text| (text, Vec::new()))
             .collect(),
+        banner: None,
         notes: Vec::new(),
+        update_check: None,
         approvals: None,
         home: None,
         factory: Some(factory),

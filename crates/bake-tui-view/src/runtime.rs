@@ -60,12 +60,14 @@ impl From<Submission> for Prompt {
 
 /// What the status line reports about the session: its model as
 /// `provider/id`, its thinking level, and how much of the model's context
-/// the last response used. `None` leaves a field out.
+/// the last response used; and its display name, which the terminal's
+/// title shows rather than the status line. `None` leaves a field out.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SessionStatus {
     pub model: Option<String>,
     pub thinking: Option<String>,
     pub context: Option<ContextUsage>,
+    pub name: Option<String>,
 }
 
 /// When a waiting prompt is admitted, as the TypeScript inbox targets it.

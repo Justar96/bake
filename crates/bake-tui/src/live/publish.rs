@@ -43,7 +43,8 @@ impl Driver {
     }
 
     /// Sends the status line's model, thinking level, and context use, Pi's
-    /// footer reading ([`AgentSession::context_usage`]).
+    /// footer reading ([`AgentSession::context_usage`]), with the session's
+    /// name for the terminal's title.
     pub(super) fn status(&mut self) {
         let status = self.read_status();
         self.status = Some(status.clone());
@@ -73,6 +74,7 @@ impl Driver {
                 .map(|_| self.session.thinking_level().as_str().to_owned()),
             model: model.map(|model| format!("{}/{}", model.provider, model.id)),
             context,
+            name: self.session.session_name(),
         }
     }
 }

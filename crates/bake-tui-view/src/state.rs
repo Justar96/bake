@@ -20,6 +20,7 @@ use crate::paste::{self, Image};
 use crate::runtime::{Approval, ApprovalAnswer, Pending, Prompt, RuntimeUpdate, Submission};
 use crate::selection::{self, Granularity, Point, Range};
 use crate::status::StatusInput;
+use crate::tips::{self, Tips};
 use crate::transcript::{self, Transcript};
 use crate::wheel::{self, WheelSteps};
 
@@ -475,6 +476,8 @@ pub struct State {
     columns: u16,
     /// Whether the last selection was copied, said until the time given.
     pub copied: Option<(bool, Duration)>,
+    /// The banner's tips while they rotate ([`State::start_tips`]).
+    tips: Option<Tips>,
     /// Images staged with the draft, by id, in the order they were pasted.
     /// The preview has no model to send them to; erasing a placeholder
     /// unstages its image.
@@ -611,6 +614,7 @@ impl State {
             selecting: Selecting::default(),
             columns: 0,
             copied: None,
+            tips: None,
             attachments: Vec::new(),
             images: 0,
             menu: MenuMemory::default(),
@@ -652,6 +656,30 @@ impl State {
             agents: Vec::new(),
             ..Self::new(frame, tones)
         }
+    }
+
+    /// Starts the live banner's tips at [`State::now`], rotating from a
+    /// place `seed` picks. The terminal owner calls it in fullscreen only:
+    /// inline, the banner is already in scrollback when a tip would change.
+    pub fn start_tips(&mut self, seed: u64) {
+        self.tips = Some(Tips::new(self.now, seed));
+        self.show_tip();
+    }
+
+    /// Brings the banner's tip up to [`State::now`], and forgets the tips
+    /// once the last has gone.
+    fn show_tip(&mut self) {
+        let tip = self.tips.and_then(|tips| tips.at(self.now));
+        tips::show(&mut self.transcript, tip);
+        if self.tips.is_some_and(|tips| tips.done(self.now)) {
+            self.tips = None;
+        }
+    }
+
+    /// Stops the tips and takes the one shown down.
+    fn end_tips(&mut self) {
+        self.tips = None;
+        tips::show(&mut self.transcript, None);
     }
 
     /// The draft and caret while a menu may open there: in the composer,
@@ -930,6 +958,7 @@ impl State {
             .edge
             .map(|edge| edge.next.saturating_sub(self.now));
         let copied = self.copied.map(|(_, until)| until.saturating_sub(self.now));
+        let tip = self.tips.and_then(|tips| tips.next_change(self.now));
         // A running shell's clock, where it shows, turns each second.
         let clock = (self.jobs_row() || matches!(self.focus, Focus::Jobs | Focus::Shell))
             .then(|| {
@@ -951,6 +980,7 @@ impl State {
             .chain(quit)
             .chain(edge)
             .chain(copied)
+            .chain(tip)
             .chain(clock)
             .min()
     }
@@ -1082,6 +1112,9 @@ fn apply(state: &mut State, msg: Msg) -> Vec<Effect> {
             if state.copied.is_some_and(|(_, until)| now >= until) {
                 state.copied = None;
             }
+            if state.tips.is_some() {
+                state.show_tip();
+            }
         }
         // While an approval waits, the wheel still scrolls the transcript,
         // but no press moves the caret or starts a selection.
@@ -1106,6 +1139,8 @@ fn apply(state: &mut State, msg: Msg) -> Vec<Effect> {
 fn runtime(state: &mut State, update: RuntimeUpdate) {
     match update {
         RuntimeUpdate::TurnStarted { seed } => {
+            // The tips are for the idle start; the first turn ends them.
+            state.end_tips();
             // A sample still running gives way; the runtime's turn is real.
             end_turn(state, Outcome::Completed);
             state.activity = Some(Activity {
@@ -1158,6 +1193,7 @@ fn runtime(state: &mut State, update: RuntimeUpdate) {
             // What the old session's view held goes with it: its rows, the
             // selection over them, its turn, and its pending prompts. The
             // draft, its staged images, and any dialog stay.
+            state.tips = None;
             state.transcript = Transcript::new(rows);
             state.transcript_epoch = state.transcript_epoch.wrapping_add(1);
             state.transcript_published = 0;
@@ -3144,6 +3180,7 @@ mod tests {
                 model: Some("p/m".into()),
                 thinking: Some("high".into()),
                 context: None,
+                name: None,
             }),
         );
         assert_eq!(state.status.model.as_deref(), Some("p/m"));
@@ -4171,5 +4208,57 @@ mod tests {
             chord(&mut state, Key::Char('c'), Mods::CTRL),
             [Effect::Quit]
         );
+    }
+
+    // Bake: the banner's tips appear after a moment, turn on the clock,
+    // wake the loop for each change, and go for good with the first turn.
+    #[test]
+    fn the_banner_tips_rotate_and_the_first_turn_ends_them() {
+        use crate::transcript::{Banner, Row};
+        let banner = Row::Banner(Banner {
+            version: "0.4.2".into(),
+            directory: "~".into(),
+            session: "new".into(),
+            access: Vec::new(),
+            tip: None,
+        });
+        let tip = |state: &State| match &state.transcript.rows[0] {
+            Row::Banner(banner) => banner.tip.clone(),
+            other => panic!("{other:?}"),
+        };
+        let mut state = State::live(FrameStyle::default(), Tones::None, vec![banner]);
+        assert_eq!(state.next_change(), None);
+        state.start_tips(0);
+        assert_eq!(tip(&state), None);
+        assert_eq!(state.next_change(), Some(tips::DELAY));
+        update(&mut state, Msg::Tick(tips::DELAY));
+        assert_eq!(tip(&state).as_deref(), Some(crate::copy::TIPS[0]));
+        assert_eq!(state.next_change(), Some(tips::EVERY));
+        update(&mut state, Msg::Tick(tips::DELAY + tips::EVERY));
+        let second = tip(&state);
+        assert!(second.is_some() && second.as_deref() != Some(crate::copy::TIPS[0]));
+        runtime(&mut state, RuntimeUpdate::TurnStarted { seed: "s".into() });
+        assert_eq!(tip(&state), None);
+        update(&mut state, Msg::Tick(tips::DELAY + tips::EVERY * 2));
+        assert_eq!(tip(&state), None);
+        // Left alone, the last tip goes and nothing more is scheduled.
+        let mut idle = State::live(
+            FrameStyle::default(),
+            Tones::None,
+            vec![Row::Banner(Banner {
+                version: "0.4.2".into(),
+                directory: "~".into(),
+                session: "new".into(),
+                access: Vec::new(),
+                tip: None,
+            })],
+        );
+        idle.start_tips(3);
+        let end = tips::DELAY + tips::EVERY * u32::try_from(tips::SHOWN).unwrap();
+        update(&mut idle, Msg::Tick(end - Duration::from_millis(1)));
+        assert!(tip(&idle).is_some());
+        update(&mut idle, Msg::Tick(end));
+        assert_eq!(tip(&idle), None);
+        assert_eq!(idle.next_change(), None);
     }
 }

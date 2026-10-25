@@ -2,6 +2,13 @@
 //! <https://herdr.dev/docs/add-herdr-support/> (Herdr 0.9.5).
 //! One worker owns the CLI child, coalesces pending reports, and releases
 //! the pane on shutdown. No subprocess or socket I/O runs on the UI thread.
+//!
+//! A `blocked` report explains itself with `--message`, as the guide asks:
+//! the tool an approval request is for, or the open dialog's title
+//! ([`Lifecycle::detail`]). Display tokens (`pane report-metadata`, see
+//! <https://herdr.dev/docs/agents/>) give sidebar rows `$model`,
+//! `$thinking`, `$context`, `$session`, and `$activity`. Herdr keeps tokens
+//! after an agent releases its pane, so shutdown clears them first.
 
 use std::ffi::OsString;
 use std::process::{Child, Command, Stdio};
@@ -11,7 +18,10 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use bake_coding_agent::agent_session::AgentSession;
 use bake_coding_agent::cli::args::parse_args;
-use bake_tui_view::runtime::RuntimeUpdate;
+use bake_tui_view::runtime::{RuntimeUpdate, SessionStatus};
+use bake_tui_view::status::{compact_model, context_percent};
+
+use crate::lifecycle::{Activity, LINE, Lifecycle, one_line};
 
 const SOURCE: &str = "bake";
 const TIMEOUT: Duration = Duration::from_millis(500);
@@ -137,51 +147,104 @@ fn resume_options(args: &[String]) -> Vec<String> {
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Report {
     state: &'static str,
+    /// What a `blocked` session waits for.
+    message: Option<String>,
     session: Session,
+}
+
+/// The display tokens `pane report-metadata` sets, by name; `None` clears
+/// one. Every value is one line of at most [`LINE`] characters, within
+/// Herdr's 80-character cap.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct Tokens {
+    /// The model without its provider, as the status line names it.
+    model: Option<String>,
+    thinking: Option<String>,
+    /// The context the last response used, as a whole percentage.
+    context: Option<String>,
+    /// The session's display name.
+    session: Option<String>,
+    /// What a working session does or a blocked one waits for.
+    activity: Option<String>,
+}
+
+impl Tokens {
+    fn read(status: &SessionStatus, lifecycle: &Lifecycle) -> Self {
+        let line = |text: &str| Some(one_line(text, LINE)).filter(|line| !line.is_empty());
+        Self {
+            model: status
+                .model
+                .as_deref()
+                .and_then(|model| line(compact_model(model))),
+            thinking: status.thinking.as_deref().and_then(line),
+            context: status
+                .context
+                .filter(|usage| usage.used.is_some())
+                .map(|usage| format!("{}%", context_percent(usage))),
+            session: status.name.as_deref().and_then(line),
+            activity: lifecycle.detail(),
+        }
+    }
+
+    fn entries(&self) -> [(&'static str, Option<&str>); 5] {
+        [
+            ("model", self.model.as_deref()),
+            ("thinking", self.thinking.as_deref()),
+            ("context", self.context.as_deref()),
+            ("session", self.session.as_deref()),
+            ("activity", self.activity.as_deref()),
+        ]
+    }
 }
 
 #[derive(Default)]
 struct Projection {
-    running: bool,
-    approvals: bool,
-    dialog: bool,
+    lifecycle: Lifecycle,
+    status: SessionStatus,
     session: Session,
     last: Option<Report>,
+    /// The tokens last queued. Nothing reported reads as no tokens, so a
+    /// session that never has any reports none.
+    tokens: Tokens,
 }
 
 impl Projection {
-    fn observe(&mut self, update: &RuntimeUpdate, session: Option<Session>) -> Option<Report> {
+    /// The state report and the tokens `update` changes, each `None` when
+    /// unchanged.
+    fn observe(
+        &mut self,
+        update: &RuntimeUpdate,
+        session: Option<Session>,
+    ) -> (Option<Report>, Option<Tokens>) {
         if let Some(session) = session {
             self.session = session;
         }
-        match update {
-            RuntimeUpdate::TurnStarted { .. } => self.running = true,
-            RuntimeUpdate::TurnEnded(_) => self.running = false,
-            RuntimeUpdate::Approvals(queue) => self.approvals = !queue.is_empty(),
-            RuntimeUpdate::Dialog(dialog) => self.dialog = dialog.is_some(),
-            RuntimeUpdate::Replaced(_) => {
-                self.running = false;
-                self.approvals = false;
-                self.dialog = false;
-            }
-            RuntimeUpdate::Status(_) => {}
-            _ => return None,
+        if let RuntimeUpdate::Status(status) = update {
+            self.status = status.clone();
+        } else if !self.lifecycle.observe(update) {
+            return (None, None);
         }
+        let state = self.lifecycle.activity();
         let report = Report {
-            state: if self.approvals || self.dialog {
-                "blocked"
-            } else if self.running {
-                "working"
-            } else {
-                "idle"
-            },
+            state: state.as_str(),
+            // Herdr's flags would read a leading hyphen as an option.
+            message: (state == Activity::Blocked)
+                .then(|| self.lifecycle.detail())
+                .flatten()
+                .map(|line| line.trim_start_matches('-').trim_start().to_owned())
+                .filter(|line| !line.is_empty()),
             session: self.session.clone(),
         };
-        if self.last.as_ref() == Some(&report) {
-            return None;
-        }
-        self.last = Some(report.clone());
-        Some(report)
+        let report = (self.last.as_ref() != Some(&report)).then(|| {
+            self.last = Some(report.clone());
+            report
+        });
+        let tokens = Tokens::read(&self.status, &self.lifecycle);
+        let tokens = (tokens != self.tokens).then(|| {
+            self.tokens = tokens.clone();
+            tokens
+        });
+        (report, tokens)
     }
 }
 
@@ -189,6 +252,7 @@ impl Projection {
 struct Mailbox {
     projection: Projection,
     pending: Option<Report>,
+    tokens: Option<Tokens>,
     closing: bool,
 }
 
@@ -209,12 +273,20 @@ impl Handle {
             .mailbox
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
-        if !mailbox.closing
-            && let Some(report) = mailbox.projection.observe(update, session)
-        {
-            mailbox.pending = Some(report);
-            self.0.ready.notify_one();
+        if mailbox.closing {
+            return;
         }
+        let (report, tokens) = mailbox.projection.observe(update, session);
+        if report.is_none() && tokens.is_none() {
+            return;
+        }
+        if report.is_some() {
+            mailbox.pending = report;
+        }
+        if tokens.is_some() {
+            mailbox.tokens = tokens;
+        }
+        self.0.ready.notify_one();
     }
 }
 
@@ -254,29 +326,48 @@ impl Reporter {
             .name("bake-herdr".into())
             .spawn(move || {
                 let mut seq = 0;
+                // The tokens Herdr holds, which shutdown clears.
+                let mut shown = Tokens::default();
                 loop {
-                    let report = {
+                    let (report, tokens, closing) = {
                         let mut mailbox = shared
                             .mailbox
                             .lock()
                             .unwrap_or_else(PoisonError::into_inner);
-                        while mailbox.pending.is_none() && !mailbox.closing {
+                        while mailbox.pending.is_none()
+                            && mailbox.tokens.is_none()
+                            && !mailbox.closing
+                        {
                             mailbox = shared
                                 .ready
                                 .wait(mailbox)
                                 .unwrap_or_else(PoisonError::into_inner);
                         }
                         if mailbox.closing {
-                            None
+                            (None, None, true)
                         } else {
-                            mailbox.pending.take()
+                            (mailbox.pending.take(), mailbox.tokens.take(), false)
                         }
                     };
-                    seq = next_seq(seq);
-                    let args = arguments(&pane, report.as_ref(), &options, seq);
-                    send(&args);
-                    if report.is_none() {
+                    if closing {
+                        if shown != Tokens::default() {
+                            seq = next_seq(seq);
+                            send(&metadata(&pane, &Tokens::default(), seq));
+                        }
+                        seq = next_seq(seq);
+                        send(&arguments(&pane, None, &options, seq));
                         break;
+                    }
+                    // The state first, so the pane is held before its
+                    // tokens change.
+                    if let Some(report) = report {
+                        seq = next_seq(seq);
+                        send(&arguments(&pane, Some(&report), &options, seq));
+                    }
+                    if let Some(tokens) = tokens {
+                        seq = next_seq(seq);
+                        send(&metadata(&pane, &tokens, seq));
+                        shown = tokens;
                     }
                 }
             })
@@ -303,6 +394,7 @@ impl Drop for Reporter {
                 .unwrap_or_else(PoisonError::into_inner);
             mailbox.closing = true;
             mailbox.pending = None;
+            mailbox.tokens = None;
             self.handle.0.ready.notify_one();
         }
         if let Some(worker) = self.worker.take() {
@@ -340,6 +432,9 @@ fn arguments(pane: &str, report: Option<&Report>, options: &[String], seq: u64) 
     ];
     if let Some(report) = report {
         args.extend(["--state".into(), report.state.into()]);
+        if let Some(message) = &report.message {
+            args.extend(["--message".into(), message.clone()]);
+        }
         let resume = if let Some(resume) = report.session.resume(options) {
             args.extend([
                 "--agent-session-path".into(),
@@ -351,6 +446,27 @@ fn arguments(pane: &str, report: Option<&Report>, options: &[String], seq: u64) 
         };
         args.push("--".into());
         args.extend(resume);
+    }
+    args
+}
+
+/// `pane report-metadata` setting `tokens`, and clearing those without a
+/// value. Tokens are visual only: they never change the pane's state.
+fn metadata(pane: &str, tokens: &Tokens, seq: u64) -> Vec<String> {
+    let mut args = vec![
+        "pane".into(),
+        "report-metadata".into(),
+        pane.into(),
+        "--source".into(),
+        SOURCE.into(),
+        "--seq".into(),
+        seq.to_string(),
+    ];
+    for (name, value) in tokens.entries() {
+        match value {
+            Some(value) => args.extend(["--token".into(), format!("{name}={value}")]),
+            None => args.extend(["--clear-token".into(), name.into()]),
+        }
     }
     args
 }
@@ -462,75 +578,171 @@ mod tests {
         }
     }
 
-    #[test]
-    fn lifecycle_reports_wait_for_all_decisions_before_resuming_work() {
-        use bake_tui_view::dialog::{DialogKind, DialogRequest, InfoDialog};
-        use bake_tui_view::runtime::Approval;
-        let mut projection = Projection::default();
-        assert_eq!(projection.observe(&status(), None).unwrap().state, "idle");
-        assert!(projection.observe(&status(), None).is_none());
-        assert_eq!(
-            projection
-                .observe(
-                    &RuntimeUpdate::TurnStarted {
-                        seed: "turn".into()
-                    },
-                    None
-                )
-                .unwrap()
-                .state,
-            "working"
-        );
-        let approval = Approval {
+    fn approval(tool: &str) -> bake_tui_view::runtime::Approval {
+        bake_tui_view::runtime::Approval {
             generation: 1,
-            tool: "bash".into(),
+            tool: tool.into(),
             call_id: "1".into(),
             parent_call_id: None,
             reason: "access".into(),
-            arguments: "".into(),
-        };
-        assert_eq!(
-            projection
-                .observe(&RuntimeUpdate::Approvals(vec![approval]), None)
-                .unwrap()
-                .state,
-            "blocked"
-        );
+            arguments: "rm -rf /secret".into(),
+        }
+    }
+
+    fn turn() -> RuntimeUpdate {
+        RuntimeUpdate::TurnStarted {
+            seed: "turn".into(),
+        }
+    }
+
+    /// The state and message `update` reports, if it reports one.
+    fn reported(
+        projection: &mut Projection,
+        update: &RuntimeUpdate,
+    ) -> Option<(&'static str, Option<String>)> {
+        projection
+            .observe(update, None)
+            .0
+            .map(|report| (report.state, report.message))
+    }
+
+    #[test]
+    fn lifecycle_reports_wait_for_approvals_before_resuming_work() {
+        use bake_tui_view::dialog::{DialogKind, DialogRequest, InfoDialog};
+        let mut projection = Projection::default();
+        let p = &mut projection;
+        assert_eq!(reported(p, &status()), Some(("idle", None)));
+        assert_eq!(reported(p, &status()), None);
+        // A dialog answers the person's own command: Herdr is not told the
+        // agent needs a decision.
         let dialog = DialogRequest {
             id: 1,
             kind: DialogKind::Info(InfoDialog {
-                title: "Question".into(),
+                title: "Model".into(),
                 lines: vec![],
             }),
         };
-        assert!(
-            projection
-                .observe(&RuntimeUpdate::Dialog(Some(dialog)), None)
-                .is_none()
+        assert_eq!(
+            p.observe(&RuntimeUpdate::Dialog(Some(dialog)), None),
+            (None, None)
         );
-        assert!(
-            projection
-                .observe(&RuntimeUpdate::Approvals(vec![]), None)
-                .is_none()
+        assert_eq!(p.observe(&RuntimeUpdate::Dialog(None), None), (None, None));
+        assert_eq!(reported(p, &turn()), Some(("working", None)));
+        // A block says what it waits for: the tool, never its arguments.
+        assert_eq!(
+            reported(p, &RuntimeUpdate::Approvals(vec![approval("bash")])),
+            Some(("blocked", Some("bash needs approval".into())))
         );
         assert_eq!(
-            projection
-                .observe(&RuntimeUpdate::Dialog(None), None)
-                .unwrap()
-                .state,
-            "working"
+            reported(p, &RuntimeUpdate::Approvals(vec![])),
+            Some(("working", None))
         );
+        // A phase changes the activity token, not the state.
+        assert_eq!(reported(p, &RuntimeUpdate::Phase("thinking".into())), None);
         assert_eq!(
-            projection
-                .observe(&RuntimeUpdate::TurnEnded(Outcome::Completed), None)
-                .unwrap()
-                .state,
-            "idle"
+            reported(p, &RuntimeUpdate::TurnEnded(Outcome::Completed)),
+            Some(("idle", None))
         );
-        assert!(
-            projection
-                .observe(&RuntimeUpdate::Live(vec![]), None)
-                .is_none()
+        assert_eq!(p.observe(&RuntimeUpdate::Live(vec![]), None), (None, None));
+    }
+
+    #[test]
+    fn a_message_never_starts_like_an_option() {
+        let mut projection = Projection::default();
+        let p = &mut projection;
+        reported(p, &turn());
+        assert_eq!(
+            reported(p, &RuntimeUpdate::Approvals(vec![approval("--state=idle")])),
+            Some(("blocked", Some("state=idle needs approval".into())))
+        );
+        let report = Report {
+            state: "blocked",
+            message: Some("bash needs approval".into()),
+            session: Session::default(),
+        };
+        let args = arguments("w1:p1", Some(&report), &[], 9);
+        assert_eq!(
+            args[9..13],
+            strings(&["--state", "blocked", "--message", "bash needs approval"])
+        );
+    }
+
+    #[test]
+    fn tokens_follow_the_status_and_activity_and_clear_what_is_gone() {
+        use bake_tui_view::status::ContextUsage;
+        let mut projection = Projection::default();
+        assert_eq!(projection.observe(&status(), None).1, None);
+        let status = SessionStatus {
+            model: Some("openrouter/anthropic/claude\nx".into()),
+            thinking: Some("high".into()),
+            context: Some(ContextUsage {
+                used: Some(509),
+                window: 1000,
+            }),
+            name: Some("fix\x1b]0;evil\x07 auth".into()),
+        };
+        let tokens = projection
+            .observe(&RuntimeUpdate::Status(status.clone()), None)
+            .1
+            .unwrap();
+        assert_eq!(
+            metadata("w1:p1", &tokens, 3),
+            strings(&[
+                "pane",
+                "report-metadata",
+                "w1:p1",
+                "--source",
+                "bake",
+                "--seq",
+                "3",
+                "--token",
+                "model=claude x",
+                "--token",
+                "thinking=high",
+                "--token",
+                "context=50%",
+                "--token",
+                "session=fix ]0;evil auth",
+                "--clear-token",
+                "activity"
+            ])
+        );
+        projection.observe(&turn(), None);
+        let working = projection
+            .observe(&RuntimeUpdate::Phase("running bash".into()), None)
+            .1
+            .unwrap();
+        assert_eq!(working.activity.as_deref(), Some("running bash"));
+        // A context not measured since a compaction is left out.
+        let unknown = projection
+            .observe(
+                &RuntimeUpdate::Status(SessionStatus {
+                    context: Some(ContextUsage {
+                        used: None,
+                        window: 1000,
+                    }),
+                    thinking: None,
+                    ..status
+                }),
+                None,
+            )
+            .1
+            .unwrap();
+        assert_eq!((unknown.context, unknown.thinking), (None, None));
+        assert_eq!(
+            metadata("w1:p1", &Tokens::default(), 4)[7..],
+            strings(&[
+                "--clear-token",
+                "model",
+                "--clear-token",
+                "thinking",
+                "--clear-token",
+                "context",
+                "--clear-token",
+                "session",
+                "--clear-token",
+                "activity"
+            ])
         );
     }
 
@@ -540,6 +752,7 @@ mod tests {
         assert_eq!(
             projection
                 .observe(&status(), Some(saved("/tmp/first.jsonl")))
+                .0
                 .unwrap()
                 .session
                 .path
@@ -551,6 +764,7 @@ mod tests {
                 &RuntimeUpdate::Replaced(vec![]),
                 Some(saved("/tmp/second.jsonl")),
             )
+            .0
             .unwrap();
         let args = arguments(
             "w1:p1",
@@ -588,6 +802,7 @@ mod tests {
         );
         let unsaved = projection
             .observe(&status(), Some(Session::default()))
+            .0
             .unwrap();
         assert!(
             arguments("w1:p1", Some(&unsaved), &[], 46).ends_with(&strings(&[
@@ -657,6 +872,7 @@ mod tests {
         ] {
             let report = Report {
                 state: "working",
+                message: None,
                 session: saved(&path),
             };
             assert!(report.session.resume(&[]).is_none());
@@ -703,6 +919,44 @@ mod tests {
         release.send(()).unwrap();
         closing.join().unwrap();
         handle.observe(&status(), None);
+        assert!(received.recv().is_err());
+    }
+
+    #[test]
+    fn worker_sends_tokens_after_the_state_and_clears_them_before_releasing() {
+        let (sent, received) = mpsc::channel();
+        let reporter = Reporter::start(
+            move |args| sent.send(args.to_vec()).unwrap(),
+            "w1:p1".into(),
+            vec![],
+        )
+        .unwrap();
+        let handle = reporter.handle();
+        handle.observe(
+            &RuntimeUpdate::Status(SessionStatus {
+                model: Some("openai/gpt-5".into()),
+                ..SessionStatus::default()
+            }),
+            None,
+        );
+        let next = || received.recv_timeout(Duration::from_secs(2)).unwrap();
+        let (state, tokens) = (next(), next());
+        assert_eq!((&*state[1], &*state[10]), ("report-agent", "idle"));
+        assert_eq!(tokens[1], "report-metadata");
+        assert!(tokens.contains(&"model=gpt-5".to_owned()));
+        drop(reporter);
+        let (cleared, released) = (next(), next());
+        let seq = |args: &[String]| {
+            let at = args.iter().position(|a| a == "--seq").unwrap();
+            args[at + 1].parse::<u64>().unwrap()
+        };
+        assert_eq!(
+            cleared,
+            metadata("w1:p1", &Tokens::default(), seq(&cleared))
+        );
+        assert_eq!(released[1], "release-agent");
+        assert!(seq(&state) < seq(&tokens));
+        assert!(seq(&tokens) < seq(&cleared) && seq(&cleared) < seq(&released));
         assert!(received.recv().is_err());
     }
 

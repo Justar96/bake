@@ -1,7 +1,8 @@
 //! Decodes Crossterm events into the view's messages. Key releases, focus
 //! changes, motion with no button held, and buttons other than the primary
 //! one produce nothing, except a character Windows delivers as an Alt code
-//! ([`Decoder`]).
+//! ([`Decoder`]). The decoder keeps the latest focus change for the
+//! terminal's indicators instead ([`Decoder::take_focus`]).
 
 use bake_tui_view::keys::{Key, KeyInput, Mods};
 use std::time::Duration;
@@ -28,6 +29,8 @@ use crossterm::event::{
 pub struct Decoder {
     windows: bool,
     held: Vec<char>,
+    /// The latest focus change not yet taken: `true` when gained.
+    focus: Option<bool>,
 }
 
 impl Decoder {
@@ -41,11 +44,22 @@ impl Decoder {
         Self {
             windows,
             held: Vec::new(),
+            focus: None,
         }
+    }
+
+    /// The latest focus change decoded since the last call, if any.
+    pub fn take_focus(&mut self) -> Option<bool> {
+        self.focus.take()
     }
 
     /// Decodes `event`, read at `at` on the loop's clock.
     pub fn decode(&mut self, event: Event, at: Duration) -> Option<Msg> {
+        match event {
+            Event::FocusGained => self.focus = Some(true),
+            Event::FocusLost => self.focus = Some(false),
+            _ => {}
+        }
         if self.windows
             && let Event::Key(key) = &event
             && let KeyCode::Char(c) = key.code
@@ -203,6 +217,7 @@ mod tests {
             None
         );
         assert_eq!(at_start(Event::FocusGained), None);
+        assert_eq!(at_start(Event::FocusLost), None);
         assert_eq!(
             at_start(Event::Mouse(MouseEvent {
                 kind: MouseEventKind::Moved,
@@ -287,6 +302,17 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[test]
+    fn the_latest_focus_change_is_kept_for_the_indicators() {
+        let mut decoder = Decoder::on(false);
+        assert_eq!(decoder.take_focus(), None);
+        for event in [Event::FocusLost, Event::FocusGained, Event::FocusLost] {
+            assert_eq!(decoder.decode(event, Duration::ZERO), None);
+        }
+        assert_eq!(decoder.take_focus(), Some(false));
+        assert_eq!(decoder.take_focus(), None);
     }
 
     #[test]

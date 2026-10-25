@@ -793,6 +793,9 @@ pub struct Started {
     /// session, before its first prompt ([`resumes_at_startup`]). Print
     /// mode never sees it: [`plan`] refuses `--resume` there.
     pub resume: bool,
+    /// The session's standing permission, as settled at startup, which the
+    /// terminal's opening banner names.
+    pub permission: crate::permissions::SessionPermission,
 }
 
 /// Runs `bake` print mode; returns the exit code. Must run inside a
@@ -824,6 +827,7 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
         home: _,
         factory: _,
         resume: _,
+        permission: _,
     } = started;
     // The first prompt's startup wait, taken here so print mode can report
     // what is not serving before the answer; the prompt then waits no more.
@@ -976,6 +980,7 @@ pub async fn run_rpc(
         factory,
         // `plan` refuses `--resume` in RPC mode.
         resume: _,
+        permission: _,
     } = started;
     let Some(stdin) = stdin else {
         session.shutdown().await;
@@ -2231,6 +2236,7 @@ async fn start_with(
         return Err(1);
     }
 
+    let permission = resources.permission.clone();
     let built = match build_session(
         &args,
         Build {
@@ -2313,6 +2319,7 @@ async fn start_with(
         home,
         factory,
         resume,
+        permission,
     })
 }
 

@@ -2120,8 +2120,8 @@ fn render_transcript(
     }
 }
 
-/// The scroll indicator. While following output, the keys that scroll,
-/// right-aligned and quiet. While reading, a pill centred under the text:
+/// The scroll indicator. While following output, nothing. While reading,
+/// a pill centred under the text:
 /// `↓ 12 lines below · Ctrl+End`, or `↓ New output · …` in yellow once
 /// output arrives below. The pill gives up its key, then its count, before
 /// it would be cut. Pressing it follows output again.
@@ -2150,27 +2150,9 @@ fn render_scroll_hint(app: &mut State, row: Rect, buf: &mut Buffer) {
         return;
     }
     let view = &app.transcript;
+    // Following output, the row stays clear; the banner's first tip names
+    // the scroll keys instead ([`crate::tips`]).
     if view.following() {
-        if !view.more_above() {
-            return;
-        }
-        let mut spans = Vec::new();
-        for (i, (key, does)) in copy::HINT_FOLLOWING.iter().enumerate() {
-            if i > 0 {
-                spans.push(Span::styled(" · ", dim()));
-            }
-            spans.push(Span::raw(*key));
-            spans.push(Span::styled(format!(" {does}"), dim()));
-        }
-        let hint = Line::from(spans);
-        let cells = hint.width() as u16;
-        if cells <= row.width {
-            line(
-                buf,
-                Rect::new(row.x + row.width - cells, row.y, cells, 1),
-                hint,
-            );
-        }
         return;
     }
     let below = view.total().saturating_sub(view.offset() + view.height);
@@ -3530,12 +3512,9 @@ mod tests {
         let mut app = State::default();
         app.draft.type_text("draft");
         let (rows, _) = draw(&mut app, 80, 16);
-        let hint = row_index(&rows, "PgUp scroll");
-        assert!(
-            rows[hint]
-                .trim_end()
-                .ends_with("Wheel/PgUp scroll · Ctrl+↑ prompts")
-        );
+        // Following, the row above the bar stays clear: no scroll keys.
+        let hint = row_index(&rows, "no model") - 1;
+        assert_eq!(rows[hint].trim(), "");
         assert!(rows[hint - 1].starts_with("  rejects it before splitting.     "));
         key(&mut app, Key::PageUp);
         let (rows, _) = draw(&mut app, 80, 16);
@@ -3547,7 +3526,7 @@ mod tests {
         );
         update(&mut app, Msg::Key(KeyInput::new(Key::End, Mods::CTRL)));
         let (rows, _) = draw(&mut app, 80, 16);
-        assert!(rows.iter().any(|r| r.contains("PgUp scroll")));
+        assert_eq!(rows[hint].trim(), "");
         // Navigation never touches the draft.
         assert_eq!((app.draft.text(), app.draft.caret()), ("draft", 5));
     }
@@ -3674,7 +3653,7 @@ mod tests {
         assert!(rows[bar - 1].contains("Copy failed"));
         update(&mut app, Msg::Tick(COPIED * 2));
         let (rows, _) = draw(&mut app, 80, 24);
-        assert!(rows[bar - 1].contains("PgUp scroll"));
+        assert_eq!(rows[bar - 1].trim(), "");
     }
 
     #[test]
@@ -3897,11 +3876,8 @@ mod tests {
         let mut app = State::default();
         let (rows, _) = draw(&mut app, 80, 24);
         let bar = row_index(&rows, "no model");
-        // Following: the scroll keys sit right-aligned on the row above the
-        // bar, ending in the status line's column.
-        let hint = rows[bar - 1].trim_end();
-        assert!(hint.ends_with("Wheel/PgUp scroll · Ctrl+↑ prompts"));
-        assert_eq!(hint.chars().count(), rows[bar].trim_end().chars().count());
+        // Following: the row above the bar stays clear.
+        assert_eq!(rows[bar - 1].trim(), "");
         key(&mut app, Key::PageUp);
         let (rows, _) = draw(&mut app, 80, 24);
         let pill = &rows[bar - 1];
@@ -3925,7 +3901,7 @@ mod tests {
         assert!(app.transcript.following());
         let (rows, _) = draw(&mut app, 80, 24);
         assert_eq!(app.latest, None);
-        assert!(rows[bar - 1].contains("Wheel/PgUp scroll"));
+        assert_eq!(rows[bar - 1].trim(), "");
     }
 
     #[test]

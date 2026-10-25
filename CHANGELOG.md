@@ -4,6 +4,11 @@ Notable changes to Bake. `bake` compiles this file in, and `/changelog` shows it
 
 ## [Unreleased]
 
+- **A clearer opening screen.** An interactive session opens with a header in place of the bare "Session saved to" note: the Bake wordmark in a warm gradient on truecolor terminals, the version, the working directory, the session in plain words (`new`, or `resumed · 6 prompts · 2h ago`), and tags for the sandbox mode, approval policy, and offline mode. `/session` still shows the session file.
+- **Tips in place of the scroll hint.** The scroll keys no longer sit above the status line. In fullscreen, the header shows a dim `tip` row for about 25 seconds after startup, or until the first turn: the scroll keys first, then two other tips that change from launch to launch.
+- **Update notice.** On a native install, an interactive session says, under an `update` tag, when a newer release is published and that `bake update` installs it. The check runs in the background at most once a day, remembers its answer in `update-check.json` in the Bake home, and is left out by `--offline`.
+- **Terminal status.** The window title names the session and directory, `bake - <name> - <directory>`, and starts with `◐` while a turn runs or `?` while an approval waits; quitting restores the previous title where the terminal keeps it. In Ghostty, a progress bar moves while a turn runs, pauses while an approval waits, and shows an error after a failed turn. A desktop notification says when a turn finishes or a tool needs approval while the window or tab is out of focus. The `terminal.showTerminalProgress` and `terminal.notifications` settings turn either on or off in any terminal.
+- **Richer Herdr status.** A `blocked` report says what it waits for, such as `bash needs approval`. A dialog opened by a command such as `/model` no longer reports `blocked`. Herdr's agent sidebar can show `$model`, `$thinking`, `$context`, `$session`, and `$activity`, which quitting clears.
 - **Faster streaming of long tool calls and answers.** A tool call's arguments are no longer parsed again from the start for every streamed piece, so a file of about 150 KB that a model writes costs about 1 second of CPU instead of 11. Long answers stream with fewer copies, and `--mode json` and RPC output no longer build each update's discarded snapshot.
 
 ## [0.4.2] - 2026-10-25

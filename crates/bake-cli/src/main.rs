@@ -32,7 +32,7 @@ use bake_coding_agent::cli::{self, Action, CliEnvironment, Interrupt};
 use bake_coding_agent::permissions::{ApprovalBroker, Approver};
 use bake_coding_agent::print_mode::SharedWriter;
 use bake_sandbox::SandboxProvider;
-use bake_tui::{LiveSession, PreviewExit, ScreenMode};
+use bake_tui::{Banner, LiveSession, PreviewExit, ScreenMode};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -649,11 +649,28 @@ fn interactive(runtime: &tokio::runtime::Runtime, args: cli::Args, stderr: Share
         Err(code) => return code,
     };
     let session = started.session;
-    let mut notes = vec![match session.session_file() {
-        Some(file) => format!("Session saved to {}", file.display()),
-        None => "Session not saved (--no-session)".to_owned(),
-    }];
-    notes.extend(session.model_fallback_message().map(str::to_owned));
+    let user_home = std::env::home_dir();
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |time| {
+            i64::try_from(time.as_millis()).unwrap_or(i64::MAX)
+        });
+    let banner = Banner {
+        version: VERSION.to_owned(),
+        directory: tilde(std::path::Path::new(&session.cwd()), user_home.as_deref()),
+        session: bake_tui::live::session_summary(
+            &session.messages(),
+            now_ms,
+            session.session_file().is_none(),
+        ),
+        access: bake_tui::live::access_pills(&started.permission, offline),
+        tip: None,
+    };
+    let mut notes: Vec<String> = session
+        .model_fallback_message()
+        .map(str::to_owned)
+        .into_iter()
+        .collect();
     // Without a model or key the terminal still starts, so /login and
     // /model can set one up; a prompt is refused with its draft kept until
     // then. Print mode stays strict.
@@ -671,7 +688,12 @@ fn interactive(runtime: &tokio::runtime::Runtime, args: cli::Args, stderr: Share
         session,
         runtime: runtime.handle().clone(),
         prompts,
+        banner: Some(banner),
         notes,
+        // `--offline` reaches no network at startup, this check included.
+        update_check: (!offline)
+            .then(|| update::startup_check(&started.home))
+            .flatten(),
         approvals: Some(approvals),
         home: Some(started.home),
         factory: Some(started.factory),
@@ -684,6 +706,16 @@ fn interactive(runtime: &tokio::runtime::Runtime, args: cli::Args, stderr: Share
             eprintln!("bake: interactive mode failed: {err}");
             1
         }
+    }
+}
+
+/// `path` for the banner, with the user's home shortened to `~`.
+fn tilde(path: &std::path::Path, home: Option<&std::path::Path>) -> String {
+    let home = home.filter(|home| home.is_absolute());
+    match home.and_then(|home| path.strip_prefix(home).ok()) {
+        Some(rest) if rest.as_os_str().is_empty() => "~".to_owned(),
+        Some(rest) => format!("~{}{}", std::path::MAIN_SEPARATOR, rest.display()),
+        None => path.display().to_string(),
     }
 }
 
@@ -861,6 +893,21 @@ mod tests {
             parse_strs(&["-p", "--self-check"]),
             Ok(Command::Agent(vec!["-p".into(), "--self-check".into()]))
         );
+    }
+
+    // Unix paths: a Windows home has a drive.
+    #[cfg(unix)]
+    #[test]
+    fn the_banner_shortens_the_users_home_to_a_tilde() {
+        use std::path::Path;
+        let home = Some(Path::new("/home/ada"));
+        assert_eq!(tilde(Path::new("/home/ada"), home), "~");
+        assert_eq!(tilde(Path::new("/home/ada/src/app"), home), "~/src/app");
+        // A sibling that only shares the prefix's text is not under it.
+        assert_eq!(tilde(Path::new("/home/adam/x"), home), "/home/adam/x");
+        assert_eq!(tilde(Path::new("/srv/x"), home), "/srv/x");
+        assert_eq!(tilde(Path::new("/srv/x"), None), "/srv/x");
+        assert_eq!(tilde(Path::new("/srv/x"), Some(Path::new(""))), "/srv/x");
     }
 
     #[test]

@@ -106,7 +106,9 @@ fn live_session(
         session,
         runtime: runtime.handle().clone(),
         prompts,
+        banner: None,
         notes: Vec::new(),
+        update_check: None,
         approvals: None,
         home: None,
         factory: None,
@@ -282,6 +284,7 @@ fn a_prompt_streams_its_answer_commits_it_once_and_reports_the_status() {
                 used: Some(0),
                 window: 1000,
             }),
+            name: None,
         })]
     );
     h.faux
@@ -343,6 +346,7 @@ fn the_status_line_reads_the_context_again_while_a_turn_runs() {
             used: usage.tokens,
             window: 1000,
         }),
+        name: None,
     });
     if !seen.contains(&measured) {
         seen = h.until(|update| update == &measured);
@@ -1398,6 +1402,183 @@ fn only_the_commands_own_cancellation_interrupts_its_work() {
     );
     let write_failed = "Compaction failed: The compaction could not be written to the session file (disk full), so the session stopped and takes no more prompts. Your draft is kept.";
     assert_eq!(work_outcome(&Err(write_failed.into())), Outcome::Failed);
+}
+
+// Bake: the transcript opens with the banner, then the notes; an update
+// check's notice arrives once the driver begins, as a notice row.
+#[test]
+fn the_banner_opens_and_an_update_notice_follows() {
+    let (runtime, _faux, mut live) = setup(Vec::new(), Vec::new(), Some("test-key"));
+    let banner = Banner {
+        version: "0.4.2".into(),
+        directory: "~/app".into(),
+        session: "new".into(),
+        access: Vec::new(),
+        tip: None,
+    };
+    live.banner = Some(banner.clone());
+    live.notes = vec!["Note".into()];
+    let notice = Notice {
+        tag: "update".into(),
+        text: "Bake 9.0.0 is available.".into(),
+    };
+    let sent = notice.clone();
+    live.update_check = Some(Box::pin(async move { Some(sent) }));
+    assert_eq!(
+        live.initial_rows(),
+        [Row::Banner(banner), Row::Info("Note".into())]
+    );
+    let (sender, updates) = std_mpsc::channel();
+    let mut port = LivePort::start(live, move |update| sender.send(update).is_ok());
+    port.begin();
+    let harness = Harness {
+        runtime,
+        faux: Arc::new(FauxProvider::new(FauxProviderOptions::default())),
+        port: Some(port),
+        updates,
+    };
+    let seen = harness.until(|update| matches!(update, RuntimeUpdate::Commit(_)));
+    assert_eq!(committed(&seen), [Row::Notice(notice)]);
+
+    harness.stop();
+}
+
+// Bake: `--offline` runs no startup network operation, so the update check
+// never starts; a check still waiting when the port stops is aborted, and
+// stopping does not wait for it.
+#[test]
+fn offline_skips_the_update_check_and_stopping_aborts_one_that_waits() {
+    for offline in [true, false] {
+        let (runtime, _faux, mut live) = setup(Vec::new(), Vec::new(), Some("test-key"));
+        let started = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag = Arc::clone(&started);
+        live.offline = offline;
+        live.update_check = Some(Box::pin(async move {
+            flag.store(true, std::sync::atomic::Ordering::SeqCst);
+            std::future::pending::<Option<Notice>>().await
+        }));
+        let (sender, updates) = std_mpsc::channel();
+        let mut port = LivePort::start(live, move |update| sender.send(update).is_ok());
+        port.begin();
+        if !offline {
+            let deadline = std::time::Instant::now() + PATIENCE;
+            while !started.load(std::sync::atomic::Ordering::SeqCst) {
+                assert!(std::time::Instant::now() < deadline, "the check never ran");
+                std::thread::sleep(Duration::from_millis(2));
+            }
+        }
+        port.stop().expect("stop");
+        assert_eq!(started.load(std::sync::atomic::Ordering::SeqCst), !offline);
+        assert!(
+            !updates
+                .try_iter()
+                .any(|update| matches!(&update, RuntimeUpdate::Commit(rows) if rows.iter().any(|row| matches!(row, Row::Notice(_))))),
+        );
+        drop(runtime);
+    }
+}
+
+// Bake: the banner's access tags name a custom preset only when it is not
+// a sandbox mode, tint the mode by how much it allows, and add `offline`.
+#[test]
+fn access_pills_name_the_sandbox_approvals_and_offline() {
+    use bake_coding_agent::permissions::{ApprovalPolicy, PresetTable, SessionPermission};
+    use bake_sandbox::SandboxMode;
+    let permission = |preset: &str, sandbox, approval| SessionPermission {
+        table: PresetTable::default(),
+        sandbox,
+        approval,
+        preset: preset.into(),
+        warnings: Vec::new(),
+    };
+    let pills = |permission: &SessionPermission, offline| -> Vec<(String, TagTone)> {
+        access_pills(permission, offline)
+            .into_iter()
+            .map(|pill| (pill.text, pill.tone))
+            .collect()
+    };
+    let pill = |text: &str, tone| (text.to_owned(), tone);
+    assert_eq!(
+        pills(
+            &permission(
+                "workspace-write",
+                SandboxMode::WorkspaceWrite,
+                ApprovalPolicy::Ask
+            ),
+            false
+        ),
+        [
+            pill("workspace-write", TagTone::Blue),
+            pill("approvals ask", TagTone::Yellow),
+        ]
+    );
+    assert_eq!(
+        pills(
+            &permission("read-only", SandboxMode::ReadOnly, ApprovalPolicy::Never),
+            true
+        ),
+        [
+            pill("read-only", TagTone::Green),
+            pill("approvals never", TagTone::Yellow),
+            pill("offline", TagTone::Pink),
+        ]
+    );
+    assert_eq!(
+        pills(
+            &permission("custom", SandboxMode::DangerFullAccess, ApprovalPolicy::Ask),
+            false
+        ),
+        [
+            pill("custom", TagTone::Pink),
+            pill("danger-full-access", TagTone::Red),
+            pill("approvals ask", TagTone::Yellow),
+        ]
+    );
+}
+
+// Bake: the banner's session line is `new`, or what was resumed and how
+// long ago it was last active, in plain words.
+#[test]
+fn the_session_summary_reads_in_plain_words() {
+    use bake_ai::{Message, UserContent, UserMessage};
+    let user = |timestamp: i64| {
+        bake_agent::AgentMessage::Llm(Message::User(UserMessage {
+            content: UserContent::Text("hi".into()),
+            timestamp,
+        }))
+    };
+    let hour = 3_600_000;
+    let now = 100 * 24 * hour;
+    assert_eq!(session_summary(&[], now, false), "new");
+    assert_eq!(session_summary(&[], now, true), "new \u{b7} not saved");
+    assert_eq!(
+        session_summary(&[user(now - 30_000)], now, false),
+        "resumed \u{b7} 1 prompt \u{b7} just now"
+    );
+    assert_eq!(
+        session_summary(&[user(now - 3 * hour), user(now - 2 * hour)], now, false),
+        "resumed \u{b7} 2 prompts \u{b7} 2h ago"
+    );
+    assert_eq!(
+        session_summary(&[user(now - 5 * 60_000)], now, false),
+        "resumed \u{b7} 1 prompt \u{b7} 5m ago"
+    );
+    assert_eq!(
+        session_summary(&[user(now - 49 * hour)], now, false),
+        "resumed \u{b7} 1 prompt \u{b7} 2d ago"
+    );
+    // A clock behind the log reads as just now; a message without a time
+    // says no age.
+    assert_eq!(
+        session_summary(&[user(now + hour)], now, false),
+        "resumed \u{b7} 1 prompt \u{b7} just now"
+    );
+    assert_eq!(
+        session_summary(&[user(0)], now, false),
+        "resumed \u{b7} 1 prompt"
+    );
+    assert_eq!(ago(i64::MIN), "just now");
+    assert_eq!(ago(i64::MAX), format!("{}d ago", i64::MAX / 60_000 / 1440));
 }
 
 mod agents_live;
