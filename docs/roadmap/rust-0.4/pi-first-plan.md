@@ -49,7 +49,7 @@ Each scope re-checks these revisions when it starts, and records the revision it
 
 | Contract | What must hold | Evidence |
 |---|---|---|
-| CLIProxyAPI provider route | URL forms, catalog discovery with `client_version=pi`, per-model wire protocol (`openai-responses`, `openai-completions`, `anthropic-messages`), effort and limit backfill from vendor catalogs, login, refresh that keeps saved efforts, and logout ([setup](../../../apps/tui/packages/app/src/cliproxyapi.ts)) | Fixture tests from that file's behavior plus a live smoke test against a proxy |
+| CLIProxyAPI provider route | URL forms, catalog discovery with `client_version=pi`, per-model wire protocol (`openai-responses`, `openai-completions`, `anthropic-messages`), effort and limit backfill from vendor catalogs, login, refresh that keeps saved efforts, and logout ([setup](https://github.com/Justar96/bake/blob/97ce6abba01fddb5ed532b60a2e25a1e134b5244/apps/tui/packages/app/src/cliproxyapi.ts)) | Fixture tests from that file's behavior plus a live smoke test against a proxy |
 | Sandbox, approvals, and permission presets ([D24](scope-00/support.md#decision-register)) | Bake's sandbox backends, approval prompts, and presets, ported into Pi's tool execution | Real denied effects on each OS (scope 04) |
 | The `~/.bake` home ([D25](scope-00/support.md#decision-register)) | `BAKE_HOME`, then `DSH_HOME`, then `~/.bake`; the CLIProxyAPI route, key, and default model read from the existing settings and credentials, which stay unchanged | Fixture homes with 0.3 settings and credentials files |
 
@@ -61,7 +61,7 @@ Not retained: Bake Session logs of any format (0.4 writes Pi's session format), 
 2. **Pi's session is the log.** The native loop takes Pi's shape (explicit inputs, typed hook points, injected stream function) and writes Pi's session format; a resumed session rebuilds its context from that file as Pi's session manager does.
 3. **Bake's design rules still apply:**
    - the [durable execution direction](durable-execution.md): owned tasks, intent before effect, replay classes, and one ownership tree; [D37](scope-00/support.md#decision-register) additionally adopts opt-in selected-run recovery, typed task documents, and background compaction for 0.4.0, with the [specified replay limits and qualification gates](durable-execution.md#opt-in-features-for-040);
-   - [defensive patterns](../../defensive-patterns.md): awaited teardown and no late callbacks;
+   - [defensive patterns](https://github.com/Justar96/bake/blob/97ce6abba01fddb5ed532b60a2e25a1e134b5244/docs/defensive-patterns.md): awaited teardown and no late callbacks;
    - the [harness audit](#dev-note) recommendations: typed stages instead of open waterfalls, and one owner per agent.
 4. **Where Pi has no equivalent, port Bake selectively.** Examples are the sandbox, approvals, subagents, goals, jobs, schedules, hooks, and the web tools. Keep the parts the model sees; redesign the rest within Pi's structure.
 5. **Provenance.** Each PR records the Pi revision and files it adapts and keeps Pi's MIT notice. Each Bake-derived behavior names its TypeScript source. Once scope 09 lands, a change to anything the model sees needs an eval record of the Rust agent.

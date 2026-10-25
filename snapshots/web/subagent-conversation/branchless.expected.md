@@ -1,5 +1,0 @@
-- tree "Subagent sessions":
-  - treeitem "example editor continuable · not running 0 tok · {{duration}}" [level=1]:
-    - text: example editor continuable · not running 0 tok {{duration}}
-    - button "Open example editor in sidebar":
-      - img

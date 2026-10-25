@@ -1,3 +1,0 @@
-name: Creation mode
-description: For creating custom agent presets. It has every standard-mode capability, plus runtime inspection, persistent plugin management, and preset authoring guidance.
-order: 4

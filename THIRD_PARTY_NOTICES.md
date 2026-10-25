@@ -2,27 +2,27 @@
 
 Bake is derived from the MIT-licensed DeepSeek Harness runtime. The notices below preserve the upstream attributions; they are not a current inventory of Bake's installed packages. Each project remains under its own license, and nothing in this file changes those terms.
 
-Bake's resolved dependency versions are recorded in [`bun.lock`](bun.lock). Review the licenses supplied by those packages before distributing Bake artifacts. Vendored source retains its original license files.
+Bake's agent dependencies are locked in [`Cargo.lock`](Cargo.lock); developer tools are locked in [`bun.lock`](https://github.com/Justar96/bake/blob/97ce6abba01fddb5ed532b60a2e25a1e134b5244/bun.lock). Native archives carry generated dependency license texts and the linked crates' NOTICE files. The inventory below preserves historical attribution for removed sources.
 
-## Vendored source (`vendor/`)
+## Historical vendored source (`vendor/`)
 
-The Cordis framework and its foundation libraries are source-vendored into this repository rather than consumed from npm, and republished under the `@deepseek-ai` scope. All are MIT-licensed; each directory preserves its upstream `LICENSE` file. Exact upstream commits and local modifications are recorded in [`vendor/README.md`](vendor/README.md).
+The 0.3 agent vendored the Cordis framework and its foundation libraries under the `@deepseek-ai` scope. All are MIT-licensed; the pinned historical links preserve each upstream `LICENSE` file. Exact upstream commits and local modifications are recorded in Git history.
 
 | Package | Upstream name | Source | License |
 | --- | --- | --- | --- |
-| `@deepseek-ai/cosmokit` | `cosmokit` | [vendor/cosmokit](vendor/cosmokit/) | MIT |
-| `@deepseek-ai/schemastery` | `schemastery` | [vendor/schemastery](vendor/schemastery/) | MIT |
-| `@deepseek-ai/cordis` | `cordis` | [vendor/cordis](vendor/cordis/) | MIT |
-| `@deepseek-ai/cordis-plugin-loader` | `@cordisjs/plugin-loader` | [vendor/loader](vendor/loader/) | MIT |
-| `@deepseek-ai/cordis-plugin-include` | `@cordisjs/plugin-include` | [vendor/include](vendor/include/) | MIT |
-| `@deepseek-ai/cordis-plugin-group` | `@cordisjs/plugin-group` | [vendor/group](vendor/group/) | MIT |
-| `@deepseek-ai/cordis-plugin-timer` | `@cordisjs/plugin-timer` | [vendor/timer](vendor/timer/) | MIT |
-| `@deepseek-ai/cordis-plugin-hmr` | `@cordisjs/plugin-hmr` | [vendor/hmr](vendor/hmr/) | MIT |
-| `@deepseek-ai/cordis-plugin-logger-console` | `@cordisjs/plugin-logger-console` | [vendor/logger-console](vendor/logger-console/) | MIT |
+| `@deepseek-ai/cosmokit` | `cosmokit` | [vendor/cosmokit](https://github.com/Justar96/bake/tree/97ce6abba01fddb5ed532b60a2e25a1e134b5244/vendor/cosmokit/) | MIT |
+| `@deepseek-ai/schemastery` | `schemastery` | [vendor/schemastery](https://github.com/Justar96/bake/tree/97ce6abba01fddb5ed532b60a2e25a1e134b5244/vendor/schemastery/) | MIT |
+| `@deepseek-ai/cordis` | `cordis` | [vendor/cordis](https://github.com/Justar96/bake/tree/97ce6abba01fddb5ed532b60a2e25a1e134b5244/vendor/cordis/) | MIT |
+| `@deepseek-ai/cordis-plugin-loader` | `@cordisjs/plugin-loader` | [vendor/loader](https://github.com/Justar96/bake/tree/97ce6abba01fddb5ed532b60a2e25a1e134b5244/vendor/loader/) | MIT |
+| `@deepseek-ai/cordis-plugin-include` | `@cordisjs/plugin-include` | [vendor/include](https://github.com/Justar96/bake/tree/97ce6abba01fddb5ed532b60a2e25a1e134b5244/vendor/include/) | MIT |
+| `@deepseek-ai/cordis-plugin-group` | `@cordisjs/plugin-group` | [vendor/group](https://github.com/Justar96/bake/tree/97ce6abba01fddb5ed532b60a2e25a1e134b5244/vendor/group/) | MIT |
+| `@deepseek-ai/cordis-plugin-timer` | `@cordisjs/plugin-timer` | [vendor/timer](https://github.com/Justar96/bake/tree/97ce6abba01fddb5ed532b60a2e25a1e134b5244/vendor/timer/) | MIT |
+| `@deepseek-ai/cordis-plugin-hmr` | `@cordisjs/plugin-hmr` | [vendor/hmr](https://github.com/Justar96/bake/tree/97ce6abba01fddb5ed532b60a2e25a1e134b5244/vendor/hmr/) | MIT |
+| `@deepseek-ai/cordis-plugin-logger-console` | `@cordisjs/plugin-logger-console` | [vendor/logger-console](https://github.com/Justar96/bake/tree/97ce6abba01fddb5ed532b60a2e25a1e134b5244/vendor/logger-console/) | MIT |
 
-## Runtime npm dependencies
+## Historical runtime npm dependencies
 
-External packages installed for runtime use or distributed inside the prebuilt browser artifacts. Browser inputs are resolved through the shipping tsdown and Vite configurations, independently of npm dependency sections. The tier covers every plugin a user can mount from `cordis.yml` — not only what the `dsh` CLI, Web UI, and Python SDK runtime load by default.
+The following inventory records packages attributed by the retired agent and its upstream browser and SDK distributions. They are not dependencies of the current Bake executable.
 
 | Package | License |
 | --- | --- |
@@ -125,9 +125,9 @@ External packages installed for runtime use or distributed inside the prebuilt b
 
 Bun applies local patches to the following packages at install time, so shipped artifacts carry modified copies; each patch file is the complete record of the modification:
 
-- `node-pty@1.2.0-beta.15` — [`patches/node-pty@1.2.0-beta.15.patch`](patches/node-pty@1.2.0-beta.15.patch)
+- `node-pty@1.2.0-beta.15` — [`patches/node-pty@1.2.0-beta.15.patch`](https://github.com/Justar96/bake/blob/97ce6abba01fddb5ed532b60a2e25a1e134b5244/patches/node-pty@1.2.0-beta.15.patch)
 
-## Official Claude Code platform payloads
+## Historical Claude Code platform payloads
 
 The project owner authorizes distribution of every version of the official `@anthropic-ai/claude-agent-sdk` package and the official Claude Code CLI/platform payloads that each version declares through `optionalDependencies`. This identity-scoped authorization does not classify their declared terms as permissive and does not cover any unrelated runtime package; version, declared-license, and payload-set changes still require the ordinary dependency, lockfile, compatibility, terms, and notices review.
 
@@ -145,14 +145,14 @@ The installed SDK 0.3.263 declares the following optional platform packages. Eac
 | [`@anthropic-ai/claude-agent-sdk-win32-x64`](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk-win32-x64) | 0.3.263 | SEE LICENSE IN LICENSE.md |
 
 
-## LibreOffice conversion kit
+## Historical LibreOffice conversion kit
 
-`@deepseek-ai/libreoffice-kit`, `@deepseek-ai/libreoffice-kit-wasm`, `@deepseek-ai/libreoffice-kit-darwin-arm64`, `@deepseek-ai/libreoffice-kit-darwin-x64`, `@deepseek-ai/libreoffice-kit-win32-arm64`, `@deepseek-ai/libreoffice-kit-win32-x64` declare MPL-2.0, which remains outside the permissive-license allowlist; the notices check accepts only these package identities at those terms. The [distribution decision](.agents/notes/implemented/architecture/2026-09-14-independent-libreoffice-kit.md) records the source obligations.
+`@deepseek-ai/libreoffice-kit`, `@deepseek-ai/libreoffice-kit-wasm`, `@deepseek-ai/libreoffice-kit-darwin-arm64`, `@deepseek-ai/libreoffice-kit-darwin-x64`, `@deepseek-ai/libreoffice-kit-win32-arm64`, `@deepseek-ai/libreoffice-kit-win32-x64` declare MPL-2.0, which remains outside the permissive-license allowlist; the notices check accepts only these package identities at those terms. The [distribution decision](https://github.com/Justar96/bake/blob/97ce6abba01fddb5ed532b60a2e25a1e134b5244/.agents/notes/implemented/architecture/2026-09-14-independent-libreoffice-kit.md) records the source obligations.
 
 The [kit repository](https://github.com/deepseek-harness/libreoffice-kit) supplies the corresponding LibreOffice source pin, modifications, build instructions, Node API, and artifact validation. Its engine packages retain their license and third-party notices; the Node API retains its MPL-2.0 declaration and NOTICE. Recipients must have access to those corresponding sources and notices.
 
 
-## Development-only npm dependencies
+## Historical development-only npm dependencies
 
 External packages **directly declared** for development, tests, types, or tooling, without a runtime installation or browser-build relationship. A package here may still be pulled in transitively by a runtime dependency — `bun.lock` is the authority on that full closure.
 
@@ -212,7 +212,7 @@ External packages **directly declared** for development, tests, types, or toolin
 
 `eslint-plugin-sonarjs` (LGPL-3.0-only) and `lightningcss` (MPL-2.0) run only as development tooling; their code is not linked into or distributed with any DeepSeek Harness artifact.
 
-## Python SDK dependencies (`python/`)
+## Historical Python SDK dependencies (`python/`)
 
 Direct dependencies of the `pyproject.toml` manifests, plus `uv` as the development workflow tool.
 
@@ -223,37 +223,37 @@ Direct dependencies of the `pyproject.toml` manifests, plus `uv` as the developm
 | [`pytest`](https://github.com/pytest-dev/pytest) | MIT | test-only |
 | [`uv`](https://github.com/astral-sh/uv) | MIT / Apache-2.0 | development workflow tool |
 
-## Ported source (`rust/crates/bake-ai`)
+## Ported source (`crates/bake-ai`)
 
-The Rust `bake-ai` crate ports code from these MIT-licensed projects. Its [`NOTICE`](rust/crates/bake-ai/NOTICE) file reproduces both license texts, and its module documentation names each source file.
+The Rust `bake-ai` crate ports code from these MIT-licensed projects. Its [`NOTICE`](crates/bake-ai/NOTICE) file reproduces both license texts, and its module documentation names each source file.
 
 | Project | Ported revision | License |
 | --- | --- | --- |
 | [Pi](https://github.com/earendil-works/pi) `packages/ai`, Copyright (c) 2025 Mario Zechner | v1.1.0 (`abe508e1b89912adde45528136c3221eb69acdd7`) | MIT |
 | [partial-json](https://github.com/promplate/partial-json-parser-js), Copyright (c) 2023 Promplate Dev Team | 0.1.7 | MIT |
 
-The crate's Cargo dependencies are locked in [`rust/Cargo.lock`](rust/Cargo.lock) and keep their own licenses.
+The crate's Cargo dependencies are locked in [`Cargo.lock`](Cargo.lock) and keep their own licenses.
 
-## Ported source (`rust/crates/bake-agent`)
+## Ported source (`crates/bake-agent`)
 
-The Rust `bake-agent` crate ports Pi's agent loop and stateful agent, and the tool-argument validation of Pi's `ai` package. Its [`NOTICE`](rust/crates/bake-agent/NOTICE) file reproduces the license text, and its module documentation names each source file.
+The Rust `bake-agent` crate ports Pi's agent loop and stateful agent, and the tool-argument validation of Pi's `ai` package. Its [`NOTICE`](crates/bake-agent/NOTICE) file reproduces the license text, and its module documentation names each source file.
 
 | Project | Ported revision | License |
 | --- | --- | --- |
 | [Pi](https://github.com/earendil-works/pi) `packages/agent` and `packages/ai/src/utils/validation.ts`, Copyright (c) 2025 Mario Zechner | v1.1.0 (`abe508e1b89912adde45528136c3221eb69acdd7`) | MIT |
 
-## Ported source (`rust/crates/bake-coding-agent`)
+## Ported source (`crates/bake-coding-agent`)
 
-The Rust `bake-coding-agent` crate ports Pi's coding-agent package, and the line diff and patch of jsdiff that Pi's edit tool uses. Its [`NOTICE`](rust/crates/bake-coding-agent/NOTICE) file reproduces both license texts, and its module documentation names each source file.
+The Rust `bake-coding-agent` crate ports Pi's coding-agent package, and the line diff and patch of jsdiff that Pi's edit tool uses. Its [`NOTICE`](crates/bake-coding-agent/NOTICE) file reproduces both license texts, and its module documentation names each source file.
 
 | Project | Ported revision | License |
 | --- | --- | --- |
 | [Pi](https://github.com/earendil-works/pi) `packages/coding-agent`, Copyright (c) 2025 Mario Zechner | v1.1.0 (`abe508e1b89912adde45528136c3221eb69acdd7`) | MIT |
 | [jsdiff](https://github.com/kpdecker/jsdiff), Copyright (c) 2009-2015 Kevin Decker | 8.0.4 | BSD-3-Clause |
 
-## Rust YAML reader (`rust/crates/bake-coding-agent`)
+## Rust YAML reader (`crates/bake-coding-agent`)
 
-`bake-coding-agent` reads the 0.3 Bake home's `settings.yaml` and `.credentials.yaml` with serde-saphyr. These crates entered [`rust/Cargo.lock`](rust/Cargo.lock) with it and keep their own licenses.
+`bake-coding-agent` reads the 0.3 Bake home's `settings.yaml` and `.credentials.yaml` with serde-saphyr. These crates entered [`Cargo.lock`](Cargo.lock) with it and keep their own licenses.
 
 | Crate | Version | License |
 | --- | --- | --- |
@@ -268,9 +268,9 @@ The Rust `bake-coding-agent` crate ports Pi's coding-agent package, and the line
 | [`multiversion_no_op`](https://github.com/hsivonen/multiversion_no_op) | 1.0.0 | Apache-2.0 OR MIT |
 | [`simdutf8`](https://github.com/rusticstuff/simdutf8) | 0.1.5 | MIT OR Apache-2.0 |
 
-## Rust image codecs (`rust/crates/bake-coding-agent`)
+## Rust image codecs (`crates/bake-coding-agent`)
 
-The `read` tool decodes, orients, resizes, and re-encodes images with the `image` crate, in place of the Photon WebAssembly module Pi uses, built with only its PNG, JPEG, GIF, WebP, and BMP codecs. These crates entered [`rust/Cargo.lock`](rust/Cargo.lock) with it and keep their own licenses. The lock also lists `zlib-rs` 0.6.8 (Zlib), an optional `flate2` backend that no Bake build enables.
+The `read` tool decodes, orients, resizes, and re-encodes images with the `image` crate, in place of the Photon WebAssembly module Pi uses, built with only its PNG, JPEG, GIF, WebP, and BMP codecs. These crates entered [`Cargo.lock`](Cargo.lock) with it and keep their own licenses. The lock also lists `zlib-rs` 0.6.8 (Zlib), an optional `flate2` backend that no Bake build enables.
 
 | Crate | Version | License |
 | --- | --- | --- |
@@ -294,18 +294,18 @@ The `read` tool decodes, orients, resizes, and re-encodes images with the `image
 | [`byteorder-lite`](https://github.com/image-rs/byteorder-lite) | 0.1.0 | Unlicense OR MIT |
 | [`quick-error`](https://github.com/tailhook/quick-error) | 2.0.1 | MIT OR Apache-2.0 |
 
-## Rust process ownership (`rust/crates/bake-coding-agent`)
+## Rust process ownership (`crates/bake-coding-agent`)
 
-`bake-coding-agent`'s bash tool owns each command's process tree through these crates, which were already in [`rust/Cargo.lock`](rust/Cargo.lock) for Tokio and keep their own licenses.
+`bake-coding-agent`'s bash tool owns each command's process tree through these crates, which were already in [`Cargo.lock`](Cargo.lock) for Tokio and keep their own licenses.
 
 | Crate | Version | License | Use |
 | --- | --- | --- | --- |
 | [`libc`](https://github.com/rust-lang/libc) | 0.2.190 | MIT OR Apache-2.0 | `setsid` and `kill` on Unix |
 | [`windows-sys`](https://github.com/microsoft/windows-rs) | 0.61.2 | MIT OR Apache-2.0 | job objects on Windows |
 
-## Rust WebAssembly plugin host (`rust/crates/bake-coding-agent`)
+## Rust WebAssembly plugin host (`crates/bake-coding-agent`)
 
-`bake-coding-agent` checks, compiles, and runs third-party plugin components with Wasmtime 50.0.0 in Bake's plugin helper process (`plugins::wasm`). These crates entered [`rust/Cargo.lock`](rust/Cargo.lock) with it, as normal, build, or procedural-macro dependencies of `bake` on at least one target (`wit-component` and `wit-parser` 0.261.0 run only inside Wasmtime's `bindgen!` macro), and keep their own licenses; most Bytecode Alliance crates are `Apache-2.0 WITH LLVM-exception`. The `wasmtime-internal-fiber` and `wasmtime` crates compile small C files with the target's C compiler. The guest SDK and the test tooling are not part of `bake`: `wit-bindgen` 0.63.0 with the 0.262.0 releases of `wasm-encoder`, `wasmparser`, `wit-parser`, `wit-component`, and `wasm-metadata`, and `wat` and `wast` 261.
+`bake-coding-agent` checks, compiles, and runs third-party plugin components with Wasmtime 50.0.0 in Bake's plugin helper process (`plugins::wasm`). These crates entered [`Cargo.lock`](Cargo.lock) with it, as normal, build, or procedural-macro dependencies of `bake` on at least one target (`wit-component` and `wit-parser` 0.261.0 run only inside Wasmtime's `bindgen!` macro), and keep their own licenses; most Bytecode Alliance crates are `Apache-2.0 WITH LLVM-exception`. The `wasmtime-internal-fiber` and `wasmtime` crates compile small C files with the target's C compiler. The guest SDK and the test tooling are not part of `bake`: `wit-bindgen` 0.63.0 with the 0.262.0 releases of `wasm-encoder`, `wasmparser`, `wit-parser`, `wit-component`, and `wasm-metadata`, and `wat` and `wast` 261.
 
 | Crate | Version | License |
 | --- | --- | --- |
@@ -372,9 +372,9 @@ The `read` tool decodes, orients, resizes, and re-encodes images with the `image
 | [`wit-component`](https://github.com/bytecodealliance/wasm-tools/tree/main/crates/wit-component) | 0.261.0 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |
 | [`wit-parser`](https://github.com/bytecodealliance/wasm-tools/tree/main/crates/wit-parser) | 0.261.0 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |
 
-## Ported source (`rust/plugins/guard`)
+## Ported source (`plugins/guard`)
 
-The `guard` plugin component ports Pi's `protected-paths` extension example. Its [`NOTICE`](rust/plugins/guard/NOTICE) file reproduces the license text.
+The `guard` plugin component ports Pi's `protected-paths` extension example. Its [`NOTICE`](plugins/guard/NOTICE) file reproduces the license text.
 
 | Project | Ported revision | License |
 | --- | --- | --- |
@@ -384,6 +384,6 @@ The `guard` plugin component ports Pi's `protected-paths` extension example. Its
 
 Earlier terminal turn header revisions included a Braille port (`GLYPH_PULSE`) of the "Glyph Pulse" loader (`dotm-square-9`) from [dot-matrix](https://dotmatrix.zzzzshawn.cloud) ([source](https://github.com/zzzzshawn/matrix)), copyright (c) 2026 dot-matrix contributors, all rights reserved. That adaptation is covered by the project's custom license, which permits use in commercial and non-commercial products and prohibits, without written permission, publishing or distributing its components as standalone reusable components or as part of another component library, and selling or sublicensing them as a standalone offering. Bake's MIT license does not cover this adaptation; do not extract it into a reusable component or library.
 
-## First-party native packages
+## Historical first-party native packages
 
-`@deepseek-ai/node-addon-system` (and its platform packages) is built and released from this repository under BSD 3-Clause. It is listed here for completeness; it is first-party, not third-party.
+The 0.3 agent built `@deepseek-ai/node-addon-system` and its platform packages under BSD 3-Clause. This historical attribution records first-party packages; current Bake archives contain no Node addon.

@@ -1,8 +1,25 @@
 # Changelog
 
-Notable changes to Bake. `bake` compiles this file in, and `/changelog` shows its released sections. Each release heading names the version in `[workspace.package]` of `rust/Cargo.toml`, which `bun run release:prepare` sets.
+Notable changes to Bake. `bake` compiles this file in, and `/changelog` shows its released sections. Each release heading names the version in `[workspace.package]` of `Cargo.toml`.
 
 ## [Unreleased]
+
+- Open the background shells' and agents' lists, a shell's output, and a child's details in a panel under the input bar; the transcript stays in view above it, the selection stays visible on short terminals, and rows out of view are counted.
+- Shift+Tab cycles the model's thinking level for the session.
+- Group `/model` by provider and then by lab, in natural order, with the model id beside each name.
+- Polish `/login`: step titles, a placeholder for the default address that Enter accepts, hints, and a working indicator while the key is checked.
+- Show answers as Markdown with colour; keep long bash commands and output to a few rows with a `+N` count, show a running call's newest output, and label code mode like other tools.
+- A `defaultTools` list of only `+`/`-` entries now changes Bake's default tool set, so code mode, the job tools, and the web tools stay on.
+
+- Move the Cargo workspace to the repository root; build and test Bake directly from the checkout, with development guidance in `docs/development.md`.
+
+- Keep the repository focused on Rust and documentation: use Cargo directly for development and CI, and remove Bun tooling, distribution automation, eval runners, snapshots, and archived evidence.
+
+- Support Ghostty's Kitty keyboard reporting with balanced terminal cleanup, and report Bake's activity and saved-session restore command to Herdr automatically.
+
+- Bake is the sole agent on `develop`: normal launch, build, test, and CI commands use the executable, and the retired runtime and its dependencies are removed.
+- Name the terminal preview Bake.
+- Remove the retired agent's Ink and DeepSeek Harness development skills; keep Bake's testing guidance.
 
 ## [0.4.0] - 2026-10-22
 

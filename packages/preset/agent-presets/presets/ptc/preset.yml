@@ -1,3 +1,0 @@
-name: PTC mode
-description: Full-featured coding agent whose tools appear through the PTC-mode SDK so the model can combine multi-step operations in one TypeScript program.
-order: 2
