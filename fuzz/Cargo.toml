@@ -1,0 +1,74 @@
+[package]
+name = "bake-fuzz"
+version = "0.0.0"
+edition = "2024"
+license = "MIT"
+publish = false
+description = "cargo-fuzz targets for Bake's untrusted-input parsers"
+
+[package.metadata]
+cargo-fuzz = true
+
+# Its own workspace, excluded from `Cargo.toml`, so the fuzz toolchain,
+# lock, and sanitizer builds never touch the shipped workspace.
+[workspace]
+
+[dependencies]
+# The libFuzzer driver cargo-fuzz expects; it re-exports `arbitrary`, whose
+# version (1.5.0) the main lock already carries through Wasmtime.
+# MIT OR Apache-2.0 OR NCSA.
+libfuzzer-sys = "=0.4.13"
+bake-agent = { path = "../crates/bake-agent" }
+bake-ai = { path = "../crates/bake-ai" }
+bake-coding-agent = { path = "../crates/bake-coding-agent" }
+bake-mcp = { path = "../crates/bake-mcp" }
+bake-tui-view = { path = "../crates/bake-tui-view" }
+bake-update = { path = "../crates/bake-update" }
+# The same versions and features as `Cargo.toml`'s workspace
+# dependencies, so the targets build the crates as the agent does. Tokio's
+# `test-util` pauses the clock for the scripted MCP server.
+serde_json = { version = "=1.0.154", features = ["float_roundtrip", "preserve_order"] }
+unicode-segmentation = "=1.13.3"
+tokio = { version = "=1.54.1", default-features = false, features = ["rt", "sync", "time", "macros", "io-util", "test-util"] }
+
+[[bin]]
+name = "session_jsonl"
+path = "fuzz_targets/session_jsonl.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "provider_stream"
+path = "fuzz_targets/provider_stream.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "mcp_client"
+path = "fuzz_targets/mcp_client.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "tool_arguments"
+path = "fuzz_targets/tool_arguments.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "tui_text"
+path = "fuzz_targets/tui_text.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "release_manifest"
+path = "fuzz_targets/release_manifest.rs"
+test = false
+doc = false
+bench = false

@@ -2,9 +2,9 @@
 
 ## Summary
 
-This page proposes how Bake's Rust terminal frontend looks, behaves, and is built, starting with fullscreen mode. It keeps the shipped TypeScript layout and visual grammar, frames the draft in a rounded box that costs no more rows than the two rules it replaces, makes the composer render dynamically without moving text or the input row, and separates pure presentation from terminal effects so each layer can be tested on its own. It implements the [terminal direction](terminal.md), which owns the acceptance scenarios; the [layout design](../../../apps/tui/DESIGN-LAYOUT.md) and [TUI design](../../../apps/tui/DESIGN.md) remain the oracle for every behavior not listed here as an intentional difference.
+This page proposes how Bake's Rust terminal frontend looks, behaves, and is built, starting with fullscreen mode. It keeps the shipped TypeScript layout and visual grammar, frames the draft in a rounded box that costs no more rows than the two rules it replaces, makes the composer render dynamically without moving text or the input row, and separates pure presentation from terminal effects so each layer can be tested on its own. It implements the [terminal direction](terminal.md), which owns the acceptance scenarios; the [layout design](https://github.com/Justar96/bake/blob/97ce6abba01fddb5ed532b60a2e25a1e134b5244/apps/tui/DESIGN-LAYOUT.md) and [TUI design](https://github.com/Justar96/bake/blob/97ce6abba01fddb5ed532b60a2e25a1e134b5244/apps/tui/DESIGN.md) remain the oracle for every behavior not listed here as an intentional difference.
 
-Status: proposed. The [Rust preview](../../../rust/README.md) implements the composer box, its wrapping and window, the frame fallback, and [delivery slice 1](#delivery-slices): the crate split, the update function, the key-binding table, and the channel-driven loop. [Delivery slices](#delivery-slices) and [preview status](#preview-status) record what later slices implement and what remains. Fullscreen remains the default by owner decision. The same components also run in the inline preview; full platform qualification remains a 0.4.0 requirement of [scope 14](README.md#14--terminal-engine-and-rendering).
+Status: proposed. The [Rust preview](../../development.md) implements the composer box, its wrapping and window, the frame fallback, and [delivery slice 1](#delivery-slices): the crate split, the update function, the key-binding table, and the channel-driven loop. [Delivery slices](#delivery-slices) and [preview status](#preview-status) record what later slices implement and what remains. Fullscreen remains the default by owner decision. The same components also run in the inline preview; full platform qualification remains a 0.4.0 requirement of [scope 14](README.md#14--terminal-engine-and-rendering).
 
 ## Table of Contents
 
@@ -35,7 +35,7 @@ Every rule below is testable. Each rule names a behavior that a buffer or PTY te
 3. **Things leave the way they came.** Input panels open above the bar and give their rows back to the transcript when they close. A key that opens a sheet also closes it. Leaving a child restores the parent draft, caret, undo history, and reading position.
 4. **Every screen answers three questions.** What am I looking at: the bar names the activity and where the session stands. What will Enter do: the placeholder or the box's bottom edge says. How do I get out: Esc always has a named destination.
 5. **Motion is restrained.** Only the shimmer across the bar's activity word and its seconds move. Nothing animates on a keystroke. With motion off, under `NO_COLOR`, or with a screen reader, state changes are discrete and the word holds still.
-6. **One grammar.** The rail markers, verbs, palette roles, and the "same family, one weight heavier" relation between `›` (a user's words) and `❯` (where the user types) stay as the [layout design](../../../apps/tui/DESIGN-LAYOUT.md#the-composer-is-the-same-family-one-weight-heavier) defines them.
+6. **One grammar.** The rail markers, verbs, palette roles, and the "same family, one weight heavier" relation between `›` (a user's words) and `❯` (where the user types) stay as the [layout design](https://github.com/Justar96/bake/blob/97ce6abba01fddb5ed532b60a2e25a1e134b5244/apps/tui/DESIGN-LAYOUT.md#the-composer-is-the-same-family-one-weight-heavier) defines them.
 
 ## Screen anatomy
 
@@ -98,17 +98,20 @@ Completion open; the panel sits on the bar, nearest the token that opened it:
 ╰────────────────────────────────────────────────────────────────── ↑↓ select ─╯
 ```
 
-Inspecting a child; the parent draft is kept and shown dim:
+Inspecting a child; the parent draft is kept and shown dim, the transcript stays above, and the child opens in the tray under the box, its hidden rows counted on the row over it:
 
 ```
-  explorer                                                     child of main
-  Read only · typing never reaches an agent or your draft
-
-  Inspecting  Tab agents · Esc draft                      main: approval waiting
+  Two registrations, both through ctx.effect.
+                                                  PgUp scroll · Ctrl+↑ prompts
+  Agents / explorer  Tab agents · Esc draft               main: approval waiting
 ╭──────────────────────────────────────────────────────────────────────────────╮
 │ ❯ Then thread the value through startup.ts and the session store, and        │
 ╰─────────────────────────────────────────────────── draft kept · Esc returns ─╯
-  Agents  2 · 1 working · 1 done                                          Ctrl+G
+  Agents  2 · 1 working · 1 done                                      +3 below
+  explorer
+  ──────────────────────────────────────────────────────────────────────────────
+  Id      explorer
+  State   Working · deepseek-v4-flash
 ```
 
 ## Intentional differences
@@ -126,6 +129,7 @@ Each difference from the TypeScript frontend needs its own reviewed acceptance c
 | D7 | The header and the status line share one row directly above the composer box, the bar: the activity or the last turn's outcome on the left, the status right-aligned. The status is minimal and consolidated into three fields: the model with its thinking level (`deepseek-v4-flash high`), the context reading (`ctx ~11% (15.2k/128k)`), and the location, the directory with its branch (`~/bake ⎇ main`). Git change counts, token totals, the cache hit, and the update notice are not shown, and the goal moves to a standing row under the box | One row says what the session is doing and where it stands, next to where the next prompt is typed, and the box gains a row of transcript. Right-aligned, the status does not move when the activity starts or ends | Pure tests of each field, its tone, and its rank, including the TypeScript `fitStatus` cases; buffer tests that the activity and status share the row and give way in order; a PTY check of the shared row |
 | D8 | The transcript and the agent views use blocks and columns instead of the TypeScript verb column. The user's words open with an accent prompt mark, `>`, as they were typed, and the rows a long prompt wraps to hang under the text. A call is one row, `✓ Bash: argument`, its state mark (a green `✓` done, a red `✗` failed, and a white `●` that blinks while it runs, shown and then blank for 600 ms each, the TypeScript `PULSE_MS`, every running mark in phase) at column 2, the tool name bold in the foreground with a colon after it, `Bash:`, in a column wide enough that the arguments of the common four-letter tools align, and its status two cells after the argument: its own, such as `exit 1`, or its line count. Where it does not fit, it takes its own row under the argument and wraps there. A tool whose name reads poorly with only its first letter raised takes a title instead, `Agent`, `Job output`, or `Stop job`. Background work pairs up by id: the call that starts a background shell or subagent, each call that reaches it later, and the notice it posts when it ends carry its id as a tag before the status, and a call that reaches it is named by the command or label its start recorded. The start reads `✓ Bash: sleep 30  bash-1  background`; a read of its output says how the job stands, `waiting` while it waits and then `running` or `exit 0`, without the status line the model reads; a stop reads `stopping` or `already finished · exit 0`; a message reads `delivered`; an empty listing reads `none`. A notice is the card of the work it reports: `✓ Bash: sleep 30  bash-1  exit 0`, `✓ Agent: review  a1  done` with the agent's closing message as its output, and `earlier process` after the status of a job an earlier process ran, so it is not mistaken for this one's. A read's or edit's path draws its directory dim, so the row reads by the file name. An edit's output is a numbered [diff](#diffs), and its status counts the lines it added and removed, `+1 -1`. On a truecolor terminal each call, and each script with its program, sits in a box: a soft grey background `#25282f` across the full width, faint red `#2e2225` when it failed, with a blank row between boxes. Inside a box of more than one line, one padding row opens and closes it, and a call of one line is a single tinted row; text wraps two cells short of its right edge. The box has two columns: column 2 holds the call's structure, its state mark, a script's gutter mark, and its `console` and `return` labels; column 4 holds what it contains, its output, diff, source, and `⋯` counts, under the tool name. The box groups the call, so it draws no gutter; without a box, a dim `│` at column 2 does. Sixteen colours have no step that subtle and `NO_COLOR` draws none, so neither boxes; a light terminal theme would need a lighter box, which waits for the terminal's background to be queried. Output starts at column 4 under the tool name, hung from a dim `│` gutter at column 2 only where no box is drawn, and a long result's count reads `⋯ 4 more lines`. The standing row reads `Agents  2 · 1 working · 1 done`, without `↳`. The agent list is a column of cards, the selected one marked `▸`, each with its name, its id right-aligned, and one line of what it does; inspection opens with the agent's name and id, then the read-only line. The classic frame swaps every mark for ASCII: `|`, `+`, `x`, `*`, `...`, and `>` | Fewer marks and aligned columns let a long session be scanned by state and tool; the status beside the call answers "what happened" without reading the output, and reads with the call at any width instead of across an empty middle. A code-mode script reads as one such block, headed `Codemode`: its numbered source, each call site under the line that makes its calls ([code mode](#code-mode)). Every mark comes from the frame's glyph set, so a terminal that cannot measure the round glyphs gets ASCII | Pure tests of each row's lines at fixed widths, in both glyph sets; buffer tests of the list and inspection; PTY checks of the new rows |
 | D9 | The preview borrows a printed catalogue's vocabulary. Short codes are tags: an exit code, interruption, stop, or unknown outcome after its call (` exit 0 ` green, ` exit 1 ` red, ` interrupted `, ` stopped `, and ` outcome unknown ` yellow) and an agent's or background job's id (blue), each a cell of padding on each side on a dark tint of its tone. A status of several parts, `already finished · exit 0`, splits at ` · ` and tags only the parts that are codes; a tag's padding stands in for the separator's space beside it, and a status too wide for its row wraps as dim text instead. The welcome title carries the palette as a swatch strip, hues then greys. A faint dashed rule of ASCII hyphens, which every console font has, runs the transcript's full width right above each user turn, after a blank row. Inspection is a ledger: the agent's name, a dashed rule, then label and value rows (`Id`, `Role`, `State`, `Input`, `Draft`) with the values in one column. The bar is a breadcrumb while inspecting, `Agents / Sample explorer` | A tag lets the codes that answer "did it work" and "which one" be found at a glance without colouring whole rows; a ledger reads a record's fields down one column; the rule marks where each turn starts when scrolling back. The tag's padding keeps its width without colour, and the strip is left out where a block glyph might be measured wrongly | Pure tests of the tag's tones, width, and fallbacks, the rule, and the strip's conditions; buffer tests of the ledger, its alignment, and the breadcrumb; PTY checks of the inspected view |
+| D10 | The agents' and background shells' lists, a child's ledger, and one shell's output open in a tray under the box and its standing row instead of in place of the transcript. A list takes up to half the terminal (3 to 14 rows) and keeps the selected entry in view; a ledger or a shell takes up to half. The tray keeps at least 3 rows on a short terminal, counts rows out of view at the right of the standing row where it has room, and the wheel over the transcript still scrolls it | Opening a list never blanks the screen above the controls, and what the user was reading stays in place | `render.rs` `the_shells_list_opens_under_the_input_and_keeps_the_transcript` at five sizes, `layout.rs` `a_tray_takes_rows_under_the_controls_and_keeps_the_transcript`, and a tmux exercise of the fullscreen and inline preview |
 
 ## Composer
 
@@ -157,7 +161,7 @@ flowchart LR
 ```
 
 - **Wrap per logical line.** A visual row never crosses a line break, so each logical line wraps on its own. The wrap cache keys each line by its content revision and the draft width. An edit invalidates only the lines it touched, and a resize invalidates all of them. The preview wraps the whole draft each frame; the cache is planned.
-- **The layout ignores the caret.** The row count depends only on the text and the width, never on where the caret is. Wrapping uses one column less than the row, and the caret takes that last column only after a row's text or over hanging whitespace, as the [composer rules](../../../apps/tui/DESIGN-LAYOUT.md#26-composer--a-cursor-following-window) require. Moving the caret therefore never moves a word or changes the composer's height.
+- **The layout ignores the caret.** The row count depends only on the text and the width, never on where the caret is. Wrapping uses one column less than the row, and the caret takes that last column only after a row's text or over hanging whitespace, as the [composer rules](https://github.com/Justar96/bake/blob/97ce6abba01fddb5ed532b60a2e25a1e134b5244/apps/tui/DESIGN-LAYOUT.md#26-composer--a-cursor-following-window) require. Moving the caret therefore never moves a word or changes the composer's height.
 - **Only visible rows are styled.** The view builds spans for the rows in the window. Rows above and below contribute only their counts.
 
 ### Wrapping
@@ -193,11 +197,11 @@ The composer renders from the session's mode. The editor, the wrapping, and the 
 | Inspecting a child | `❯` dim | the kept parent draft, dim | `draft kept · Esc returns` | Explains that inspection is read-only |
 | Masked sign-in field | `❯` cyan | the field's prompt | the field's hint | Submits the field |
 
-The placeholder's parts after the first drop whole when they do not fit, and the idle placeholder drops them below 60 columns, as the [width rules](../../../apps/tui/DESIGN-LAYOUT.md#the-composer-yields-structure-before-it-yields-content) require. A hidden-row count takes the bottom edge before the hint does. A question's free-text answer and the sign-in field reuse the same editor and view with their own drafts and no history. A masked field draws each grapheme as `•`, and word motion treats the line as one word.
+The placeholder's parts after the first drop whole when they do not fit, and the idle placeholder drops them below 60 columns, as the [width rules](https://github.com/Justar96/bake/blob/97ce6abba01fddb5ed532b60a2e25a1e134b5244/apps/tui/DESIGN-LAYOUT.md#the-composer-yields-structure-before-it-yields-content) require. A hidden-row count takes the bottom edge before the hint does. A question's free-text answer and the sign-in field reuse the same editor and view with their own drafts and no history. A masked field draws each grapheme as `•`, and word motion treats the line as one word.
 
 ### Tokens
 
-Paste placeholders, image placeholders, and completed mentions are atomic spans the draft records by byte range and identity. Motion and deletion treat a span as one grapheme. Deleting an image placeholder emits an unstage effect, and neither undo nor yank restores it; a text placeholder stays registered for both, as [the input contract](../../../apps/tui/DESIGN.md#5-input-flow) requires. Styling (D3) never changes a span's cell width.
+Paste placeholders, image placeholders, and completed mentions are atomic spans the draft records by byte range and identity. Motion and deletion treat a span as one grapheme. Deleting an image placeholder emits an unstage effect, and neither undo nor yank restores it; a text placeholder stays registered for both, as [the input contract](https://github.com/Justar96/bake/blob/97ce6abba01fddb5ed532b60a2e25a1e134b5244/apps/tui/DESIGN.md#5-input-flow) requires. Styling (D3) never changes a span's cell width.
 
 ## Activity line
 
@@ -224,7 +228,7 @@ Input panels belong to the input, not to the conversation. They stack between th
 8. Completion
 9. Command usage
 
-Completion is lowest, so it sits next to the token that opened it. Every panel that lists a source of unbounded length uses a [derived item limit](../../../apps/tui/DESIGN-LAYOUT.md#the-item-limit-is-derived-never-constant) and the `+N more` form. An interaction never yields; when it cannot fit beside the composer, it replaces the controls, as it does today.
+Completion is lowest, so it sits next to the token that opened it. Every panel that lists a source of unbounded length uses a [derived item limit](https://github.com/Justar96/bake/blob/97ce6abba01fddb5ed532b60a2e25a1e134b5244/apps/tui/DESIGN-LAYOUT.md#the-item-limit-is-derived-never-constant) and the `+N more` form. An interaction never yields; when it cannot fit beside the composer, it replaces the controls, as it does today.
 
 ## Layout planner
 
@@ -247,7 +251,7 @@ This order follows the TypeScript collapse: gap, bottom edge, top edge, and then
 
 ## Transcript viewport
 
-Fullscreen's transcript is a viewport over immutable committed batches and the current live rows, as [the fullscreen design](../../../apps/tui/DESIGN-LAYOUT.md#21a-fullscreen-transcript) describes. The Rust viewport keeps the same obligations:
+Fullscreen's transcript is a viewport over immutable committed batches and the current live rows, as [the fullscreen design](https://github.com/Justar96/bake/blob/97ce6abba01fddb5ed532b60a2e25a1e134b5244/apps/tui/DESIGN-LAYOUT.md#21a-fullscreen-transcript) describes. The Rust viewport keeps the same obligations:
 
 - **Bounded work.** A row is presented only when visited, with at most 32 cached presentations, keyed by row identity, width, and presentation policy. Following output measures from the newest row up; reading measures from the anchor down. Neither mode measures the whole history.
 - **One reading anchor.** The anchor is a row identity, a character offset, and a line within the row. It holds through appends, composer growth, resize, and the conversion of a streamed row into committed fragments.
@@ -408,7 +412,7 @@ pub fn update(state: &mut State, msg: Msg) -> Vec<Effect>;
 pub fn render(state: &mut State, frame: &mut Frame);
 ```
 
-`render` changes only the composer window, because the rows the frame grants the composer decide where the window follows the caret. `State` holds presentation state only: drafts, focus, open sheets, window and viewport positions, completion selection, notices, and the quit timer's deadline. Agent status, inboxes, permissions, context pressure, goals, and the transcript stay with their runtime owners and arrive through `RuntimeUpdate`, following the [one-authority rule](../../../apps/tui/DESIGN.md#3b-one-authority-per-fact). Key bindings live in one table that maps a focus and a `KeyInput` to an action, so Bake, not a widget, owns every shortcut.
+`render` changes only the composer window, because the rows the frame grants the composer decide where the window follows the caret. `State` holds presentation state only: drafts, focus, open sheets, window and viewport positions, completion selection, notices, and the quit timer's deadline. Agent status, inboxes, permissions, context pressure, goals, and the transcript stay with their runtime owners and arrive through `RuntimeUpdate`, following the [one-authority rule](https://github.com/Justar96/bake/blob/97ce6abba01fddb5ed532b60a2e25a1e134b5244/apps/tui/DESIGN.md#3b-one-authority-per-fact). Key bindings live in one table that maps a focus and a `KeyInput` to an action, so Bake, not a widget, owns every shortcut.
 
 ### Event loop
 
@@ -418,7 +422,7 @@ The UI thread owns `State` and the terminal. Other threads only send messages to
 - **Batching.** The loop waits for the next message or the next deadline: a shimmer beat, an elapsed-second change, the quit timer, or a pending frame. It then applies a `Tick` and every waiting message in order, up to 256, and draws once.
 - **Frame policy.** A batch that contains input is drawn at once. A batch of runtime updates alone is drawn at most once every 16 ms. The activity line is redrawn on each shimmer beat, or each second with motion off.
 - **Output.** Every frame is written between synchronized-update markers (DEC mode 2026), and Ratatui's buffer diff writes only changed cells. A slow terminal blocks only the UI thread; the reader thread keeps queueing keys, and the next batch applies all of them.
-- **Debris.** While the lease is held, nothing else writes to stdout or stderr. Diagnostics go to a file sink, and captured messages appear as notices, as [the debris rules](../../../apps/tui/DESIGN-LAYOUT.md#83-debris--someone-else-writes-to-the-terminal) require.
+- **Debris.** While the lease is held, nothing else writes to stdout or stderr. Diagnostics go to a file sink, and captured messages appear as notices, as [the debris rules](https://github.com/Justar96/bake/blob/97ce6abba01fddb5ed532b60a2e25a1e134b5244/apps/tui/DESIGN-LAYOUT.md#83-debris--someone-else-writes-to-the-terminal) require.
 
 ### Runtime port
 
@@ -440,7 +444,7 @@ The preview uses a Bake-owned output writer over fixed Ratatui buffers. Both mod
 
 ## Preview status
 
-The [Rust preview](../../../rust/README.md) implements the [composer shape](#shape), `wrapDraft`'s wrapping without dictionary word boundaries, the caret-independent layout, the persistent window with hidden-row counts on the edges, D1's window height, the notice above the header, the frame fallback, the text [activity line](#activity-line) with its shimmer, for a sample turn and a sample compaction that Ctrl+T steps through, the [modes table](#modes) for idle, running, compacting, and inspection, the [layout planner](#layout-planner)'s claim order for the regions the preview has, the bar that shares the activity with the consolidated status, status fitting by rank, a sample turn's outcome held on the bar, standing-row keys that give way below 60 columns, batched input with one synchronized repaint per batch, and autowrap turned off while it owns the screen. These gaps from the oracle remain:
+The [Rust preview](../../development.md) implements the [composer shape](#shape), `wrapDraft`'s wrapping without dictionary word boundaries, the caret-independent layout, the persistent window with hidden-row counts on the edges, D1's window height, the notice above the header, the frame fallback, the text [activity line](#activity-line) with its shimmer, for a sample turn and a sample compaction that Ctrl+T steps through, the [modes table](#modes) for idle, running, compacting, and inspection, the [layout planner](#layout-planner)'s claim order for the regions the preview has, the bar that shares the activity with the consolidated status, status fitting by rank, a sample turn's outcome held on the bar, standing-row keys that give way below 60 columns, batched input with one synchronized repaint per batch, and autowrap turned off while it owns the screen. These gaps from the oracle remain:
 
 | Preview behavior | Oracle behavior | Source |
 |---|---|---|
@@ -473,11 +477,11 @@ These slices are ordered PRs inside [scope 14](README.md#14--terminal-engine-and
 
 [The terminal direction](terminal.md#acceptance-scenarios) owns the acceptance scenarios; these layers support them.
 
-- **Pure tests.** Editor and wrap cases ported from the TypeScript [editor tests](../../../apps/tui/packages/ui/tests/editor.test.ts) at every width from 4 to 29. Invariants: no row exceeds its width, no wrapped row opens with a space, the row count does not depend on the caret, and the caret stays inside the window.
+- **Pure tests.** Editor and wrap cases ported from the TypeScript [editor tests](https://github.com/Justar96/bake/blob/97ce6abba01fddb5ed532b60a2e25a1e134b5244/apps/tui/packages/ui/tests/editor.test.ts) at every width from 4 to 29. Invariants: no row exceeds its width, no wrapped row opens with a space, the row count does not depend on the caret, and the caret stays inside the window.
 - **Ported cases.** Wrap and caret cases ported from the TypeScript `wrapDraft` tests run as Rust unit tests, so a parity claim rests on shared input rather than on reading two implementations; the cross-runtime comparison harness was deleted under [D32](scope-00/support.md#decision-register).
 - **Buffer tests.** Ratatui `TestBackend` renders of every mode and panel at 40×12, 80×24, and 120×36, every size up to 12×8, the D1 heights, a resize sequence that keeps the caret inside the box, and both frames, in color and under `NO_COLOR`.
 - **PTY tests.** The existing `bun run test:rust:pty` scenarios, which check autowrap and synchronized-output restoration, extended with cursor-position reads after edits and resizes, mouse restoration, and a composer that grows and shrinks while output arrives.
-- **Performance.** Keystroke-to-frame latency with a 256 KiB draft, and frame cost while streaming, measured with an extended [performance diagnostic](../../../apps/tui/packages/app/performance/README.md) before any claim is made.
+- **Performance.** Keystroke-to-frame latency with a 256 KiB draft, and frame cost while streaming, measured with an extended [performance diagnostic](https://github.com/Justar96/bake/blob/97ce6abba01fddb5ed532b60a2e25a1e134b5244/apps/tui/packages/app/performance/README.md) before any claim is made.
 
 ## Open decisions
 

@@ -1,6 +1,6 @@
 # Bake
 
-Bake is a keyboard-driven coding agent for the terminal. It streams the model's answer as it arrives, runs shell and file tools inside a sandbox under a permission preset you choose, and saves every session so you can continue, resume, or fork it later. Bake 0.4 is a single native executable, `bake`, written in Rust.
+Bake is a keyboard-driven coding agent for the terminal. It streams the model's answer as it arrives, runs shell and file tools inside a sandbox under a permission preset you choose, and saves every session so you can continue, resume, or fork it later. Bake is a single executable, `bake`.
 
 > [!NOTE]
 > **Bake 0.4.0 runs on Linux**, x86_64 and arm64, with glibc 2.34 or newer (RHEL 9 and its rebuilds, Amazon Linux 2023, Ubuntu 22.04, Debian 12, and newer). **macOS and Windows support is coming in a later 0.4 release.** Until then the installer stops on those platforms before it downloads anything; on Windows, install Bake inside WSL.
@@ -80,19 +80,18 @@ The first command restores any `bake` command the installer replaced and removes
 
 - `bake docs <topic>`: the command line, the Bake home, models, settings, permissions, sessions, context files, skills, MCP, hooks, plugins, code mode, RPC, and updates.
 - [Safety](SAFETY.md): what the sandbox does and does not protect.
-- [Rust workspace](rust/README.md): building from source (`bun run dev:rust` from a checkout), the crates, and their checks.
-- [Distribution](distribution/README.md): the native release route, the installers, and how a release is published.
-- [0.4 roadmap](docs/roadmap/rust-0.4/README.md): the Rust port's scopes, decisions, and evidence, and what the macOS and Windows releases still need.
+- [Build and test Bake](docs/development.md): building from source with Cargo, the crates, and their checks.
+- [0.4 roadmap](docs/roadmap/rust-0.4/README.md): scopes, decisions, and evidence, and what the macOS and Windows releases still need.
 - [Contributing](CONTRIBUTING.md) and the [changelog](CHANGELOG.md).
-
-## Acknowledgements
-
-Bake's native agent ports [pi](https://github.com/earendil-works/pi), which is MIT-licensed: its agent loop, session format, tools, and coding agent are the foundation `bake` is built on, with Bake's own sandbox, permissions, terminal interface, and distribution. Bake began as a fork of [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness), DeepSeek's MIT-licensed agent harness, which the 0.3 TypeScript agent ran on.
-
-Thank you to the authors of both projects.
-
-Bake is an independent project. It is not an official DeepSeek product, and it is not endorsed by DeepSeek or by pi's authors. "DeepSeek Harness" is a trademark of DeepSeek; see its [brand guidelines](BRAND_GUIDELINES.md).
 
 ## License
 
-[MIT](LICENSE). Bake keeps the original copyright notice and the upstream attributions in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+[MIT](LICENSE). Copyright © 2026 Bake contributors. Upstream copyright and license notices are preserved in `LICENSE`, crate notices, and [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+
+## Acknowledgements
+
+Bake ports [pi](https://github.com/earendil-works/pi), which is MIT-licensed: its agent loop, session format, tools, and coding agent are the foundation `bake` is built on, with Bake's own sandbox, permissions, terminal interface, and distribution. Bake began as a fork of [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness), DeepSeek's MIT-licensed agent harness, which the 0.3 TypeScript agent ran on.
+
+Thank you to the authors of both projects.
+
+Bake is an independent project. It is not an official DeepSeek product, and it is not endorsed by DeepSeek or by pi's authors. "DeepSeek Harness" is a trademark of DeepSeek.

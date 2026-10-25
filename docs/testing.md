@@ -1,47 +1,11 @@
-# Testing policy
+# Testing Bake
 
-Bake tests the shared runtime, terminal application, and built profile at the layer where each behavior is observable. The root [AGENTS.md](../AGENTS.md) owns the current commands.
+Install the toolchain pinned at the repository root and run Cargo there. Use `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`, `cargo test --workspace --locked`, and `cargo build --workspace --locked` before pushing. For a focused test, run `cargo test --locked -p <crate> --lib <filter>`. Workspace tests include documentation tests.
 
-## Choose a check
+Tests own paths, listeners, subprocesses, clocks, and global mutations. They mock external systems, never the runtime under test. Use invariant properties for parsers and transforms of untrusted input. Commit property regression seeds; do not commit crash artifacts.
 
-- Run focused runtime specs with `bun run test:runtime <file>`. Cordis and Ink tests execute on Node; pure modules and tooling tests execute on Bun.
-- Run `bun run test` for the shared pure and Node integration suites.
-- Run `bun apps/tui/scripts/tui.ts check docs` for terminal documentation and `bun apps/tui/scripts/tui.ts check types` for TUI types.
-- Run `bun run test:e2e` for keyless built-profile PTY scenarios when terminal behavior changes.
-- Run `bun run test:integration` for the `*.e2e.ts` suites when a change reaches a profile composition, a sandbox backend, or built output. They run keyless unless `DSH_E2E_LIVE=1`.
-- Run `bun run iterate:rust` while editing Rust: it formats, runs Clippy, and runs the tests the uncommitted change reaches, stopping at the first failure. Run `bun run test:rust -p bake-agent --lib` for focused Rust tests, replacing the crate and adding a test-name filter as needed.
-- Prove a pure function that reads untrusted input with a `proptest` property that would fail if its logic broke, and check a branch's Rust tests with `bun run mutants:rust`: a missed mutant is a changed line no test checks. `bun run coverage:rust` and `bun run fuzz:rust` find untested and panicking code; [Rust checks](../rust/README.md#checks) describe all four. `bun run check:rust` also runs format, Clippy, doctests, and build; [Rust checks](../rust/README.md#checks) describe the runner and reports.
-- Run `bun run preflight` before pushing to `develop`: every CI gate, with the runtime specs the change reaches. `bun run verify` runs the same gates with the whole runtime suite. Test failures remain failures; preflight does not retry them automatically.
+Install cargo-mutants for mutation checks, cargo-llvm-cov for line and region coverage, and cargo-fuzz for fuzzing. From the repository root, run `cargo mutants --package <crate>` and address missed mutations; explain equivalent mutants. Run `cargo llvm-cov --workspace --html` to inspect gaps. From `fuzz/`, run `cargo fuzz list` and `cargo fuzz run <target> -- -max_total_time=120` after changing a parser that target reaches. Fix crashes with deterministic regressions in the owning crate. Coverage of confined helper processes has instrumentation limits.
 
-Report checks that actually ran, including failures and skipped work. Do not bypass hooks without explicit approval.
+Terminal changes need expected-output tests and a real-terminal exercise covering the changed behavior, including restoration. Cargo unit tests do not establish PTY coverage. The Windows pseudoconsole helper remains available as the `bake-process` `conpty` example.
 
-## Test real behavior
-
-Product-visible plugins need a non-unit composition test that boots test-only `cordis.yml` through the Loader and app or process. Mock external nondeterminism such as the model, network, and clock; keep the runtime under test real. Assert model-visible output, durable state, or user-visible behavior through the public entry path. An end-to-end assertion re-reads a file or re-runs a command instead of trusting an agent's self-report.
-
-Tests own temporary paths, ports, process-global changes, and child processes. Teardown restores shared state and awaits owned work. A spec that passes only by itself is a defect in the spec.
-
-## Pin the model surface
-
-Two expected-output suites pin what each shipped composition sends on its first model request: the system prompt, every context message (workspace instructions, runtime context, skill catalog), and every tool with its exact description and JSON schema, in request order. Each snapshot is a Markdown file that starts with its measured sizes: system-prompt characters, tool JSON characters, context-message characters, and tool count.
-
-| Suite | Compositions | Snapshots | Gate |
-|---|---|---|---|
-| [`apps/cli/tests/profiles/model-surface.expected.e2e.ts`](../apps/cli/tests/profiles/model-surface.expected.e2e.ts) | `headless` and `desktop`, launched from the built CLI | `apps/cli/tests/profiles/expected/model-surface/` | `integration` |
-| [`apps/tui/packages/app/tests/model-surface.spec.ts`](../apps/tui/packages/app/tests/model-surface.spec.ts) | the terminal profile with each shipped preset: `standard`, `ptc`, `minimal`, and the Cordis plugin-management preset | `apps/tui/packages/app/tests/expected/model-surface/` | `tui-spec` |
-
-Both drive the real composition to its first request through a keyless adapter, so no test code assembles a prompt. They plant a fixed workspace (an `AGENTS.md`, one skill, and a `.git` boundary) and replace the workspace, homes, temporary directory, model id, and dates with placeholders such as `<cwd>` and `<model>`. The snapshots record the provider-neutral request every adapter receives, not one provider's wire body. Windows ships `pwsh` instead of `bash`, so the cases skip there.
-
-After an intended change, rebuild and rewrite the snapshots, then review the diff:
-
-```sh
-bun run build
-bun run test:integration apps/cli/tests/profiles/model-surface.expected.e2e.ts -u
-node node_modules/vitest/vitest.mjs run --config apps/tui/vitest.config.ts apps/tui/packages/app/tests/model-surface.spec.ts -u
-```
-
-A diff in these snapshots is a model-visible change, so the pull request needs an [eval record](../evals/README.md#when-to-record).
-
-## Preserve session evidence
-
-Model-visible input must be reconstructable from the session log. Never overwrite, move, or delete a committed session generation to satisfy a test. [Session format status](session-format-status.md) owns released format and migration rules.
+Model-visible changes need paired evaluation against a clean build of the base `develop` commit. Record the models, prompts, trial counts, results, and accepted regressions in documentation for the change. Fixture smokes alone do not measure model quality. Follow [contributing](../CONTRIBUTING.md) for platform checks, and report actual passes, failures, skips, and host architectures.

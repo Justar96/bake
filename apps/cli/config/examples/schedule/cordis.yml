@@ -1,9 +1,0 @@
-# Opt-in Schedule patch over the shipped Web composition. The owner observes
-# only roots published after this overlay loads.
-
-- insert:
-    - id: schedule
-      name: 'bake-schedule'
-
-- id: ui-schedule
-  disabled: false

@@ -2,7 +2,7 @@
 
 ## Experimental status
 
-Bake, like the DeepSeek Harness runtime it is built on, is experimental developer-preview software. It has not undergone a security audit and must not be treated as secure or production-ready.
+Bake is experimental developer-preview software. It has not undergone a security audit and must not be treated as secure or production-ready.
 
 The project can execute model-generated code and commands, load third-party plugins, and access the network, processes, credentials, and files made available to it. Incorrect model output, defects, misconfiguration, malicious input, or untrusted plugins may damage the host computer, modify or delete files, disclose data or credentials, or cause other unintended effects.
 

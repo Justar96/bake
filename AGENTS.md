@@ -1,117 +1,68 @@
 # Bake
 
-Bake is an independent terminal coding agent. Its product line is the Rust agent, `bake` under `rust/`, built to the [Rust 0.4 roadmap](docs/roadmap/rust-0.4/README.md). Bake 0.4.0 is the Rust agent's Linux release; macOS and Windows support comes in later 0.4.x releases. The TypeScript agent is deprecated and frozen: the 0.4.0 installers install the Rust agent instead, and roadmap scope 17 removes the TypeScript tree from `develop` (see [Branches and releases](#branches-and-releases)). `origin` is Bake's own repository. `upstream` is a read-only reference: review its DeepSeek Harness releases there, then port changes selectively. Never merge from or push to `upstream` automatically.
+Bake is an independent, MIT-licensed terminal coding agent. Its product is the `bake` executable built from the Cargo workspace at the repository root. User-facing text calls it Bake. The repository contains Rust, its embedded assets and test fixtures, documentation, and Cargo-based CI. Linux x86_64 and arm64 are released; macOS and Windows support follows in 0.4.x.
 
-## Porting from upstream
-
-Upstream is TypeScript, so its fixes reach only the frozen TypeScript agent: port bug and security fixes alone, onto `release/0.3`. Bake removed upstream's web client, desktop app, ACP, Python SDK, docs website, benchmarks, and upstream CI and review automation, along with their Agent Notes and docs. The `desktop` profile bundle in `packages/bundle/desktop` is Bake's own: the separate Bake Desktop app launches it with `dsh --profile desktop`, so keep it and its tests. When porting:
-
-- A modify/delete conflict on a removed note or doc keeps the deletion (`git rm <file>`). Do not restore docs for removed products.
-- `packages/session/session-format-catalog/src/retired-vocabulary.ts` keeps event types that released Session logs carry but no plugin writes, so those logs still open. Remove an entry only with a Session-format version bump and migration; regenerate with `bun run gen-persistence-catalog` and confirm no persistence digest moves.
-- Leave `.agents/notes/archived/`, `docs/persistence-changes/historical-formats/`, and `snapshots/` as they are: they are frozen history, and their links may point at removed code.
-- Some docs still describe upstream gates Bake does not ship, including the Agent Note format, archive, and classification verifiers named in `.agents/notes/README.md` and the `dsh-archive-agent-notes` skill. Trust `package.json` scripts over prose; fix the wording when you touch it.
+Use the current source, [development guide](docs/development.md), and [contribution guide](CONTRIBUTING.md) for implementation and commands. The [0.4 roadmap](docs/roadmap/rust-0.4/README.md) and [support register](docs/roadmap/rust-0.4/scope-00/support.md) retain design decisions and qualification history. Historical commands, deleted tooling, and linked Git snapshots do not define the current development workflow.
 
 ## Workspace
 
-Bun owns the TypeScript workspace: dependency installation, `bun.lock`, workspace scripts, builds, and hooks. Reproduce a checkout with `bun install --frozen-lockfile`, and do not add a root pnpm or npm lockfile. The separate, opt-in `rust/` workspace uses Cargo, its own `Cargo.lock`, and the toolchain pinned in `rust/rust-toolchain.toml`; run Cargo from that directory so the pin applies. Its preview is excluded from the 0.3 launcher and release archives. The shipped agent process runs on Node, with Bun building and launching it. The runtime's external-profile package manager is a separate concern and does not belong to this workspace. Bake launch commands default to `~/.bake`; setting `BAKE_HOME` selects a different home instead, without migrating upstream data. Bake reads each `BAKE_<name>` environment setting first and falls back to its `DSH_<name>` spelling, so `DSH_HOME` still works when `BAKE_HOME` is unset.
+- `crates/`: agent, model adapters, tools, session services, sandbox, terminal, and executable.
+- `plugins/`: Wasm plugin SDK examples and hostile fixtures.
+- `fuzz/`: parser fuzz targets with a separate nightly toolchain and lockfile.
+- `probes/`: standalone research crates; they are outside the main workspace checks.
+- `crates/bake-cli/docs/`: user documentation embedded in `bake`.
+- `docs/`: architecture, development guidance, and roadmap documentation.
+- `.github/workflows/`: Cargo CI, optional Rust quality checks, and the `main` branch source check.
 
-- `apps/tui/packages/app/`: profile composition, agent control, terminal lifecycle.
-- `apps/tui/packages/ui/`: side-effect-free Ink components, projection, layout, localized copy.
-- `apps/tui/packages/harness/`: component development and recording.
-- `apps/cli/`: Node profile launcher and external-plugin management.
-- `packages/`: shared agent runtime and its tests; read [the architecture](docs/architecture.md) before changing it.
-- `native/`, `vendor/`: native support and pinned Cordis sources. Preserve licenses and upstream attribution.
-- `snapshots/`: recorded session evidence. Never overwrite, move, or delete a committed session generation.
-- `evals/`: per-version agent-loop metrics and the live paired runner that produces them.
+Keep development Cargo-based; do not reintroduce a JavaScript package workspace, Bun wrappers, or the retired tooling and archive directories. JavaScript, HTML, CSS, Wasm, and data files embedded by Rust or consumed by its tests are product inputs: preserve their include paths, provenance, and licenses. Keep them inside their owning Rust crate or the plugin fixtures. [Plugin build instructions](plugins/README.md) describe how to rebuild the committed components.
 
-## Commands
+Run Cargo from the repository root so `rust-toolchain.toml` applies. Keep builds locked. `Cargo.lock` and `fuzz/Cargo.lock` own separate dependency graphs; standalone probes also own their locks. Pin external dependencies exactly, document their purpose and licensing, and keep test-only dependencies in `[dev-dependencies]`.
+
+Inspect the working tree before editing and preserve unrelated changes. Never overwrite sessions, credentials, or user settings while checking behavior. Bake defaults to `~/.bake`; `BAKE_HOME` takes precedence over `DSH_HOME`. Preserve the existing environment fallbacks and user-owned command links.
+
+## Code ownership
+
+Follow the [architecture](docs/architecture.md) and [crate table](docs/development.md#crates). `bake-cli` owns executable entrypoints and embedded docs; `bake-coding-agent` owns sessions, tools, settings, and integrations; `bake-agent` owns the model/tool loop; `bake-ai` owns model protocols. Keep terminal effects in `bake-tui` and pure editor/view state in `bake-tui-view`. Process-tree ownership belongs in `bake-process`, confinement in `bake-sandbox`, and signed updates in `bake-update`.
+
+Tool execution must cross the permission and approval boundary before side effects. Cancellation and teardown await owned work, stop owned descendants, restore terminal state, and leave no late callbacks. Rust must not panic on untrusted input. Keep changes in the crate that owns the contract rather than duplicating policy in callers.
+
+## Commands and checks
+
+Run from the repository root:
 
 ```sh
-bun install --frozen-lockfile
-bun run build             # Node runtime and TUI artifacts
-bun run start             # built terminal agent
-bun run dev               # hot component preview, no agent or model key
-bun run dev:tui           # build and run the real Node agent
-bun run dev:rust          # build and run the interactive Rust agent (bake) against the Bake home
-bun run dev:rust:preview  # build and run the Rust TUI preview (fixture runtime, no model connection)
-bun run check:rust        # locked Rust format, lint, test, and build checks
-bun run iterate:rust      # Rust edit loop: fmt, clippy, and the tests the uncommitted change reaches
-bun run mutants:rust      # mutation testing of the changed Rust lines; prints missed mutants
-bun run coverage:rust     # Rust line and region coverage report
-bun run fuzz:rust         # cargo-fuzz targets in rust/fuzz on its nightly (--list, <target>, --all)
-bun run check             # TUI types, tests, layout, peer identity, and docs
-bun run test              # pure and Node integration tests
-bun run test:runtime <file>  # focused shared-runtime tests
-bun run test:e2e           # keyless built-profile PTY scenarios
-bun run test:integration   # *.e2e.ts suites: built profiles, sandboxes, artifacts; keyless
-bun run build:native-system  # native addon the JSONL persistence specs need
-bun run typecheck         # workspace sources; not packages/**/tests
-bun run doc-sync          # entry documents and terminal Markdown
-bun run gen-rust-migration-inventory  # after a Rust port change; verify-rust-migration-inventory checks it
-bun run lint              # Oxlint over apps, packages, scripts, and evals
-bun run preflight         # every CI gate before pushing; --fast for the static half
-bun run verify            # preflight with the whole runtime suite
-bun run eval              # live paired agent-loop eval; needs a model route
-bun run eval:record       # commit an eval's metrics and flag regressions
+cargo run --locked -p bake-cli --
+cargo run --locked -p bake-cli -- preview
+cargo build --workspace --locked
+cargo build --release --locked -p bake-cli
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --locked
+cargo test --locked -p bake-agent --lib
 ```
 
-Run the checks relevant to your change while you work, and `bun run preflight` before pushing to `develop`. Outside CI, preflight runs only the Rust tests a change reaches; `--full` runs them all. Preflight reports every gate instead of stopping at the first failure. Full preflight requires the pinned Rust toolchain; `--fast` excludes native builds and PTY scenarios. Any terminal behavior change also requires the built-profile PTY scenarios. Tests that use Cordis or Ink run on Node; pure modules and tooling tests run on Bun; native workspace tests run under Cargo. Report only what you actually ran, including failures and skipped checks. Never bypass hooks without explicit approval.
+Use the [Bake testing skill](.agents/skills/bake-testing/SKILL.md) for Rust changes. Start with affected crates and their consumers. Tests own their temporary files, ports, subprocesses, and global mutations. Mock external nondeterminism, never the runtime under test. Parsers and transforms of untrusted input need invariant property tests. Use mutation, coverage, and fuzz checks where the changed logic warrants them; their commands and limits are in [testing](docs/testing.md).
+
+For documentation-only changes, check the diff, local links, and commands against the source; do not claim runtime test evidence from that review. Embedded user docs and the root changelog are executable inputs, so changes to those also need a CLI build. Formatting must preserve unrelated working-tree edits. Run `git diff --check` before handing off changes.
+
+Before pushing to `develop`, run format, Clippy, workspace tests, and build on Linux. Terminal changes also require an expected-output test and a real-terminal exercise. Agent, native, and terminal changes need those Cargo checks on the Intel x86_64 Mac via SSH alias `macpro` or `BAKE_MAC_HOST`, in `~/bake-ci` or `BAKE_MAC_DIR`. Report an unreachable host instead of claiming evidence. Windows and Apple Silicon checks use an on-demand CI run from a scratch branch (`gh workflow run ci.yml --ref <branch>`); platform changes need that run before pushing. Never commit a host address or bypass hooks. Report only checks actually run, including failures and skips.
 
 ## Branches and releases
 
-`develop` is where work lands, and it is Rust-first; `main` holds released code; `release/0.3` is the TypeScript agent's maintenance line, cut from v0.3.8. [CONTRIBUTING.md](CONTRIBUTING.md) covers the local workflow and [distribution/README.md](distribution/README.md#release-with-github-actions) the release workflow.
+`origin` is Bake's repository. Work lands directly on an up-to-date `develop`, rebased on `origin/develop`; no pull requests go into `develop`, and it is never force-pushed. `main` accepts only merge-commit release pull requests from `develop`. Never commit directly to `main` or `release/0.3`. Do not restore the retired runtime or merge `release/0.3` into `develop` or `main`. Do not merge from or push to an upstream reference automatically.
 
-- Iterate locally and commit and push directly to `develop`, rebased on an up-to-date `origin/develop`; no pull request goes into `develop`. Never commit to `main` or `release/0.3` directly, and never force-push `develop`.
-- GitHub CI runs automatically only on the release pull request from `develop` into `main`, so the local checks are the gate for every push. Before pushing, run the checks your change needs and then `bun run preflight` on Linux. When the change touches `rust/`, native code, or terminal behavior, also run `bun run preflight:mac` (see [macOS checks](#macos-checks)), and run the native checks on Windows and Apple Silicon with an on-demand CI run when the change touches platform code (see [macOS checks](#macos-checks)); otherwise the release pull request checks them. Report in the commit message or to the user which platforms ran and which did not.
-- The TypeScript agent (`apps/`, `packages/`, and the profiles and bundles they build) is frozen. Add no TypeScript features. On `develop`, change TypeScript only to keep its gates passing or for tooling the Rust port uses, such as `evals/` and `scripts/`. The Rust release removes the TypeScript agent from `develop`, under roadmap scope 17.
-- A 0.3 fix starts from an up-to-date `origin/release/0.3` and targets it; that branch's AGENTS.md has its fixes-only rules and its release steps. Nothing from `release/0.3` merges into `develop` or `main`.
-- 0.3 bug and security maintenance ends when 0.4.0 ships. From that release, ship and maintain only Rust Bake; the supported `dsh`, profile, and package aliases retire with 0.3. Announce retirement and the fresh Rust install in the 0.4.0 release notes. Preserve existing installs and user-owned command links, the native `BAKE_*` then `DSH_*` environment fallback, and the final TypeScript update route ([D10 and D13](docs/roadmap/rust-0.4/scope-00/support.md#decision-register)).
-- The release pull request runs TypeScript checks on Linux, the native job on Linux, Windows, and Apple Silicon macOS, and the Windows release check. Before that, run the same workflow on demand for Windows and Apple Silicon evidence: push a scratch branch and run `gh workflow run ci.yml --ref <branch>`.
-- `main` accepts only a merge-commit pull request from `develop`, which the `develop only` check enforces. Open one only to ship a release. Releases ship from `develop`: 0.4.0, the Linux release, shipped at the owner's request before the roadmap's release qualification was complete ([D51](docs/roadmap/rust-0.4/scope-00/support.md#decision-register)), and 0.4.x releases follow with the macOS and Windows builds. No 0.3 version ships after 0.4.0.
-- To release from `develop`, on an up-to-date `develop`:
-  1. Run `bun run release:prepare <version>`. Check the changelog section it writes, and rename `evals/agent-loop/versions/unreleased/` to `v<version>` if it exists.
-  2. Run `bun run release:preflight --offline --tag v<version>`, then commit only those edits as `release: <version>`.
-  3. Push to `develop`, then open the pull request from `develop` to `main` and fix what its CI finds on `develop`.
-  4. Once that merges, tag `main`'s merge commit `v<version>` and push only the tag. The tag publishes to every install, so push it only when the user asks for that release.
+Release tags require an explicit request from the owner. CI checks the Rust workspace; it does not publish or deploy releases. The Rust updater remains part of the product. Keep existing deployed download routes intact unless changing them is explicitly requested.
 
-## macOS checks
+## Agent contracts
 
-Linux and macOS are the platforms checked before every push that needs them; macOS is checked on an Intel Mac over SSH, and Apple Silicon and Windows by an on-demand run of the CI workflow. `bun run preflight:mac` sends this checkout's committed and tracked uncommitted changes to the Mac, runs `bun run preflight --only native` there, follows its log, and exits with its status. Pass another command to run that instead, such as `bun run preflight:mac 'cd rust && cargo test --locked -p bake-tui'`, and use `bun run preflight:mac --log` to print the last run again.
+Port primarily from Pi's latest official release. Re-check it when starting a scope, record the revision and adapted files, preserve its MIT notice, and port its tests. Bake keeps the CLIProxyAPI route, sandbox/approvals/permission presets, and the Bake home and its settings and credentials. Retained contracts name their original source revision in fixture provenance. The [Pi-first plan](docs/roadmap/rust-0.4/pi-first-plan.md) governs where older scope text conflicts. Bake reads and writes Pi sessions; it does not migrate, read, or lock the retired agent's Session logs. Its system prompt is Bake's own.
 
-- The SSH host is `macpro`, an alias in `~/.ssh/config` with key login, or `BAKE_MAC_HOST`. Never commit the Mac's address.
-- The first run clones the repository into `~/bake-ci` on the Mac (`BAKE_MAC_DIR`). The Mac needs git, Bun, and rustup, and the native package check needs cargo-about 0.9.2 on its PATH or `BAKE_CARGO_ABOUT=<path>` in the command.
-- The run is detached on the Mac, so a dropped connection does not stop it. Commands longer than a tool's time limit belong in a background job.
-- Report the Mac's architecture with its summary. The Mac in use is an Intel x86_64 machine, so Apple Silicon is checked by the CI workflow's `macos-latest` job.
-- When `macpro` cannot be reached, say so instead of claiming macOS evidence.
-- Windows is checked when a Windows host is available, such as the Windows side of a WSL machine: run `bun run preflight --only native` in a Windows clone of the change. Without one, run the CI workflow on a scratch branch (`gh workflow run ci.yml --ref <branch>`), which runs the native job on Windows and Apple Silicon, and cite its run; the release pull request runs it again.
+With a public API change, update the crate row and test paragraph in `docs/development.md`, and the roadmap Dev Note.
 
-## Rust 0.4 port
+## Evaluation and documentation
 
-The [roadmap](docs/roadmap/rust-0.4/README.md) and its [support register](docs/roadmap/rust-0.4/scope-00/support.md#decision-register) own the port's decisions; the [Pi-first scope plan](docs/roadmap/rust-0.4/pi-first-plan.md) governs every scope where older scope text still assumes 0.3 parity or compatibility.
+Changes to prompts, tools, results and errors, context, compaction, caching, the agent loop, or model adapters need paired evaluation against a clean built worktree of the base `develop` commit. Compare the built executables and document the method, models, prompts, trial counts, results, and accepted regressions with the change. The repository has no evaluator runner; do not prescribe deleted commands or claim a standard suite ran. Report missing live-model access and regressions to the user; keyless fixtures alone do not measure model quality.
 
-- 0.4 is a new binary that users install; it does not migrate or interoperate with a TypeScript install (D32). It writes and reads Pi's session format and does not read, migrate, or lock Bake Session logs of any format. Do not add TypeScript-compatibility code, cross-runtime checks, or conformance tables against the TypeScript runtime.
-- Port primarily from Pi's latest official release (D22). Re-check the release when a scope starts, record the Pi revision and files a change adapts, keep Pi's MIT notice, and port Pi's tests with its code. Port Bake's TypeScript only where the plan, a decision, or a retained contract needs it, and name its source.
-- Three Bake contracts are retained: the CLIProxyAPI provider route, Bake's sandbox, approvals, and permission presets (D24), and the `~/.bake` home (`BAKE_HOME`, then `DSH_HOME`) with its existing settings and credentials read as D25 describes. Tools, schemas, results, and repair text follow Pi, with D24's sandbox additions; the system prompt is Bake's own (D33), and the [system prompt design](docs/roadmap/rust-0.4/system-prompt.md) proposes its text.
-- Prove a retained contract with fixture tests derived from its TypeScript source, which you cite; the TypeScript arm stays in TypeScript tests and never changes product source. Rust code never panics on untrusted input.
-- With each change to a Rust public API, update the `rust/README.md` crate row and test paragraph and the roadmap Dev Note, then run `bun run gen-rust-migration-inventory`, `verify-rust-migration-inventory`, and `bun run doc-sync`.
+Documentation describes current Bake behavior in English. Update embedded user docs when changing commands or behavior, and the owning crate documentation when changing APIs. Keep comments local and explain obligations that code cannot show. Files end with one newline. Never commit credentials or `.env` files.
 
-## Evals
-
-Every version keeps its agent-loop metrics so the next one can be checked for regressions. [evals/README.md](evals/README.md) has the procedure.
-
-- A change that can alter what the model sees or how many round trips a task takes needs an eval record committed with it. That covers prompts, personas, tool schemas, descriptions, arguments, results, and errors, context assembly, compaction, caching, the agent loop, and LLM adapters.
-- Measure the candidate in a paired run against a clean, built worktree of the `develop` commit it builds on, on the standard suite with the standard and extended model sets listed in evals/README.md and three trials. Record it under `evals/agent-loop/versions/unreleased/<YYYY-MM-DD>-<topic>/`. A release renames `unreleased/` to its tag, as the changelog does.
-- Report the record's regressions in the commit message and to the user. Fix a flagged regression, or state its cause and why it is accepted, in the record's note. Compare versions only through a paired run: absolute counts from different days drift with the gateway, the cache, and the models.
-- Never edit or delete a committed record, and move one only in that release rename; supersede a wrong record with a new one. Raw output, which includes transcripts, stays in the ignored `.preflight/`.
-
-## Engineering
-
-- Use ESM and strict TypeScript in the TypeScript workspace. Rust belongs under `rust/`, with formatting and Clippy checks; keep terminal effects separate from pure editor and view state. Local TypeScript relative imports use `.ts`; cross-package imports use package names the importing package declares. Every workspace package outside `vendor/` and `native/` uses a `bake-` name: runtime packages under `packages/` use `bake-<name>`, the CLI is `bake-cli`, and the terminal packages are `bake-tui-<name>`. When porting fixes, map upstream `@deepseek-ai/dsh-<name>` imports to `bake-<name>`, `@deepseek-ai/dsh` to `bake-cli`, and `@dsh-tui/<name>` to `bake-tui-<name>`, and preserve vendored `@deepseek-ai/*` identifiers. Add each rename to the legacy package-name map in `packages/boot/app-boot/src/legacy-package-names.ts`.
-- Extend behavior through Cordis plugins and documented events, not ad hoc hooks. Registrations are effects that must supply disposers; waterfall listeners call `next()` when delegating.
-- Model-visible input must be reconstructable from the session log. Preserve released data and migration behavior; consult [session format status](docs/session-format-status.md) before any persistence change.
-- Read [defensive patterns](docs/defensive-patterns.md) before lifecycle or concurrency work. Teardown must await owned work, restore terminal state, and leave no late callbacks.
-- Tests own their temporary paths, ports, global mutations, and subprocesses. Mock external nondeterminism, never the runtime under test.
-- Keep UI state authoritative: render logged events and runtime projections instead of maintaining competing copies. Localized product text belongs in `apps/tui/packages/ui/src/copy.ts`.
-- When removing a feature, also remove its obsolete consumers, tests, and documentation. Before deleting a shared package, check imports, package dependencies, TypeScript references, and YAML compositions.
-- Documentation describes current Bake behavior. Update the owning README and JSDoc alongside code changes, and write English only: Bake keeps no translated documentation or UI language. Historical upstream design material is reference only, never an instruction to restore removed products.
-- Keep comments local and explain non-obvious obligations. Files end with one newline. Never commit credentials or `.env`.
+Keep MIT in `LICENSE` and Cargo metadata, including Bake contributors' copyright and existing upstream notices. DeepSeek and Pi acknowledgements belong at the bottom of the root README; preserve detailed attribution in `THIRD_PARTY_NOTICES.md` and crate NOTICE/license files. Historical references should link to an existing Git revision rather than a deleted local path.

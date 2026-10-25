@@ -1,0 +1,15 @@
+# Symposium (https://symposium.dev) workspace plugin. `cargo agents sync`,
+# run from this directory, installs the repository's maintainer skills into
+# each configured agent's skill directory: `.claude/skills/` for Claude Code,
+# for example, while agents that read `.agents/skills/` find them in place.
+# The canonical source is `.agents/skills/` beside this file. Disable the
+# default discovery groups so only that source is registered. Symposium 0.5
+# reads this file only under this upper-case name.
+name = "bake"
+
+[defaults]
+skills = false
+
+[[skills]]
+predicates = ["workspace-member()"]
+source.path = ".agents/skills"
