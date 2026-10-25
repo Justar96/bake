@@ -10,6 +10,7 @@ Notable changes to Bake. `bake` compiles this file in, and `/changelog` shows it
 - Polish `/login`: step titles, a placeholder for the default address that Enter accepts, hints, and a working indicator while the key is checked.
 - Show answers as Markdown with colour; keep long bash commands and output to a few rows with a `+N` count, show a running call's newest output, and label code mode like other tools.
 - A `defaultTools` list of only `+`/`-` entries now changes Bake's default tool set, so code mode, the job tools, and the web tools stay on.
+- Windows: a killed process tree whose short children reused an ended child's process id now finishes settling instead of waiting forever.
 
 - Move the Cargo workspace to the repository root; build and test Bake directly from the checkout, with development guidance in `docs/development.md`.
 

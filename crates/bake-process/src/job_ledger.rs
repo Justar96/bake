@@ -24,8 +24,27 @@
 //!   job's `TotalProcesses` both before and after every counted member was
 //!   observed ended, with no member unresolved and no active process. Fewer
 //!   counted than associated (a lost message, a pid reused inside the job
-//!   before it was opened, a failed association counted by the job) never
-//!   settles; more is a contradiction that never settles either.
+//!   before it was opened that no exit message tells apart, a failed
+//!   association counted by the job) never settles; more is a contradiction
+//!   that never settles either.
+//!
+//! A pid reused inside the job is also counted from the job's exit
+//! messages (`JOB_OBJECT_MSG_EXIT_PROCESS` and
+//! `JOB_OBJECT_MSG_ABNORMAL_EXIT_PROCESS`, [`Ledger::exited`]). A completion
+//! port delivers one job's messages in the order they were queued; a
+//! process's exit is queued after its own new-process message, and before
+//! its pid can be released and given to the next process. So a pid's first
+//! new-process message, and each later one that follows an exit message for
+//! the pid, name distinct processes: a second lower bound on the pid's
+//! associations beside the distinct members opened. Each pid counts the
+//! larger of the two, and only once a member has been resolved for it.
+//! Without the second, a churning tree whose short children reuse an ended
+//! member's pid and release it before the account opens it leaves the count
+//! short for good (observed natively in `tests/windows_job_rundown.rs`'s
+//! idle churn). A missing exit message leaves the count short, as before;
+//! only a new-process message queued again after its own process's exit
+//! could count one association twice, which makes the account a
+//! contradiction unless a message is also lost.
 //!
 //! [`Opened::NoSuchProcess`] and [`Opened::OtherProcess`] mean the reported
 //! member released its pid. Microsoft's [process-id lifetime explanation]
@@ -114,6 +133,28 @@ impl std::fmt::Display for Verdict {
     }
 }
 
+/// One pid's lower bounds on the processes the job associated with it.
+#[derive(Debug, Default)]
+struct Tally {
+    /// Distinct members opened with the pid, or inferred from it.
+    members: u64,
+    /// Its first new-process message and each later one that followed an
+    /// exit message for it (see the module docs).
+    messages: u64,
+}
+
+impl Tally {
+    /// Counts nothing until a member has been resolved for the pid, so an
+    /// unknown report stays ambiguous.
+    fn counted(&self) -> u64 {
+        if self.members == 0 {
+            0
+        } else {
+            self.members.max(self.messages)
+        }
+    }
+}
+
 /// The account of one job.
 #[derive(Debug)]
 pub(crate) struct Ledger<H> {
@@ -123,6 +164,11 @@ pub(crate) struct Ledger<H> {
     /// The pids whose record is `Live` or `Unresolved`: what a check or a
     /// retry visits, so neither walks the ended records of a long life.
     open: HashSet<u32>,
+    /// Recorded pids with an exit message since their last new-process
+    /// message; bounded by the records.
+    exited: HashSet<u32>,
+    /// Each recorded pid's two lower bounds; `counted` is their sum.
+    tallies: HashMap<u32, Tally>,
     counted: u64,
     contradiction: Option<&'static str>,
 }
@@ -132,6 +178,8 @@ impl<H> Default for Ledger<H> {
         Self {
             records: HashMap::new(),
             open: HashSet::new(),
+            exited: HashSet::new(),
+            tallies: HashMap::new(),
             counted: 0,
             contradiction: None,
         }
@@ -156,6 +204,15 @@ impl<H> Ledger<H> {
         self.contradiction.get_or_insert(why);
     }
 
+    /// Records one exit message naming `pid`. A pid the account has not
+    /// recorded is ignored: its new-process message was lost, which keeps
+    /// the count short anyway.
+    pub(crate) fn exited(&mut self, pid: u32) {
+        if self.records.contains_key(&pid) {
+            self.exited.insert(pid);
+        }
+    }
+
     /// Records one `JOB_OBJECT_MSG_NEW_PROCESS` naming `pid`.
     pub(crate) fn reported(&mut self, pid: u32, host: &mut impl Host<Handle = H>) {
         if pid == 0 {
@@ -167,15 +224,37 @@ impl<H> Ledger<H> {
             self.contradict("more distinct pids than the account keeps");
             return;
         }
+        // Taken by every new-process message, so it marks only an exit
+        // between this message and the one before it.
+        let after_exit = self.exited.remove(&pid);
+        let first = !self.records.contains_key(&pid);
+        let members = self.observe(pid, host);
+        self.tally(pid, members, u64::from(first || after_exit));
+    }
+
+    /// Adds to `pid`'s tally, and the change in its count to the total.
+    fn tally(&mut self, pid: u32, members: u64, messages: u64) {
+        let tally = self.tallies.entry(pid).or_default();
+        let before = tally.counted();
+        tally.members += members;
+        tally.messages += messages;
+        // Both bounds only grow, so the count never falls.
+        self.counted += tally.counted() - before;
+    }
+
+    /// Opens `pid` and records what it names; returns how many members not
+    /// counted before that names.
+    fn observe(&mut self, pid: u32, host: &mut impl Host<Handle = H>) -> u64 {
+        let mut members = 0;
         let opened = host.open(pid);
         let record = self.records.remove(&pid);
         let next = match (record, opened) {
             (None | Some(Record::Unresolved), Opened::NoSuchProcess | Opened::OtherProcess) => {
-                self.counted += 1;
+                members += 1;
                 Record::Vanished
             }
             (None | Some(Record::Unresolved), Opened::Member { created, handle }) => {
-                self.counted += 1;
+                members += 1;
                 Record::Live { created, handle }
             }
             (None | Some(Record::Unresolved), Opened::Unknown) => Record::Unresolved,
@@ -205,7 +284,7 @@ impl<H> Ledger<H> {
             ) => match (created, now) {
                 // A different member reusing the pid.
                 (Some(ended), Some(now)) if ended != now => {
-                    self.counted += 1;
+                    members += 1;
                     Record::Live {
                         created: Some(now),
                         handle,
@@ -218,7 +297,7 @@ impl<H> Ledger<H> {
             (Some(Record::Vanished), Opened::Member { created, handle }) => {
                 // The vanished one released the pid before this member
                 // existed (see the module docs), so this is another one.
-                self.counted += 1;
+                members += 1;
                 Record::Live { created, handle }
             }
             // A pid seen before that cannot be told apart from an earlier
@@ -231,6 +310,7 @@ impl<H> Ledger<H> {
             self.open.remove(&pid);
         }
         self.records.insert(pid, next);
+        members
     }
 
     /// Opens again every reported pid still unknown.
@@ -242,7 +322,8 @@ impl<H> Ledger<H> {
             .copied()
             .collect();
         for pid in unresolved {
-            self.reported(pid, host);
+            let members = self.observe(pid, host);
+            self.tally(pid, members, 0);
         }
     }
 
@@ -566,6 +647,245 @@ mod tests {
             settle(&mut ledger, &mut table, 3, 0),
             Verdict::Pending("fewer members named than the job associated")
         );
+    }
+
+    // Bake: a short child that reused an ended member's pid, joined the job,
+    // and released the pid before it was opened is told from a duplicate
+    // message by the exit message queued between them (the idle-churn
+    // shortfall `tests/windows_job_rundown.rs` observed).
+    #[test]
+    fn an_exit_message_tells_a_reused_pid_from_a_duplicate() {
+        let mut table = Table::default();
+        table.processes.insert(4, (true, 1, true));
+        let mut ledger = Ledger::default();
+        ledger.reported(4, &mut table);
+        assert_eq!(ledger.check(&mut table), Ok(0));
+        ledger.exited(4);
+        // The next process with pid 4 has come and gone.
+        table.processes.remove(&4);
+        ledger.reported(4, &mut table);
+        assert_eq!(ledger.counted(), 2);
+        assert_eq!(settle(&mut ledger, &mut table, 2, 0), Verdict::Settled);
+        // The exit is taken by that message: a repeat counts nothing.
+        ledger.reported(4, &mut table);
+        assert_eq!(ledger.counted(), 2);
+
+        // A vanished record, and a pid now naming a process outside the job.
+        let mut table = Table::default();
+        let mut ledger = Ledger::default();
+        ledger.reported(8, &mut table);
+        ledger.exited(8);
+        table.processes.insert(8, (false, 5, false));
+        ledger.reported(8, &mut table);
+        assert_eq!(ledger.counted(), 2);
+        assert_eq!(settle(&mut ledger, &mut table, 2, 0), Verdict::Settled);
+    }
+
+    // Failure controls: without an exit message between them, or for a pid
+    // never reported, a repeated report counts nothing.
+    #[test]
+    fn an_exit_message_counts_only_after_an_ended_record() {
+        let mut table = Table::default();
+        table.processes.insert(4, (true, 1, true));
+        let mut ledger = Ledger::default();
+        ledger.reported(4, &mut table);
+        assert_eq!(ledger.check(&mut table), Ok(0));
+        table.processes.remove(&4);
+        ledger.reported(4, &mut table);
+        assert_eq!(ledger.counted(), 1);
+
+        let mut ledger = Ledger::default();
+        ledger.exited(12);
+        ledger.reported(12, &mut table);
+        ledger.reported(12, &mut table);
+        assert_eq!(ledger.counted(), 1);
+    }
+
+    // A first member gone before its report was opened, whose pid the next
+    // member already holds: the report opens the second, and the exit
+    // message between the two reports counts the first.
+    #[test]
+    fn a_report_that_opens_a_later_member_still_counts_both() {
+        let mut table = Table::default();
+        table.processes.insert(16, (true, 3, false));
+        let mut ledger = Ledger::default();
+        ledger.reported(16, &mut table);
+        ledger.exited(16);
+        ledger.reported(16, &mut table);
+        assert_eq!(ledger.counted(), 2);
+        assert_eq!(
+            settle(&mut ledger, &mut table, 2, 0),
+            Verdict::Pending("a named member has not ended")
+        );
+        table.processes.get_mut(&16).expect("16").2 = true;
+        assert_eq!(settle(&mut ledger, &mut table, 2, 0), Verdict::Settled);
+    }
+
+    /// A small xorshift generator, so the simulation is deterministic.
+    struct Rng(u64);
+
+    impl Rng {
+        fn below(&mut self, n: u64) -> u64 {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            self.0 % n
+        }
+    }
+
+    enum Message {
+        New(u32),
+        Exit(u32),
+    }
+
+    /// A churning job over three pids, its messages queued in order and
+    /// taken late, some repeated before their process's exit and, when
+    /// `lossy`, some lost. A settled account always means every process
+    /// ever created has ended, and the count never exceeds the processes
+    /// associated. Without a lost message, the account settles once the
+    /// tree has ended.
+    fn simulate(seed: u64, lossy: bool) {
+        const PIDS: [u32; 3] = [4, 8, 12];
+        let mut rng = Rng(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1);
+        let mut table = Table::default();
+        let mut ledger = Ledger::default();
+        let mut queue = std::collections::VecDeque::new();
+        let mut associated = 0u32;
+        let mut created = 0u64;
+        let take = |ledger: &mut Ledger<u64>, table: &mut Table, message| match message {
+            Message::New(pid) => ledger.reported(pid, table),
+            Message::Exit(pid) => ledger.exited(pid),
+        };
+        let poll = |ledger: &mut Ledger<u64>, table: &mut Table, settled: u32| {
+            ledger.retry(table);
+            let waiting = ledger.check(table);
+            let active = table
+                .processes
+                .values()
+                .filter(|(_, _, signalled)| !signalled)
+                .count() as u32;
+            let verdict = ledger.verdict(settled, settled, active, waiting);
+            if verdict == Verdict::Settled {
+                assert!(
+                    table.processes.values().all(|(_, _, signalled)| *signalled),
+                    "seed {seed}: settled with a process running"
+                );
+            }
+            verdict
+        };
+        for _ in 0..300 {
+            match rng.below(6) {
+                // A process is created with a free pid.
+                0 => {
+                    let free: Vec<u32> = PIDS
+                        .iter()
+                        .copied()
+                        .filter(|pid| !table.processes.contains_key(pid))
+                        .collect();
+                    if !free.is_empty() {
+                        let pid = free[rng.below(free.len() as u64) as usize];
+                        created += 1;
+                        associated += 1;
+                        table.processes.insert(pid, (true, created, false));
+                        let copies = match rng.below(10) {
+                            0 if lossy => 0,
+                            1 => 2,
+                            _ => 1,
+                        };
+                        for _ in 0..copies {
+                            queue.push_back(Message::New(pid));
+                        }
+                    }
+                }
+                // A running process exits.
+                1 | 2 => {
+                    // Sorted: the table's order is random.
+                    let mut running: Vec<u32> = table
+                        .processes
+                        .iter()
+                        .filter(|(_, (_, _, signalled))| !signalled)
+                        .map(|(pid, _)| *pid)
+                        .collect();
+                    running.sort_unstable();
+                    if !running.is_empty() {
+                        let pid = running[rng.below(running.len() as u64) as usize];
+                        table.processes.get_mut(&pid).expect("running").2 = true;
+                        if !lossy || rng.below(10) != 0 {
+                            queue.push_back(Message::Exit(pid));
+                        }
+                    }
+                }
+                // An ended process no handle holds releases its pid.
+                3 => {
+                    let held: Vec<u64> = ledger
+                        .records
+                        .values()
+                        .filter_map(|record| match record {
+                            Record::Live { handle, .. } => Some(*handle),
+                            _ => None,
+                        })
+                        .collect();
+                    let mut releasable: Vec<u32> = table
+                        .processes
+                        .iter()
+                        .filter(|(_, (_, at, signalled))| *signalled && !held.contains(at))
+                        .map(|(pid, _)| *pid)
+                        .collect();
+                    releasable.sort_unstable();
+                    if !releasable.is_empty() {
+                        let pid = releasable[rng.below(releasable.len() as u64) as usize];
+                        table.processes.remove(&pid);
+                    }
+                }
+                // The account takes the oldest message.
+                4 => {
+                    if let Some(message) = queue.pop_front() {
+                        take(&mut ledger, &mut table, message);
+                    }
+                }
+                // A settle poll, only once every message is taken, as
+                // `Job::settle` drains the port first.
+                _ => {
+                    if queue.is_empty() {
+                        poll(&mut ledger, &mut table, associated);
+                    }
+                }
+            }
+            assert!(
+                ledger.counted() <= u64::from(associated),
+                "seed {seed}: counted {} of {associated}",
+                ledger.counted()
+            );
+        }
+        // The tree is terminated: every process ends, and the account
+        // drains what is left.
+        let mut running: Vec<u32> = table
+            .processes
+            .iter()
+            .filter(|(_, (_, _, signalled))| !signalled)
+            .map(|(pid, _)| *pid)
+            .collect();
+        running.sort_unstable();
+        for pid in running {
+            table.processes.get_mut(&pid).expect("running").2 = true;
+            queue.push_back(Message::Exit(pid));
+        }
+        while let Some(message) = queue.pop_front() {
+            take(&mut ledger, &mut table, message);
+        }
+        let verdict = poll(&mut ledger, &mut table, associated);
+        assert!(ledger.counted() <= u64::from(associated), "seed {seed}");
+        if !lossy {
+            assert_eq!(verdict, Verdict::Settled, "seed {seed}");
+        }
+    }
+
+    #[test]
+    fn a_simulated_churn_settles_only_once_every_process_ended() {
+        for seed in 1..=500 {
+            simulate(seed, false);
+            simulate(seed, true);
+        }
     }
 
     // A pid now naming a process outside the job: the reported member

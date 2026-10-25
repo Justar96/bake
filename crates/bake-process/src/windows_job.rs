@@ -57,8 +57,11 @@ use crate::job_ledger::{Host, Ledger, Opened};
 
 pub use crate::job_ledger::Verdict;
 
-/// `JOB_OBJECT_MSG_NEW_PROCESS` from `winnt.h`.
+/// `JOB_OBJECT_MSG_NEW_PROCESS`, `JOB_OBJECT_MSG_EXIT_PROCESS`, and
+/// `JOB_OBJECT_MSG_ABNORMAL_EXIT_PROCESS` from `winnt.h`.
 const JOB_OBJECT_MSG_NEW_PROCESS: u32 = 6;
+const JOB_OBJECT_MSG_EXIT_PROCESS: u32 = 7;
+const JOB_OBJECT_MSG_ABNORMAL_EXIT_PROCESS: u32 = 8;
 /// The key the job's messages carry; the port serves only this job.
 const KEY: usize = 1;
 /// Messages taken per call, and per settle poll: a backlog left from a long
@@ -271,8 +274,8 @@ impl Job {
         (ledger.counted(), ledger.open_members())
     }
 
-    /// Records queued new-process messages, at most `budget` rounded up to
-    /// a whole batch; returns how many messages were taken and whether the
+    /// Records queued new-process and exit messages, in the order the port
+    /// delivers them, at most `budget` rounded up to a whole batch; returns how many messages were taken and whether the
     /// queue was seen empty.
     fn drain(
         &self,
@@ -310,12 +313,19 @@ impl Job {
                     ledger.contradict("a message on the job's port carried another key");
                     continue;
                 }
-                if entry.dwNumberOfBytesTransferred != JOB_OBJECT_MSG_NEW_PROCESS {
-                    continue;
-                }
-                match u32::try_from(entry.lpOverlapped as usize) {
-                    Ok(pid) => ledger.reported(pid, host),
-                    Err(_) => ledger.contradict("a new-process message's pid is out of range"),
+                let pid = u32::try_from(entry.lpOverlapped as usize);
+                match (entry.dwNumberOfBytesTransferred, pid) {
+                    (JOB_OBJECT_MSG_NEW_PROCESS, Ok(pid)) => ledger.reported(pid, host),
+                    (JOB_OBJECT_MSG_NEW_PROCESS, Err(_)) => {
+                        ledger.contradict("a new-process message's pid is out of range");
+                    }
+                    // An exit message's pid out of range marks nothing.
+                    (JOB_OBJECT_MSG_EXIT_PROCESS | JOB_OBJECT_MSG_ABNORMAL_EXIT_PROCESS, pid) => {
+                        if let Ok(pid) = pid {
+                            ledger.exited(pid);
+                        }
+                    }
+                    _ => {}
                 }
             }
             taken += removed;
