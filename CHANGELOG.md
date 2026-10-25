@@ -4,23 +4,19 @@ Notable changes to Bake. `bake` compiles this file in, and `/changelog` shows it
 
 ## [Unreleased]
 
-- Open the background shells' and agents' lists, a shell's output, and a child's details in a panel under the input bar; the transcript stays in view above it, the selection stays visible on short terminals, and rows out of view are counted.
-- Shift+Tab cycles the model's thinking level for the session.
-- Group `/model` by provider and then by lab, in natural order, with the model id beside each name.
-- Polish `/login`: step titles, a placeholder for the default address that Enter accepts, hints, and a working indicator while the key is checked.
-- Show answers as Markdown with colour; keep long bash commands and output to a few rows with a `+N` count, show a running call's newest output, and label code mode like other tools.
-- A `defaultTools` list of only `+`/`-` entries now changes Bake's default tool set, so code mode, the job tools, and the web tools stay on.
-- Windows: a killed process tree whose short children reused an ended child's process id now finishes settling instead of waiting forever.
+## [0.4.1] - 2026-10-25
 
-- Move the Cargo workspace to the repository root; build and test Bake directly from the checkout, with development guidance in `docs/development.md`.
+Bake 0.4.1 polishes the terminal and keeps Linux as its only released platform.
 
-- Keep the repository focused on Rust and documentation: use Cargo directly for development and CI, and remove Bun tooling, distribution automation, eval runners, snapshots, and archived evidence.
-
-- Support Ghostty's Kitty keyboard reporting with balanced terminal cleanup, and report Bake's activity and saved-session restore command to Herdr automatically.
-
-- Bake is the sole agent on `develop`: normal launch, build, test, and CI commands use the executable, and the retired runtime and its dependencies are removed.
-- Name the terminal preview Bake.
-- Remove the retired agent's Ink and DeepSeek Harness development skills; keep Bake's testing guidance.
+- **Lists open under the input.** The background shells' and agents' lists, one shell's output, and a subagent's details open in a panel under the input bar. The conversation stays in view above it, the selection stays visible on short terminals, and rows out of view are counted.
+- **Shift+Tab cycles the thinking level** of the session's model.
+- **`/model` is grouped** by provider and then by lab, in natural order, with each model's id beside its name.
+- **Clearer `/login`:** step titles, the default address as a placeholder that Enter accepts, hints, and a working indicator while the key is checked.
+- **Easier-to-read transcript:** answers are drawn as Markdown with colour, long bash commands and output keep a few rows with a `+N` count, a running call shows its newest output, and code mode is labelled like the other tools.
+- **Terminals:** Ghostty's Kitty keyboard reporting is supported with balanced cleanup, and Bake reports its activity and the command that restores a saved session to Herdr.
+- **Settings:** a `defaultTools` list of only `+` and `-` entries now changes Bake's default tool set, so code mode, the job tools, and the web tools stay on.
+- **Windows (not yet released):** a killed process tree whose short children reused an ended child's process id now finishes settling instead of waiting forever.
+- **Repository:** the Cargo workspace is at the repository root, and the retired TypeScript agent, Bun tooling, distribution automation, eval runners, and archived evidence are removed. This release is tagged in source only; installers and `bake update` stay on 0.4.0.
 
 ## [0.4.0] - 2026-10-22
 
