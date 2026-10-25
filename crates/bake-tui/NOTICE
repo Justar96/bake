@@ -52,6 +52,12 @@ exportZip of src/modes/interactive/bug-report.ts in
 src/live/commands/bug.rs; with the cases of test/session-share.test.ts and
 test/interactive-mode-bug-report-hint.test.ts in
 src/live/tests/share_live.rs.
+From release v1.4.0, revision 4a080252f06caf63a525d7873c5d94d3c23887e0:
+the terminal title of src/modes/interactive/interactive-mode.ts
+(updateTerminalTitle) and its progress calls around turns and compaction,
+with setTitle, setProgress, and the one-second progress keep-alive of
+packages/tui/src/terminal.ts and the case of packages/tui/test/terminal.test.ts
+that checks the OSC 9;4 clear sequence, in src/indicators.rs.
 --------------------------------------------------------------------------------
 MIT License
 

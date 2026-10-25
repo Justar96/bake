@@ -11,6 +11,18 @@
 
 `bake update` exits 0 when it installed the release or the install is already up to date, and 1 with one line on standard error when it refused. `--check` exits 10 when a newer release is published, so a script can tell a waiting update from a failed check.
 
+## The update notice
+
+Every interactive session opens with a header: Bake's version, the working directory, the session in plain words (`new`, or `resumed`, its prompt count, and how long ago it was last active; `/session` shows its file), and its access as tags: a custom preset's name, the sandbox mode, the approval policy, and `offline` when the session is offline. In fullscreen, a dim `tip` row appears under the tags after a moment and turns through three tips, the scroll keys first, eight seconds each; it goes when they are done or when the first turn starts.
+
+A session started from a native install also checks for a published release in the background, as `bake update --check` does, and when one is newer than the installed release it adds a line tagged `update`:
+
+```
+ update  Bake 0.4.3 is available; this install runs 0.4.2. Run 'bake update' to install it.
+```
+
+The check installs nothing and takes no install lock. It remembers the version it found, and when, in `update-check.json` in the Bake home, and reuses that answer for a day, so most launches make no request for it. A failed check shows nothing and is tried again at the next launch. `--offline`, `BAKE_OFFLINE=1`, or `DSH_OFFLINE=1` leaves the check out, and a `bake` built from source, which has no native install, never checks.
+
 ## On macOS and Windows
 
 Bake 0.4.0 publishes native releases for Linux alone, x64 and arm64. On macOS and Windows every `bake update` run refuses with exit status 1 before it reaches the network or changes anything, including `--check`, `--force`, and `--rollback`, and names the release that brings those platforms:

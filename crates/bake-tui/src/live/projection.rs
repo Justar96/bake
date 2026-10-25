@@ -548,8 +548,9 @@ impl Projector {
 }
 
 /// Whether `event` can change what the status line reads: the model or
-/// thinking level, or the context a response measured or a compaction or
-/// masking batch reduced. The driver reads the status again after one.
+/// thinking level, the context a response measured or a compaction or
+/// masking batch reduced, or the session's name. The driver reads the
+/// status again after one.
 pub fn moves_status(event: &SessionEvent<'_>) -> bool {
     matches!(
         event,
@@ -557,6 +558,7 @@ pub fn moves_status(event: &SessionEvent<'_>) -> bool {
             | SessionEvent::AgentEnd { .. }
             | SessionEvent::AgentSettled { .. }
             | SessionEvent::ThinkingLevelChanged(_)
+            | SessionEvent::SessionInfoChanged(_)
             | SessionEvent::CompactionEnd { .. }
             | SessionEvent::BackgroundCompaction {
                 status: BackgroundCompactionStatus::Committed,

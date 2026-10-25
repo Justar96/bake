@@ -6,10 +6,11 @@
 //! level, per-model thinking levels, the queue modes, the session
 //! directory, `blockImages`, `images.autoResize`, `defaultTools`, `compaction`
 //! (with per-model overrides), `branchSummary.reserveTokens` and
-//! `branchSummary.skipPrompt`, `retry`, and Pi v1.3.0's `codemode.mode` and
-//! `codemode.inlineBudget` ([`crate::tools::codemode`]),
+//! `branchSummary.skipPrompt`, `retry`, Pi v1.3.0's `codemode.mode` and
+//! `codemode.inlineBudget` ([`crate::tools::codemode`]), and Pi v1.4.0's
+//! `terminal.showTerminalProgress`,
 //! and Bake's own `permission` section ([`crate::permissions`]),
-//! `webSearch.model` ([`crate::web::search`]), and
+//! `terminal.notifications`, `webSearch.model` ([`crate::web::search`]), and
 //! `maxToolArgumentWhitespace` (Bake's route option in
 //! `packages/llm/llm-pi-ai/src/config.ts`). Pi reads `~/.pi/agent/settings.json` and
 //! merges a project's `.pi/settings.json` over it; Bake reads
@@ -146,6 +147,16 @@ pub struct Settings {
     /// unset or not a finite number of at least 0, which uses
     /// [`crate::tools::codemode::DEFAULT_CODEMODE_INLINE_BUDGET`].
     pub codemode_inline_budget: Option<f64>,
+    /// `terminal.showTerminalProgress`, Pi v1.4.0's: whether the terminal
+    /// shows an OSC 9;4 progress indicator while a turn runs. `None` when
+    /// unset or not a boolean; the terminal interface then shows it in
+    /// Ghostty only.
+    pub show_terminal_progress: Option<bool>,
+    /// `terminal.notifications`, Bake's own: whether the terminal shows a
+    /// desktop notification when a turn ends or asks for approval while
+    /// it is out of focus. `None` when unset or not a boolean; the
+    /// terminal interface then shows them in Ghostty only.
+    pub terminal_notifications: Option<bool>,
     /// Load errors, as Pi's settings diagnostics word them.
     pub warnings: Vec<String>,
 }
@@ -258,6 +269,8 @@ impl Default for Settings {
             cliproxyapi: CliProxySetting::Absent,
             codemode_mode: CodemodeMode::On,
             codemode_inline_budget: None,
+            show_terminal_progress: None,
+            terminal_notifications: None,
             warnings: Vec::new(),
         }
     }
@@ -447,6 +460,15 @@ fn string(object: &Map<String, Value>, key: &str) -> Option<String> {
         .map(str::to_owned)
 }
 
+/// A boolean member of the `terminal` section; `None` when it is absent or
+/// not a boolean.
+fn terminal_flag(object: &Map<String, Value>, key: &str) -> Option<bool> {
+    object
+        .get("terminal")
+        .and_then(|terminal| terminal.get(key))
+        .and_then(Value::as_bool)
+}
+
 impl Settings {
     /// Settings from a parsed object, after Pi's `queueMode` migration.
     pub fn from_object(object: &Map<String, Value>) -> Self {
@@ -547,6 +569,8 @@ impl Settings {
                 .and_then(|codemode| codemode.get("inlineBudget"))
                 .and_then(Value::as_f64)
                 .filter(|budget| budget.is_finite() && *budget >= 0.0),
+            show_terminal_progress: terminal_flag(object, "showTerminalProgress"),
+            terminal_notifications: terminal_flag(object, "notifications"),
             warnings: Vec::new(),
         }
     }
@@ -941,6 +965,29 @@ mod tests {
         );
         let settings = Settings::parse(r#"{"defaultTools":"read"}"#, Path::new("s.json"));
         assert_eq!(settings.default_tools, Some(Vec::new()));
+    }
+
+    // Pi v1.4.0 `settings-schema.ts` `showTerminalProgress`, and Bake's
+    // own `terminal.notifications`; unset leaves the terminal to decide.
+    #[test]
+    fn reads_the_terminal_signal_settings() {
+        let read = |text: &str| {
+            let settings = Settings::parse(text, Path::new("s.json"));
+            (
+                settings.show_terminal_progress,
+                settings.terminal_notifications,
+            )
+        };
+        assert_eq!(
+            read(r#"{"terminal":{"showTerminalProgress":true,"notifications":false}}"#),
+            (Some(true), Some(false))
+        );
+        assert_eq!(
+            read(r#"{"terminal":{"showTerminalProgress":"yes","notifications":1}}"#),
+            (None, None)
+        );
+        assert_eq!(read(r#"{"terminal":true}"#), (None, None));
+        assert_eq!(read("{}"), (None, None));
     }
 
     // Bake `packages/llm/llm-pi-ai/src/config.ts`: a positive integer.

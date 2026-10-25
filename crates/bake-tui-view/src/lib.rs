@@ -31,5 +31,6 @@ pub mod shell_output;
 pub mod state;
 pub mod status;
 pub mod syntax;
+pub mod tips;
 pub mod transcript;
 pub mod wheel;

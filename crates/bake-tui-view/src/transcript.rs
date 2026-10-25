@@ -57,6 +57,12 @@ pub enum CallState {
 pub enum Row {
     /// The preview's title and introduction, which open the transcript.
     Welcome,
+    /// The live terminal's opening header: Bake, its version, where the
+    /// session works, whether it is new, and what it may do.
+    Banner(Banner),
+    /// A note that asks for the user's attention, such as a published
+    /// update: a yellow tag, then its text.
+    Notice(Notice),
     /// The user's words that started a turn.
     User(String),
     /// The model's working-out, dim and italic.
@@ -84,6 +90,39 @@ pub enum Row {
     /// A `codemode` call: its script, the calls the script made, and what
     /// went back to the model.
     Codemode(Codemode),
+}
+
+/// What the live terminal's [`Row::Banner`] shows.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Banner {
+    /// The running version, such as `0.4.2`.
+    pub version: String,
+    /// The working directory, with the user's home shortened to `~`.
+    pub directory: String,
+    /// The session in plain words, such as `new` or `resumed · 6 prompts ·
+    /// 2h ago`.
+    pub session: String,
+    /// What the session may do, as tags: its sandbox mode, its approval
+    /// policy, and whether it is offline. None leaves the line out.
+    pub access: Vec<Pill>,
+    /// The tip shown under the tags for a while after startup, which the
+    /// view sets and clears ([`crate::tips`]); `None` leaves the line out.
+    pub tip: Option<String>,
+}
+
+/// One tag in the banner.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Pill {
+    pub text: String,
+    pub tone: TagTone,
+}
+
+/// What a [`Row::Notice`] says.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Notice {
+    /// The tag before it, such as `update`.
+    pub tag: String,
+    pub text: String,
 }
 
 impl Row {
@@ -765,6 +804,19 @@ pub fn present(rows: &[Row], index: usize, width: usize, look: Look) -> Vec<Line
                 lines.extend(hang(paragraph, prose, RAIL, rail(), rail(), dim()));
             }
         }
+        Row::Banner(banner) => lines.extend(present_banner(banner, prose, look)),
+        Row::Notice(notice) => {
+            let label = tag(&notice.tag, TagTone::Yellow, look.tones);
+            let indent = RAIL + label.width() + 1;
+            lines.extend(hang(
+                &notice.text,
+                prose,
+                indent,
+                vec![pad(RAIL), label, pad(1)],
+                vec![pad(indent)],
+                Style::new(),
+            ));
+        }
         // A prompt mark opens the user's words, as they were typed; the
         // rows a long prompt wraps to hang under the text, not the mark.
         Row::User(text) => {
@@ -828,6 +880,121 @@ pub fn present(rows: &[Row], index: usize, width: usize, look: Look) -> Vec<Line
         }
     }
     lines
+}
+
+/// The banner's lines: a blank row, the wordmark, its version, and the tagline when it
+/// fits, then each detail under a dim label, its value hung beside it, and
+/// the access tags, which flow onto more rows when they do not fit.
+fn present_banner(banner: &Banner, width: usize, look: Look) -> Vec<Line<'static>> {
+    let mut title = vec![pad(RAIL)];
+    title.extend(wordmark(look));
+    title.push(pad(1));
+    title.push(Span::styled(format!("v{}", banner.version), dim()));
+    let used: usize = title.iter().map(Span::width).sum();
+    let tagline = format!("{}{}", copy::BANNER_SEP, copy::BANNER_TAGLINE);
+    if used + tagline.width() <= width {
+        title.push(Span::styled(tagline, dim()));
+    }
+    // A blank row above keeps the title off the terminal's top edge, or
+    // the shell prompt above it inline.
+    let mut lines = vec![Line::default(), Line::from(title)];
+    let [directory, session, access, tip] = copy::BANNER_LABELS;
+    let column = copy::BANNER_LABELS
+        .iter()
+        .map(|label| label.width())
+        .max()
+        .unwrap_or(0)
+        + 2;
+    let label = |name: &str| vec![pad(RAIL), Span::styled(format!("{name:<column$}"), dim())];
+    for (name, value) in [(directory, &banner.directory), (session, &banner.session)] {
+        lines.extend(hang(
+            value,
+            width,
+            RAIL + column,
+            label(name),
+            vec![pad(RAIL + column)],
+            Style::new(),
+        ));
+    }
+    if !banner.access.is_empty() {
+        let start = RAIL + column;
+        let mut row = label(access);
+        let mut at = start;
+        for pill in &banner.access {
+            let span = tag(&pill.text, pill.tone, look.tones);
+            let gap = usize::from(at > start);
+            if at > start && at + gap + span.width() > width {
+                lines.push(clip_line(Line::from(std::mem::take(&mut row)), width));
+                row.push(pad(start));
+                at = start;
+            } else if gap > 0 {
+                row.push(pad(1));
+                at += 1;
+            }
+            at += span.width();
+            row.push(span);
+        }
+        lines.push(clip_line(Line::from(row), width));
+    }
+    if let Some(text) = &banner.tip {
+        lines.extend(hang(
+            text,
+            width,
+            RAIL + column,
+            label(tip),
+            vec![pad(RAIL + column)],
+            dim(),
+        ));
+    }
+    lines
+}
+
+/// The gradient [`wordmark`] runs along: amber, orange, then rose, an
+/// oven's glow.
+const WORDMARK_GLOW: [(u8, u8, u8); 3] =
+    [(0xf5, 0x9e, 0x0b), (0xf9, 0x73, 0x16), (0xf4, 0x3f, 0x5e)];
+
+/// "Bake", bold: each letter a step along [`WORDMARK_GLOW`] on a truecolor
+/// terminal, the accent on sixteen colours or with the classic frame, and
+/// only bold under `NO_COLOR`.
+fn wordmark(look: Look) -> Vec<Span<'static>> {
+    let bold = Modifier::BOLD;
+    if look.tones != Tones::TrueColor || look.classic {
+        return vec![Span::styled(
+            copy::TITLE,
+            accent(look.tones).add_modifier(bold),
+        )];
+    }
+    let letters: Vec<&str> = copy::TITLE.graphemes(true).collect();
+    let last = letters.len().saturating_sub(1).max(1);
+    letters
+        .iter()
+        .enumerate()
+        .map(|(index, letter)| {
+            let (r, g, b) = glow(index, last);
+            Span::styled(
+                (*letter).to_owned(),
+                Style::new().fg(Color::Rgb(r, g, b)).add_modifier(bold),
+            )
+        })
+        .collect()
+}
+
+/// The colour `index` of `last` steps along [`WORDMARK_GLOW`].
+fn glow(index: usize, last: usize) -> (u8, u8, u8) {
+    let spans = WORDMARK_GLOW.len() - 1;
+    // Position in the gradient, in units of 1/(last) of one stop.
+    let scaled = index.min(last) * spans;
+    let stop = (scaled / last).min(spans - 1);
+    let within = scaled - stop * last;
+    let mix = |from: u8, to: u8| {
+        let (from, to) = (i64::from(from), i64::from(to));
+        let value = from
+            + (to - from) * i64::try_from(within).unwrap_or(0) / i64::try_from(last).unwrap_or(1);
+        u8::try_from(value.clamp(0, 255)).unwrap_or(u8::MAX)
+    };
+    let (from, to) = (WORDMARK_GLOW[stop], WORDMARK_GLOW[stop + 1]);
+    (mix(from.0, to.0), mix(from.1, to.1), mix(from.2, to.2))
 }
 
 /// What kind of work a tool does. It picks whether its argument reads as a
@@ -2847,6 +3014,170 @@ mod tests {
         assert_eq!(
             tag("x", TagTone::Blue, Tones::Ansi).style.fg,
             Some(Color::Blue)
+        );
+    }
+
+    fn banner_rows() -> Vec<Row> {
+        let pill = |text: &str, tone| Pill {
+            text: text.into(),
+            tone,
+        };
+        vec![
+            Row::Banner(Banner {
+                version: "0.4.2".into(),
+                directory: "~/src/app".into(),
+                session: "resumed · 6 prompts · 2h ago".into(),
+                access: vec![
+                    pill("workspace-write", TagTone::Blue),
+                    pill("approvals ask", TagTone::Yellow),
+                    pill("offline", TagTone::Pink),
+                ],
+                tip: None,
+            }),
+            Row::Notice(Notice {
+                tag: "update".into(),
+                text: "Bake 0.4.3 is available. Run bake update to install it.".into(),
+            }),
+        ]
+    }
+
+    #[test]
+    fn the_banner_names_bake_its_version_session_and_access() {
+        let rows = banner_rows();
+        assert_eq!(
+            text(&present(&rows, 0, 80, PLAIN)),
+            [
+                "",
+                "  Bake v0.4.2 · code, freshly baked",
+                "  directory  ~/src/app",
+                "  session    resumed · 6 prompts · 2h ago",
+                "  access      workspace-write   approvals ask   offline",
+            ]
+        );
+        // Narrow, the tagline goes, a long value hangs under its column, and
+        // the tags flow onto the next row instead of being cut.
+        assert_eq!(
+            text(&present(&rows, 0, 34, PLAIN)),
+            [
+                "",
+                "  Bake v0.4.2",
+                "  directory  ~/src/app",
+                "  session    resumed · 6 prompts",
+                "             · 2h ago",
+                "  access      workspace-write",
+                "              approvals ask",
+                "              offline",
+            ]
+        );
+        // Every row stays inside the width, however narrow.
+        for width in 1..=90 {
+            for line in present(&rows, 0, width, PLAIN) {
+                assert!(line.width() <= width.max(RAIL + 12), "{width}: {line:?}");
+            }
+        }
+        // An empty access list leaves its line out.
+        let Row::Banner(mut banner) = rows[0].clone() else {
+            unreachable!()
+        };
+        banner.access.clear();
+        assert_eq!(present(&[Row::Banner(banner)], 0, 80, PLAIN).len(), 4);
+    }
+
+    #[test]
+    fn a_tip_hangs_dim_under_the_access_tags() {
+        let mut rows = banner_rows();
+        let Row::Banner(banner) = &mut rows[0] else {
+            unreachable!()
+        };
+        banner.tip = Some("Shift+Tab cycles the thinking level".into());
+        let drawn = present(&rows, 0, 80, PLAIN);
+        assert_eq!(
+            text(&drawn).last().map(String::as_str),
+            Some("  tip        Shift+Tab cycles the thinking level")
+        );
+        let tip = drawn.last().unwrap();
+        assert!(tip.spans.iter().skip(1).all(|span| span.style == dim()));
+        // Narrow, it hangs under its column.
+        assert_eq!(
+            text(&present(&rows, 0, 34, PLAIN))[8..],
+            [
+                "  tip        Shift+Tab cycles",
+                "             the thinking level",
+            ]
+        );
+    }
+
+    #[test]
+    fn the_wordmark_glows_on_truecolor_and_falls_back_elsewhere() {
+        let rows = banner_rows();
+        let title = |look| present(&rows, 0, 80, look)[1].clone();
+        let truecolor = Look {
+            tones: Tones::TrueColor,
+            ..PLAIN
+        };
+        let letters: Vec<Style> = title(truecolor).spans[1..5]
+            .iter()
+            .map(|s| s.style)
+            .collect();
+        let rgb = |r, g, b| {
+            Style::new()
+                .fg(Color::Rgb(r, g, b))
+                .add_modifier(Modifier::BOLD)
+        };
+        assert_eq!(
+            letters,
+            [
+                rgb(0xf5, 0x9e, 0x0b),
+                rgb(0xf7, 0x82, 0x12),
+                rgb(0xf8, 0x62, 0x2e),
+                rgb(0xf4, 0x3f, 0x5e),
+            ]
+        );
+        // Sixteen colours and the classic frame take the accent; `NO_COLOR`
+        // only bold. The text is the same in every case.
+        let ansi = Look {
+            tones: Tones::Ansi,
+            ..PLAIN
+        };
+        let classic = Look {
+            classic: true,
+            ..truecolor
+        };
+        for (look, style) in [
+            (ansi, accent(Tones::Ansi).add_modifier(Modifier::BOLD)),
+            (
+                classic,
+                accent(Tones::TrueColor).add_modifier(Modifier::BOLD),
+            ),
+            (PLAIN, Style::new().add_modifier(Modifier::BOLD)),
+        ] {
+            let line = title(look);
+            assert_eq!(line.spans[1].content, "Bake");
+            assert_eq!(line.spans[1].style, style);
+        }
+        assert_eq!(text(&[title(truecolor)]), text(&[title(PLAIN)]));
+    }
+
+    #[test]
+    fn a_notice_opens_with_its_tag_and_hangs_under_its_text() {
+        let rows = banner_rows();
+        assert_eq!(
+            text(&present(&rows, 1, 40, PLAIN)),
+            [
+                "",
+                "   update  Bake 0.4.3 is available.",
+                "           Run bake update to install",
+                "           it.",
+            ]
+        );
+        let look = Look {
+            tones: Tones::TrueColor,
+            ..PLAIN
+        };
+        let drawn = present(&rows, 1, 40, look);
+        assert_eq!(
+            drawn[1].spans[1],
+            tag("update", TagTone::Yellow, Tones::TrueColor)
         );
     }
 

@@ -181,6 +181,281 @@ pub fn parse_streaming_json_object(partial_json: Option<&str>) -> JsonObject {
     }
 }
 
+/// Streamed tool arguments: the text so far and its
+/// [`parse_streaming_json_object`] result, kept current as deltas arrive.
+///
+/// Parsing the whole text again after every delta makes a long argument,
+/// such as a file being written, cost the square of its length. While the
+/// text ends inside a string value, a delta that only continues that string
+/// is decoded onto the previous result instead. The partial parser reads
+/// malformed text before the string differently as the text grows, so this
+/// starts only after a full parse that strict JSON confirms. A delta with a
+/// quote, a raw control character, an escape cut short or invalid, or a
+/// surrogate escape parses the whole text again. What strict JSON refuses
+/// stays in the text, so after a refusal the text is checked again only
+/// once it has doubled, keeping the checks' cost linear.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct StreamingJsonObject {
+    text: String,
+    object: JsonObject,
+    open: Option<OpenString>,
+    /// The text length before which strict JSON is not asked again.
+    recheck_at: usize,
+}
+
+/// The string value a [`StreamingJsonObject`]'s text ends in.
+#[derive(Debug, Clone)]
+struct OpenString {
+    path: Vec<Step>,
+    /// The text's trailing whitespace, which the parse trims until
+    /// something follows it.
+    pending: String,
+}
+
+#[derive(Debug, Clone)]
+enum Step {
+    Member(String),
+    Item(usize),
+}
+
+/// Ends the open string while [`confirmed_open_string`] checks it. A string
+/// whose own text ends in it only makes the check fail.
+const MARK: char = '\u{FFFF}';
+
+impl StreamingJsonObject {
+    /// Arguments whose text starts as `text`.
+    pub fn new(text: String) -> Self {
+        let mut arguments = Self {
+            text,
+            ..Self::default()
+        };
+        arguments.parse();
+        arguments
+    }
+
+    /// The text so far.
+    pub fn text(&self) -> &str {
+        &self.text
+    }
+
+    /// The text so far, ending the stream.
+    pub fn into_text(self) -> String {
+        self.text
+    }
+
+    /// [`parse_streaming_json_object`] of the text so far.
+    pub fn object(&self) -> &JsonObject {
+        &self.object
+    }
+
+    /// Appends `delta` to the text.
+    pub fn push(&mut self, delta: &str) {
+        self.text.push_str(delta);
+        if !self.continue_open_string(delta) {
+            self.parse();
+        }
+    }
+
+    fn parse(&mut self) {
+        self.object = parse_streaming_json_object(Some(&self.text));
+        self.open = None;
+        if self.text.len() < self.recheck_at {
+            return;
+        }
+        let Some((closed, pending)) = closed_at_open_string(&self.text) else {
+            return;
+        };
+        self.open = confirmed_open_string(&closed, &self.object, pending);
+        if self.open.is_none() {
+            self.recheck_at = self.text.len().saturating_mul(2);
+        }
+    }
+
+    fn continue_open_string(&mut self, delta: &str) -> bool {
+        let Some(open) = &mut self.open else {
+            return false;
+        };
+        let Some((added, pending)) = continue_string(&open.pending, delta) else {
+            return false;
+        };
+        let Some(Value::String(value)) = member_at(&mut self.object, &open.path) else {
+            return false;
+        };
+        value.push_str(&added);
+        open.pending = pending;
+        true
+    }
+}
+
+/// `delta` read as more of a string literal whose text so far ends in the
+/// whitespace `pending`: what it adds to the string's value, and the
+/// trailing whitespace then held back. `None` for a delta that could end
+/// the string or does not decode on its own.
+fn continue_string(pending: &str, delta: &str) -> Option<(String, String)> {
+    let mut added = String::new();
+    let mut held = pending.to_owned();
+    let mut chars = delta.chars();
+    while let Some(ch) = chars.next() {
+        let decoded = match ch {
+            '"' => return None,
+            '\\' => match chars.next()? {
+                '"' => '"',
+                '\\' => '\\',
+                '/' => '/',
+                'b' => '\u{8}',
+                'f' => '\u{c}',
+                'n' => '\n',
+                'r' => '\r',
+                't' => '\t',
+                'u' => {
+                    let digits: Vec<char> = chars.by_ref().take(4).collect();
+                    // `None` for a surrogate, which may pair across deltas.
+                    char::from_u32(hex4_value(&digits)?)?
+                }
+                _ => return None,
+            },
+            ch if (ch as u32) <= 0x1f => return None,
+            // `str::trim`, which the partial parser applies, drops these
+            // from the end of the text.
+            ch if ch.is_whitespace() => {
+                held.push(ch);
+                continue;
+            }
+            ch => ch,
+        };
+        added.push_str(&held);
+        held.clear();
+        added.push(decoded);
+    }
+    Some((added, held))
+}
+
+fn member_at<'a>(object: &'a mut JsonObject, path: &[Step]) -> Option<&'a mut Value> {
+    let (Step::Member(key), rest) = path.split_first()? else {
+        return None;
+    };
+    let mut value = object.get_mut(key)?;
+    for step in rest {
+        value = match (step, value) {
+            (Step::Member(key), Value::Object(members)) => members.get_mut(key)?,
+            (Step::Item(index), Value::Array(items)) => items.get_mut(*index)?,
+            _ => return None,
+        };
+    }
+    Some(value)
+}
+
+/// When `text` ends inside a string value, outside an escape, the text as
+/// the partial parser trims it with that string ended by [`MARK`] and its
+/// containers closed, and the trailing whitespace the trim removed.
+fn closed_at_open_string(text: &str) -> Option<(String, &str)> {
+    let trimmed = text.trim_end();
+    let pending = text.get(trimmed.len()..)?;
+    if pending.chars().any(|ch| (ch as u32) <= 0x1f) {
+        return None;
+    }
+    let closers = open_value_string_closers(trimmed)?;
+    let mut closed = String::with_capacity(trimmed.len() + closers.len() + 4);
+    closed.push_str(trimmed);
+    closed.push(MARK);
+    closed.push('"');
+    closed.push_str(&closers);
+    Some((closed, pending))
+}
+
+/// The string [`closed_at_open_string`] marked, when strict JSON reads
+/// `closed` as `object` holds it.
+fn confirmed_open_string(closed: &str, object: &JsonObject, pending: &str) -> Option<OpenString> {
+    let mut strict: Value = serde_json::from_str(closed).ok()?;
+    let mut marked = Vec::new();
+    unmark(&mut strict, &mut Vec::new(), &mut marked);
+    let [path] = <[Vec<Step>; 1]>::try_from(marked).ok()?;
+    (strict.as_object() == Some(object)).then(|| OpenString {
+        path,
+        pending: pending.to_owned(),
+    })
+}
+
+/// The brackets that close `text`'s objects and arrays, when it ends inside
+/// a string that is a value, not a key, outside an escape, and not after
+/// the first half of a surrogate pair, which the next delta may complete.
+fn open_value_string_closers(text: &str) -> Option<String> {
+    // Each open container's closer, and for an object whether a key is next.
+    let mut open: Vec<(char, bool)> = Vec::new();
+    let (mut in_string, mut is_key, mut escaped) = (false, false, false);
+    // A `\u` escape's characters still to come, its code unit so far, and
+    // whether the last character ended a high surrogate.
+    let (mut digits, mut unit, mut high) = (0, 0, false);
+    for ch in text.chars() {
+        if in_string {
+            high = false;
+            match ch {
+                _ if digits > 0 => {
+                    digits -= 1;
+                    unit = unit << 4 | ch.to_digit(16).unwrap_or(0);
+                    high = digits == 0 && (0xD800..0xDC00).contains(&unit);
+                }
+                _ if escaped => {
+                    escaped = false;
+                    digits = if ch == 'u' { 4 } else { 0 };
+                    unit = 0;
+                }
+                '\\' => escaped = true,
+                '"' => in_string = false,
+                _ => {}
+            }
+            continue;
+        }
+        match ch {
+            '"' => {
+                in_string = true;
+                is_key = matches!(open.last(), Some(('}', true)));
+            }
+            '{' => open.push(('}', true)),
+            '[' => open.push((']', false)),
+            '}' | ']' => {
+                open.pop();
+            }
+            ':' | ',' => {
+                if let Some(('}', key_next)) = open.last_mut() {
+                    *key_next = ch == ',';
+                }
+            }
+            _ => {}
+        }
+    }
+    (in_string && !is_key && !escaped && digits == 0 && !high)
+        .then(|| open.iter().rev().map(|(closer, _)| closer).collect())
+}
+
+/// Removes [`MARK`] from the end of each string in `value` that has it,
+/// collecting the way to each from `path`.
+fn unmark(value: &mut Value, path: &mut Vec<Step>, marked: &mut Vec<Vec<Step>>) {
+    match value {
+        Value::String(text) => {
+            if text.ends_with(MARK) {
+                text.pop();
+                marked.push(path.clone());
+            }
+        }
+        Value::Array(items) => {
+            for (index, item) in items.iter_mut().enumerate() {
+                path.push(Step::Item(index));
+                unmark(item, path, marked);
+                path.pop();
+            }
+        }
+        Value::Object(members) => {
+            for (key, member) in members.iter_mut() {
+                path.push(Step::Member(key.clone()));
+                unmark(member, path, marked);
+                path.pop();
+            }
+        }
+        Value::Null | Value::Bool(_) | Value::Number(_) => {}
+    }
+}
+
 /// Why the partial parser stopped.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PartialJsonError(pub String);
@@ -606,6 +881,87 @@ mod tests {
         assert!(parse_partial(&at_cap).is_ok());
     }
 
+    /// Pushes each piece, checking the object against a full parse of the
+    /// text so far and whether a string continues without one.
+    fn stream(pieces: &[(&str, bool)]) -> StreamingJsonObject {
+        let mut arguments = StreamingJsonObject::default();
+        for (piece, continues) in pieces {
+            arguments.push(piece);
+            assert_eq!(
+                arguments.object(),
+                &parse_streaming_json_object(Some(arguments.text())),
+                "{:?}",
+                arguments.text()
+            );
+            assert_eq!(
+                arguments.open.is_some(),
+                *continues,
+                "{:?}",
+                arguments.text()
+            );
+        }
+        arguments
+    }
+
+    #[test]
+    fn a_streamed_string_value_continues_without_parsing_again() {
+        let arguments = stream(&[
+            ("{\"path\":\"a.rs\",", false),
+            ("\"content\":\"", true),
+            ("fn main", true),
+            ("() {", true),
+            ("\\n", true),
+            ("    ", true),
+            ("println!(", true),
+            ("\\\"hi\\\"", true),
+            (");\\n}", true),
+            ("  ", true),
+            ("\\u00E9\\/", true),
+            ("\u{3000}", true),
+            ("x", true),
+        ]);
+        assert_eq!(
+            arguments.object()["content"],
+            json!("fn main() {\n    println!(\"hi\");\n}  é/\u{3000}x")
+        );
+        assert_eq!(
+            StreamingJsonObject::new("{\"a\":\"b".into()).object()["a"],
+            json!("b")
+        );
+    }
+
+    #[test]
+    fn anything_else_parses_the_whole_text_again() {
+        stream(&[
+            ("{\"a\":[1,{\"b\":\"x", true),
+            // An escape cut between deltas.
+            ("\\", false),
+            ("n", true),
+            // A surrogate pair, which pairs across deltas.
+            ("\\ud83d", false),
+            ("\\ude00", true),
+            // An escape cut inside its digits is not a refusal.
+            ("\\u00", false),
+            ("e9", true),
+            // A key is not continued.
+            ("\"}],\"c", false),
+            ("\":", false),
+            (" \"z", true),
+            // Nor is a string strict JSON refuses, nor any after it.
+            ("\\x", false),
+            ("w\",\"d\":\"v", false),
+        ]);
+        stream(&[
+            ("{\"a\":\"x", true),
+            // A raw line break the parse trims, then keeps.
+            ("\n", false),
+            ("y", false),
+        ]);
+        // `NaN` reads as null, which strict JSON does not.
+        stream(&[("{\"n\":NaN,\"a\":\"x", false), ("y", false)]);
+        stream(&[("[\"x", false), ("y", false)]);
+    }
+
     mod properties {
         use proptest::prelude::*;
 
@@ -637,6 +993,67 @@ mod tests {
         fn object() -> impl Strategy<Value = Value> {
             prop::collection::vec(("[a-z\u{e9}\u{1F648}]{0,4}", value()), 0..4)
                 .prop_map(|members| Value::Object(members.into_iter().collect()))
+        }
+
+        /// `text`, JSON, with the characters of its strings escaped in the
+        /// other ways JSON allows as `choices` pick: `\uXXXX` in either case,
+        /// as a surrogate pair beyond the basic plane, and `\/`.
+        fn escaped_differently(text: &str, choices: &[u8]) -> String {
+            let mut out = String::new();
+            let mut choices = choices.iter().cycle();
+            let (mut in_string, mut escaped) = (false, false);
+            // The hex digits of a `\u` escape still to copy.
+            let mut digits = 0;
+            for ch in text.chars() {
+                if !in_string || escaped || digits > 0 || matches!(ch, '\\' | '"') {
+                    out.push(ch);
+                    if !in_string {
+                        in_string = ch == '"';
+                    } else if digits > 0 {
+                        digits -= 1;
+                    } else if escaped {
+                        escaped = false;
+                        digits = if ch == 'u' { 4 } else { 0 };
+                    } else {
+                        escaped = ch == '\\';
+                        in_string = ch != '"';
+                    }
+                    continue;
+                }
+                let mut units = [0u16; 2];
+                match choices.next().copied().unwrap_or(0) {
+                    0 | 1 => {
+                        for unit in ch.encode_utf16(&mut units) {
+                            out.push_str(&format!("\\u{unit:04x}"));
+                        }
+                    }
+                    2 => {
+                        for unit in ch.encode_utf16(&mut units) {
+                            out.push_str(&format!("\\u{unit:04X}"));
+                        }
+                    }
+                    3 if ch == '/' => out.push_str("\\/"),
+                    _ => out.push(ch),
+                }
+            }
+            out
+        }
+
+        /// `text` cut into deltas of the given lengths in characters, in turn.
+        fn deltas<'a>(text: &'a str, lengths: &[usize]) -> Vec<&'a str> {
+            let bounds: Vec<usize> = text
+                .char_indices()
+                .map(|(index, _)| index)
+                .chain([text.len()])
+                .collect();
+            let mut pieces = Vec::new();
+            let (mut at, mut lengths) = (0, lengths.iter().cycle());
+            while at + 1 < bounds.len() {
+                let next = (at + lengths.next().copied().unwrap_or(1)).min(bounds.len() - 1);
+                pieces.push(&text[bounds[at]..bounds[next]]);
+                at = next;
+            }
+            pieces
         }
 
         /// Whether `partial`, read from a prefix of `full`'s text, holds only
@@ -719,6 +1136,61 @@ mod tests {
                     );
                 }
                 prop_assert_eq!(parse_streaming_json(Some(&text)), full);
+            }
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(256))]
+
+            #[test]
+            fn streamed_arguments_read_as_a_full_parse_of_their_text(
+                full in object(),
+                pretty in any::<bool>(),
+                choices in prop::collection::vec(0u8..8, 1..16),
+                lengths in prop::collection::vec(1usize..6, 1..8),
+            ) {
+                let text = if pretty {
+                    serde_json::to_string_pretty(&full).unwrap()
+                } else {
+                    serde_json::to_string(&full).unwrap()
+                };
+                let text = escaped_differently(&text, &choices);
+                let mut arguments = StreamingJsonObject::default();
+                for delta in deltas(&text, &lengths) {
+                    arguments.push(delta);
+                    prop_assert_eq!(
+                        arguments.object(),
+                        &parse_streaming_json_object(Some(arguments.text()))
+                    );
+                }
+                prop_assert_eq!(arguments.text(), text.as_str());
+                prop_assert_eq!(Value::Object(arguments.object().clone()), full);
+            }
+
+            #[test]
+            fn any_streamed_text_reads_as_a_full_parse_of_it(
+                pieces in prop::collection::vec(
+                    prop_oneof![
+                        Just("{\"a\":\"".to_owned()),
+                        Just("\"b\":[\"".to_owned()),
+                        "[a-z \"\\\\{}\\[\\]:,0-9.eE+-]{0,6}",
+                        "(\\PC|[\u{0}-\u{1f}\u{85}\u{FFFF}]){0,4}",
+                        Just("\\u00e9".to_owned()),
+                        Just("\\ud83d".to_owned()),
+                        Just("\\ude00".to_owned()),
+                        Just("NaN".to_owned()),
+                    ],
+                    0..16,
+                ),
+            ) {
+                let mut arguments = StreamingJsonObject::default();
+                for piece in &pieces {
+                    arguments.push(piece);
+                    prop_assert_eq!(
+                        arguments.object(),
+                        &parse_streaming_json_object(Some(arguments.text()))
+                    );
+                }
             }
         }
     }

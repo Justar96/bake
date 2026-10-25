@@ -40,7 +40,9 @@ use crate::utils::abort::is_aborted;
 use crate::utils::error_body::{ProviderError, format_provider_error, normalize_provider_error};
 use crate::utils::event_stream::{AssistantMessageEventSender, AssistantMessageEventStream};
 use crate::utils::hash::short_hash;
-use crate::utils::json_parse::{parse_json_strict, parse_streaming_json_object};
+use crate::utils::json_parse::{
+    StreamingJsonObject, parse_json_strict, parse_streaming_json_object,
+};
 use crate::utils::text::{get_system_message_text, render_system_message_update};
 use crate::utils::tool_argument_guard::{ArgumentScan, DEFAULT_MAX_TOOL_ARGUMENT_WHITESPACE};
 use crate::utils::transcript::{
@@ -1144,7 +1146,7 @@ fn map_stop_reason(reason: &str) -> (StopReason, Option<String>) {
 
 #[derive(Debug, Default)]
 struct ToolScratch {
-    partial_args: String,
+    partial_args: StreamingJsonObject,
     stream_index: Option<i64>,
     scan: ArgumentScan,
 }
@@ -1259,7 +1261,7 @@ impl CompletionsStreamProcessor {
                 self.scratch.insert(
                     index,
                     ToolScratch {
-                        partial_args: String::new(),
+                        partial_args: StreamingJsonObject::default(),
                         stream_index,
                         scan: ArgumentScan::default(),
                     },
@@ -1400,8 +1402,8 @@ impl CompletionsStreamProcessor {
                             &self.model.id,
                             &tool_name,
                         )?;
-                        scratch.partial_args.push_str(arguments);
-                        let parsed = parse_streaming_json_object(Some(&scratch.partial_args));
+                        scratch.partial_args.push(arguments);
+                        let parsed = scratch.partial_args.object().clone();
                         if let Some(AssistantContentBlock::ToolCall(block)) =
                             self.output.content.get_mut(index)
                         {
@@ -1466,7 +1468,7 @@ impl CompletionsStreamProcessor {
                     let partial_args = self
                         .scratch
                         .remove(&index)
-                        .map(|scratch| scratch.partial_args);
+                        .map(|scratch| scratch.partial_args.into_text());
                     let arguments = parse_streaming_json_object(partial_args.as_deref());
                     let tool_call = match self.output.content.get_mut(index) {
                         Some(AssistantContentBlock::ToolCall(call)) => {

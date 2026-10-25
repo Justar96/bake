@@ -23,6 +23,7 @@ bake reads its settings from `settings.json` in the Bake home, a JSON object rea
 | `sessionDir` | One directory to keep every project's sessions in, in place of `sessions/` in the Bake home; continuing and listing still pick the working directory's sessions |
 | `blockImages` | When `true`, images are not sent to the model |
 | `images.autoResize` | Whether the `read` tool shrinks large images before sending them; `true` when unset |
+| `terminal` | `showTerminalProgress`: whether the terminal shows a progress bar (OSC 9;4) while a turn runs; `notifications`: whether it shows a desktop notification when a turn ends or a tool needs approval while the terminal is out of focus. When unset, each is on in Ghostty and off elsewhere (`bake docs cli`) |
 | `compaction` | `enabled` (default `true`), `reserveTokens` (default 16384), `keepRecentTokens` (default 20000), and `modelOverrides` keyed `provider/id` for the two token settings |
 | `backgroundCompaction` | When `true`, prepares one summary while foreground work continues; requires compaction enabled and defaults to `false` |
 | `contextMasking` | When `true`, experimentally replaces older eligible tool observations with logged placeholders; default `false`, with ordinary compaction retained |

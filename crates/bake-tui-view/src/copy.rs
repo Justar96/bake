@@ -6,6 +6,27 @@ pub const INTRO: &[&str] = &[
     "",
     "Press Ctrl+G to inspect a sample agent. Esc brings you back to your draft.",
 ];
+/// The live banner's words beside the title and version.
+pub const BANNER_TAGLINE: &str = "code, freshly baked";
+pub const BANNER_SEP: &str = " · ";
+/// The live banner's detail labels: the working directory, the session,
+/// what the session may do, and the tip it shows for a while.
+pub const BANNER_LABELS: [&str; 4] = ["directory", "session", "access", "tip"];
+/// The tips the live banner turns through after startup ([`crate::tips`]).
+/// The first, the scroll keys, always shows first; each fits one row of an
+/// 80-column banner.
+pub const TIPS: &[&str] = &[
+    "Wheel or PgUp scrolls back \u{b7} Ctrl+\u{2191} jumps between prompts",
+    "Shift+Tab cycles the thinking level",
+    "Type @ to mention a file, or / for every command",
+    "Alt+Enter or Ctrl+J starts a new line",
+    "Ctrl+V pastes an image from the clipboard",
+    "While Bake works, Enter steers it and Esc interrupts",
+    "/resume reopens a saved session \u{b7} /tree switches branches",
+    "/compact frees context when a long session fills it",
+    "/session shows this session's file, tokens, and cost",
+    "Ctrl+- undoes an edit to your draft",
+];
 pub const HEADER_LIST_HINT: &str = "↑↓ select · Enter inspect · Esc back";
 /// The idle placeholder's parts. The preview has no commands or file
 /// mentions to name, so it names its editing keys instead.
@@ -162,9 +183,6 @@ pub const RUNNING: &str = "running";
 pub const TOOK: &str = "took";
 pub const EARLIER_CALLS: &str = "earlier calls";
 pub const FULL_OUTPUT: &str = "Full output:";
-/// The transcript's hint row: its keys while following output, and the way
-/// back while reading history.
-pub const HINT_FOLLOWING: &[(&str, &str)] = &[("Wheel/PgUp", "scroll"), ("Ctrl+↑", "prompts")];
 /// While reading history, how much lies below: `12 lines below`.
 pub const LINES_BELOW: &str = "lines below";
 /// The slash menu's words: its key on the box's edge, the count of matches

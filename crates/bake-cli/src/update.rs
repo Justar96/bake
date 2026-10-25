@@ -7,15 +7,25 @@
 //! needs a native install: this executable's own root, or the one
 //! `BAKE_NATIVE_ROOT` names. Bake 0.4.0 publishes native updates for Linux
 //! alone, so on macOS and Windows every run says that those arrive in 0.4.x.
+//!
+//! An interactive session on such an install also checks for a published
+//! release when it starts ([`startup_check`]) and says when one is newer;
+//! it remembers the answer in the Bake home for a day, so most launches
+//! reach no network for it.
 
-use std::path::PathBuf;
+use std::cmp::Ordering;
+use std::future::Future;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use bake_update::UpdateError;
 use bake_update::layout::{Root, detect_root};
 use bake_update::manifest::{host_target, release_target};
 use bake_update::source::Source;
 use bake_update::update::{Outcome, Updater};
+use bake_update::version::{compare_versions, is_release_version};
+use serde_json::{Value, json};
 
 /// What `bake update` was asked to do.
 #[derive(Debug, PartialEq, Eq)]
@@ -103,6 +113,93 @@ pub fn run(request: &Request) -> ExitCode {
         Ok(outcome) => report(request, &outcome),
         Err(error) => fail(error.message()),
     }
+}
+
+/// The file in the Bake home that remembers the last startup check.
+const CHECK_FILE: &str = "update-check.json";
+
+/// How long a startup check's answer stands before a launch fetches the
+/// manifest again.
+const CHECK_EVERY: Duration = Duration::from_secs(24 * 60 * 60);
+
+/// The interactive startup's update check, or `None` when this `bake`
+/// runs from no native install, such as a source build, or on a platform
+/// Bake publishes no native release for. The check reads the answer
+/// `home` remembers when it is under a day old, and otherwise fetches the
+/// signed manifest as `bake update --check` does; it installs nothing and
+/// takes no install lock. Any failure is silent: it yields no notice.
+pub fn startup_check(home: &Path) -> Option<bake_tui::UpdateCheck> {
+    let root = install_root().ok()?;
+    let updater = Updater::new(Root::new(root), Source::default(), crate::VERSION).ok()?;
+    let cache = home.join(CHECK_FILE);
+    Some(Box::pin(async move {
+        let installed = updater.installed();
+        let fetch = async {
+            match updater.check_only().await.ok()? {
+                Outcome::Available { version, .. } | Outcome::UpToDate { version } => Some(version),
+                _ => None,
+            }
+        };
+        let latest = latest_release(&cache, SystemTime::now(), fetch).await?;
+        update_notice(&latest, &installed)
+    }))
+}
+
+/// The newest published version: the one `cache` remembers when it was
+/// checked less than [`CHECK_EVERY`] before `now`, or what `fetch` finds,
+/// which `cache` then remembers.
+async fn latest_release(
+    cache: &Path,
+    now: SystemTime,
+    fetch: impl Future<Output = Option<String>>,
+) -> Option<String> {
+    let now = now.duration_since(UNIX_EPOCH).ok()?.as_secs();
+    if let Some(latest) = std::fs::read_to_string(cache)
+        .ok()
+        .and_then(|text| remembered(&text, now))
+    {
+        return Some(latest);
+    }
+    let latest = fetch.await?;
+    remember(cache, &latest, now);
+    Some(latest)
+}
+
+/// The version a check file names, when it is a release version checked
+/// less than [`CHECK_EVERY`] before `now`; a check dated in the future is
+/// stale, so a clock set back does not hold an answer.
+fn remembered(text: &str, now: u64) -> Option<String> {
+    let value: Value = serde_json::from_str(text).ok()?;
+    let checked = value.get("checked")?.as_u64()?;
+    let latest = value.get("latest")?.as_str()?;
+    let fresh = checked <= now && now - checked < CHECK_EVERY.as_secs();
+    (fresh && is_release_version(latest)).then(|| latest.to_owned())
+}
+
+/// Writes the check file through a temporary file and a rename, so a
+/// concurrent launch reads the old answer or the new one, never part of
+/// one. A failed write only means the next launch checks again.
+fn remember(cache: &Path, latest: &str, now: u64) {
+    let text = format!("{}\n", json!({ "checked": now, "latest": latest }));
+    let mut temp = cache.as_os_str().to_owned();
+    temp.push(format!(".{}.tmp", std::process::id()));
+    let temp = PathBuf::from(temp);
+    if std::fs::write(&temp, text)
+        .and_then(|()| std::fs::rename(&temp, cache))
+        .is_err()
+    {
+        let _ = std::fs::remove_file(&temp);
+    }
+}
+
+/// The notice for `latest` when it is newer than `installed`.
+fn update_notice(latest: &str, installed: &str) -> Option<bake_tui::Notice> {
+    (compare_versions(latest, installed) == Ordering::Greater).then(|| bake_tui::Notice {
+        tag: "update".to_owned(),
+        text: format!(
+            "Bake {latest} is available; this install runs {installed}. Run 'bake update' to install it."
+        ),
+    })
 }
 
 /// Where this install is: `BAKE_NATIVE_ROOT`, or the root this
@@ -243,6 +340,97 @@ mod tests {
                 assert_eq!(Err(error), release_target(host_target()).map(|_| ()));
             }
         }
+    }
+
+    #[test]
+    fn a_startup_notice_names_only_a_newer_release() {
+        assert_eq!(
+            update_notice("0.4.3", "0.4.2"),
+            Some(bake_tui::Notice {
+                tag: "update".to_owned(),
+                text: "Bake 0.4.3 is available; this install runs 0.4.2. Run 'bake update' to install it."
+                    .to_owned(),
+            })
+        );
+        assert_eq!(update_notice("0.4.2", "0.4.2"), None);
+        assert_eq!(update_notice("0.4.1", "0.4.2"), None);
+        assert_eq!(update_notice("0.5.0-rc.1", "0.5.0"), None);
+    }
+
+    #[test]
+    fn a_remembered_check_stands_for_a_day_and_only_names_a_version() {
+        let day = CHECK_EVERY.as_secs();
+        let file = |checked: u64, latest: &str| {
+            json!({ "checked": checked, "latest": latest }).to_string()
+        };
+        assert_eq!(
+            remembered(&file(1000, "0.4.3"), 1000).as_deref(),
+            Some("0.4.3")
+        );
+        assert_eq!(
+            remembered(&file(1000, "0.4.3"), 1000 + day - 1).as_deref(),
+            Some("0.4.3")
+        );
+        assert_eq!(remembered(&file(1000, "0.4.3"), 1000 + day), None);
+        // Dated in the future, it is stale.
+        assert_eq!(remembered(&file(1001, "0.4.3"), 1000), None);
+        // Text that is not a release version, or not a check file, is ignored.
+        for text in [
+            file(1000, "0.4.3\u{1b}[2J"),
+            file(1000, "v0.4.3"),
+            file(1000, ""),
+            "{\"checked\": -1, \"latest\": \"0.4.3\"}".to_owned(),
+            "{\"latest\": \"0.4.3\"}".to_owned(),
+            "[]".to_owned(),
+            "not json".to_owned(),
+            String::new(),
+        ] {
+            assert_eq!(remembered(&text, 1000), None, "{text}");
+        }
+    }
+
+    #[test]
+    fn a_startup_check_fetches_once_a_day_and_remembers_the_answer() {
+        let dir = std::env::temp_dir().join(format!(
+            "bake-update-startup-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_or(0, |time| time.as_nanos())
+        ));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let cache = dir.join(CHECK_FILE);
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("runtime");
+        let at = |secs: u64| UNIX_EPOCH + Duration::from_secs(secs);
+        let fetches = std::cell::Cell::new(0);
+        let check = |now, answer: Option<&str>| {
+            runtime.block_on(latest_release(&cache, now, async {
+                fetches.set(fetches.get() + 1);
+                answer.map(str::to_owned)
+            }))
+        };
+        // Nothing remembered: it fetches, and remembers.
+        assert_eq!(check(at(1000), Some("0.4.3")).as_deref(), Some("0.4.3"));
+        assert_eq!(fetches.get(), 1);
+        // Within the day the remembered answer stands.
+        assert_eq!(check(at(2000), Some("0.4.4")).as_deref(), Some("0.4.3"));
+        assert_eq!(fetches.get(), 1);
+        // A day later it fetches again; a failed fetch keeps the old file.
+        let later = 1000 + CHECK_EVERY.as_secs();
+        assert_eq!(check(at(later), None), None);
+        assert_eq!(fetches.get(), 2);
+        assert_eq!(check(at(later), Some("0.4.4")).as_deref(), Some("0.4.4"));
+        assert_eq!(fetches.get(), 3);
+        assert_eq!(check(at(later + 1), None).as_deref(), Some("0.4.4"));
+        // No temporary file is left beside it.
+        let names: Vec<_> = std::fs::read_dir(&dir)
+            .expect("read dir")
+            .map(|entry| entry.expect("entry").file_name())
+            .collect();
+        assert_eq!(names, [std::ffi::OsString::from(CHECK_FILE)]);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

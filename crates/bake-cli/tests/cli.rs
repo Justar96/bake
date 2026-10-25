@@ -928,6 +928,18 @@ fn home_command(root: &TempDir, args: &[&str]) -> Command {
         .env_remove("DSH_OFFLINE")
         .env_remove("CLIPROXYAPI_API_KEY")
         .env("HOME", root.0.join("user"));
+    // The terminal running the tests chooses no status indicators or
+    // Herdr reports for the `bake` under test.
+    for name in [
+        "TERM_PROGRAM",
+        "TERM_PROGRAM_VERSION",
+        "HERDR_ENV",
+        "HERDR_PANE_ID",
+        "HERDR_BIN_PATH",
+        "HERDR_SOCKET_PATH",
+    ] {
+        command.env_remove(name);
+    }
     command
 }
 
@@ -1175,6 +1187,110 @@ fn offline_stops_the_interactive_startup_refresh() {
         refreshed,
         "the offline launch refreshed the catalog: {:?}",
         proxy.seen()
+    );
+}
+
+/// The terminal's indicators and Herdr's reports, end to end in a
+/// terminal that names itself Ghostty, with a stand-in Herdr CLI that
+/// records its calls: the title is saved and set, a named session renames
+/// it, a turn shows progress and reports `working`, a turn that ends while
+/// the terminal is out of focus notifies, and `SIGTERM` puts the title back,
+/// stops focus reports, clears the display tokens, and releases the pane.
+#[cfg(target_os = "linux")]
+#[test]
+fn ghostty_and_herdr_follow_a_named_session_through_a_turn() {
+    use std::os::unix::fs::PermissionsExt;
+    let proxy = Proxy::start();
+    let root = signed_in_home("terminal-status", &proxy);
+    let calls = root.0.join("herdr-calls");
+    let herdr = root.0.join("herdr");
+    std::fs::write(
+        &herdr,
+        format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\n",
+            calls.display()
+        ),
+    )
+    .expect("herdr stand-in");
+    std::fs::set_permissions(&herdr, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+    let recorded = || std::fs::read_to_string(&calls).unwrap_or_default();
+    let mut command = home_command(&root, &["--model", "cliproxyapi/proxy-model", "--offline"]);
+    command
+        .env("TERM_PROGRAM", "ghostty")
+        .env("HERDR_ENV", "1")
+        .env("HERDR_PANE_ID", "w1:p1")
+        .env("HERDR_BIN_PATH", &herdr)
+        .env("HERDR_SOCKET_PATH", root.0.join("herdr.sock"));
+    let mut terminal = Terminal::start(command);
+    terminal.wait("composer", || terminal.screen().contains('❯'));
+    let screen = terminal.screen();
+    assert!(
+        screen.contains("\x1b[22;0t\x1b]0;bake - project\x07"),
+        "{screen:?}"
+    );
+    assert!(screen.contains("\x1b[?1004h"), "{screen:?}");
+    terminal.wait("Herdr's idle report", || {
+        recorded().contains("--state idle")
+    });
+
+    terminal.send("/name auth work\r");
+    terminal.wait("the renamed title", || {
+        terminal
+            .screen()
+            .contains("\x1b]0;bake - auth work - project\x07")
+    });
+    // The composer takes keys again once the command's frame is armed.
+    terminal.wait("the composer after the command", || {
+        let screen = terminal.screen();
+        screen
+            .rfind("Preparing…")
+            .is_some_and(|at| screen[at..].contains("Type a draft"))
+    });
+    // The terminal reports losing focus, as Ghostty does when its window
+    // or tab is left.
+    terminal.send("\x1b[O");
+    terminal.send("hello\r");
+    terminal.wait("the completed turn's notification", || {
+        terminal
+            .screen()
+            .contains("\x1b]777;notify;bake - auth work;Ready for your next prompt\x07")
+    });
+    let screen = terminal.screen();
+    let started = screen.find("\x1b]9;4;3\x07").expect("progress shown");
+    let cleared = screen.rfind("\x1b]9;4;0\x07").expect("progress cleared");
+    assert!(started < cleared, "{screen:?}");
+    assert!(screen.contains("\x1b]0;◐ bake - auth work - project\x07"));
+    // Herdr's reports run on their own worker, so the turn's idle report
+    // can land after the terminal has already drawn its end.
+    terminal.wait("Herdr's tokens and the turn's idle report", || {
+        let calls = recorded();
+        calls.contains("--token model=proxy-model")
+            && calls.contains("--token session=auth work")
+            && calls
+                .find("--state working")
+                .is_some_and(|working| calls[working..].contains("--state idle"))
+    });
+    assert!(recorded().contains("--token activity="), "{}", recorded());
+
+    let before = terminal.screen().len();
+    let output = std::sync::Arc::clone(&terminal.screen);
+    terminal.stop();
+    let restored = output.lock().expect("screen")[before..].to_owned();
+    assert!(restored.contains("\x1b[23;0t"), "{restored:?}");
+    assert!(restored.contains("\x1b[?1004l"), "{restored:?}");
+    let calls = recorded();
+    let last: Vec<&str> = calls.lines().rev().take(2).collect();
+    assert!(
+        last[0].starts_with("pane release-agent w1:p1 --source bake"),
+        "{calls}"
+    );
+    assert!(
+        last[1].starts_with("pane report-metadata w1:p1 --source bake"),
+        "{calls}"
+    );
+    assert!(
+        last[1].contains("--clear-token model") && !last[1].contains("--token "),
+        "{calls}"
     );
 }
 

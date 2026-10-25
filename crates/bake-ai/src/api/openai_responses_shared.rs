@@ -22,7 +22,7 @@ use crate::types::{
 };
 use crate::utils::event_stream::AssistantMessageEventSender;
 use crate::utils::hash::short_hash;
-use crate::utils::json_parse::parse_streaming_json_object;
+use crate::utils::json_parse::{StreamingJsonObject, parse_streaming_json_object};
 use crate::utils::text::{get_system_message_text, render_system_message_update};
 use crate::utils::tool_argument_guard::{ArgumentScan, DEFAULT_MAX_TOOL_ARGUMENT_WHITESPACE};
 use crate::utils::transcript::resolve_transcript;
@@ -340,7 +340,7 @@ pub struct ResponsesStreamProcessor {
     pub output: AssistantMessage,
     saw_terminal: bool,
     slots: HashMap<Option<i64>, (SlotKind, usize)>,
-    partial_json: HashMap<usize, String>,
+    partial_json: HashMap<usize, StreamingJsonObject>,
     scans: HashMap<usize, ArgumentScan>,
     max_tool_argument_whitespace: usize,
     reasoning_by_id: HashMap<String, usize>,
@@ -509,7 +509,8 @@ impl ResponsesStreamProcessor {
                 let mut scan = ArgumentScan::default();
                 scan.scan_arguments(initial);
                 self.scans.insert(index, scan);
-                self.partial_json.insert(index, initial.to_owned());
+                self.partial_json
+                    .insert(index, StreamingJsonObject::new(initial.to_owned()));
                 SlotKind::ToolCall
             }
             _ => return None,
@@ -560,7 +561,11 @@ impl ResponsesStreamProcessor {
     }
 
     fn set_arguments(&mut self, index: usize) {
-        let parsed = parse_streaming_json_object(self.partial_json.get(&index).map(String::as_str));
+        let parsed = self
+            .partial_json
+            .get(&index)
+            .map(|arguments| arguments.object().clone())
+            .unwrap_or_default();
         if let Some(AssistantContentBlock::ToolCall(call)) = self.output.content.get_mut(index) {
             call.arguments = parsed;
         }
@@ -709,8 +714,8 @@ impl ResponsesStreamProcessor {
                     && self.partial_json.contains_key(&index)
                 {
                     self.check_argument_delta(index, delta)?;
-                    if let Some(partial) = self.partial_json.get_mut(&index) {
-                        partial.push_str(delta);
+                    if let Some(arguments) = self.partial_json.get_mut(&index) {
+                        arguments.push(delta);
                     }
                     self.set_arguments(index);
                     self.emit(sender, |partial| AssistantMessageEvent::ToolCallDelta {
@@ -722,7 +727,10 @@ impl ResponsesStreamProcessor {
             }
             "response.function_call_arguments.done" => {
                 if let Some(index) = self.slot(output_index, SlotKind::ToolCall)
-                    && let Some(previous) = self.partial_json.get(&index).cloned()
+                    && let Some(previous) = self
+                        .partial_json
+                        .get(&index)
+                        .map(|arguments| arguments.text().to_owned())
                 {
                     let arguments = event
                         .get("arguments")
@@ -736,7 +744,8 @@ impl ResponsesStreamProcessor {
                     if let Some(rest) = &rest {
                         self.check_argument_delta(index, rest)?;
                     }
-                    self.partial_json.insert(index, arguments);
+                    self.partial_json
+                        .insert(index, StreamingJsonObject::new(arguments));
                     self.set_arguments(index);
                     if let Some(rest) = rest {
                         self.emit(sender, |partial| AssistantMessageEvent::ToolCallDelta {
@@ -876,7 +885,11 @@ impl ResponsesStreamProcessor {
             }
             (Some("function_call"), Some((SlotKind::ToolCall, index))) => {
                 self.scans.remove(&index);
-                let Some(partial) = self.partial_json.remove(&index) else {
+                let Some(partial) = self
+                    .partial_json
+                    .remove(&index)
+                    .map(StreamingJsonObject::into_text)
+                else {
                     return;
                 };
                 let source = non_empty_str(item.get("arguments"))

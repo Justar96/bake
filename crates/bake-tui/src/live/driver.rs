@@ -28,6 +28,12 @@ impl Drop for Driver {
                 let _ = task.await;
             }));
         }
+        if let Some(task) = self.update.take() {
+            task.abort();
+            orphans.push(Box::pin(async move {
+                let _ = task.await;
+            }));
+        }
     }
 }
 
@@ -52,6 +58,15 @@ impl Driver {
                 )),
                 abort,
             ));
+        }
+        // Nor does `--offline` check for an update.
+        if let Some(check) = self.update_check.take().filter(|_| !self.offline) {
+            let send = Arc::clone(&self.send);
+            self.update = Some(tokio::spawn(async move {
+                if let Some(notice) = check.await {
+                    send(RuntimeUpdate::Commit(vec![Row::Notice(notice)]));
+                }
+            }));
         }
         // `--resume` opens the session picker before the first prompt; the
         // prompts wait in `held` until it ends, so the replacement it
@@ -161,6 +176,7 @@ impl Driver {
             abort.abort();
             task
         });
+        let update = self.update.take().inspect(JoinHandle::abort);
         // Pi's `dispose`, awaited: the run, its writes, and its requests end
         // before the terminal is given back.
         shut_down(&self.session, self.approvals.as_ref()).await;
@@ -175,6 +191,9 @@ impl Driver {
         }
         if let Some(startup) = startup {
             let _ = startup.await;
+        }
+        if let Some(update) = update {
+            let _ = update.await;
         }
         if let Some(run) = running {
             let _ = run.task.await;

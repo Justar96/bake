@@ -17,7 +17,7 @@ The Bake home is the directory that holds bake's models, keys, settings, and sav
 
 Instructions and skills for every project are not in the Bake home: they are in `~/.agents` in your home directory (`bake docs context` and `bake docs skills`).
 
-bake never writes `models.json` or `mcp.json`. Interactive commands write `auth.json` (the CLIProxyAPI key) and `settings.json` (the CLIProxyAPI route, saved defaults, and `/settings` changes), each through a locked, atomic replacement that keeps other members (`bake docs models`). It creates `sessions/`, the session files in it, and a `.lock` file beside each session it writes, which it leaves in place (`bake docs sessions`). The `bake plugin` commands write `plugins/`, and a session records a plugin's failure in `plugins/plugins.json` (`bake docs plugins`).
+bake never writes `models.json` or `mcp.json`. Interactive commands write `auth.json` (the CLIProxyAPI key) and `settings.json` (the CLIProxyAPI route, saved defaults, and `/settings` changes), each through a locked, atomic replacement that keeps other members (`bake docs models`). It creates `sessions/`, the session files in it, and a `.lock` file beside each session it writes, which it leaves in place (`bake docs sessions`). An interactive session started from a native install writes `update-check.json`, the last published version it found and when, through an atomic replacement (`bake docs update`). The `bake plugin` commands write `plugins/`, and a session records a plugin's failure in `plugins/plugins.json` (`bake docs plugins`).
 
 ## Settings from Bake 0.3
 

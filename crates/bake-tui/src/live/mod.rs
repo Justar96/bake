@@ -84,7 +84,7 @@ use bake_tui_view::paste::Image;
 use bake_tui_view::runtime::{RuntimeUpdate, SessionStatus};
 use bake_tui_view::state::Outcome;
 use bake_tui_view::status::ContextUsage;
-use bake_tui_view::transcript::Row;
+use bake_tui_view::transcript::{Banner, Notice, Pill, Row, TagTone};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use tokio::sync::{Notify, mpsc, oneshot};
@@ -142,8 +142,16 @@ pub struct LiveSession {
     pub runtime: tokio::runtime::Handle,
     /// Prompts to send first, in order, as the command line gave them.
     pub prompts: Vec<(String, Vec<ImageContent>)>,
-    /// Notes for the top of the transcript, such as the session file.
+    /// The header the transcript opens with: Bake's version, the working
+    /// directory, and the session file; `None` opens with the notes.
+    pub banner: Option<Banner>,
+    /// Notes for the top of the transcript, after the banner, such as why
+    /// the model fell back.
     pub notes: Vec<String>,
+    /// Checks for a published update once the driver begins, unless
+    /// `offline`; the notice it returns is committed as a [`Row::Notice`].
+    /// Stopping the port aborts it.
+    pub update_check: Option<UpdateCheck>,
     /// The broker the session's tools ask for approval, which the view
     /// answers; `None` when the session was built without one, so its
     /// escalations fail closed.
@@ -170,10 +178,96 @@ pub struct LiveSession {
 }
 
 impl LiveSession {
-    /// The rows the transcript opens with: the notes, then what the session
-    /// already holds.
+    /// The rows the transcript opens with: the banner, the notes, then what
+    /// the session already holds.
     pub fn initial_rows(&self) -> Vec<Row> {
-        opening_rows(&self.notes, &self.session)
+        let mut rows: Vec<Row> = self.banner.clone().map(Row::Banner).into_iter().collect();
+        rows.extend(opening_rows(&self.notes, &self.session));
+        rows
+    }
+}
+
+/// A startup update check: the notice to show when a newer release is
+/// published, or `None` when there is none or the check failed.
+pub type UpdateCheck =
+    std::pin::Pin<Box<dyn std::future::Future<Output = Option<Notice>> + std::marker::Send>>;
+
+/// The banner's access tags for a session's standing `permission`: a
+/// custom preset's name, pink, when it is not a sandbox mode's; the sandbox
+/// mode, green for `read-only`, blue for `workspace-write`, and red for
+/// `danger-full-access`; the approval policy, yellow; and `offline`, pink.
+pub fn access_pills(
+    permission: &bake_coding_agent::permissions::SessionPermission,
+    offline: bool,
+) -> Vec<Pill> {
+    use bake_sandbox::SandboxMode;
+    let pill = |text: String, tone| Pill { text, tone };
+    let sandbox = permission.sandbox.as_str();
+    let mut pills = Vec::new();
+    if permission.preset != sandbox {
+        pills.push(pill(permission.preset.clone(), TagTone::Pink));
+    }
+    let tone = match permission.sandbox {
+        SandboxMode::ReadOnly => TagTone::Green,
+        SandboxMode::WorkspaceWrite => TagTone::Blue,
+        SandboxMode::DangerFullAccess => TagTone::Red,
+    };
+    pills.push(pill(sandbox.to_owned(), tone));
+    pills.push(pill(
+        format!("approvals {}", permission.approval.as_str()),
+        TagTone::Yellow,
+    ));
+    if offline {
+        pills.push(pill("offline".to_owned(), TagTone::Pink));
+    }
+    pills
+}
+
+/// The banner's session line for `messages`, the transcript a session
+/// opens with, at `now_ms`: `new`, or `resumed`, its prompts, and how long
+/// ago its last message was; `unsaved` adds `not saved`.
+pub fn session_summary(
+    messages: &[bake_agent::AgentMessage],
+    now_ms: i64,
+    unsaved: bool,
+) -> String {
+    let mut parts = Vec::new();
+    if messages.is_empty() {
+        parts.push("new".to_owned());
+    } else {
+        parts.push("resumed".to_owned());
+        let prompts = messages
+            .iter()
+            .filter(|message| message.role() == "user")
+            .count();
+        parts.push(match prompts {
+            1 => "1 prompt".to_owned(),
+            count => format!("{count} prompts"),
+        });
+        if let Some(last) = messages
+            .iter()
+            .map(bake_agent::AgentMessage::timestamp)
+            .max()
+            && last > 0
+        {
+            parts.push(ago(now_ms.saturating_sub(last)));
+        }
+    }
+    if unsaved {
+        parts.push("not saved".to_owned());
+    }
+    parts.join(copy::BANNER_SEP)
+}
+
+/// `elapsed_ms` read as an age: `just now` under a minute, then minutes,
+/// hours, and days; a time in the future reads as `just now`.
+fn ago(elapsed_ms: i64) -> String {
+    let minutes = elapsed_ms / 60_000;
+    match minutes {
+        i64::MIN..=0 => "just now".to_owned(),
+        1..=59 => format!("{minutes}m ago"),
+        60..=1439 => format!("{}h ago", minutes / 60),
+        _ => format!("{}d ago", minutes / 1440),
     }
 }
 
@@ -241,7 +335,9 @@ impl LivePort {
             session,
             runtime,
             prompts,
+            banner: _,
             notes: _,
+            update_check,
             approvals,
             home,
             factory,
@@ -321,6 +417,8 @@ impl LivePort {
                 .collect(),
             resume,
             offline,
+            update_check,
+            update: None,
             aborts: Vec::new(),
             turns: 0,
             approvals: approvals.clone(),
@@ -580,7 +678,11 @@ struct Driver {
     dialog_ids: Arc<std::sync::atomic::AtomicU64>,
     /// The once-per-launch CLIProxyAPI refresh, and its abort.
     startup: Option<(JoinHandle<()>, AbortController)>,
-    /// Where a panicking driver leaves `command` and `startup`.
+    /// The update check the command line gave, until the driver begins.
+    update_check: Option<UpdateCheck>,
+    /// The running update check, which shutdown aborts and awaits.
+    update: Option<JoinHandle<()>>,
+    /// Where a panicking driver leaves `command`, `startup`, and `update`.
     orphans: Orphans,
     #[cfg(test)]
     commit_gate: Option<commands::CommitGate>,
