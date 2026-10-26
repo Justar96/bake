@@ -5,12 +5,14 @@
 //! the settings a session uses: the default provider, model, and thinking
 //! level, per-model thinking levels, the queue modes, the session
 //! directory, `blockImages`, `images.autoResize`, `defaultTools`, `compaction`
-//! (with per-model overrides), `branchSummary.reserveTokens` and
+//! (with per-model overrides, and Bake's own `compaction.thresholdPercent`
+//! and `compaction.cachedSummary`), `branchSummary.reserveTokens` and
 //! `branchSummary.skipPrompt`, `retry`, Pi v1.3.0's `codemode.mode` and
 //! `codemode.inlineBudget` ([`crate::tools::codemode`]), and Pi v1.4.0's
 //! `terminal.showTerminalProgress`,
 //! and Bake's own `permission` section ([`crate::permissions`]),
-//! `terminal.notifications`, `webSearch.model` ([`crate::web::search`]), and
+//! `terminal.notifications`, `statusLine` (the status line's optional
+//! readings), `webSearch.model` ([`crate::web::search`]), and
 //! `maxToolArgumentWhitespace` (Bake's route option in
 //! `packages/llm/llm-pi-ai/src/config.ts`). Pi reads `~/.pi/agent/settings.json` and
 //! merges a project's `.pi/settings.json` over it; Bake reads
@@ -19,8 +21,9 @@
 //!
 //! [`SettingsStore`] writes the file, porting the global-scope saves of
 //! `SettingsManager` (Pi v1.2.0, `06a466935536f8c9bcacb2d5efc0fc021be1bdff`)
-//! for the settings above that Pi has setters for, through the locked
-//! atomic backend of [`crate::json_store`].
+//! for the settings above that Pi has setters for, and for the compaction
+//! members and `branchSummary.skipPrompt` that `/settings` changes, through
+//! the locked atomic backend of [`crate::json_store`].
 //!
 //! # Deviations from Pi
 //!
@@ -43,6 +46,7 @@
 //!   does not define, is ignored where Pi would pass it on. The compaction
 //!   token settings are the exception: they are checked when read and an
 //!   invalid one is an error carrying Pi's message, as in Pi.
+//!   `compaction.thresholdPercent` is checked the same way.
 //! - **Errors.** A file that is not a JSON object yields Pi's warning
 //!   `Invalid settings file <path>: <message>`; the parser's message is
 //!   `serde_json`'s, not V8's.
@@ -157,6 +161,8 @@ pub struct Settings {
     /// it is out of focus. `None` when unset or not a boolean; the
     /// terminal interface then shows them in Ghostty only.
     pub terminal_notifications: Option<bool>,
+    /// `statusLine`, Bake's own: the status line's optional readings.
+    pub status_line: StatusLineSettings,
     /// Load errors, as Pi's settings diagnostics word them.
     pub warnings: Vec<String>,
 }
@@ -228,13 +234,27 @@ pub const CLIPROXYAPI_MEMBER: &str = "cliproxyapi";
 /// Pi's `setCompactionEnabled` on a settings value: `compaction.enabled`,
 /// keeping the section's other members.
 pub fn set_compaction_enabled_in(settings: &mut Settings, enabled: bool) {
+    set_compaction_member_in(settings, "enabled", Some(Value::Bool(enabled)));
+}
+
+/// Sets the `compaction` member `key` of a settings value to `value`, or
+/// removes it when `value` is `None`, keeping the section's other members.
+/// A `compaction` that is not an object is replaced.
+pub fn set_compaction_member_in(settings: &mut Settings, key: &str, value: Option<Value>) {
     let mut compaction = settings
         .compaction
         .as_ref()
         .and_then(Value::as_object)
         .cloned()
         .unwrap_or_default();
-    compaction.insert("enabled".into(), Value::Bool(enabled));
+    match value {
+        Some(value) => {
+            compaction.insert(key.into(), value);
+        }
+        None => {
+            compaction.shift_remove(key);
+        }
+    }
     settings.compaction = Some(Value::Object(compaction));
 }
 
@@ -271,8 +291,41 @@ impl Default for Settings {
             codemode_inline_budget: None,
             show_terminal_progress: None,
             terminal_notifications: None,
+            status_line: StatusLineSettings::default(),
             warnings: Vec::new(),
         }
+    }
+}
+
+/// The `statusLine` member of `settings.json`: which of the status line's
+/// optional readings the interactive terminal shows, after Pi's footer.
+/// Each is off unless `true`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct StatusLineSettings {
+    /// `statusLine.tokens`: the session's input and output token totals.
+    pub tokens: bool,
+    /// `statusLine.cache`: the session's cache reads and writes, and the
+    /// share of the latest prompt read from the cache.
+    pub cache: bool,
+}
+
+impl StatusLineSettings {
+    fn from_value(value: Option<&Value>) -> Self {
+        let on = |key: &str| {
+            value
+                .and_then(|line| line.get(key))
+                .and_then(Value::as_bool)
+                == Some(true)
+        };
+        Self {
+            tokens: on("tokens"),
+            cache: on("cache"),
+        }
+    }
+
+    /// Whether any reading needs the session's usage totals.
+    pub fn any(&self) -> bool {
+        self.tokens || self.cache
     }
 }
 
@@ -571,6 +624,7 @@ impl Settings {
                 .filter(|budget| budget.is_finite() && *budget >= 0.0),
             show_terminal_progress: terminal_flag(object, "showTerminalProgress"),
             terminal_notifications: terminal_flag(object, "notifications"),
+            status_line: StatusLineSettings::from_value(object.get("statusLine")),
             warnings: Vec::new(),
         }
     }
@@ -604,6 +658,18 @@ impl Settings {
         )
     }
 
+    /// `compaction.cachedSummary`, Bake's own: whether a compaction writes
+    /// its summary from the conversation the provider has cached
+    /// ([`crate::compaction::cached`]). Defaults to true; only `false`
+    /// turns it off.
+    pub fn cached_compaction(&self) -> bool {
+        self.compaction
+            .as_ref()
+            .and_then(|compaction| compaction.get("cachedSummary"))
+            .and_then(Value::as_bool)
+            != Some(false)
+    }
+
     /// Pi's `getCompactionTokenSetting`: the model's override, then the
     /// ordinary setting, then the default. An invalid value is an error
     /// with Pi's message.
@@ -613,13 +679,28 @@ impl Settings {
         model: Option<(&str, &str)>,
         default: u64,
     ) -> Result<u64, String> {
+        self.compaction_setting(field, model, token_count, "a non-negative safe integer")
+            .map(|value| value.unwrap_or(default))
+    }
+
+    /// A `compaction` member resolved as Pi's `getCompactionTokenSetting`
+    /// resolves it, read by `parse`: the model's override, then the
+    /// ordinary setting. A value `parse` refuses is an error saying it
+    /// expected `expected`.
+    fn compaction_setting<T>(
+        &self,
+        field: &str,
+        model: Option<(&str, &str)>,
+        parse: impl Fn(&Value) -> Option<T>,
+        expected: &str,
+    ) -> Result<Option<T>, String> {
         let compaction = self.compaction.as_ref().and_then(Value::as_object);
         let ordinary = compaction.and_then(|compaction| compaction.get(field));
         let ordinary = match ordinary {
             None => None,
-            Some(value) => Some(token_count(value).ok_or_else(|| {
+            Some(value) => Some(parse(value).ok_or_else(|| {
                 format!(
-                    "Invalid compaction.{field} setting: {}. Expected a non-negative safe integer.",
+                    "Invalid compaction.{field} setting: {}. Expected {expected}.",
                     js_string(value)
                 )
             })?),
@@ -640,20 +721,22 @@ impl Settings {
                 ));
             };
             if let Some(value) = entry.get(field) {
-                resolved = Some(token_count(value).ok_or_else(|| {
+                resolved = Some(parse(value).ok_or_else(|| {
                     format!(
-                        "Invalid compaction.modelOverrides[\"{key}\"].{field} setting: {}. Expected a non-negative safe integer.",
+                        "Invalid compaction.modelOverrides[\"{key}\"].{field} setting: {}. Expected {expected}.",
                         js_string(value)
                     )
                 })?);
             }
         }
-        Ok(resolved.or(ordinary).unwrap_or(default))
+        Ok(resolved.or(ordinary))
     }
 
     /// Pi's `getCompactionSettings(model)`: each token setting resolved
     /// through the model's override (`compaction.modelOverrides`, keyed by
     /// the exact `provider/id`), the ordinary setting, then the default.
+    /// Bake's `thresholdPercent`, a whole number from 1 to 100, resolves the
+    /// same way and is unset by default.
     pub fn compaction_settings(
         &self,
         model: Option<(&str, &str)>,
@@ -670,6 +753,16 @@ impl Settings {
                 "keepRecentTokens",
                 model,
                 defaults.keep_recent_tokens,
+            )?,
+            threshold_percent: self.compaction_setting(
+                "thresholdPercent",
+                model,
+                |value| {
+                    token_count(value)
+                        .filter(|percent| (1..=100).contains(percent))
+                        .and_then(|percent| u8::try_from(percent).ok())
+                },
+                "a whole number from 1 to 100",
             )?,
         })
     }
@@ -879,7 +972,26 @@ impl SettingsStore {
     /// section's other members. A `compaction` that is not an object is
     /// replaced.
     pub fn set_compaction_enabled(&self, enabled: bool) -> Result<Settings, StoreError> {
+        self.set_compaction_member("enabled", Some(Value::Bool(enabled)))
+    }
+
+    /// Sets the `compaction` member `key`, or removes it when `value` is
+    /// `None`, keeping the section's other members, as
+    /// [`Self::set_compaction_enabled`] does. Bake's own, for the members
+    /// `/settings` changes: `thresholdPercent`, `keepRecentTokens`, and
+    /// `cachedSummary`.
+    pub fn set_compaction_member(
+        &self,
+        key: &str,
+        value: Option<Value>,
+    ) -> Result<Settings, StoreError> {
         self.update(|object| {
+            let Some(value) = value else {
+                return object
+                    .get_mut("compaction")
+                    .and_then(Value::as_object_mut)
+                    .is_some_and(|section| remove_member(section, key));
+            };
             let section = object
                 .entry("compaction")
                 .or_insert_with(|| Value::Object(Map::new()));
@@ -887,7 +999,41 @@ impl SettingsStore {
                 *section = Value::Object(Map::new());
             }
             match section.as_object_mut() {
-                Some(section) => set_member(section, "enabled", Value::Bool(enabled)),
+                Some(section) => set_member(section, key, value),
+                None => false,
+            }
+        })
+    }
+
+    /// Sets `statusLine.<key>` to `on`, keeping the section's other members.
+    /// A `statusLine` that is not an object is replaced. Bake's own.
+    pub fn set_status_line(&self, key: &str, on: bool) -> Result<Settings, StoreError> {
+        self.update(|object| {
+            let section = object
+                .entry("statusLine")
+                .or_insert_with(|| Value::Object(Map::new()));
+            if !section.is_object() {
+                *section = Value::Object(Map::new());
+            }
+            match section.as_object_mut() {
+                Some(section) => set_member(section, key, Value::Bool(on)),
+                None => false,
+            }
+        })
+    }
+
+    /// `branchSummary.skipPrompt`, keeping the section's other members. A
+    /// `branchSummary` that is not an object is replaced. Bake's own.
+    pub fn set_branch_summary_skip_prompt(&self, skip: bool) -> Result<Settings, StoreError> {
+        self.update(|object| {
+            let section = object
+                .entry("branchSummary")
+                .or_insert_with(|| Value::Object(Map::new()));
+            if !section.is_object() {
+                *section = Value::Object(Map::new());
+            }
+            match section.as_object_mut() {
+                Some(section) => set_member(section, "skipPrompt", Value::Bool(skip)),
                 None => false,
             }
         })
@@ -1115,7 +1261,8 @@ mod tests {
                 Ok(CompactionSettings {
                     enabled: true,
                     reserve_tokens: 400000,
-                    keep_recent_tokens: 10000
+                    keep_recent_tokens: 10000,
+                    threshold_percent: None,
                 })
             );
             assert_eq!(
@@ -1123,7 +1270,8 @@ mod tests {
                 Ok(CompactionSettings {
                     enabled: true,
                     reserve_tokens: 8192,
-                    keep_recent_tokens: 10000
+                    keep_recent_tokens: 10000,
+                    threshold_percent: None,
                 })
             );
         }
@@ -1259,6 +1407,59 @@ mod tests {
             }
         }
 
+        // Bake: `thresholdPercent` is a whole number from 1 to 100,
+        // resolved through the model's override as the token settings are,
+        // and an invalid one is an error naming it.
+        #[test]
+        fn threshold_percent_resolves_and_is_checked() {
+            let threshold = |value: Value, model| {
+                settings(value)
+                    .compaction_settings(model)
+                    .map(|compaction| compaction.threshold_percent)
+            };
+            assert_eq!(threshold(json!({}), None), Ok(None));
+            let both = json!({ "compaction": {
+                "thresholdPercent": 80,
+                "modelOverrides": { KEY: { "thresholdPercent": 60 } },
+            }});
+            assert_eq!(threshold(both.clone(), None), Ok(Some(80)));
+            assert_eq!(threshold(both, Some(MODEL)), Ok(Some(60)));
+            assert_eq!(
+                threshold(json!({ "compaction": { "thresholdPercent": 100 } }), None),
+                Ok(Some(100))
+            );
+            for invalid in [json!(0), json!(101), json!(50.5), json!("80"), json!(-1)] {
+                let message = format!(
+                    "Invalid compaction.thresholdPercent setting: {}. Expected a whole number from 1 to 100.",
+                    js_string(&invalid)
+                );
+                assert_eq!(
+                    threshold(
+                        json!({ "compaction": { "thresholdPercent": invalid } }),
+                        None
+                    ),
+                    Err(message)
+                );
+            }
+            assert_eq!(
+                threshold(
+                    json!({ "compaction": { "modelOverrides": { KEY: { "thresholdPercent": 0 } } } }),
+                    Some(MODEL)
+                ),
+                Err(format!(
+                    "Invalid compaction.modelOverrides[\"{KEY}\"].thresholdPercent setting: 0. Expected a whole number from 1 to 100."
+                ))
+            );
+            // On unless turned off; a value that is not a boolean is ignored.
+            assert!(settings(json!({})).cached_compaction());
+            assert!(
+                settings(json!({ "compaction": { "cachedSummary": "no" } })).cached_compaction()
+            );
+            assert!(
+                !settings(json!({ "compaction": { "cachedSummary": false } })).cached_compaction()
+            );
+        }
+
         // Pi: "accepts zero in ordinary settings and model overrides".
         #[test]
         fn zero_is_accepted() {
@@ -1266,6 +1467,7 @@ mod tests {
                 enabled: true,
                 reserve_tokens: 0,
                 keep_recent_tokens: 0,
+                threshold_percent: None,
             };
             let manager =
                 settings(json!({ "compaction": { "reserveTokens": 0, "keepRecentTokens": 0 } }));
@@ -1416,6 +1618,93 @@ mod tests {
             );
             assert_eq!(read(store.path())["x"], 1);
             assert_eq!(store.load(), loaded);
+        }
+
+        // Bake: `/settings` sets and removes compaction members, keeping
+        // the section's others, and saves `branchSummary.skipPrompt`.
+        #[test]
+        fn compaction_members_are_set_and_removed_in_place() {
+            let dir = TempDir::new("settings-compaction");
+            let store = SettingsStore::new(dir.path());
+            std::fs::write(
+                store.path(),
+                r#"{"compaction":{"reserveTokens":9000},"branchSummary":"broken"}"#,
+            )
+            .unwrap();
+            store
+                .set_compaction_member("thresholdPercent", Some(json!(80)))
+                .unwrap();
+            store
+                .set_compaction_member("cachedSummary", Some(json!(true)))
+                .unwrap();
+            let settings = store.set_branch_summary_skip_prompt(true).unwrap();
+            assert!(settings.cached_compaction());
+            assert!(settings.branch_summary_skip_prompt);
+            assert!(!settings.status_line.any());
+            store.set_status_line("cache", true).unwrap();
+            let settings = store.set_status_line("tokens", false).unwrap();
+            assert_eq!(
+                settings.status_line,
+                StatusLineSettings {
+                    tokens: false,
+                    cache: true
+                }
+            );
+            assert_eq!(
+                read(store.path())["statusLine"],
+                json!({ "cache": true, "tokens": false })
+            );
+            std::fs::write(
+                store.path(),
+                serde_json::to_vec(&json!({
+                    "compaction": { "reserveTokens": 9000, "thresholdPercent": 80, "cachedSummary": true },
+                    "branchSummary": { "skipPrompt": true },
+                }))
+                .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(
+                settings
+                    .compaction_settings(None)
+                    .map(|compaction| compaction.threshold_percent),
+                Ok(Some(80))
+            );
+            assert_eq!(
+                read(store.path()),
+                json!({
+                    "compaction": { "reserveTokens": 9000, "thresholdPercent": 80, "cachedSummary": true },
+                    "branchSummary": { "skipPrompt": true },
+                })
+            );
+            let settings = store
+                .set_compaction_member("thresholdPercent", None)
+                .unwrap();
+            assert_eq!(
+                settings
+                    .compaction_settings(None)
+                    .map(|compaction| compaction.threshold_percent),
+                Ok(None)
+            );
+            assert_eq!(
+                read(store.path())["compaction"],
+                json!({ "reserveTokens": 9000, "cachedSummary": true })
+            );
+            // Removing what is not there writes nothing.
+            let before = std::fs::read(store.path()).unwrap();
+            store
+                .set_compaction_member("keepRecentTokens", None)
+                .unwrap();
+            assert_eq!(std::fs::read(store.path()).unwrap(), before);
+            // The in-memory form follows the same rule.
+            let mut memory = Settings::default();
+            set_compaction_member_in(&mut memory, "keepRecentTokens", Some(json!(30000)));
+            set_compaction_enabled_in(&mut memory, false);
+            assert_eq!(
+                memory.compaction,
+                Some(json!({ "keepRecentTokens": 30000, "enabled": false }))
+            );
+            set_compaction_member_in(&mut memory, "keepRecentTokens", None);
+            assert_eq!(memory.compaction, Some(json!({ "enabled": false })));
         }
 
         // Pi's `removeModelThinkingLevel`, keyed per model here.

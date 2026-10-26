@@ -19,9 +19,20 @@
 //!   stream that ends without a result, is an `Err`, Pi's thrown error.
 //! - A message member of the wrong type counts zero characters where
 //!   JavaScript would produce `NaN` or throw.
+//! - [`CompactionSettings::threshold_percent`], Bake's own
+//!   `compaction.thresholdPercent`, can start automatic compaction before
+//!   Pi's `contextWindow - reserveTokens` ([`CompactionSettings::threshold`]).
+//! - [`compact`] removes `<read-files>` and `<modified-files>` blocks the
+//!   model copied from the previous summary before it appends the merged
+//!   lists, so a summary carries one set of each (pi-cached-compaction
+//!   0.2.0's `checkpointSummary`). Pi appends its lists after the copies.
+//! - [`cached`] writes the summary from the conversation the provider has
+//!   cached when `compaction.cachedSummary` is on; [`compact`] remains
+//!   the fallback.
 
 mod attempt;
 pub mod branch_summarization;
+pub mod cached;
 pub mod utils;
 
 pub use attempt::{SummaryAttempt, SummaryAttemptObserver};
@@ -78,9 +89,26 @@ pub struct CompactionResult {
     /// `{ readFiles, modifiedFiles }` for Pi's own summaries.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub details: Option<Value>,
+    /// How the summary was written. Bake's own; it is not serialized, so
+    /// the result keeps Pi's shape.
+    #[serde(skip)]
+    pub path: SummaryPath,
 }
 
-/// Pi's `CompactionSettings`.
+/// How a compaction's summary was written.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum SummaryPath {
+    /// Pi's summary, with the cached summary off or not tried.
+    #[default]
+    Standard,
+    /// From the conversation the provider cached ([`cached`]).
+    Cached,
+    /// Pi's summary after the cached summary could not be used, for this
+    /// reason.
+    Fallback(String),
+}
+
+/// Pi's `CompactionSettings`, with Bake's `threshold_percent`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CompactionSettings {
     /// Whether automatic compaction runs.
@@ -89,6 +117,10 @@ pub struct CompactionSettings {
     pub reserve_tokens: u64,
     /// Recent tokens kept unsummarized.
     pub keep_recent_tokens: u64,
+    /// Bake's `compaction.thresholdPercent`: automatic compaction also
+    /// starts once the context exceeds this share of the window, from 1
+    /// to 100. `None` keeps Pi's rule alone.
+    pub threshold_percent: Option<u8>,
 }
 
 /// Pi's `DEFAULT_COMPACTION_SETTINGS`.
@@ -96,7 +128,24 @@ pub const DEFAULT_COMPACTION_SETTINGS: CompactionSettings = CompactionSettings {
     enabled: true,
     reserve_tokens: 16384,
     keep_recent_tokens: 20000,
+    threshold_percent: None,
 };
+
+impl CompactionSettings {
+    /// The context size automatic compaction waits for the context to
+    /// exceed: Pi's `contextWindow - reserveTokens`, or
+    /// [`Self::threshold_percent`] of the window when that is lower, so a
+    /// percentage never leaves less room than the reserve. Negative when
+    /// the reserve exceeds the window.
+    pub fn threshold(&self, context_window: u64) -> i128 {
+        let window = i128::from(context_window);
+        let reserved = window - i128::from(self.reserve_tokens);
+        match self.threshold_percent {
+            Some(percent) => reserved.min(window * i128::from(percent) / 100),
+            None => reserved,
+        }
+    }
+}
 
 // ============================================================================
 // Token calculation
@@ -275,7 +324,7 @@ pub fn projected_context_tokens(
     Some(estimate_projected_context_tokens(projection, branch_entries).tokens)
 }
 
-/// Pi's `shouldCompact`.
+/// Pi's `shouldCompact`, at [`CompactionSettings::threshold`].
 pub fn should_compact(
     context_tokens: u64,
     context_window: u64,
@@ -284,7 +333,7 @@ pub fn should_compact(
     if !settings.enabled {
         return false;
     }
-    i128::from(context_tokens) > i128::from(context_window) - i128::from(settings.reserve_tokens)
+    i128::from(context_tokens) > settings.threshold(context_window)
 }
 
 // ============================================================================
@@ -713,11 +762,23 @@ pub async fn complete_summarization_with_control(
     .await
 }
 
+/// Checks a summary request's payload before it is sent: `Ok` passes it
+/// on, with a replacement or not, and `Err` aborts the request before any
+/// byte leaves.
+pub(crate) type PayloadGate =
+    Arc<dyn Fn(&Value, &Model) -> Result<Option<Value>, ()> + Send + Sync>;
+
 #[derive(Clone, Copy, Default)]
 struct SummaryRun<'a> {
     control: Option<&'a bake_agent::RunControl>,
     foreground_reserve: u64,
     on_attempt: Option<&'a SummaryAttemptObserver>,
+    /// Keeps the request's cache retention, for a summary that reads the
+    /// conversation's prompt cache ([`cached`]); otherwise the request
+    /// writes no cache.
+    keep_cache: bool,
+    /// Replaces the request's `on_payload`.
+    gate: Option<&'a PayloadGate>,
 }
 
 impl<'a> From<&'a SummarizationOptions> for SummaryRun<'a> {
@@ -726,6 +787,7 @@ impl<'a> From<&'a SummarizationOptions> for SummaryRun<'a> {
             control: options.run_control.as_ref(),
             foreground_reserve: options.foreground_call_reserve,
             on_attempt: options.on_attempt.as_ref(),
+            ..Self::default()
         }
     }
 }
@@ -741,7 +803,9 @@ async fn complete_summarization_with_run(
 ) -> Result<AssistantMessage, String> {
     let control = run.control;
     let mut request = options;
-    request.base.cache_retention = Some(CacheRetention::None);
+    if !run.keep_cache {
+        request.base.cache_retention = Some(CacheRetention::None);
+    }
     if request.base.session_id.is_none() {
         request.base.session_id = Some(crate::session::id::uuid_v7());
     }
@@ -754,6 +818,18 @@ async fn complete_summarization_with_run(
     }
     let signal = controller.signal();
     request.base.signal = Some(signal.clone());
+    if let Some(gate) = run.gate {
+        // The provider checks this signal after building the payload and
+        // before it sends, so a refused payload is never sent.
+        let gate = Arc::clone(gate);
+        let refuse = controller.clone();
+        request.base.on_payload = Some(Arc::new(move |payload, model| {
+            gate(payload, model).unwrap_or_else(|()| {
+                refuse.abort();
+                None
+            })
+        }));
+    }
     let produce = || {
         let request = request.clone();
         let external = external.clone();
@@ -1338,6 +1414,9 @@ pub async fn compact(
             .await?;
             (result.text, result.usage)
         };
+    if let Some(stripped) = utils::strip_file_lists(&summary) {
+        summary = stripped;
+    }
     let (read_files, modified_files) = compute_file_lists(&preparation.file_ops);
     summary.push_str(&format_file_operations(&read_files, &modified_files));
     if preparation.first_kept_entry_id.is_empty() {
@@ -1353,6 +1432,7 @@ pub async fn compact(
         estimated_tokens_after: None,
         usage: Some(usage),
         details: Some(Value::Object(details)),
+        path: SummaryPath::Standard,
     })
 }
 

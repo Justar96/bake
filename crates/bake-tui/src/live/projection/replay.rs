@@ -1,13 +1,16 @@
 //! A resumed session's transcript, and the notices of background work as
 //! the cards of the jobs and subagents they report.
 
+use bake_coding_agent::session::messages::CompactionSummaryMessage;
+
 use super::calls::{display_name, job_state, outcome};
 use super::*;
 
 /// The transcript a resumed session opens with, Pi's `renderSessionContext`
 /// over the restored messages: prompts, responses with their calls settled
 /// by their results, notices paired with the work they report, and
-/// compaction summaries as a note.
+/// compaction summaries as a compaction's mark, with the context they
+/// replaced.
 pub fn replay(messages: &[AgentMessage]) -> Vec<Row> {
     let labels = Projector::with_history(messages).labels;
     let settled: HashMap<String, Outcome> = messages
@@ -71,7 +74,16 @@ pub fn replay(messages: &[AgentMessage]) -> Vec<Row> {
                 rows.push(Row::Error(failure));
             }
         } else if message.role() == "compactionSummary" {
-            rows.push(Row::Info("Earlier conversation was compacted".into()));
+            let before = message
+                .as_custom()
+                .and_then(|custom| custom.as_any().downcast_ref::<CompactionSummaryMessage>())
+                .map_or(0, |summary| summary.tokens_before);
+            rows.push(Row::Compacted(Compacted {
+                title: COMPACTED_EARLIER.to_owned(),
+                before,
+                after: None,
+                notes: Vec::new(),
+            }));
         } else if message.role() == "branchSummary" {
             rows.push(Row::branch_summary());
         } else if let Some(row) = notice_row(message, &labels) {

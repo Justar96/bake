@@ -1488,6 +1488,21 @@ async fn run_lazy_request(
         merged.abort();
     }
     options.base.signal = Some(merged.signal());
+    // An abort made while the payload hook runs, such as a cached summary
+    // refusing a payload that does not repeat the cached request, reaches
+    // the provider before it sends: providers check their signal right
+    // after the hook, before `forward` could pass the abort on.
+    if let Some(hook) = options.base.on_payload.take() {
+        let request = signal.clone();
+        let provider = merged.clone();
+        options.base.on_payload = Some(Arc::new(move |payload, model| {
+            let next = hook(payload, model);
+            if request.as_ref().is_some_and(AbortSignal::aborted) {
+                provider.abort();
+            }
+            next
+        }));
+    }
     // Set on abort, and if this task is dropped, so that a command
     // the auth thread runs is killed either way.
     struct CancelOnDrop(Arc<AtomicBool>);

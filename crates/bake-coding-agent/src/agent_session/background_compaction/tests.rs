@@ -11,6 +11,7 @@ fn settings() -> CompactionSettings {
         enabled: true,
         reserve_tokens: 1024,
         keep_recent_tokens: 1,
+        threshold_percent: None,
     }
 }
 

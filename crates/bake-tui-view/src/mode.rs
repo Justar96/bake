@@ -19,7 +19,7 @@ pub enum Mode {
     Idle,
     /// A turn runs; Enter steers its next step.
     Running,
-    /// History is being compacted; Enter queues a prompt.
+    /// History is being compacted; Esc cancels it.
     Compacting,
     /// A child is inspected; the parent draft is kept and shown dim.
     Inspecting,
@@ -108,7 +108,7 @@ mod tests {
             (
                 Mode::Compacting,
                 true,
-                (false, "Compacting… Enter queues · Esc cancels", None),
+                (false, "Compacting history… Esc cancels", None),
             ),
             (
                 Mode::Inspecting,

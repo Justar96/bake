@@ -1294,6 +1294,82 @@ async fn a_dropped_consumer_stops_and_awaits_the_provider() {
     assert!(held.cleaned.load(Ordering::SeqCst));
 }
 
+/// A provider that runs the payload hook and reports whether the signal it
+/// checks before sending is aborted then, as the HTTP adapters check it.
+struct PayloadProbe {
+    api: String,
+    aborted: std::sync::Mutex<Option<bool>>,
+}
+
+impl bake_ai::ApiProvider for PayloadProbe {
+    fn api(&self) -> &str {
+        &self.api
+    }
+
+    fn stream(
+        &self,
+        model: &bake_ai::Model,
+        context: &TranscriptContext,
+        options: bake_ai::StreamOptions,
+    ) -> bake_ai::AssistantMessageEventStream {
+        self.stream_simple(model, context, options.into())
+    }
+
+    fn stream_simple(
+        &self,
+        model: &bake_ai::Model,
+        _: &TranscriptContext,
+        options: SimpleStreamOptions,
+    ) -> bake_ai::AssistantMessageEventStream {
+        if let Some(hook) = &options.base.on_payload {
+            hook(&json!({}), model);
+        }
+        *self.aborted.lock().expect("lock") = Some(
+            options
+                .base
+                .signal
+                .as_ref()
+                .is_some_and(bake_ai::AbortSignal::aborted),
+        );
+        let (sender, stream) = bake_ai::assistant_message_channel();
+        let mut message = bake_ai::AssistantMessage::pending(model);
+        message.stop_reason = StopReason::Aborted;
+        sender.finish(message);
+        stream
+    }
+}
+
+// Bake: an abort made while the payload hook runs reaches the provider's
+// signal before the hook returns, so the provider never sends that payload.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_abort_from_the_payload_hook_stops_the_send() {
+    let (faux, apis, runtime) = faux_runtime("key");
+    let probe = Arc::new(PayloadProbe {
+        api: faux.model().api.clone(),
+        aborted: std::sync::Mutex::new(None),
+    });
+    apis.register(probe.clone());
+    let stream_fn = runtime.stream_fn_owned(apis, None);
+    let model = runtime.snapshot().model("faux", "faux-1").expect("model");
+    for refuse in [false, true] {
+        let request = bake_ai::AbortController::new();
+        let mut options = SimpleStreamOptions::default();
+        options.base.signal = Some(request.signal());
+        let hook_request = request.clone();
+        options.base.on_payload = Some(Arc::new(move |_, _| {
+            if refuse {
+                hook_request.abort();
+            }
+            None
+        }));
+        let stream = stream_fn(&model, &TranscriptContext::default(), options).expect("stream");
+        tokio::time::timeout(OWNED_WAIT, stream.result())
+            .await
+            .expect("the request ends");
+        assert_eq!(*probe.aborted.lock().expect("lock"), Some(refuse));
+    }
+}
+
 /// A loopback server for one streaming request: it answers with SSE
 /// headers and holds the body open, and reports when the client closes the
 /// connection. The test owns the listener, its port, and the task.

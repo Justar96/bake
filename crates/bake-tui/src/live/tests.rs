@@ -285,6 +285,7 @@ fn a_prompt_streams_its_answer_commits_it_once_and_reports_the_status() {
                 window: 1000,
             }),
             name: None,
+            ..SessionStatus::default()
         })]
     );
     h.faux
@@ -347,6 +348,7 @@ fn the_status_line_reads_the_context_again_while_a_turn_runs() {
             window: 1000,
         }),
         name: None,
+        ..SessionStatus::default()
     });
     if !seen.contains(&measured) {
         seen = h.until(|update| update == &measured);

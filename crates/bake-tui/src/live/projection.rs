@@ -33,6 +33,7 @@ use bake_coding_agent::agent_session::job_notices::NOTICE_TYPE;
 use bake_coding_agent::agent_session::{
     BackgroundCompactionStatus, CompactionReason, SessionEvent, SummarizationSource,
 };
+use bake_coding_agent::compaction::{CompactionResult, SummaryPath};
 use bake_coding_agent::hooks;
 use bake_coding_agent::schedules;
 use bake_coding_agent::session::messages::CustomMessage;
@@ -45,7 +46,7 @@ use bake_tui_view::codemode::{self, Codemode, NestedCall, NestedStatus};
 use bake_tui_view::copy;
 use bake_tui_view::jobs::{self, JobState};
 use bake_tui_view::runtime::{Pending, RuntimeUpdate, Target};
-use bake_tui_view::transcript::{CallState, Row};
+use bake_tui_view::transcript::{CallState, Compacted, Row};
 use serde_json::Value;
 
 mod calls;
@@ -197,21 +198,36 @@ impl Projector {
                 follow_up,
                 &self.waiting,
             ))],
-            SessionEvent::CompactionStart { .. } => self.set_phase("compacting"),
+            // `/compact` names itself in the bar when it starts; a
+            // compaction between a run's steps takes the bar from the run.
+            SessionEvent::CompactionStart {
+                reason: CompactionReason::Manual,
+            } => self.show_phase(COMPACTION_PREPARING),
+            SessionEvent::CompactionStart { reason } => {
+                let mut updates = vec![RuntimeUpdate::CompactionStarted { interrupts: true }];
+                updates.extend(self.show_phase(match reason {
+                    CompactionReason::Overflow => COMPACTION_OVERFLOW,
+                    _ => COMPACTION_PREPARING,
+                }));
+                updates
+            }
+            SessionEvent::CompactionSummary {
+                cached,
+                tokens_before,
+                ..
+            } => self.show_phase(&summary_phase(*cached, *tokens_before)),
             SessionEvent::BackgroundCompaction {
                 status: BackgroundCompactionStatus::Committed,
                 result: Some(result),
                 ..
-            } => vec![self.commit_now(Row::Info(format!(
-                "Compacted the conversation in the background ({} tokens before)",
-                result.tokens_before
-            )))],
+            } => vec![self.commit_now(compacted_row(COMPACTED_IN_BACKGROUND, result))],
             // `/compact` reports its own outcome, with its draft.
             SessionEvent::CompactionEnd {
                 reason: CompactionReason::Manual,
                 ..
             } => Vec::new(),
             SessionEvent::CompactionEnd {
+                reason,
                 result,
                 aborted,
                 error_message,
@@ -220,18 +236,16 @@ impl Projector {
                 let row = if *aborted {
                     Some(Row::Info("Compaction cancelled".into()))
                 } else if let Some(result) = result {
-                    Some(Row::Info(format!(
-                        "Compacted the conversation ({} tokens before)",
-                        result.tokens_before
-                    )))
+                    Some(compacted_row(compaction_title(*reason), result))
                 } else {
                     error_message.clone().map(Row::Error)
                 };
                 // Pi clears its compaction indicator: the run, retried or
                 // about to settle, reads as it did before.
                 let mut updates: Vec<_> = row.map(|row| self.commit_now(row)).into_iter().collect();
+                updates.push(RuntimeUpdate::CompactionEnded);
                 let phase = self.running_phase();
-                updates.extend(self.set_phase(&phase));
+                updates.extend(self.show_phase(&phase));
                 updates
             }
             SessionEvent::AutoRetryStart {
@@ -261,7 +275,7 @@ impl Projector {
                 updates
             }
             SessionEvent::SummarizationRetryAttemptStart { source } => match source {
-                SummarizationSource::Compaction(_) => self.show_phase("compacting"),
+                SummarizationSource::Compaction(_) => self.show_phase(COMPACTION_RETRYING),
                 SummarizationSource::BranchSummary => self.show_phase(copy::SUMMARIZING_BRANCH),
             },
             // A successful retry shows its response, as Pi's does. A
@@ -545,6 +559,80 @@ impl Projector {
         self.phase = Some(phase.to_owned());
         vec![RuntimeUpdate::Phase(phase.to_owned())]
     }
+}
+
+/// The bar's phase as a compaction starts.
+const COMPACTION_PREPARING: &str = "preparing";
+/// The bar's phase as a compaction recovers from a context overflow.
+const COMPACTION_OVERFLOW: &str = "recovering from a context overflow";
+/// The bar's phase as a compaction's summary is requested again.
+const COMPACTION_RETRYING: &str = "summarizing again";
+/// The mark of a summary installed between turns.
+const COMPACTED_IN_BACKGROUND: &str = "Compacted in the background";
+/// The mark of a resumed session's earlier compaction.
+pub const COMPACTED_EARLIER: &str = "Earlier conversation compacted";
+
+/// The bar's phase while a compaction's summary is written: read from the
+/// prompt cache, or summarized from the older messages.
+fn summary_phase(cached: bool, tokens_before: u64) -> String {
+    let tokens = bake_tui_view::status::format_tokens(tokens_before);
+    if cached {
+        format!("reading {tokens} tokens from the cache")
+    } else {
+        format!("summarizing {tokens} tokens")
+    }
+}
+
+/// What a compaction's mark is titled, by what started it.
+pub fn compaction_title(reason: CompactionReason) -> &'static str {
+    match reason {
+        CompactionReason::Manual => "Compacted",
+        CompactionReason::Threshold => "Auto-compacted",
+        CompactionReason::Overflow => "Compacted after a context overflow",
+    }
+}
+
+/// A compaction's mark in the transcript ([`Row::Compacted`]): the context
+/// before and after, and how the summary was written: the share of its
+/// prompt a cached summary read from the cache, or why the cached summary,
+/// while on, was not used.
+pub fn compacted_row(title: &str, result: &CompactionResult) -> Row {
+    let mut notes = Vec::new();
+    match &result.path {
+        SummaryPath::Cached => notes.push(
+            result
+                .usage
+                .as_ref()
+                .and_then(cache_share)
+                .unwrap_or_else(|| "The summary was written from the prompt cache.".into()),
+        ),
+        SummaryPath::Fallback(why) => {
+            notes.push(format!("The cached summary was not used: {why}."));
+        }
+        SummaryPath::Standard => {}
+    }
+    Row::Compacted(Compacted {
+        title: title.to_owned(),
+        before: result.tokens_before,
+        after: result.estimated_tokens_after,
+        notes,
+    })
+}
+
+/// How much of a summary request's prompt came from the provider's cache;
+/// `None` when none did.
+pub fn cache_share(usage: &bake_ai::Usage) -> Option<String> {
+    let prompt = usage
+        .input
+        .saturating_add(usage.cache_read)
+        .saturating_add(usage.cache_write);
+    (usage.cache_read > 0 && prompt > 0).then(|| {
+        format!(
+            "The summary read {}% of its {} prompt tokens from the cache.",
+            u128::from(usage.cache_read) * 100 / u128::from(prompt),
+            bake_tui_view::status::format_tokens(prompt)
+        )
+    })
 }
 
 /// Whether `event` can change what the status line reads: the model or

@@ -93,6 +93,7 @@
 
 mod approval_history;
 mod background_compaction;
+mod cached_compaction;
 mod codemode;
 mod context_masking;
 mod hooks;
@@ -372,6 +373,25 @@ pub struct SessionStats {
     pub cost: f64,
 }
 
+/// The usage Pi's footer reads: the session's token totals over every
+/// entry, counted as [`SessionStats`] counts them, and the latest
+/// response's prompt-cache share.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct UsageTotals {
+    /// Uncached input tokens.
+    pub input: u64,
+    pub output: u64,
+    pub cache_read: u64,
+    pub cache_write: u64,
+    /// The cost in dollars.
+    pub cost: f64,
+    /// Pi's `latestCacheHitRate` as a share from 0 to 1: the latest
+    /// assistant response's cache reads over its prompt tokens (input,
+    /// cache reads, and cache writes). `None` before a response, or when
+    /// the latest one reported no prompt tokens.
+    pub latest_cache_hit: Option<f64>,
+}
+
 impl SessionStats {
     /// The four token counts' sum, Pi's `tokens.total`.
     pub fn total_tokens(&self) -> u64 {
@@ -446,6 +466,21 @@ pub enum SessionEvent<'a> {
     CompactionStart {
         /// What started it.
         reason: CompactionReason,
+    },
+    /// Bake's own: a compaction's summary request is about to be sent,
+    /// from the provider's cache ([`crate::compaction::cached`]) or as Pi's
+    /// summary; `fallback` says why the cached summary, while on, was not
+    /// used. A cached request whose payload check refuses it as it is sent,
+    /// or that fails, is followed by Pi's, with the reason.
+    CompactionSummary {
+        /// What started the compaction.
+        reason: CompactionReason,
+        /// Whether the request repeats the cached conversation.
+        cached: bool,
+        /// The context estimate before the compaction.
+        tokens_before: u64,
+        /// Why the cached summary was not used.
+        fallback: Option<&'a str>,
     },
     /// Pi's `compaction_end`.
     CompactionEnd {
@@ -1594,6 +1629,7 @@ impl AgentSession {
             abort_requested: AtomicBool::new(false),
             run_control: Mutex::new(None),
             background_compaction: background_compaction::BackgroundCompaction::default(),
+            cached_requests: Arc::default(),
             state: Mutex::new(RunState::default()),
             activity: tokio::sync::watch::Sender::new(Activity::default()),
             gap: Arc::default(),
@@ -1619,6 +1655,27 @@ impl AgentSession {
         }
         let hidden_declarations: codemode::HiddenDeclarations = Arc::default();
         let hidden_in_requests = Arc::clone(&hidden_declarations);
+        // One conversion for the agent's requests and for a summary that
+        // repeats them ([`cached_compaction`]).
+        let request_messages: cached_compaction::RequestMessages =
+            Arc::new(move |messages: &[LiveMessage]| {
+                let converted =
+                    codemode::hide_declarations(convert_to_llm(messages), &hidden_in_requests);
+                if block {
+                    block_images(converted)
+                } else {
+                    converted
+                }
+            });
+        let _ = core
+            .cached_requests
+            .convert
+            .set(Arc::clone(&request_messages));
+        let agent_stream_fn = cached_compaction::capturing(
+            Arc::clone(&stream_fn),
+            Arc::clone(&settings),
+            Arc::clone(&core.cached_requests),
+        );
         let schedules = schedules_enabled.then(|| Arc::new(schedules::Schedules::new()));
         if let Some(schedules) = &schedules {
             tools.extend(schedules::tools(&core, schedules));
@@ -1654,15 +1711,8 @@ impl AgentSession {
                 messages,
             },
             convert_to_llm: Some(hook::convert_to_llm(move |messages| {
-                let converted =
-                    codemode::hide_declarations(convert_to_llm(messages), &hidden_in_requests);
-                Box::pin(async move {
-                    if block {
-                        block_images(converted)
-                    } else {
-                        converted
-                    }
-                })
+                let converted = request_messages(messages);
+                Box::pin(async move { converted })
             })),
             after_tool_call: Some(hook::after_tool_call(move |context, _signal| {
                 let content = context.result.content.clone();
@@ -1710,7 +1760,7 @@ impl AgentSession {
             finish_turn: Some(hooks::finish_turn(Arc::clone(&shared_hooks))),
             prepare_request: (task_documents_enabled || read_settings(&settings).context_masking)
                 .then(|| context_masking::request_hook(Arc::clone(&core), task_documents_enabled)),
-            stream_fn: Some(stream_fn),
+            stream_fn: Some(agent_stream_fn),
             prepare_next_turn_with_context: Some(next_turn_hook(
                 Arc::clone(&core),
                 published.clone(),
@@ -2097,6 +2147,87 @@ impl AgentSession {
         stats
     }
 
+    /// Pi's footer `getSessionStats` reading: the token totals of every
+    /// entry of the session, whatever the branch, and the latest assistant
+    /// response's cache share ([`UsageTotals`]).
+    pub fn usage_totals(&self) -> UsageTotals {
+        let session = lock(&self.session);
+        let mut stats = SessionStats::default();
+        let mut latest_cache_hit = None;
+        for entry in session.entries() {
+            let kind = entry.entry_type();
+            if matches!(kind, "usage" | "branch_summary" | "compaction") {
+                if let Some(usage) = entry.get("usage") {
+                    stats.add_usage(usage);
+                }
+                continue;
+            }
+            if kind != "message" {
+                continue;
+            }
+            let Some(message) = entry.get("message") else {
+                continue;
+            };
+            let role = message.get("role").and_then(serde_json::Value::as_str);
+            let Some(usage) = message.get("usage") else {
+                continue;
+            };
+            match role {
+                Some("toolResult") => stats.add_usage(usage),
+                Some("assistant") => {
+                    stats.add_usage(usage);
+                    let count = |key: &str| {
+                        usage
+                            .get(key)
+                            .and_then(serde_json::Value::as_f64)
+                            .filter(|count| count.is_finite() && *count > 0.0)
+                            .unwrap_or(0.0)
+                    };
+                    let prompt = count("input") + count("cacheRead") + count("cacheWrite");
+                    latest_cache_hit = (prompt > 0.0).then(|| count("cacheRead") / prompt);
+                }
+                _ => {}
+            }
+        }
+        UsageTotals {
+            input: stats.input,
+            output: stats.output,
+            cache_read: stats.cache_read,
+            cache_write: stats.cache_write,
+            cost: stats.cost,
+            latest_cache_hit,
+        }
+    }
+
+    /// Sets `statusLine.tokens`: whether the interactive status line shows
+    /// the session's input and output token totals. Saved; the terminal
+    /// reads it when it next draws the status.
+    pub async fn set_status_line_tokens(&self, on: bool) -> Result<DefaultSave, String> {
+        self.set_status_line("tokens", on).await
+    }
+
+    /// Sets `statusLine.cache`: whether the interactive status line shows
+    /// the session's prompt-cache reads, writes, and latest hit share.
+    pub async fn set_status_line_cache(&self, on: bool) -> Result<DefaultSave, String> {
+        self.set_status_line("cache", on).await
+    }
+
+    async fn set_status_line(&self, key: &'static str, on: bool) -> Result<DefaultSave, String> {
+        self.run_change(move |control| async move {
+            {
+                let mut settings = write_settings(&control.settings);
+                match key {
+                    "tokens" => settings.status_line.tokens = on,
+                    _ => settings.status_line.cache = on,
+                }
+            }
+            Ok(control
+                .save(move |store| store.set_status_line(key, on))
+                .await)
+        })
+        .await
+    }
+
     /// Pi's `getContextUsage`: the current model's context window and the
     /// projected tokens of the session's branch
     /// ([`crate::compaction::projected_context_tokens`]). `None` without a
@@ -2432,6 +2563,70 @@ impl AgentSession {
             );
             Ok(control
                 .save(move |store| store.set_compaction_enabled(enabled))
+                .await)
+        })
+        .await
+    }
+
+    /// Sets Bake's `compaction.thresholdPercent`: automatic compaction also
+    /// starts once the context fills `percent` of the window, from 1 to
+    /// 100, from the next check ([`crate::compaction::CompactionSettings`]).
+    /// `None` removes it, keeping Pi's rule alone.
+    pub async fn set_compaction_threshold_percent(
+        &self,
+        percent: Option<u8>,
+    ) -> Result<DefaultSave, String> {
+        if percent.is_some_and(|percent| !(1..=100).contains(&percent)) {
+            return Err("The compaction threshold is a whole percentage from 1 to 100.".into());
+        }
+        self.set_compaction_member("thresholdPercent", percent.map(serde_json::Value::from))
+            .await
+    }
+
+    /// Sets Pi's `compaction.keepRecentTokens`, the recent tokens a
+    /// compaction keeps, from the next compaction; `None` removes it, so
+    /// Pi's default applies. A model's `modelOverrides` entry still wins.
+    pub async fn set_compaction_keep_recent_tokens(
+        &self,
+        tokens: Option<u64>,
+    ) -> Result<DefaultSave, String> {
+        self.set_compaction_member("keepRecentTokens", tokens.map(serde_json::Value::from))
+            .await
+    }
+
+    /// Sets Bake's `compaction.cachedSummary`: whether a compaction writes
+    /// its summary from the provider's prompt cache
+    /// ([`crate::compaction::cached`]), from the next request on.
+    pub async fn set_cached_compaction(&self, enabled: bool) -> Result<DefaultSave, String> {
+        self.set_compaction_member("cachedSummary", Some(serde_json::Value::Bool(enabled)))
+            .await
+    }
+
+    async fn set_compaction_member(
+        &self,
+        key: &'static str,
+        value: Option<serde_json::Value>,
+    ) -> Result<DefaultSave, String> {
+        self.run_change(move |control| async move {
+            crate::settings::set_compaction_member_in(
+                &mut write_settings(&control.settings),
+                key,
+                value.clone(),
+            );
+            Ok(control
+                .save(move |store| store.set_compaction_member(key, value))
+                .await)
+        })
+        .await
+    }
+
+    /// Sets `branchSummary.skipPrompt`: whether `/tree` leaves a branch
+    /// without asking to summarize it, from the next navigation.
+    pub async fn set_branch_summary_skip_prompt(&self, skip: bool) -> Result<DefaultSave, String> {
+        self.run_change(move |control| async move {
+            write_settings(&control.settings).branch_summary_skip_prompt = skip;
+            Ok(control
+                .save(move |store| store.set_branch_summary_skip_prompt(skip))
                 .await)
         })
         .await

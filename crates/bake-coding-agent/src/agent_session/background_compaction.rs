@@ -231,7 +231,9 @@ impl Core {
             return Ok(committed);
         };
         let settings = self.compaction_settings(Some(&model))?;
-        if !settings.enabled || model.context_window <= settings.reserve_tokens.saturating_mul(2) {
+        // A summary starts one reserve before the foreground threshold.
+        let foreground = settings.threshold(model.context_window);
+        if !settings.enabled || foreground <= i128::from(settings.reserve_tokens) {
             return Ok(committed);
         }
         let thinking = self
@@ -244,8 +246,10 @@ impl Core {
                 let tokens =
                     estimate_projected_context_tokens(&session.build_session_projection(), &branch)
                         .tokens;
-                let threshold = model.context_window - settings.reserve_tokens.saturating_mul(2);
-                if tokens < threshold || should_compact(tokens, model.context_window, &settings) {
+                let threshold = foreground - i128::from(settings.reserve_tokens);
+                if i128::from(tokens) < threshold
+                    || should_compact(tokens, model.context_window, &settings)
+                {
                     return None;
                 }
                 Snapshot::capture(session, model, thinking, settings)

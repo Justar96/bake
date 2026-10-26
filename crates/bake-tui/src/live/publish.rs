@@ -43,8 +43,10 @@ impl Driver {
     }
 
     /// Sends the status line's model, thinking level, and context use, Pi's
-    /// footer reading ([`AgentSession::context_usage`]), with the session's
-    /// name for the terminal's title.
+    /// footer reading ([`AgentSession::context_usage`]), the token totals
+    /// and prompt cache when `statusLine` turns them on
+    /// ([`AgentSession::usage_totals`]), and the session's name for the
+    /// terminal's title.
     pub(super) fn status(&mut self) {
         let status = self.read_status();
         self.status = Some(status.clone());
@@ -62,19 +64,39 @@ impl Driver {
     }
 
     pub(super) fn read_status(&self) -> SessionStatus {
-        let model = self.session.model();
-        let context = self.session.context_usage().map(|usage| ContextUsage {
-            used: usage.tokens,
-            window: usage.context_window,
-        });
-        SessionStatus {
-            thinking: model
-                .as_ref()
-                .filter(|model| model.reasoning)
-                .map(|_| self.session.thinking_level().as_str().to_owned()),
-            model: model.map(|model| format!("{}/{}", model.provider, model.id)),
-            context,
-            name: self.session.session_name(),
-        }
+        read_status(&self.session)
+    }
+}
+
+/// The status line's readings of `session`, as the driver sends them
+/// ([`Driver::status`]); `/settings` sends them too when it changes what
+/// the line shows.
+pub(super) fn read_status(session: &AgentSession) -> SessionStatus {
+    let model = session.model();
+    let context = session.context_usage().map(|usage| ContextUsage {
+        used: usage.tokens,
+        window: usage.context_window,
+    });
+    let line = session.settings().status_line;
+    let totals = line.any().then(|| session.usage_totals());
+    SessionStatus {
+        thinking: model
+            .as_ref()
+            .filter(|model| model.reasoning)
+            .map(|_| session.thinking_level().as_str().to_owned()),
+        model: model.map(|model| format!("{}/{}", model.provider, model.id)),
+        context,
+        tokens: totals.filter(|_| line.tokens).map(|totals| TokenTotals {
+            input: totals.input,
+            output: totals.output,
+        }),
+        cache: totals.filter(|_| line.cache).map(|totals| CacheReading {
+            read: totals.cache_read,
+            write: totals.cache_write,
+            hit: totals
+                .latest_cache_hit
+                .map(|share| (share * 100.0).floor().clamp(0.0, 100.0) as u64),
+        }),
+        name: session.session_name(),
     }
 }

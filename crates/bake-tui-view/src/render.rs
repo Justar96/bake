@@ -1504,6 +1504,9 @@ fn bar_left(app: &State) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
             }
             (None, Some(summary)) => {
                 let (head, color) = match summary.outcome {
+                    Outcome::Completed if summary.kind == ActivityKind::Compaction => {
+                        (format!("✓ {}", copy::COMPACTED), Color::Green)
+                    }
                     Outcome::Completed => (format!("✓ {}", copy::COMPLETED), Color::Green),
                     Outcome::Interrupted => (format!("■ {}", copy::INTERRUPTED), Color::Yellow),
                     Outcome::Failed => (format!("✗ {}", copy::FAILED_TURN), Color::Red),
@@ -3342,7 +3345,7 @@ mod tests {
 
         ctrl_t(&mut app);
         let (prompt, bottom) = composer_rows(&mut app, 80);
-        assert!(prompt.starts_with("│ ❯ Compacting… Enter queues · Esc cancels"));
+        assert!(prompt.starts_with("│ ❯ Compacting history… Esc cancels"));
         assert_eq!(bottom, format!("╰{}╯", "─".repeat(78)));
 
         ctrl_t(&mut app);
@@ -3372,6 +3375,49 @@ mod tests {
             let (rows, cursor) = draw(&mut app, 80, 24);
             assert_eq!((interior(&rows), cursor), expected, "{:?}", app.mode());
         }
+    }
+
+    // Bake: a live compaction names itself in the bar with the phase the
+    // runtime reports, and `/compact` ends as `Compacted`.
+    #[test]
+    fn a_live_compaction_shows_its_phase_and_ends_as_compacted() {
+        use crate::runtime::RuntimeUpdate;
+        let mut app = State::live(FrameStyle::default(), Tones::None, Vec::new());
+        update(
+            &mut app,
+            Msg::Runtime(RuntimeUpdate::TurnStarted { seed: "s".into() }),
+        );
+        update(
+            &mut app,
+            Msg::Runtime(RuntimeUpdate::CompactionStarted { interrupts: false }),
+        );
+        update(
+            &mut app,
+            Msg::Runtime(RuntimeUpdate::Phase(
+                "reading 182.3k tokens from the cache".into(),
+            )),
+        );
+        app.now = Duration::from_secs(7);
+        let (rows, _) = draw(&mut app, 80, 24);
+        let y = row_index(&rows, "Compacting history…");
+        assert!(
+            rows[y].starts_with("  Compacting history…  reading 182.3k tokens from the cache · 7s"),
+            "{rows:#?}"
+        );
+        assert!(
+            rows.iter()
+                .any(|row| row.contains("❯ Compacting history… Esc cancels")),
+            "{rows:#?}"
+        );
+        update(
+            &mut app,
+            Msg::Runtime(RuntimeUpdate::TurnEnded(Outcome::Completed)),
+        );
+        let (rows, _) = draw(&mut app, 80, 24);
+        assert!(
+            rows.iter().any(|row| row.starts_with("  ✓ Compacted  7s")),
+            "{rows:#?}"
+        );
     }
 
     #[test]
@@ -3466,6 +3512,7 @@ mod tests {
             }),
             cwd: "~/projects/bake".into(),
             ascii: false,
+            ..status::StatusInput::default()
         };
         let bar = |rows: &[String]| rows[row_index(rows, "❯") - 2].trim_end().to_owned();
         let (rows, _) = draw(&mut app, 80, 24);

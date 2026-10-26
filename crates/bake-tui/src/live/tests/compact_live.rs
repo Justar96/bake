@@ -77,7 +77,17 @@ fn compact_rebuilds_the_transcript_and_the_next_prompt_sees_the_summary() {
         Submission::FollowUp("/compact   keep the numbers  ".into()),
     );
     let mut updates = h.ended(4);
-    updates.extend(h.until(|u| matches!(u, RuntimeUpdate::Replaced(_))));
+    // The transcript is rebuilt, then the compaction ends, so the bar
+    // keeps its outcome.
+    updates.extend(h.until(|u| matches!(u, RuntimeUpdate::TurnEnded(_))));
+    let rebuilt = updates
+        .iter()
+        .position(|u| matches!(u, RuntimeUpdate::Replaced(_)))
+        .expect("rebuilt");
+    assert!(matches!(
+        updates.get(rebuilt + 1),
+        Some(RuntimeUpdate::TurnEnded(Outcome::Completed))
+    ));
     let started = updates
         .iter()
         .position(|u| matches!(u, RuntimeUpdate::TurnStarted { .. }))
@@ -88,10 +98,21 @@ fn compact_rebuilds_the_transcript_and_the_next_prompt_sees_the_summary() {
             .all(|u| matches!(u, RuntimeUpdate::Status(_))),
         "{updates:#?}"
     );
+    // The bar names the compaction itself, then what its summary does.
+    assert!(matches!(
+        updates.get(started + 1),
+        Some(RuntimeUpdate::CompactionStarted { interrupts: false })
+    ));
     assert!(
         updates
             .iter()
-            .any(|u| matches!(u, RuntimeUpdate::Phase(phase) if phase == "compacting"))
+            .any(|u| matches!(u, RuntimeUpdate::Phase(phase) if phase == "preparing"))
+    );
+    assert!(
+        updates
+            .iter()
+            .any(|u| matches!(u, RuntimeUpdate::Phase(phase) if phase.starts_with("summarizing ") && phase.ends_with(" tokens"))),
+        "{updates:#?}"
     );
     assert_eq!(turn_ended(&updates), Some(Outcome::Completed));
     // No dialog opened, so none is closed: closing one would start a
@@ -104,13 +125,20 @@ fn compact_rebuilds_the_transcript_and_the_next_prompt_sees_the_summary() {
     assert!(refused(&updates).is_none());
     assert!(committed(&updates).is_empty(), "no row before the rebuild");
     let rows = replaced(&updates).expect("rebuilt");
-    let note = match rows.last() {
-        Some(Row::Info(note)) => note.clone(),
+    let mark = match rows.last() {
+        Some(Row::Compacted(mark)) => mark.clone(),
         other => panic!("{other:?}"),
     };
+    assert_eq!(mark.title, "Compacted");
+    assert!(mark.before > 0, "{mark:?}");
+    // The faux summary of so short a history is longer than it.
+    assert!(mark.after.is_some(), "{mark:?}");
+    // The faux provider runs no payload hook, so the cached summary, on
+    // by default, had no request to repeat; the mark says so.
+    assert_eq!(mark.notes.len(), 1, "{mark:?}");
     assert!(
-        note.starts_with("Compacted from ") && note.ends_with(" tokens"),
-        "{note}"
+        mark.notes[0].starts_with("The cached summary was not used: no earlier request to repeat"),
+        "{mark:?}"
     );
     assert!(
         rows.contains(&Row::Answer("Echo: three.".into())),
@@ -166,7 +194,7 @@ fn esc_cancels_a_running_compaction_and_keeps_every_draft() {
     let calls = h.faux.call_count();
     h.faux.set_responses(vec![held_summary()]);
     h.submit_id(4, Submission::FollowUp("/compact".into()));
-    h.until(|u| matches!(u, RuntimeUpdate::Phase(phase) if phase == "compacting"));
+    h.until(|u| matches!(u, RuntimeUpdate::Phase(phase) if phase.starts_with("summarizing ")));
     h.wait_for_requests(calls + 1);
     h.submit_id(5, Submission::Steer("typed meanwhile".into()));
     let reason = refused(&h.ended(5)).expect("refused");
@@ -252,7 +280,7 @@ fn stopping_during_a_compaction_writes_nothing() {
     let calls = h.faux.call_count();
     h.faux.set_responses(vec![held_summary()]);
     h.submit_id(4, Submission::FollowUp("/compact".into()));
-    h.until(|u| matches!(u, RuntimeUpdate::Phase(phase) if phase == "compacting"));
+    h.until(|u| matches!(u, RuntimeUpdate::Phase(phase) if phase.starts_with("summarizing ")));
     h.wait_for_requests(calls + 1);
     h.stop();
     assert!(entries(&file, "compaction").is_empty());

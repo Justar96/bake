@@ -260,6 +260,7 @@ fn cut_points_and_preparations_match_pi() {
             enabled: true,
             reserve_tokens: 2000,
             keep_recent_tokens: keep,
+            threshold_percent: None,
         };
         let preparation = prepare_compaction(&entries, settings).map(|prep| {
             json!({
@@ -334,6 +335,7 @@ async fn summaries_send_pis_prompts_and_build_pis_results() {
             enabled: true,
             reserve_tokens: 2000,
             keep_recent_tokens: case["keep"].as_u64().unwrap(),
+            threshold_percent: None,
         };
         let preparation = prepare_compaction(&entries, settings).unwrap();
         recorder.answer(&[

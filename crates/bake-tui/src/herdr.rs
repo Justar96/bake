@@ -680,6 +680,7 @@ mod tests {
                 window: 1000,
             }),
             name: Some("fix\x1b]0;evil\x07 auth".into()),
+            ..SessionStatus::default()
         };
         let tokens = projection
             .observe(&RuntimeUpdate::Status(status.clone()), None)

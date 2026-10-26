@@ -83,7 +83,7 @@ use bake_tui_view::dialog::DialogAnswer;
 use bake_tui_view::paste::Image;
 use bake_tui_view::runtime::{RuntimeUpdate, SessionStatus};
 use bake_tui_view::state::Outcome;
-use bake_tui_view::status::ContextUsage;
+use bake_tui_view::status::{CacheReading, ContextUsage, TokenTotals};
 use bake_tui_view::transcript::{Banner, Notice, Pill, Row, TagTone};
 use std::sync::atomic::{AtomicBool, Ordering};
 
