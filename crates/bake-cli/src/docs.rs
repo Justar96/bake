@@ -23,6 +23,11 @@ pub const TOPICS: &[Topic] = &[
         text: include_str!("../docs/cli.md"),
     },
     Topic {
+        name: "headless",
+        summary: "Running bake from scripts and other agents: --output-format json and stdin",
+        text: include_str!("../docs/headless.md"),
+    },
+    Topic {
         name: "home",
         summary: "The Bake home, what it holds, and what is read from Bake 0.3",
         text: include_str!("../docs/home.md"),

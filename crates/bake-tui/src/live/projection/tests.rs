@@ -31,9 +31,12 @@ fn background_commit_reports_context_without_replacing_foreground_phase() {
     };
     assert_eq!(
         projector.apply(&committed),
-        vec![RuntimeUpdate::Commit(vec![Row::Info(
-            "Compacted the conversation in the background (8000 tokens before)".into()
-        )])]
+        vec![RuntimeUpdate::Commit(vec![Row::Compacted(Compacted {
+            title: "Compacted in the background".into(),
+            before: 8000,
+            after: Some(1000),
+            notes: Vec::new(),
+        })])]
     );
     assert_eq!(projector.phase.as_deref(), Some("running"));
 }
@@ -46,12 +49,13 @@ fn compaction_result() -> bake_coding_agent::compaction::CompactionResult {
         estimated_tokens_after: Some(1000),
         usage: None,
         details: None,
+        path: bake_coding_agent::compaction::SummaryPath::Standard,
     }
 }
 
-// An automatic compaction hands the bar back to the run, and a
-// summary's retry reads as a wait, then as the work it retries, as
-// Pi's indicators do.
+// An automatic compaction takes the bar from the run and hands it back,
+// its summary says what it reads, and a summary's retry reads as a wait,
+// then as the work it retries, as Pi's indicators do.
 #[test]
 fn compaction_and_summary_retries_move_the_bar_phase() {
     let result = compaction_result();
@@ -60,7 +64,19 @@ fn compaction_and_summary_retries_move_the_bar_phase() {
         projector.apply(&SessionEvent::CompactionStart {
             reason: CompactionReason::Overflow,
         }),
-        [RuntimeUpdate::Phase("compacting".into())]
+        [
+            RuntimeUpdate::CompactionStarted { interrupts: true },
+            RuntimeUpdate::Phase("recovering from a context overflow".into()),
+        ]
+    );
+    assert_eq!(
+        projector.apply(&SessionEvent::CompactionSummary {
+            reason: CompactionReason::Overflow,
+            cached: false,
+            tokens_before: 182_340,
+            fallback: Some("the last request overflowed the context window"),
+        }),
+        [RuntimeUpdate::Phase("summarizing 182.3k tokens".into())]
     );
     let scheduled = SessionEvent::SummarizationRetryScheduled {
         attempt: 1,
@@ -80,15 +96,21 @@ fn compaction_and_summary_retries_move_the_bar_phase() {
     };
     assert_eq!(
         projector.apply(&retried),
-        [RuntimeUpdate::Phase("compacting".into())]
+        [RuntimeUpdate::Phase("summarizing again".into())]
     );
     assert_eq!(
         projector.apply(&SessionEvent::SummarizationRetryFinished),
         []
     );
+    let fell_back = bake_coding_agent::compaction::CompactionResult {
+        path: bake_coding_agent::compaction::SummaryPath::Fallback(
+            "the last request overflowed the context window".into(),
+        ),
+        ..result.clone()
+    };
     let ended = SessionEvent::CompactionEnd {
         reason: CompactionReason::Overflow,
-        result: Some(&result),
+        result: Some(&fell_back),
         aborted: false,
         will_retry: true,
         error_message: None,
@@ -96,11 +118,48 @@ fn compaction_and_summary_retries_move_the_bar_phase() {
     assert_eq!(
         projector.apply(&ended),
         [
-            RuntimeUpdate::Commit(vec![Row::Info(
-                "Compacted the conversation (8000 tokens before)".into()
-            )]),
+            RuntimeUpdate::Commit(vec![Row::Compacted(Compacted {
+                title: "Compacted after a context overflow".into(),
+                before: 8000,
+                after: Some(1000),
+                notes: vec![
+                    "The cached summary was not used: the last request overflowed the context window."
+                        .into()
+                ],
+            })]),
+            RuntimeUpdate::CompactionEnded,
             RuntimeUpdate::Phase(copy::FIRST_PHASE.into()),
         ]
+    );
+    // A cached summary says how much of its prompt the cache served.
+    let cached = bake_coding_agent::compaction::CompactionResult {
+        path: bake_coding_agent::compaction::SummaryPath::Cached,
+        usage: Some(bake_ai::Usage {
+            input: 1_000,
+            cache_read: 182_000,
+            ..bake_ai::Usage::default()
+        }),
+        ..result.clone()
+    };
+    assert_eq!(
+        compacted_row("Auto-compacted", &cached),
+        Row::Compacted(Compacted {
+            title: "Auto-compacted".into(),
+            before: 8000,
+            after: Some(1000),
+            notes: vec!["The summary read 99% of its 183k prompt tokens from the cache.".into()],
+        })
+    );
+    assert_eq!(
+        projector.apply(&SessionEvent::CompactionSummary {
+            reason: CompactionReason::Threshold,
+            cached: true,
+            tokens_before: 950,
+            fallback: None,
+        }),
+        [RuntimeUpdate::Phase(
+            "reading 950 tokens from the cache".into()
+        )]
     );
     // A failure reports itself and leaves the bar to the run as well.
     projector.phase = Some("compacting".into());
@@ -115,10 +174,18 @@ fn compaction_and_summary_retries_move_the_bar_phase() {
         projector.apply(&failed),
         [
             RuntimeUpdate::Commit(vec![Row::Error("no summary".into())]),
+            RuntimeUpdate::CompactionEnded,
             RuntimeUpdate::Phase(copy::FIRST_PHASE.into()),
         ]
     );
-    // `/compact` keeps its own phase and outcome.
+    // `/compact` names itself when it starts, then keeps its own phase and
+    // outcome.
+    assert_eq!(
+        projector.apply(&SessionEvent::CompactionStart {
+            reason: CompactionReason::Manual,
+        }),
+        [RuntimeUpdate::Phase("preparing".into())]
+    );
     projector.phase = Some("compacting".into());
     let manual = SessionEvent::CompactionEnd {
         reason: CompactionReason::Manual,
@@ -145,11 +212,11 @@ fn compaction_and_summary_retries_move_the_bar_phase() {
     );
     assert_eq!(
         projector.apply(&retried),
-        [RuntimeUpdate::Phase("compacting".into())]
+        [RuntimeUpdate::Phase("summarizing again".into())]
     );
     assert_eq!(
         projector.apply(&retried),
-        [RuntimeUpdate::Phase("compacting".into())]
+        [RuntimeUpdate::Phase("summarizing again".into())]
     );
     assert_eq!(
         projector.apply(&scheduled)[1..],

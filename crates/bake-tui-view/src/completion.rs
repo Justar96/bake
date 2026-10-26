@@ -58,7 +58,11 @@ pub const CATALOG: &[Command] = &[
 pub const LIVE_CATALOG: &[Command] = &[
     command("model", Some("[search]"), "Choose the model"),
     command("thinking", Some("[level]"), "Choose the thinking level"),
-    command("settings", None, "Change session settings"),
+    command(
+        "settings",
+        None,
+        "Change compaction, queue, /tree, and status line settings",
+    ),
     command("login", None, "Sign in to CLIProxyAPI"),
     command("logout", None, "Sign out of CLIProxyAPI"),
     command("refresh-models", None, "Refresh the CLIProxyAPI model list"),

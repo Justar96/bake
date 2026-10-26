@@ -73,6 +73,10 @@ pub enum Row {
     Error(String),
     /// A note from the session itself, such as where it is saved, drawn dim.
     Info(String),
+    /// Where the conversation was compacted: a ruled mark in the
+    /// compaction blue with the context before and after, and notes under
+    /// it.
+    Compacted(Compacted),
     /// A tool call and its result as one block.
     Call {
         tool: String,
@@ -115,6 +119,20 @@ pub struct Banner {
 pub struct Pill {
     pub text: String,
     pub tone: TagTone,
+}
+
+/// What a [`Row::Compacted`] marks.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Compacted {
+    /// What happened, such as `Compacted` or `Auto-compacted`.
+    pub title: String,
+    /// The context before it, in tokens.
+    pub before: u64,
+    /// The context after it, when measured.
+    pub after: Option<u64>,
+    /// Dim notes under the mark, each its own paragraph, such as how much
+    /// of the summary's prompt the cache served.
+    pub notes: Vec<String>,
 }
 
 /// What a [`Row::Notice`] says.
@@ -295,6 +313,67 @@ pub fn rule(width: usize, margin: usize, look: Look) -> Line<'static> {
         pad(margin),
         Span::styled(look.marks().rule.repeat(cells), faint(look.tones)),
     ])
+}
+
+/// `Compacted · 182.3k → 21.1k tokens - - -`: the title in the compaction
+/// blue, the counts dim, and a faint rule to `width`, as the turn's rule
+/// rules off a prompt; then each note, dim, under the title. A head too
+/// wide for a rule wraps without one.
+fn present_compacted(mark: &Compacted, width: usize, look: Look) -> Vec<Line<'static>> {
+    // A note may carry a provider's error text: no escape sequence or
+    // control character reaches the terminal.
+    let clean = |text: &str| {
+        text.lines()
+            .map(|line| shell_output::parse_sgr(line, Tones::None).0)
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    let arrow = if look.classic { "->" } else { "→" };
+    let counts = match mark.after {
+        Some(after) => format!(
+            "{} {arrow} {} tokens",
+            crate::status::format_tokens(mark.before),
+            crate::status::format_tokens(after)
+        ),
+        None => format!("{} tokens", crate::status::format_tokens(mark.before)),
+    };
+    let title = clean(&mark.title);
+    let blue = look
+        .tones
+        .style(crate::activity::Hue::Compacting, 0.0)
+        .add_modifier(Modifier::BOLD);
+    let head = format!("{title} · {counts}");
+    let mut lines = Vec::new();
+    let room = width.saturating_sub(RAIL);
+    if head.width() + 2 <= room {
+        let rest = room - head.width() - 1;
+        lines.push(Line::from(vec![
+            pad(RAIL),
+            Span::styled(title, blue),
+            Span::styled(format!(" · {counts} "), dim()),
+            Span::styled(look.marks().rule.repeat(rest), faint(look.tones)),
+        ]));
+    } else {
+        lines.extend(hang(
+            &head,
+            width,
+            RAIL,
+            vec![pad(RAIL)],
+            vec![pad(RAIL)],
+            blue,
+        ));
+    }
+    for note in &mark.notes {
+        lines.extend(hang(
+            &clean(note),
+            width,
+            RAIL,
+            vec![pad(RAIL)],
+            vec![pad(RAIL)],
+            dim(),
+        ));
+    }
+    lines
 }
 
 /// Fainter than [`dim`]: the darkest palette grey on a truecolor terminal,
@@ -848,6 +927,7 @@ pub fn present(rows: &[Row], index: usize, width: usize, look: Look) -> Vec<Line
             colour(look.tones, (0xef, 0x44, 0x44), Color::Red),
         )),
         Row::Info(text) => lines.extend(hang(text, prose, RAIL, rail(), rail(), dim())),
+        Row::Compacted(mark) => lines.extend(present_compacted(mark, prose, look)),
         Row::Call {
             tool,
             argument,
@@ -3081,6 +3161,70 @@ mod tests {
         };
         banner.access.clear();
         assert_eq!(present(&[Row::Banner(banner)], 0, 80, PLAIN).len(), 4);
+    }
+
+    // Bake: a compaction is a ruled mark with the context before and after
+    // in compact counts, and its notes under it; a head too wide for its
+    // rule wraps, and nothing escapes the width or reaches the terminal.
+    #[test]
+    fn a_compaction_mark_rules_off_its_counts_and_notes() {
+        let mark = Row::Compacted(Compacted {
+            title: "Auto-compacted".into(),
+            before: 182_340,
+            after: Some(21_050),
+            notes: vec![
+                "The summary read 99% of its 183,000 prompt tokens from the cache.".into(),
+                "bad \x1b]0;title\x07 text".into(),
+            ],
+        });
+        let rows = [Row::Answer("done".into()), mark.clone()];
+        let drawn = text(&present(&rows, 1, 60, PLAIN));
+        assert_eq!(
+            drawn,
+            [
+                "",
+                "  Auto-compacted · 182.3k → 21.1k tokens -----------------",
+                "  The summary read 99% of its 183,000 prompt tokens from",
+                "  the cache.",
+                "  bad  text",
+            ]
+        );
+        let classic = Look {
+            classic: true,
+            ..PLAIN
+        };
+        assert!(text(&present(&rows, 1, 60, classic))[1].contains("182.3k -> 21.1k tokens"));
+        let unmeasured = Row::Compacted(Compacted {
+            title: "Compacted".into(),
+            before: 950,
+            after: None,
+            notes: Vec::new(),
+        });
+        assert_eq!(
+            text(&present(&[unmeasured], 0, 30, PLAIN)),
+            ["  Compacted · 950 tokens ---"]
+        );
+        assert_eq!(
+            text(&present(std::slice::from_ref(&mark), 0, 20, PLAIN))[..2],
+            ["  Auto-compacted ·", "  182.3k → 21.1k"]
+        );
+        for width in 1..=90 {
+            for line in present(&rows, 1, width, PLAIN) {
+                assert!(line.width() <= width.max(RAIL + 2), "{width}: {line:?}");
+            }
+        }
+        // The title takes the compaction blue.
+        let blue = Look {
+            tones: Tones::TrueColor,
+            ..PLAIN
+        };
+        let head = &present(&[mark], 0, 60, blue)[0];
+        assert_eq!(
+            head.spans[1].style.fg,
+            Tones::TrueColor
+                .style(crate::activity::Hue::Compacting, 0.0)
+                .fg
+        );
     }
 
     #[test]

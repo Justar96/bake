@@ -134,6 +134,47 @@ pub fn format_file_operations(read_files: &[String], modified_files: &[String]) 
     format!("\n\n{}", sections.join("\n\n"))
 }
 
+/// A summary without the `<read-files>` and `<modified-files>` blocks a
+/// model copied into it from an earlier summary, trimmed, or `None` when it
+/// has none. Each block runs from its opening tag to the first closing tag
+/// of the same name, as pi-cached-compaction 0.2.0's
+/// `/<(read-files|modified-files)>[\s\S]*?<\/\1>/g` matches; an opening tag
+/// that is never closed stays.
+pub fn strip_file_lists(summary: &str) -> Option<String> {
+    const TAGS: [(&str, &str); 2] = [
+        ("<read-files>", "</read-files>"),
+        ("<modified-files>", "</modified-files>"),
+    ];
+    let mut kept = String::with_capacity(summary.len());
+    let mut rest = summary;
+    let mut stripped = false;
+    loop {
+        // The earliest opening tag that is closed after it.
+        let block = TAGS
+            .iter()
+            .filter_map(|(open, close)| {
+                let mut from = 0;
+                while let Some(start) = rest[from..].find(open).map(|at| from + at) {
+                    let body = start + open.len();
+                    if let Some(end) = rest[body..].find(close) {
+                        return Some((start, body + end + close.len()));
+                    }
+                    from = body;
+                }
+                None
+            })
+            .min();
+        let Some((start, end)) = block else {
+            kept.push_str(rest);
+            break;
+        };
+        kept.push_str(&rest[..start]);
+        rest = &rest[end..];
+        stripped = true;
+    }
+    stripped.then(|| kept.trim().to_owned())
+}
+
 /// The most characters of one tool result a serialized conversation keeps.
 const TOOL_RESULT_MAX_CHARS: usize = 2000;
 

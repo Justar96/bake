@@ -43,6 +43,7 @@ impl Driver {
             self.send(RuntimeUpdate::TurnStarted {
                 seed: format!("{}-{}", self.session.session_id(), self.turns),
             });
+            self.send(RuntimeUpdate::CompactionStarted { interrupts: false });
         }
         let task = tokio::spawn(commands::run(name, argument, context));
         self.command = Some(CommandRun {
@@ -90,9 +91,12 @@ impl Driver {
             return;
         };
         let outcome = done.unwrap_or_else(|error| Err(format!("The command failed: {error}")));
-        if command.name == commands::COMPACT {
+        let compacted = matches!(outcome, Ok(commands::Done::Compacted { .. }));
+        if command.name == commands::COMPACT && !compacted {
             // It opens no dialog, so no keyboard handoff starts and the
-            // draft typed while it ran keeps taking keys.
+            // draft typed while it ran keeps taking keys. A compaction that
+            // succeeded ends after the transcript is rebuilt, below, so its
+            // outcome stays in the bar.
             self.send(RuntimeUpdate::TurnEnded(work_outcome(&outcome)));
         } else if !commands::NO_DIALOG.contains(&command.name) {
             // The command closed its dialog; a panicked one could not have.
@@ -149,7 +153,7 @@ impl Driver {
             // The compaction is written and the agent's transcript is the
             // compacted context: the transcript starts over with it, as
             // Pi's `compaction_end` handler renders it.
-            Ok(commands::Done::Compacted { note }) => {
+            Ok(commands::Done::Compacted { row }) => {
                 if let Some(id) = command.id {
                     self.send(RuntimeUpdate::Admitted(id));
                 }
@@ -159,8 +163,9 @@ impl Driver {
                     .unwrap_or_else(PoisonError::into_inner) =
                     Projector::with_history(&self.session.messages());
                 let mut rows = projection::replay_compacted(&self.session.messages());
-                rows.push(Row::Info(note));
+                rows.push(row);
                 self.send(RuntimeUpdate::Replaced(rows));
+                self.send(RuntimeUpdate::TurnEnded(Outcome::Completed));
                 self.publish_pending();
             }
             Ok(done) => {

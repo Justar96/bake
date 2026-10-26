@@ -211,6 +211,7 @@ fn compacts_above_the_reserve_unless_disabled() {
         enabled: true,
         reserve_tokens: 10000,
         keep_recent_tokens: 20000,
+        threshold_percent: None,
     };
     assert!(should_compact(95000, 100000, &settings));
     assert!(!should_compact(89000, 100000, &settings));
@@ -228,6 +229,91 @@ fn compacts_above_the_reserve_unless_disabled() {
             ..settings
         }
     ));
+}
+
+// Bake: `thresholdPercent` starts compaction earlier, never later than
+// Pi's rule.
+#[test]
+fn a_threshold_percent_compacts_earlier_but_never_later() {
+    let pi = DEFAULT_COMPACTION_SETTINGS;
+    assert_eq!(pi.threshold(200_000), 200_000 - 16_384);
+    let at = |percent| CompactionSettings {
+        threshold_percent: Some(percent),
+        ..pi
+    };
+    assert_eq!(at(80).threshold(200_000), 160_000);
+    assert!(should_compact(160_001, 200_000, &at(80)));
+    assert!(!should_compact(160_000, 200_000, &at(80)));
+    assert!(!should_compact(160_001, 200_000, &pi));
+    // A percentage above the reserve's rule keeps the reserve free.
+    assert_eq!(at(100).threshold(200_000), pi.threshold(200_000));
+    assert_eq!(at(95).threshold(200_000), pi.threshold(200_000));
+    assert_eq!(at(1).threshold(1_000_000), 10_000);
+    // A disabled compaction ignores it.
+    let off = CompactionSettings {
+        enabled: false,
+        ..at(10)
+    };
+    assert!(!should_compact(199_000, 200_000, &off));
+    // A reserve above the window still compacts any context.
+    let tiny = CompactionSettings {
+        reserve_tokens: 20,
+        ..at(50)
+    };
+    assert!(should_compact(1, 10, &tiny));
+}
+
+// Bake: copied file lists are removed, each block from its opening tag to
+// the first closing tag of its name, and an unclosed tag stays.
+#[test]
+fn copied_file_lists_are_stripped() {
+    assert_eq!(utils::strip_file_lists("## Goal\nx"), None);
+    assert_eq!(
+        utils::strip_file_lists(
+            "## Goal\nx\n\n<read-files>\na\n</read-files>\n\n<modified-files>\nb\n</modified-files>\n"
+        )
+        .as_deref(),
+        Some("## Goal\nx")
+    );
+    assert_eq!(
+        utils::strip_file_lists("a <modified-files>b</modified-files> c <read-files>d").as_deref(),
+        Some("a  c <read-files>d")
+    );
+    assert_eq!(
+        utils::strip_file_lists("<read-files>a</read-files><read-files>b</read-files>z").as_deref(),
+        Some("z")
+    );
+    assert_eq!(utils::strip_file_lists("<read-files>open"), None);
+}
+
+// Bake (pi-cached-compaction 0.2.0's `checkpointSummary`): a summary that
+// copied the previous summary's file lists ends with one merged set.
+#[tokio::test]
+async fn a_summary_that_copied_its_file_lists_carries_one_set() {
+    let mock = Mock::new();
+    let mut copied = summary_response();
+    copied.content = vec![faux_text(
+        "## Goal\nTest summary\n\n<read-files>\nold.rs\n</read-files>",
+    )];
+    mock.once(copied);
+    let mut preparation = split_preparation(Some("previous"), 2000, true);
+    preparation.is_split_turn = false;
+    preparation.turn_prefix_messages.clear();
+    preparation.file_ops.read.insert("old.rs".into());
+    preparation.file_ops.edited.insert("new.rs".into());
+    let result = compact(
+        &preparation,
+        &test_model(false, 8192),
+        None,
+        &mock.stream_fn(),
+        &key(),
+    )
+    .await
+    .unwrap_or_else(|error| panic!("{error}"));
+    assert_eq!(
+        result.summary,
+        "## Goal\nTest summary\n\n<read-files>\nold.rs\n</read-files>\n\n<modified-files>\nnew.rs\n</modified-files>"
+    );
 }
 
 // Pi "findCutPoint": "should find cut point based on actual token
@@ -661,6 +747,7 @@ fn split_preparation(previous: Option<&str>, reserve: u64, history: bool) -> Com
             enabled: true,
             reserve_tokens: reserve,
             keep_recent_tokens: 20,
+            threshold_percent: None,
         },
     }
 }

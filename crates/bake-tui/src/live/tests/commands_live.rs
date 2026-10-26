@@ -324,6 +324,127 @@ fn model_sets_an_exact_match_or_opens_the_list() {
     h.stop();
 }
 
+// Bake: `/settings` groups its rows under the command they shape; a change
+// applies at once and returns to the list, Esc on a setting's values goes
+// back without one, and Esc on the list reports the changes made.
+#[test]
+fn settings_are_grouped_and_stay_open_until_esc() {
+    let h = harness(Vec::new(), Vec::new());
+    h.until(|u| matches!(u, RuntimeUpdate::Status(_)));
+    let session = h.port().test_session.upgrade().expect("live session");
+    h.submit_id(1, Submission::FollowUp("/settings".into()));
+    let list = h.dialog();
+    let DialogKind::List(sheet) = &list.kind else {
+        panic!("{list:?}");
+    };
+    let groups: Vec<(&str, &str)> = sheet
+        .items
+        .iter()
+        .map(|item| (item.group.as_deref().unwrap_or(""), item.label.as_str()))
+        .collect();
+    assert_eq!(
+        groups,
+        [
+            (commands::settings::COMPACTION, "Auto-compaction"),
+            (commands::settings::COMPACTION, "Compact at"),
+            (commands::settings::COMPACTION, "Keep recent"),
+            (commands::settings::COMPACTION, "Cached summary"),
+            (commands::settings::QUEUE, "Steering mode"),
+            (commands::settings::QUEUE, "Follow-up mode"),
+            (commands::settings::TREE, "Branch summary"),
+            (commands::settings::STATUS_LINE, "Token totals"),
+            (commands::settings::STATUS_LINE, "Prompt cache"),
+        ]
+    );
+    let choose = |id, value: &str| {
+        h.reply(
+            id,
+            DialogAnswer::Chose {
+                value: value.into(),
+                save_default: false,
+            },
+        );
+    };
+    choose(list.id, "compact-at");
+    let values = h.dialog();
+    let DialogKind::List(at) = &values.kind else {
+        panic!("{values:?}");
+    };
+    assert_eq!(at.title, "Compact at");
+    assert_eq!(
+        at.current,
+        Some(at.items.len() - 1),
+        "the default is current"
+    );
+    choose(values.id, "80");
+    let list = h.dialog();
+    let DialogKind::List(sheet) = &list.kind else {
+        panic!("{list:?}");
+    };
+    assert_eq!(sheet.selected, Some(1), "the changed row stays selected");
+    assert_eq!(sheet.items[1].detail.as_deref(), Some("80%"));
+    assert_eq!(
+        session
+            .settings()
+            .compaction_settings(None)
+            .map(|compaction| compaction.threshold_percent),
+        Ok(Some(80))
+    );
+    // Esc on the values changes nothing and comes back.
+    choose(list.id, "cached-summary");
+    let values = h.dialog();
+    h.reply(values.id, DialogAnswer::Cancel);
+    let list = h.dialog();
+    assert!(session.settings().cached_compaction(), "on by default");
+    choose(list.id, "cached-summary");
+    let values = h.dialog();
+    choose(values.id, "off");
+    let list = h.dialog();
+    // The status line takes the cache reading at once, before the sheet
+    // closes.
+    choose(list.id, "status-cache");
+    let values = h.dialog();
+    choose(values.id, "on");
+    let seen = h.until(|u| matches!(u, RuntimeUpdate::Dialog(Some(_))));
+    assert!(
+        seen.iter().any(|u| matches!(
+            u,
+            RuntimeUpdate::Status(SessionStatus {
+                cache: Some(_),
+                tokens: None,
+                ..
+            })
+        )),
+        "{seen:?}"
+    );
+    let list = match seen.last() {
+        Some(RuntimeUpdate::Dialog(Some(list))) => list.clone(),
+        other => panic!("{other:?}"),
+    };
+    h.reply(list.id, DialogAnswer::Cancel);
+    let updates = h.command_end(1);
+    assert!(matches!(updates.last(), Some(RuntimeUpdate::Admitted(1))));
+    assert!(!session.settings().cached_compaction());
+    assert!(session.settings().status_line.cache);
+    let rows = committed(&h.until(|u| matches!(u, RuntimeUpdate::Commit(_))));
+    let unsaved = "for this session; it could not be saved: no settings file to save to";
+    assert_eq!(
+        rows,
+        [
+            Row::Info(format!("Compact at: 80% {unsaved}")),
+            Row::Info(format!("Cached summary: off {unsaved}")),
+            Row::Info(format!("Prompt cache: on {unsaved}")),
+        ]
+    );
+    // Without a change, Esc gives the draft back.
+    h.submit_id(2, Submission::FollowUp("/settings".into()));
+    let list = h.dialog();
+    h.reply(list.id, DialogAnswer::Cancel);
+    let updates = h.command_end(2);
+    assert_eq!(refusal(&updates).as_deref(), Some(commands::CANCELLED));
+    h.stop();
+}
+
 // Pi `cycleThinkingLevel` (Shift+Tab): each press moves to the model's
 // next level, from the highest back to the lowest, for this session only,
 // and the status line follows; a model with one level stays where it is.

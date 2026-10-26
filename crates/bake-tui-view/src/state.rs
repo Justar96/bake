@@ -410,6 +410,8 @@ pub enum Outcome {
 pub struct TurnSummary {
     pub outcome: Outcome,
     pub elapsed: Duration,
+    /// What ended: a turn, or a compaction that was the work itself.
+    pub kind: ActivityKind,
 }
 
 /// Presentation state: the parent draft, keyboard focus, one notice, the
@@ -428,6 +430,9 @@ pub struct State {
     pub selected: String,
     pub notice: Option<Notice>,
     pub activity: Option<Activity>,
+    /// The runtime's turn a compaction interrupted, shown again when the
+    /// compaction ends ([`RuntimeUpdate::CompactionEnded`]).
+    pub compacting_over: Option<Activity>,
     /// What the runtime's turn is doing, as it last reported.
     pub phase: Option<String>,
     /// Prompts the runtime holds but has not admitted, as it last reported.
@@ -590,6 +595,7 @@ impl State {
             selected: String::new(),
             notice: None,
             activity: None,
+            compacting_over: None,
             phase: None,
             pending: Vec::new(),
             summary: None,
@@ -1149,6 +1155,7 @@ fn runtime(state: &mut State, update: RuntimeUpdate) {
                 started: state.now,
                 runtime: true,
             });
+            state.compacting_over = None;
             state.phase = None;
             state.summary = None;
         }
@@ -1203,8 +1210,19 @@ fn runtime(state: &mut State, update: RuntimeUpdate) {
             state.latest = None;
             state.transcript_area = None;
             state.live_call = None;
-            state.activity = None;
-            state.phase = None;
+            // `/compact` rebuilds the transcript before it ends: the
+            // compaction that is the work itself keeps the bar until its
+            // [`RuntimeUpdate::TurnEnded`].
+            let compacting = state.activity.filter(|work| {
+                work.runtime
+                    && work.kind == ActivityKind::Compaction
+                    && state.compacting_over.is_none()
+            });
+            if compacting.is_none() {
+                state.phase = None;
+            }
+            state.activity = compacting;
+            state.compacting_over = None;
             state.summary = None;
             state.pending.clear();
         }
@@ -1240,6 +1258,8 @@ fn runtime(state: &mut State, update: RuntimeUpdate) {
             state.status.model = status.model;
             state.status.thinking = status.thinking;
             state.status.context = status.context;
+            state.status.tokens = status.tokens;
+            state.status.cache = status.cache;
         }
         RuntimeUpdate::Approvals(approvals) => {
             let front = approvals.first().map(|a| a.generation);
@@ -1277,14 +1297,50 @@ fn runtime(state: &mut State, update: RuntimeUpdate) {
             }
         }
         RuntimeUpdate::TurnEnded(outcome) => {
-            if let Some(turn) = state.activity.filter(|a| a.runtime) {
+            // A compaction that interrupted the turn ends with it, and the
+            // turn is what ended; a compaction that was the work, as
+            // `/compact` is, ends as a compaction.
+            let ended = state.compacting_over.take().or(state.activity);
+            if let Some(work) = ended.filter(|a| a.runtime) {
                 state.summary = Some(TurnSummary {
                     outcome,
-                    elapsed: state.now.saturating_sub(turn.started),
+                    elapsed: state.now.saturating_sub(work.started),
+                    kind: work.kind,
                 });
                 state.activity = None;
             }
             state.phase = None;
+        }
+        RuntimeUpdate::CompactionStarted { interrupts } => {
+            state.end_tips();
+            let current = state.activity.filter(|a| a.runtime);
+            // A repeated start, or a sample, leaves the work as it is.
+            if current.is_some_and(|a| a.kind == ActivityKind::Compaction) {
+                return;
+            }
+            state.compacting_over = current.filter(|_| interrupts);
+            state.activity = Some(Activity {
+                kind: ActivityKind::Compaction,
+                word: crate::copy::COMPACTING,
+                started: if interrupts {
+                    state.now
+                } else {
+                    current.map_or(state.now, |a| a.started)
+                },
+                runtime: true,
+            });
+            state.phase = None;
+            state.summary = None;
+        }
+        RuntimeUpdate::CompactionEnded => {
+            if state
+                .activity
+                .is_some_and(|a| a.runtime && a.kind == ActivityKind::Compaction)
+                && let Some(turn) = state.compacting_over.take()
+            {
+                state.activity = Some(turn);
+                state.phase = None;
+            }
         }
     }
 }
@@ -2295,6 +2351,7 @@ fn end_turn(state: &mut State, outcome: Outcome) {
         state.summary = Some(TurnSummary {
             outcome,
             elapsed: state.now.saturating_sub(sample.started),
+            kind: ActivityKind::Turn,
         });
     }
     // The turn's script settles with it: run to its end when the turn
@@ -3180,15 +3237,98 @@ mod tests {
                 model: Some("p/m".into()),
                 thinking: Some("high".into()),
                 context: None,
+                tokens: Some(crate::status::TokenTotals {
+                    input: 12_000,
+                    output: 3_400,
+                }),
+                cache: None,
                 name: None,
             }),
         );
         assert_eq!(state.status.model.as_deref(), Some("p/m"));
+        assert_eq!(state.status.tokens.map(|t| t.output), Some(3_400));
         assert_eq!(state.status.thinking.as_deref(), Some("high"));
         runtime(&mut state, RuntimeUpdate::TurnStarted { seed: "s".into() });
         runtime(&mut state, RuntimeUpdate::TurnEnded(Outcome::Failed));
         assert_eq!(state.summary.map(|s| s.outcome), Some(Outcome::Failed));
         assert_eq!(state.activity, None);
+    }
+
+    // Bake: a compaction between a turn's steps names itself with its own
+    // clock and hands the bar back to the turn; one the turn's end cuts
+    // short ends with the turn; `/compact`, which is the work itself, keeps
+    // its start and ends as a compaction.
+    #[test]
+    fn a_runtime_compaction_takes_the_bar_and_gives_it_back() {
+        let mut state = live();
+        runtime(&mut state, RuntimeUpdate::TurnStarted { seed: "s".into() });
+        let turn = state.activity;
+        state.now = Duration::from_secs(10);
+        runtime(
+            &mut state,
+            RuntimeUpdate::CompactionStarted { interrupts: true },
+        );
+        let compaction = state.activity.expect("compacting");
+        assert_eq!(
+            (compaction.kind, compaction.word, compaction.started),
+            (
+                ActivityKind::Compaction,
+                crate::copy::COMPACTING,
+                Duration::from_secs(10)
+            )
+        );
+        assert_eq!(state.mode(), Mode::Compacting);
+        // A repeated start changes nothing.
+        runtime(
+            &mut state,
+            RuntimeUpdate::CompactionStarted { interrupts: true },
+        );
+        assert_eq!(state.compacting_over, turn);
+        runtime(&mut state, RuntimeUpdate::CompactionEnded);
+        assert_eq!(state.activity, turn);
+        assert_eq!(state.mode(), Mode::Running);
+        runtime(
+            &mut state,
+            RuntimeUpdate::CompactionStarted { interrupts: true },
+        );
+        state.now = Duration::from_secs(20);
+        runtime(&mut state, RuntimeUpdate::TurnEnded(Outcome::Completed));
+        assert_eq!(
+            state.summary,
+            Some(TurnSummary {
+                outcome: Outcome::Completed,
+                elapsed: Duration::from_secs(20),
+                kind: ActivityKind::Turn,
+            })
+        );
+        assert_eq!((state.activity, state.compacting_over), (None, None));
+        // `/compact`.
+        runtime(&mut state, RuntimeUpdate::TurnStarted { seed: "c".into() });
+        state.now = Duration::from_secs(23);
+        runtime(
+            &mut state,
+            RuntimeUpdate::CompactionStarted { interrupts: false },
+        );
+        assert_eq!(
+            state.activity.map(|a| (a.kind, a.started)),
+            Some((ActivityKind::Compaction, Duration::from_secs(20)))
+        );
+        // Its end comes as the turn's, not a compaction's end, and the
+        // transcript it rebuilds first leaves it running.
+        runtime(&mut state, RuntimeUpdate::CompactionEnded);
+        assert_eq!(state.mode(), Mode::Compacting);
+        runtime(&mut state, RuntimeUpdate::Replaced(Vec::new()));
+        assert_eq!(state.mode(), Mode::Compacting);
+        state.now = Duration::from_secs(32);
+        runtime(&mut state, RuntimeUpdate::TurnEnded(Outcome::Completed));
+        assert_eq!(
+            state.summary,
+            Some(TurnSummary {
+                outcome: Outcome::Completed,
+                elapsed: Duration::from_secs(12),
+                kind: ActivityKind::Compaction,
+            })
+        );
     }
 
     #[test]
@@ -3320,6 +3460,7 @@ mod tests {
             Some(TurnSummary {
                 outcome: Outcome::Interrupted,
                 elapsed: Duration::from_secs(2),
+                kind: ActivityKind::Turn,
             })
         );
         // The committed prompt is recalled like any other.
@@ -3867,6 +4008,7 @@ mod tests {
         let completed = Some(TurnSummary {
             outcome: Outcome::Completed,
             elapsed: Duration::from_secs(8),
+            kind: ActivityKind::Turn,
         });
         assert_eq!(state.summary, completed);
         // Ending the compaction, by Ctrl+T or Esc, keeps the turn's outcome.
@@ -3881,6 +4023,7 @@ mod tests {
             Some(TurnSummary {
                 outcome: Outcome::Interrupted,
                 elapsed: Duration::from_secs(3),
+                kind: ActivityKind::Turn,
             })
         );
         press(&mut state, Key::Esc);

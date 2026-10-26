@@ -28,9 +28,10 @@ use serde_json::Value;
 use tokio::sync::watch;
 
 use super::{Listeners, SessionEvent, SharedSession, lock};
+use crate::compaction::cached::CachedSummary;
 use crate::compaction::{
-    CompactionResult, CompactionSettings, RetryObserver, SummarizationOptions, compact,
-    estimate_context_tokens, estimate_projected_context_tokens, estimate_tokens,
+    CompactionResult, CompactionSettings, RetryObserver, SummarizationOptions, SummaryPath,
+    compact, estimate_context_tokens, estimate_projected_context_tokens, estimate_tokens,
     prepare_compaction, should_compact,
 };
 use crate::owned_work::{BlockingTask, Refused, WorkGate};
@@ -392,6 +393,8 @@ pub(super) struct Core {
     pub abort_requested: AtomicBool,
     pub run_control: Mutex<Option<bake_agent::RunControl>>,
     pub background_compaction: super::background_compaction::BackgroundCompaction,
+    /// The agent's last request, for a summary that reads its cache.
+    pub cached_requests: Arc<super::cached_compaction::CachedRequests>,
     pub state: Mutex<RunState>,
     pub activity: watch::Sender<Activity>,
     /// Why the session file lacks an entry, once a write to it failed.
@@ -812,7 +815,10 @@ impl Core {
     }
 
     /// Pi's `_runDefaultCompaction`, appending the result and refreshing
-    /// the transcript.
+    /// the transcript. With `compaction.cachedSummary` on, the summary is
+    /// first written from the provider's prompt cache
+    /// ([`Self::cached_summary`]); Pi's summary runs when that is ruled out
+    /// or fails.
     ///
     /// The cancellation (`controller` or `cancel`) is checked again under
     /// the session lock, immediately before the append, so an abort that
@@ -841,15 +847,46 @@ impl Core {
             on_retry: Some(self.summarization_observer(SummarizationSource::Compaction(reason))),
             ..SummarizationOptions::default()
         };
-        let mut result = compact(
-            preparation,
-            model,
-            custom_instructions,
-            &self.stream_fn,
-            &options,
-        )
-        .await
-        .map_err(CompactionError::Failed)?;
+        let cached = self
+            .cached_summary(
+                preparation,
+                model,
+                custom_instructions,
+                controller.signal(),
+                reason,
+            )
+            .await;
+        let path = match cached {
+            CachedSummary::Done(result) => Ok(*result),
+            CachedSummary::Cancelled => return Err(CompactionError::Cancelled),
+            CachedSummary::Off => Err(SummaryPath::Standard),
+            CachedSummary::Fallback(why) => Err(SummaryPath::Fallback(why)),
+        };
+        let mut result = match path {
+            Ok(result) => result,
+            Err(path) => {
+                self.emit(&SessionEvent::CompactionSummary {
+                    reason,
+                    cached: false,
+                    tokens_before: preparation.tokens_before,
+                    fallback: match &path {
+                        SummaryPath::Fallback(why) => Some(why),
+                        _ => None,
+                    },
+                });
+                let mut result = compact(
+                    preparation,
+                    model,
+                    custom_instructions,
+                    &self.stream_fn,
+                    &options,
+                )
+                .await
+                .map_err(CompactionError::Failed)?;
+                result.path = path;
+                result
+            }
+        };
         let signals = [Some(controller.signal()), cancel.cloned()];
         let cancelled = move || signals.iter().flatten().any(AbortSignal::aborted);
         if cancelled() {

@@ -46,6 +46,9 @@ mod background_accounting;
 #[path = "print_mode/codemode.rs"]
 mod codemode;
 
+#[path = "print_mode/headless.rs"]
+mod headless;
+
 #[path = "print_mode/schedules.rs"]
 mod schedules;
 
@@ -381,35 +384,9 @@ impl Workspace {
                 let _ = input.write_all(text.as_bytes());
             }
         });
-        let drain = |pipe: Option<Box<dyn Read + Send>>| {
-            std::thread::spawn(move || {
-                let mut bytes = Vec::new();
-                if let Some(mut pipe) = pipe {
-                    let _ = pipe.read_to_end(&mut bytes);
-                }
-                bytes
-            })
-        };
-        let stdout = drain(child.stdout.take().map(|pipe| Box::new(pipe) as _));
-        let stderr = drain(child.stderr.take().map(|pipe| Box::new(pipe) as _));
-        let deadline = Instant::now() + RUN_TIMEOUT;
-        let status = loop {
-            match child.try_wait().expect("bake status") {
-                Some(status) => break status,
-                None if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(10)),
-                None => {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    panic!("bake {args:?} ran longer than {RUN_TIMEOUT:?}");
-                }
-            }
-        };
+        let output = finish(child, args);
         let _ = writer.join();
-        Output {
-            status,
-            stdout: stdout.join().expect("stdout reader"),
-            stderr: stderr.join().expect("stderr reader"),
-        }
+        output
     }
 
     /// Every session file under the home.
@@ -428,6 +405,40 @@ impl Workspace {
         walk(&self.home().join("sessions"), &mut out);
         out.sort();
         out
+    }
+}
+
+/// Collects a started `bake`'s output and status, failing the test if it
+/// takes longer than [`RUN_TIMEOUT`] rather than hanging it. Its standard
+/// input is the caller's to write or close.
+fn finish(mut child: std::process::Child, args: &[&str]) -> Output {
+    let drain = |pipe: Option<Box<dyn Read + Send>>| {
+        std::thread::spawn(move || {
+            let mut bytes = Vec::new();
+            if let Some(mut pipe) = pipe {
+                let _ = pipe.read_to_end(&mut bytes);
+            }
+            bytes
+        })
+    };
+    let stdout = drain(child.stdout.take().map(|pipe| Box::new(pipe) as _));
+    let stderr = drain(child.stderr.take().map(|pipe| Box::new(pipe) as _));
+    let deadline = Instant::now() + RUN_TIMEOUT;
+    let status = loop {
+        match child.try_wait().expect("bake status") {
+            Some(status) => break status,
+            None if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(10)),
+            None => {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("bake {args:?} ran longer than {RUN_TIMEOUT:?}");
+            }
+        }
+    };
+    Output {
+        status,
+        stdout: stdout.join().expect("stdout reader"),
+        stderr: stderr.join().expect("stderr reader"),
     }
 }
 

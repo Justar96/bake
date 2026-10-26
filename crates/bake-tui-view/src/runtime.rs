@@ -13,7 +13,7 @@ use crate::dialog::DialogRequest;
 use crate::jobs::BackgroundJob;
 use crate::paste::Image;
 use crate::state::Outcome;
-use crate::status::ContextUsage;
+use crate::status::{CacheReading, ContextUsage, TokenTotals};
 use crate::transcript::Row;
 
 /// A prompt the user sent, and how it reaches the agent: chosen from the
@@ -60,13 +60,16 @@ impl From<Submission> for Prompt {
 
 /// What the status line reports about the session: its model as
 /// `provider/id`, its thinking level, and how much of the model's context
-/// the last response used; and its display name, which the terminal's
-/// title shows rather than the status line. `None` leaves a field out.
+/// the last response used; the token totals and prompt cache, when the
+/// user turned them on; and its display name, which the terminal's title
+/// shows rather than the status line. `None` leaves a field out.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SessionStatus {
     pub model: Option<String>,
     pub thinking: Option<String>,
     pub context: Option<ContextUsage>,
+    pub tokens: Option<TokenTotals>,
+    pub cache: Option<CacheReading>,
     pub name: Option<String>,
 }
 
@@ -126,6 +129,16 @@ pub enum RuntimeUpdate {
     /// What the running turn is doing now, such as `thinking` or
     /// `running bash`, for the bar.
     Phase(String),
+    /// History compaction started: the bar names it in the compaction blue,
+    /// with its own clock, and the composer says Esc cancels it. With
+    /// `interrupts`, it runs between the running turn's steps, and the
+    /// turn shows again on [`RuntimeUpdate::CompactionEnded`]; without, it
+    /// is the work itself, as `/compact` is, and
+    /// [`RuntimeUpdate::TurnEnded`] ends it.
+    CompactionStarted { interrupts: bool },
+    /// The compaction a [`RuntimeUpdate::CompactionStarted`] with
+    /// `interrupts` began ended; the turn it interrupted shows again.
+    CompactionEnded,
     /// The rows still being written, which replace the previous live rows.
     /// They are drawn after every committed row.
     Live(Vec<Row>),

@@ -34,8 +34,9 @@ pub const PLACEHOLDER: &[&str] = &["Type a draft", "Alt+Enter newline", "Ctrl+- 
 /// While a turn runs, Enter steers instead of sending.
 pub const PLACEHOLDER_RUNNING: &[&str] = &["Enter steers the next step · Alt+↑ sends now"];
 pub const PLACEHOLDER_APPROVAL: &[&str] = &["Approval pending"];
-/// While history is compacted, Enter queues a prompt to run afterwards.
-pub const PLACEHOLDER_COMPACTING: &[&str] = &["Compacting… Enter queues · Esc cancels"];
+/// While history is compacted: Esc cancels it, and a prompt sent meanwhile
+/// is refused with its draft kept or waits for the turn it interrupts.
+pub const PLACEHOLDER_COMPACTING: &[&str] = &["Compacting history… Esc cancels"];
 /// An inspection whose parent draft is empty.
 pub const PLACEHOLDER_INSPECTING: &[&str] = &["Read-only · Esc returns to parent"];
 /// Between a placeholder's parts.
@@ -303,8 +304,12 @@ pub const INSPECT_KEYS: &str = "Tab agents · Esc draft";
 /// label before the context reading.
 pub const NO_MODEL_FIELD: &str = "no model";
 pub const CONTEXT: &str = "ctx";
+/// The dim label before the status line's prompt-cache reading.
+pub const CACHE: &str = "cache";
 /// The header's word for a sample turn that ran to its end, and for one Esc stopped.
 pub const COMPLETED: &str = "Completed";
+/// The bar's word after a compaction that was the work itself, as `/compact` is.
+pub const COMPACTED: &str = "Compacted";
 pub const INTERRUPTED: &str = "Interrupted";
 /// The approval panel's words: its title, before the tool's name; the
 /// heading over the call's arguments; its keys, as the TypeScript copy's

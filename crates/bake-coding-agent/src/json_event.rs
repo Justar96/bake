@@ -316,6 +316,24 @@ pub fn session_event_json(event: &SessionEvent<'_>) -> Value {
             out.insert("reason".into(), reason.as_str().into());
             Value::Object(out)
         }
+        SessionEvent::CompactionSummary {
+            reason,
+            cached,
+            tokens_before,
+            fallback,
+        } => {
+            let mut out = object("compaction_summary");
+            out.insert("reason".into(), reason.as_str().into());
+            out.insert(
+                "path".into(),
+                if *cached { "cached" } else { "standard" }.into(),
+            );
+            out.insert("tokensBefore".into(), (*tokens_before).into());
+            if let Some(fallback) = fallback {
+                out.insert("fallbackReason".into(), (*fallback).into());
+            }
+            Value::Object(out)
+        }
         SessionEvent::CompactionEnd {
             reason,
             result,
@@ -691,6 +709,7 @@ mod tests {
             estimated_tokens_after: Some(3),
             usage: None,
             details: Some(json!({ "readFiles": [], "modifiedFiles": [] })),
+            path: crate::compaction::SummaryPath::Cached,
         };
         assert_eq!(
             line(SessionEvent::CompactionEnd {
@@ -751,6 +770,26 @@ mod tests {
         assert_eq!(
             line(SessionEvent::SummarizationRetryFinished),
             r#"{"type":"summarization_retry_finished"}"#
+        );
+        // Bake's own: which summary a compaction sends, and why the cached
+        // one was not used. The result's path is not serialized.
+        assert_eq!(
+            line(SessionEvent::CompactionSummary {
+                reason: CompactionReason::Threshold,
+                cached: true,
+                tokens_before: 180_000,
+                fallback: None,
+            }),
+            r#"{"type":"compaction_summary","reason":"threshold","path":"cached","tokensBefore":180000}"#
+        );
+        assert_eq!(
+            line(SessionEvent::CompactionSummary {
+                reason: CompactionReason::Manual,
+                cached: false,
+                tokens_before: 9,
+                fallback: Some("the prompt cache has expired"),
+            }),
+            r#"{"type":"compaction_summary","reason":"manual","path":"standard","tokensBefore":9,"fallbackReason":"the prompt cache has expired"}"#
         );
     }
 }

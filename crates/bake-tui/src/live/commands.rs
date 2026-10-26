@@ -9,9 +9,10 @@
 //! `showSettingsSelector`). A model or level named exactly is set at once
 //! (Pi regression 7443). Otherwise a list opens. Enter changes this
 //! session; Ctrl+S also saves the default, as Pi's `app.models.save` and
-//! `app.thinking.save` do. `/settings` saves what it changes, as Pi's
-//! settings selector does, and offers only settings the running session
-//! applies at once.
+//! `app.thinking.save` do. `/settings` ([`settings`]) saves what it
+//! changes, as Pi's settings selector does, offers only settings the
+//! running session applies at once, and groups them under the slash
+//! command or the part of the screen whose work they shape.
 //!
 //! `/session`, `/name`, `/new`, and `/resume` follow Pi v1.2.0
 //! `interactive-mode.ts` (`handleSessionCommand`, `handleNameCommand`,
@@ -48,7 +49,11 @@
 //! `agent-session.ts` (`compact`) through
 //! [`AgentSession::compact_when_idle`]: the instructions, trimmed, go to
 //! the summary request, and on success the transcript starts over with the
-//! kept history and `Compacted from N tokens` below it. Unlike Pi, which
+//! kept history and the compaction's mark below it: the context before and
+//! after, and how the summary was written (the share of its prompt a
+//! cached summary read from the cache, or why the cached summary was not
+//! used). While it runs, the bar names it in the compaction blue with its
+//! phase, such as `reading 182.3k tokens from the cache`. Unlike Pi, which
 //! aborts a running response first, it is idle only, with the busy rule of
 //! `/new`: Esc stays the one key that stops a turn, and a running turn or
 //! waiting prompt is never dropped by a compaction. While it runs, the bar
@@ -88,13 +93,13 @@
 mod bug;
 pub mod changelog;
 mod gh;
+pub mod settings;
 mod share;
 
 use std::ffi::OsString;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use bake_agent::QueueMode;
 use bake_ai::{AbortController, AbortSignal, Model, ModelThinkingLevel};
 use bake_coding_agent::agent_session::{
     AgentSession, BRANCH_SUMMARY_CANCELLED, DefaultSave, ForkPosition, NAVIGATION_CANCELLED,
@@ -329,8 +334,8 @@ pub enum Done {
     /// chosen user message's text, goes back into the draft.
     Navigated { note: String, draft: Option<String> },
     /// `/compact` wrote its compaction: the transcript starts over with
-    /// the kept history and this note below it.
-    Compacted { note: String },
+    /// the kept history and this mark below it ([`Row::Compacted`]).
+    Compacted { row: Row },
 }
 
 impl std::fmt::Debug for Done {
@@ -343,7 +348,7 @@ impl std::fmt::Debug for Done {
             Self::Navigated { note, .. } => {
                 f.debug_struct("Navigated").field("note", note).finish()
             }
-            Self::Compacted { note } => f.debug_struct("Compacted").field("note", note).finish(),
+            Self::Compacted { row } => f.debug_struct("Compacted").field("row", row).finish(),
         }
     }
 }
@@ -478,7 +483,7 @@ pub async fn run(name: &str, argument: String, mut context: Context) -> Outcome 
     let outcome = match name {
         "model" => model(&mut context, &argument).await,
         "thinking" => thinking(&mut context, &argument).await,
-        "settings" => settings(&mut context).await,
+        "settings" => settings::settings(&mut context).await,
         "login" => login(&mut context).await,
         "logout" => logout(&context).await,
         "refresh-models" => refresh(&context).await,
@@ -810,116 +815,6 @@ async fn thinking(context: &mut Context, argument: &str) -> Outcome {
         &format!("Thinking level: {}", applied.as_str()),
         &result,
     )))
-}
-
-fn queue_mode(mode: QueueMode) -> &'static str {
-    match mode {
-        QueueMode::All => "all",
-        QueueMode::OneAtATime => "one-at-a-time",
-    }
-}
-
-fn on_off(on: bool) -> &'static str {
-    if on { "on" } else { "off" }
-}
-
-async fn settings(context: &mut Context) -> Outcome {
-    let session = Arc::clone(&context.session);
-    let compaction = session.settings().compaction_enabled();
-    let rows = [
-        (
-            "steering",
-            "Steering mode",
-            queue_mode(session.steering_mode()),
-        ),
-        (
-            "follow-up",
-            "Follow-up mode",
-            queue_mode(session.follow_up_mode()),
-        ),
-        ("compaction", "Auto-compaction", on_off(compaction)),
-    ];
-    let answer = context
-        .ask(DialogKind::List(ListDialog {
-            title: "Settings".into(),
-            items: rows
-                .iter()
-                .map(|(value, label, now)| ListItem {
-                    value: (*value).into(),
-                    label: (*label).into(),
-                    detail: Some((*now).into()),
-                    ..ListItem::default()
-                })
-                .collect(),
-            current: None,
-            selected: None,
-            filterable: false,
-            saves_default: false,
-            note: Some("Saved to settings.json; applies now.".into()),
-            search: None,
-        }))
-        .await;
-    let DialogAnswer::Chose { value: setting, .. } = answer else {
-        return Err(CANCELLED.into());
-    };
-    let (title, choices, now): (&str, &[&str], &str) = match setting.as_str() {
-        "steering" => (
-            "Steering mode",
-            &["one-at-a-time", "all"],
-            queue_mode(session.steering_mode()),
-        ),
-        "follow-up" => (
-            "Follow-up mode",
-            &["one-at-a-time", "all"],
-            queue_mode(session.follow_up_mode()),
-        ),
-        "compaction" => ("Auto-compaction", &["on", "off"], on_off(compaction)),
-        _ => return Err(CANCELLED.into()),
-    };
-    let answer = context
-        .ask(DialogKind::List(ListDialog {
-            title: title.into(),
-            items: choices
-                .iter()
-                .map(|choice| ListItem {
-                    value: (*choice).into(),
-                    label: (*choice).into(),
-                    ..ListItem::default()
-                })
-                .collect(),
-            current: choices.iter().position(|choice| *choice == now),
-            selected: None,
-            filterable: false,
-            saves_default: false,
-            note: None,
-            search: None,
-        }))
-        .await;
-    let DialogAnswer::Chose { value, .. } = answer else {
-        return Err(CANCELLED.into());
-    };
-    let mode = |value: &str| {
-        if value == "all" {
-            QueueMode::All
-        } else {
-            QueueMode::OneAtATime
-        }
-    };
-    let result = match setting.as_str() {
-        "steering" => session.set_steering_mode(mode(&value)).await?,
-        "follow-up" => session.set_follow_up_mode(mode(&value)).await?,
-        _ => session.set_auto_compaction_enabled(value == "on").await?,
-    };
-    let note = format!("{title}: {value}");
-    Ok(Done::Note(match result {
-        DefaultSave::Failed(reason) => {
-            format!("{note} for this session; it could not be saved: {reason}")
-        }
-        DefaultSave::Unsynced(reason) => {
-            format!("{note} (saved; it may not survive a power loss: {reason})")
-        }
-        _ => note,
-    }))
 }
 
 /// `/session`, Pi's `handleSessionCommand` as a read-only sheet: the
@@ -1522,14 +1417,19 @@ async fn compact(context: &Context, argument: &str) -> Outcome {
         .await
     {
         Ok(result) => {
-            let mut note = format!(
-                "Compacted from {} tokens",
-                group_digits(result.tokens_before)
+            let mut row = super::projection::compacted_row(
+                super::projection::compaction_title(
+                    bake_coding_agent::agent_session::CompactionReason::Manual,
+                ),
+                &result,
             );
-            if context.signal.aborted() {
-                note.push_str("; it was saved before the cancel arrived");
+            if context.signal.aborted()
+                && let Row::Compacted(mark) = &mut row
+            {
+                mark.notes
+                    .push("It was saved before the cancel arrived.".into());
             }
-            Ok(Done::Compacted { note })
+            Ok(Done::Compacted { row })
         }
         Err(error) if error == COMPACTION_CANCELLED => Err(CANCELLED.into()),
         Err(error) if error == COMPACTION_WHILE_STREAMING || error == COMPACTION_WHILE_BUSY => {

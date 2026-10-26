@@ -244,12 +244,13 @@ The Rust `bake-agent` crate ports Pi's agent loop and stateful agent, and the to
 
 ## Ported source (`crates/bake-coding-agent`)
 
-The Rust `bake-coding-agent` crate ports Pi's coding-agent package, and the line diff and patch of jsdiff that Pi's edit tool uses. Its [`NOTICE`](crates/bake-coding-agent/NOTICE) file reproduces both license texts, and its module documentation names each source file.
+The Rust `bake-coding-agent` crate ports Pi's coding-agent package, the line diff and patch of jsdiff that Pi's edit tool uses, and the cached summary of the pi-cached-compaction extension. Its [`NOTICE`](crates/bake-coding-agent/NOTICE) file reproduces their license texts, and its module documentation names each source file.
 
 | Project | Ported revision | License |
 | --- | --- | --- |
 | [Pi](https://github.com/earendil-works/pi) `packages/coding-agent`, Copyright (c) 2025 Mario Zechner | v1.1.0 (`abe508e1b89912adde45528136c3221eb69acdd7`) | MIT |
 | [jsdiff](https://github.com/kpdecker/jsdiff), Copyright (c) 2009-2015 Kevin Decker | 8.0.4 | BSD-3-Clause |
+| [pi-cached-compaction](https://github.com/nicobailon/pi-cached-compaction), Copyright (c) 2026 Nico Bailon | 0.2.0 (`e1e20de0a7e433070414602f1105cdcac258ef4f`) | MIT (declared in its `package.json`) |
 
 ## Rust YAML reader (`crates/bake-coding-agent`)
 

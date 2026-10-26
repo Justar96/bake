@@ -4,7 +4,9 @@
 //! The row is minimal: `deepseek-v4-flash  think high  ctx ~11% (15.2k/128k)
 //! ⎇ main  ~/bake`, the model, its thinking level, the context window's
 //! occupancy, the git branch, and the working directory. A reading the
-//! session does not have is left out.
+//! session does not have is left out. The session's token totals
+//! (`↑12k ↓3.4k`) and its prompt cache (`cache 99% (R180k W2k)`), Pi's
+//! footer readings, show after the context when the user turns them on.
 //!
 //! Fields keep their order. Each gives way at its own rank, whole or to a
 //! shorter complete reading, never cut mid-word, except the two fields that
@@ -354,6 +356,25 @@ pub struct Branch {
     pub detached: bool,
 }
 
+/// The session's token totals, Pi's footer `↑input ↓output`: uncached
+/// input and output over every response.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TokenTotals {
+    pub input: u64,
+    pub output: u64,
+}
+
+/// The session's prompt cache, Pi's footer `R`, `W`, and `CH`: tokens
+/// read from and written to the cache over every response, and the share
+/// of the latest response's prompt read from it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct CacheReading {
+    pub read: u64,
+    pub write: u64,
+    /// Whole percent, rounded down; `None` before a response with a prompt.
+    pub hit: Option<u64>,
+}
+
 /// What the status line reports. Each reading is optional except the
 /// directory, which is empty when unknown.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -363,6 +384,10 @@ pub struct StatusInput {
     pub model: Option<String>,
     pub thinking: Option<String>,
     pub context: Option<ContextUsage>,
+    /// Shown when the user turns them on (`statusLine.tokens`).
+    pub tokens: Option<TokenTotals>,
+    /// Shown when the user turns it on (`statusLine.cache`).
+    pub cache: Option<CacheReading>,
     pub branch: Option<Branch>,
     /// The working directory, already shortened against home.
     pub cwd: String,
@@ -436,12 +461,19 @@ pub fn thinking_tone(level: &str) -> Tone {
 }
 
 /// The status line's fields, in display order: the model with its thinking
-/// level, the context reading, and the location, which is the working
-/// directory with the branch after it.
+/// level, the context reading, the token totals and the cache when they
+/// are on, and the location, which is the working directory with the
+/// branch after it.
 pub fn fields(input: &StatusInput) -> Vec<Field> {
     let mut fields = vec![model_field(input)];
     if let Some(usage) = input.context {
         fields.push(context_field(usage));
+    }
+    if let Some(totals) = input.tokens {
+        fields.push(tokens_field(totals, input.ascii));
+    }
+    if let Some(field) = input.cache.and_then(cache_field) {
+        fields.push(field);
     }
     if let Some(field) = location_field(input) {
         fields.push(field);
@@ -520,6 +552,66 @@ fn context_field(usage: ContextUsage) -> Field {
         ],
         yields: vec![absolute_rank],
         shrink: None,
+    }
+}
+
+/// `↑12k ↓3.4k`, or `in 12k out 3.4k` in the classic frame: the session's
+/// uncached input and output. It gives way among the first.
+fn tokens_field(totals: TokenTotals, ascii: bool) -> Field {
+    let (up, down) = if ascii {
+        ("in ", " out ")
+    } else {
+        ("↑", " ↓")
+    };
+    Field {
+        forms: vec![vec![
+            Part::new(up, Tone::Dim),
+            Part::new(format_tokens(totals.input), Tone::Plain),
+            Part::new(down, Tone::Dim),
+            Part::new(format_tokens(totals.output), Tone::Plain),
+        ]],
+        yields: vec![rank::TOTALS],
+        shrink: None,
+    }
+}
+
+/// `cache 99% (R180k W2k)`: the latest prompt's share read from the cache,
+/// then the session's cache reads and writes, each shown once it is not
+/// zero, as Pi's footer shows them; the counts give way first and the
+/// share at its own rank. Without a share, the counts alone; with neither,
+/// nothing.
+fn cache_field(cache: CacheReading) -> Option<Field> {
+    let label = Part::new(format!("{} ", copy::CACHE), Tone::Dim);
+    let counts = [("R", cache.read), ("W", cache.write)]
+        .iter()
+        .filter(|(_, count)| *count > 0)
+        .map(|(mark, count)| format!("{mark}{}", format_tokens(*count)))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let share = cache
+        .hit
+        .map(|hit| vec![label.clone(), Part::new(format!("{hit}%"), Tone::Plain)]);
+    match (share, counts.is_empty()) {
+        (Some(share), false) => {
+            let mut whole = share.clone();
+            whole.push(Part::new(format!(" ({counts})"), Tone::Dim));
+            Some(Field {
+                forms: vec![whole, share],
+                yields: vec![rank::TOTALS, rank::CACHE_HIT],
+                shrink: None,
+            })
+        }
+        (Some(share), true) => Some(Field {
+            forms: vec![share],
+            yields: vec![rank::CACHE_HIT],
+            shrink: None,
+        }),
+        (None, false) => Some(Field {
+            forms: vec![vec![label, Part::new(counts, Tone::Dim)]],
+            yields: vec![rank::TOTALS],
+            shrink: None,
+        }),
+        (None, true) => None,
     }
 }
 
@@ -752,6 +844,7 @@ mod tests {
             }),
             cwd: "~/bake".into(),
             ascii: false,
+            ..StatusInput::default()
         }
     }
 
@@ -804,6 +897,72 @@ mod tests {
         let mut no_level = full();
         no_level.thinking = None;
         assert_eq!(fields(&no_level)[0].forms.len(), 1);
+    }
+
+    // Bake: the token totals and the cache, Pi's footer readings, come
+    // after the context when turned on. The totals and the cache's counts
+    // give way first, then the directory, and the hit outlasts the branch's
+    // directory.
+    #[test]
+    fn token_totals_and_the_cache_show_when_on_and_give_way_early() {
+        let mut input = full();
+        input.tokens = Some(TokenTotals {
+            input: 12_000,
+            output: 3_400,
+        });
+        input.cache = Some(CacheReading {
+            read: 180_000,
+            write: 2_000,
+            hit: Some(99),
+        });
+        let fields = fields(&input);
+        assert_eq!(
+            row(&fields, 120),
+            "deepseek-v4-flash high  ctx ~11% (15.2k/128k)  ↑12k ↓3.4k  cache 99% (R180k W2k)  ~/bake ⎇ main"
+        );
+        assert_eq!(fields[3].forms[0][0].tone, Tone::Dim);
+        assert_eq!(fields[3].forms[0][1].tone, Tone::Plain);
+        assert_eq!(
+            row(&fields, 70),
+            "deepseek-v4-flash high  ctx ~11%  cache 99%  ~/bake ⎇ main"
+        );
+        assert_eq!(
+            row(&fields, 52),
+            "deepseek-v4-flash high  ctx ~11%  cache 99%  ⎇ main"
+        );
+        assert_eq!(row(&fields, 44), "deepseek-v4-flash high  ctx ~11%  ⎇ main");
+        // The classic frame spells the arrows out.
+        input.ascii = true;
+        assert_eq!(text(&super::fields(&input)[2].forms[0]), "in 12k out 3.4k");
+        // Without a measured prompt the cache shows its counts, and before
+        // any use, nothing.
+        let counts = cache_field(CacheReading {
+            read: 0,
+            write: 900,
+            hit: None,
+        })
+        .expect("counts");
+        assert_eq!(text(&counts.forms[0]), "cache W900");
+        assert_eq!(cache_field(CacheReading::default()), None);
+        // A provider that reports no writes, or no cache at all, shows what
+        // it has.
+        let reads = cache_field(CacheReading {
+            read: 31_600,
+            write: 0,
+            hit: Some(89),
+        })
+        .expect("reads");
+        assert_eq!(text(&reads.forms[0]), "cache 89% (R31.6k)");
+        let none = cache_field(CacheReading {
+            read: 0,
+            write: 0,
+            hit: Some(0),
+        })
+        .expect("a share");
+        assert_eq!(
+            none.forms.iter().map(|form| text(form)).collect::<Vec<_>>(),
+            ["cache 0%"]
+        );
     }
 
     #[test]
