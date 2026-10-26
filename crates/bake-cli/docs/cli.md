@@ -1,6 +1,6 @@
 # The command line
 
-In a terminal, bake opens an interactive session; with `-p` or `--mode`, or when standard input or output is not a terminal, it runs one headless turn, prints the result, and exits. `bake --help` lists every option, and `bake docs` lists these topics.
+In a terminal, bake opens an interactive session; with `-p`, `--output-format`, or `--mode`, or when standard input or output is not a terminal, it runs one headless turn, prints the result, and exits. `bake --help` lists every option, and `bake docs` lists these topics; `bake docs headless` covers running bake from a script or another agent.
 
 ## Interactive sessions
 
@@ -33,12 +33,14 @@ bake "Explain src/main.rs" # send a first prompt, then keep the session open
 bake -p "Summarize the open TODOs in src/"
 git diff | bake -p $'\n\nReview this change'
 bake --mode json -p "List the tests" > events.jsonl
+bake -p --output-format json "Fix the failing test" < /dev/null
 ```
 
-- `-p`, `--print` sends the prompts and prints the final answer. bake also prints when `--mode` is given or standard input or output is not a terminal; otherwise it opens an interactive session.
+- `-p`, `--print` sends the prompts and prints the final answer. bake also prints when `--output-format`, `--mode`, or `-` is given or standard input or output is not a terminal; otherwise it opens an interactive session.
 - Each message argument is a prompt, sent in order. `--` ends the options, so later arguments are messages even when they start with `-`.
-- When standard input is not a terminal, bake reads it to the end before starting, up to 64 MiB, so give a run with nothing to pipe `< /dev/null`. The input is trimmed and joined to the first message with no separator, which is why the example above starts its message with a blank line.
-- `--mode text` prints the text of the final answer; `--mode json` prints the session header and then every event as one JSON line.
+- When standard input is not a terminal, bake reads it to the end before starting, up to 64 MiB. Beside a message or `@file`, a pipe that sends nothing within 1 second is left unread with a warning, so a caller that leaves standard input open does not stall the run; `-` waits for piped input however long it takes, and `< /dev/null` skips the read. The input is trimmed and joined to the first message with no separator, which is why the example above starts its message with a blank line.
+- `--mode text` prints the text of the final answer; `--mode json` prints the session header and then every event as one JSON line. An answer cut off at the model's output limit is printed, then reported on standard error, and the run exits 1, as in Pi 1.4.0.
+- `--output-format text|json|stream-json` is the same choice under the name other agent command lines use: `text` is `--mode text`, `json` prints one result object with the answer, how the run ended, the session to continue, and the run's usage, and `stream-json` prints `--mode json`'s lines and then the result object. Give it or `--mode`, not both (`bake docs headless`).
 - `--max-model-calls <n>` limits model requests across all prompts, retries, and compaction summaries in one print invocation. `--run-timeout-ms <n>` sets its deadline, starting before the first prompt after startup. Both are optional; zero admits no request. Exhaustion stops new work, cancels active work, waits for cleanup, and exits 1. Cleanup can extend past the deadline. These flags require print mode.
 - JSON `agent_settled` events include an `outcome` with `kind` equal to `finished_turn`, `cancelled`, `budget_exhausted`, or `failed`. A finished turn does not assert that the task's result has been independently verified.
 - `--recoverable` journals one print prompt. `--resume-run <id> --session <path>` selects its saved run, retaining spent requests and refusing uncertain tool effects or interrupted deadlines. Recovery takes no new prompt or replacement limits; see `bake docs sessions`.
@@ -112,7 +114,7 @@ Commands the `bash` tool runs receive the session's details: `BAKE_SESSION_ID`, 
 | Status | Meaning |
 |---|---|
 | 0 | The turn finished, or the interactive session was quit |
-| 1 | An error, a model failure, or an exhausted run budget; model failures also appear in JSON events |
+| 1 | An error, a model failure, an answer cut off at the model's output limit, or an exhausted run budget; model failures also appear in JSON events and the result object |
 | 2 | An argument bake cannot parse: one that is not UTF-8, or a bad argument to `preview`, `docs`, `--self-check`, or a `plugin` command |
 | 129, 130, 143 | Stopped by `SIGHUP` or a closed terminal, `SIGINT` (Ctrl+C; also Ctrl+Break on Windows), or `SIGTERM`; the session, its MCP servers, and the processes its tools started are closed first |
 

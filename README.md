@@ -10,7 +10,7 @@ Bake is a keyboard-driven coding agent for the terminal. It streams the model's 
 - **Interactive sessions**, fullscreen or inline in your terminal's scrollback: steer a running turn, stop it with Esc, and pick models, thinking levels, sessions, and settings from slash commands.
 - **Sandboxed tools**: bash, file reads and edits, search, web search and fetch, and code mode, which runs a JavaScript program that calls the other tools, each gated by a permission preset and approvals.
 - **Sessions you keep**: continue the last one with `bake -c`, pick one with `bake -r`, fork, branch, and compact when the context fills.
-- **Headless runs**: `bake -p` prints one answer; `--mode json` streams every event and `--mode rpc` speaks a JSONL protocol.
+- **Headless runs**: `bake -p` prints one answer; `--output-format json` prints one result object for scripts and other agents, `--mode json` streams every event, and `--mode rpc` speaks a JSONL protocol.
 - **Extensions**: `AGENTS.md` context files, skills, prompt templates, MCP servers, command hooks, and Wasm plugins that can veto tool calls.
 
 ## Install
@@ -52,7 +52,7 @@ bake
 Bake reaches models through your providers. Run `/login` in a session to connect a [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) account, or describe any OpenAI- or Anthropic-compatible provider in `~/.bake/models.json` with its key in `auth.json`; `bake docs models` shows both. If you used Bake 0.3, its CLIProxyAPI route, key, and default model are read from `~/.bake` without changing them. Then:
 
 - Type a prompt and press Enter; `@` references a file and `/` lists the commands, such as `/model`, `/thinking`, `/resume`, `/compact`, and `/settings`.
-- `bake -p "explain this repository"` prints one answer and exits.
+- `bake -p "explain this repository"` prints one answer and exits; from a script or another agent, `bake -p --output-format json "…"` prints one JSON result with the answer and the session to continue (`bake docs headless`).
 - `bake --inline` keeps the session in your terminal's scrollback instead of the full screen.
 - `bake --permission workspace-write` or `danger-full-access` picks the permission preset; `bake docs permissions` explains them.
 - `bake docs` lists the built-in documentation, and `bake --help` the launch options.

@@ -65,6 +65,19 @@
 //! which reads no piped standard input: there the stream carries the
 //! protocol. [`run_rpc`] runs its loop.
 //!
+//! Bake's own, for programs that run `bake`: Pi reads piped standard input
+//! to its end whenever it is not a terminal, so a caller that leaves the
+//! stream open and silent (a harness's inherited pipe, ssh, a CI runner)
+//! waits forever. Here, when the prompt also comes from a message, an
+//! `@file`, or `--resume-run`, a pipe that sends nothing within
+//! [`STDIN_FIRST_BYTE_WAIT`] is left unread, with a warning; once a byte
+//! arrives, or with no other prompt, or given `-`, it is read to its end
+//! as Pi reads it. The same rule the senpi fork of Pi adopted
+//! (`code-yeongyu/senpi` #3719), with a longer wait for slow producers.
+//! `--output-format` is another way to choose print mode's output
+//! ([`plan`]), and its result modes report a startup failure as a result
+//! object too ([`run`]).
+//!
 //! Not ported (deferred): theme and extension flags, extension tools, and
 //! the missing-session-cwd prompt.
 
@@ -124,6 +137,10 @@ pub use args::{
 
 /// The most piped standard input read for a prompt.
 pub const MAX_STDIN_BYTES: u64 = 64 * 1024 * 1024;
+
+/// How long print mode waits for piped standard input's first byte when
+/// the prompt also comes from the command line; see the module docs.
+pub const STDIN_FIRST_BYTE_WAIT: std::time::Duration = std::time::Duration::from_secs(1);
 
 /// Everything the command line reads from its process, so tests can supply
 /// their own.
@@ -350,6 +367,15 @@ pub fn plan(
     {
         return Action::Exit(error(stderr, "--name requires a non-empty value"));
     }
+    if let Some(format) = parsed.output_format {
+        if parsed.mode.is_some() {
+            return Action::Exit(error(
+                stderr,
+                "--output-format and --mode choose the same thing; give one of them",
+            ));
+        }
+        parsed.mode = Some(format);
+    }
     if parsed.mode == Some(Mode::Rpc) {
         if let Some(message) = validate_rpc_flags(&parsed) {
             return Action::Exit(error(stderr, &message));
@@ -359,6 +385,7 @@ pub fn plan(
     let mode = match parsed.mode {
         Some(mode) => mode,
         None if parsed.print
+            || parsed.read_stdin
             || parsed.list_models.is_some()
             || !stdin_is_terminal
             || !stdout_is_terminal =>
@@ -406,6 +433,11 @@ fn validate_rpc_flags(args: &Args) -> Option<String> {
     if !args.file_args.is_empty() {
         return Some("@file arguments are not supported in RPC mode".into());
     }
+    if args.read_stdin {
+        return Some(
+            "- reads a prompt from standard input, which carries the protocol in RPC mode".into(),
+        );
+    }
     if args.recoverable || args.resume_run.is_some() {
         return Some(
             "--recoverable and --resume-run require print mode (--print or --mode text or json)"
@@ -451,7 +483,7 @@ fn validate_run_recovery_flags(args: &Args) -> Option<String> {
                     .into(),
             );
         }
-        if !args.messages.is_empty() || !args.file_args.is_empty() {
+        if !args.messages.is_empty() || !args.file_args.is_empty() || args.read_stdin {
             return Some("--resume-run takes no new prompt or file arguments.".into());
         }
     } else if args.messages.len() > 1 {
@@ -475,6 +507,75 @@ fn read_piped_stdin(stdin: Box<dyn Read + Send>) -> Result<Option<String>, Strin
     let text = String::from_utf8_lossy(&bytes);
     let trimmed = text.trim();
     Ok((!trimmed.is_empty()).then(|| trimmed.to_owned()))
+}
+
+/// What piped standard input gave the first prompt.
+#[derive(Debug, PartialEq, Eq)]
+enum Piped {
+    /// Read to its end: the trimmed text, or `None` when empty.
+    Read(Option<String>),
+    /// Nothing arrived within the wait, so it was left unread.
+    Silent,
+}
+
+/// Reads `stdin` to its end ([`read_piped_stdin`]) on a thread of its own,
+/// which a silent pipe may keep blocked until the process exits; nothing
+/// waits for it then. With `first_byte_wait`, a stream that neither sends
+/// a byte nor ends within it is [`Piped::Silent`]; once one arrives, it is
+/// read to its end however long that takes.
+async fn read_stdin(
+    stdin: Box<dyn Read + Send>,
+    first_byte_wait: Option<std::time::Duration>,
+) -> Result<Piped, String> {
+    let (first, arrived) = tokio::sync::oneshot::channel();
+    let (sent, done) = tokio::sync::oneshot::channel();
+    let reader = FirstRead {
+        inner: stdin,
+        first: Some(first),
+    };
+    std::thread::Builder::new()
+        .name("bake-stdin".into())
+        .spawn(move || {
+            let _ = sent.send(read_piped_stdin(Box::new(reader)));
+        })
+        .map_err(|error| format!("Could not read standard input: {error}"))?;
+    if let Some(wait) = first_byte_wait {
+        tokio::select! {
+            biased;
+            // A reader that stopped reports why below.
+            _ = arrived => {}
+            () = tokio::time::sleep(wait) => return Ok(Piped::Silent),
+        }
+    }
+    done.await
+        .map_err(|_| "Could not read standard input: its reader stopped".to_owned())?
+        .map(Piped::Read)
+}
+
+/// Says when its first read returns, with bytes, the end, or an error.
+struct FirstRead {
+    inner: Box<dyn Read + Send>,
+    first: Option<tokio::sync::oneshot::Sender<()>>,
+}
+
+impl Read for FirstRead {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        let read = self.inner.read(buffer);
+        let interrupted =
+            matches!(&read, Err(error) if error.kind() == std::io::ErrorKind::Interrupted);
+        if !interrupted && let Some(first) = self.first.take() {
+            let _ = first.send(());
+        }
+        read
+    }
+}
+
+/// The warning for piped input left unread after `wait`.
+fn silent_stdin_warning(wait: std::time::Duration) -> String {
+    format!(
+        "Nothing arrived on standard input within {} ms, so the prompt is sent without it. Pass - to wait for piped input, or redirect standard input from /dev/null to skip the wait.",
+        wait.as_millis()
+    )
 }
 
 /// Pi's `validateForkFlags`.
@@ -799,11 +900,36 @@ pub struct Started {
 }
 
 /// Runs `bake` print mode; returns the exit code. Must run inside a
-/// multi-threaded Tokio runtime.
-pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
+/// multi-threaded Tokio runtime. With `--output-format json` or
+/// `stream-json`, a startup failure is reported as a result object on
+/// standard output too ([`crate::print_mode::startup_failure_json`]), with
+/// the errors standard error got; a stop request writes none.
+pub async fn run(mut environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
     if let Some(search_pattern) = args.list_models.clone() {
         return run_list_models(environment, search_pattern.as_deref()).await;
     }
+    let output = match mode {
+        Mode::Json => PrintOutput::Json,
+        Mode::Result => PrintOutput::Result,
+        Mode::StreamJson => PrintOutput::StreamJson,
+        // [`plan`] sends `--mode rpc` to [`run_rpc`], never here.
+        Mode::Text | Mode::Rpc => PrintOutput::Text,
+    };
+    let failures = output.writes_result().then(|| {
+        let (stderr, kept) = crate::print_mode::capture_errors(environment.stderr.clone());
+        environment.stderr = stderr;
+        (environment.stdout.clone(), kept)
+    });
+    let report = |code: i32| {
+        // A stop request's status is a signal's, and reports nothing.
+        if code == 1
+            && let Some((stdout, kept)) = &failures
+        {
+            let errors = kept.lock().map(|kept| kept.clone()).unwrap_or_default();
+            write_out(stdout, &crate::print_mode::startup_failure_json(&errors));
+        }
+        code
+    };
     let max_model_calls = args.max_model_calls;
     let run_timeout_ms = args.run_timeout_ms;
     let recovery = match (&args.resume_run, args.recoverable) {
@@ -813,7 +939,7 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
     };
     let started = match start(environment, args).await {
         Ok(started) => started,
-        Err(code) => return code,
+        Err(code) => return report(code),
     };
     let Started {
         session,
@@ -850,10 +976,10 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
             Some(deadline) => Some(deadline),
             None => {
                 session.shutdown().await;
-                return error(
+                return report(error(
                     &stderr,
                     "--run-timeout-ms exceeds this platform's clock range",
-                );
+                ));
             }
         },
         None => None,
@@ -865,11 +991,7 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
             max_model_calls,
         }),
         recovery,
-        mode: match mode {
-            Mode::Json => PrintOutput::Json,
-            // [`plan`] sends `--mode rpc` to [`run_rpc`], never here.
-            Mode::Text | Mode::Rpc => PrintOutput::Text,
-        },
+        mode: output,
         initial_message,
         initial_images,
         messages,
@@ -2270,19 +2392,30 @@ async fn start_with(
     // The session, and any MCP server it started, is shut down whether the
     // read fails or a stop request (print mode's SIGTERM or SIGHUP) comes
     // while a writer holds the pipe open. The read itself cannot be
-    // cancelled; the binary does not wait for it at exit.
-    // In RPC mode the stream carries the protocol, as in Pi; nothing
-    // reads it here.
+    // cancelled: its thread ([`read_stdin`]) stays blocked, and nothing
+    // waits for it at exit. In RPC mode the stream carries the protocol,
+    // as in Pi; nothing reads it here. `-` reads a terminal too, to its
+    // end-of-file.
     let mut protocol_stdin = None;
-    let piped = if stdin_is_terminal || kind == StartKind::Rpc {
+    let piped = if (stdin_is_terminal && !args.read_stdin) || kind == StartKind::Rpc {
         if kind == StartKind::Rpc {
             protocol_stdin = Some(stdin);
         }
         Ok(None)
     } else {
-        let read = tokio::task::spawn_blocking(move || read_piped_stdin(stdin));
+        // Piped input beside another prompt need not come; see the module
+        // docs.
+        let prompt_elsewhere =
+            !args.messages.is_empty() || !args.file_args.is_empty() || args.resume_run.is_some();
+        let wait = (prompt_elsewhere && !args.read_stdin).then_some(STDIN_FIRST_BYTE_WAIT);
         tokio::select! {
-            read = read => read.unwrap_or_else(|join| Err(join.to_string())),
+            read = read_stdin(stdin, wait) => read.map(|piped| match piped {
+                Piped::Read(text) => text,
+                Piped::Silent => {
+                    warn(&stderr, &silent_stdin_warning(STDIN_FIRST_BYTE_WAIT));
+                    None
+                }
+            }),
             code = &mut interrupt => {
                 session.shutdown().await;
                 return Err(code);
@@ -2367,6 +2500,116 @@ mod tests {
             Action::Interactive(_)
         ));
         assert_eq!(text(&errors), "");
+    }
+
+    // Bake's `--output-format` and `-` choose print mode in a terminal, as
+    // `--mode` and `-p` do; `--output-format` takes `--mode`'s place.
+    #[test]
+    fn output_formats_and_a_bare_dash_choose_print_mode() {
+        let (stderr, errors) = sink();
+        for (format, mode) in [
+            ("text", Mode::Text),
+            ("json", Mode::Result),
+            ("stream-json", Mode::StreamJson),
+        ] {
+            assert!(
+                matches!(
+                    plan(&strings(&["--output-format", format, "hi"]), true, true, &stderr),
+                    Action::Print(args, found) if found == mode && args.mode == Some(mode)
+                ),
+                "{format}"
+            );
+        }
+        assert!(matches!(
+            plan(&strings(&["-", "hi"]), true, true, &stderr),
+            Action::Print(args, Mode::Text) if args.read_stdin && args.messages == ["hi"]
+        ));
+        assert_eq!(text(&errors), "");
+        for (args, message) in [
+            (
+                vec!["--output-format", "json", "--mode", "json", "hi"],
+                "Error: --output-format and --mode choose the same thing; give one of them\n",
+            ),
+            (
+                vec!["--mode", "rpc", "-"],
+                "Error: - reads a prompt from standard input, which carries the protocol in RPC mode\n",
+            ),
+        ] {
+            let (stderr, errors) = sink();
+            assert_eq!(plan(&strings(&args), true, true, &stderr), Action::Exit(1));
+            assert_eq!(text(&errors), message, "{args:?}");
+        }
+    }
+
+    /// A pipe whose writer the test holds: it stays open and silent until
+    /// the writer writes or is dropped.
+    fn held_pipe() -> (Box<dyn Read + Send>, std::io::PipeWriter) {
+        let (reader, writer) = std::io::pipe().expect("pipe");
+        (Box::new(reader), writer)
+    }
+
+    // Bake's own: piped input beside another prompt is left unread when it
+    // stays silent, and read to its end once it sends a byte or ends.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_silent_pipe_is_left_unread_only_within_a_wait() {
+        use std::io::Write as _;
+        use std::time::Duration;
+
+        let (silent, _held) = held_pipe();
+        assert_eq!(
+            read_stdin(silent, Some(Duration::from_millis(20))).await,
+            Ok(Piped::Silent)
+        );
+        let (ended, writer) = held_pipe();
+        drop(writer);
+        assert_eq!(
+            read_stdin(ended, Some(Duration::from_secs(60))).await,
+            Ok(Piped::Read(None))
+        );
+        let (sent, mut writer) = held_pipe();
+        writer.write_all(b"  the diff \n").expect("write");
+        drop(writer);
+        assert_eq!(
+            read_stdin(sent, Some(Duration::from_secs(60))).await,
+            Ok(Piped::Read(Some("the diff".into())))
+        );
+        // A byte within the wait keeps the read going to the end, however
+        // long that takes; the wait bounds only the first byte.
+        let (slow, mut writer) = held_pipe();
+        writer.write_all(b"part one, ").expect("write");
+        let (go, ready) = std::sync::mpsc::channel::<()>();
+        let producer = std::thread::spawn(move || {
+            ready.recv().expect("go");
+            writer.write_all(b"part two").expect("write");
+        });
+        // The first part is in the pipe before the read starts; the second
+        // comes well after the wait.
+        let read = tokio::spawn(read_stdin(slow, Some(Duration::from_millis(300))));
+        tokio::time::sleep(Duration::from_millis(600)).await;
+        go.send(()).expect("send");
+        producer.join().expect("producer");
+        assert_eq!(
+            read.await.expect("read"),
+            Ok(Piped::Read(Some("part one, part two".into())))
+        );
+        // Without a wait, a silent pipe is waited for.
+        let (late, mut writer) = held_pipe();
+        let read = tokio::spawn(read_stdin(late, None));
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(!read.is_finished());
+        writer.write_all(b"late prompt").expect("write");
+        drop(writer);
+        assert_eq!(
+            read.await.expect("read"),
+            Ok(Piped::Read(Some("late prompt".into())))
+        );
+    }
+
+    #[test]
+    fn the_silent_pipe_warning_names_both_ways_out() {
+        let warning = silent_stdin_warning(STDIN_FIRST_BYTE_WAIT);
+        assert!(warning.contains("within 1000 ms"), "{warning}");
+        assert!(warning.contains("Pass - ") && warning.contains("/dev/null"));
     }
 
     // The flags `bake` excludes (Pi's extensions, themes, and

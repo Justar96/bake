@@ -28,6 +28,13 @@
 //! `--approval <policy>`, which select the session's permission (D24) the
 //! way Pi's `--thinking` selects its thinking level, and `--inline`, which
 //! keeps interactive mode in the terminal's scrollback.
+//!
+//! For callers that are programs, Bake also takes the headless
+//! conventions other agent command lines share (Claude Code's and Gemini
+//! CLI's `--output-format`): `--output-format text|json|stream-json`,
+//! another way to choose print mode's output ([`Mode::Result`] and
+//! [`Mode::StreamJson`]), and a bare `-`, which reads the prompt from
+//! standard input however long it takes ([`Args::read_stdin`]).
 
 use bake_ai::ModelThinkingLevel;
 
@@ -46,6 +53,12 @@ pub enum Mode {
     /// `rpc`: Pi's JSONL protocol on standard input and output
     /// ([`crate::rpc`]).
     Rpc,
+    /// Bake's `--output-format json`: one result object when the run ends
+    /// ([`crate::print_mode::PrintOutput::Result`]).
+    Result,
+    /// Bake's `--output-format stream-json`: `json`'s events, then the
+    /// result object.
+    StreamJson,
 }
 
 /// Pi's diagnostic kinds.
@@ -94,6 +107,14 @@ pub struct Args {
     pub resume_run: Option<String>,
     /// `--mode`.
     pub mode: Option<Mode>,
+    /// Bake's `--output-format`: `text` is [`Mode::Text`], `json`
+    /// [`Mode::Result`], and `stream-json` [`Mode::StreamJson`]. It cannot
+    /// be combined with `--mode` ([`crate::cli::plan`]).
+    pub output_format: Option<Mode>,
+    /// Bake's `-`: standard input is the prompt's start, read to its end
+    /// however long it takes, even beside a message argument and even from
+    /// a terminal. It implies print mode.
+    pub read_stdin: bool,
     /// `--continue`, `-c`.
     pub continue_session: bool,
     /// `--resume`, `-r`: pick the session to open. Interactive mode only.
@@ -270,6 +291,23 @@ pub fn parse_args(args: &[String]) -> Args {
                     }
                 }
             },
+            "--output-format" => match next.filter(|format| !format.starts_with('-')) {
+                None => result.diagnostics.push(Diagnostic::error(
+                    "--output-format requires text, json, or stream-json",
+                )),
+                Some(format) => {
+                    i += 1;
+                    match format {
+                        "text" => result.output_format = Some(Mode::Text),
+                        "json" => result.output_format = Some(Mode::Result),
+                        "stream-json" => result.output_format = Some(Mode::StreamJson),
+                        other => result.diagnostics.push(Diagnostic::error(format!(
+                            "Invalid output format \"{other}\". Valid values: text, json, stream-json"
+                        ))),
+                    }
+                }
+            },
+            "-" => result.read_stdin = true,
             "--continue" | "-c" => result.continue_session = true,
             "--resume" | "-r" => result.resume = true,
             "--provider" if next.is_some() => {
@@ -636,6 +674,54 @@ mod tests {
                 "Invalid mode \"acp\". Valid values: text, json, rpc"
             )]
         );
+        // Pi's `--mode` takes only its own values.
+        assert!(!parse(&["--mode", "stream-json"]).diagnostics.is_empty());
+    }
+
+    // Bake's `--output-format`, Claude Code's and Gemini CLI's names for
+    // the same choice: `json` is one result object and `stream-json` the
+    // event stream ending with it.
+    #[test]
+    fn output_formats_and_their_errors() {
+        for (value, mode) in [
+            ("text", Mode::Text),
+            ("json", Mode::Result),
+            ("stream-json", Mode::StreamJson),
+        ] {
+            let args = parse(&["--output-format", value, "hi"]);
+            assert_eq!(args.output_format, Some(mode), "{value}");
+            assert_eq!(args.mode, None, "{value}");
+            assert_eq!(args.messages, ["hi"], "{value}");
+            assert!(args.diagnostics.is_empty(), "{value}");
+        }
+        for missing in [&["--output-format"][..], &["--output-format", "-p"]] {
+            assert_eq!(
+                parse(missing).diagnostics,
+                [Diagnostic::error(
+                    "--output-format requires text, json, or stream-json"
+                )],
+                "{missing:?}"
+            );
+        }
+        assert_eq!(
+            parse(&["--output-format", "rpc"]).diagnostics,
+            [Diagnostic::error(
+                "Invalid output format \"rpc\". Valid values: text, json, stream-json"
+            )]
+        );
+    }
+
+    // A bare `-` reads standard input; after `--` it is a message.
+    #[test]
+    fn a_bare_dash_reads_standard_input() {
+        let args = parse(&["-p", "-", "review this"]);
+        assert!(args.print && args.read_stdin);
+        assert_eq!(args.messages, ["review this"]);
+        assert!(args.diagnostics.is_empty());
+        assert!(parse(&["-"]).read_stdin);
+        let after = parse(&["--", "-"]);
+        assert!(!after.read_stdin);
+        assert_eq!(after.messages, ["-"]);
     }
 
     #[test]

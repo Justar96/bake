@@ -3332,6 +3332,8 @@ mod nested_call_tests;
 #[cfg(test)]
 mod plugin_tests;
 #[cfg(test)]
+mod print_result_tests;
+#[cfg(test)]
 mod recovery_tests;
 #[cfg(test)]
 mod service_tests;

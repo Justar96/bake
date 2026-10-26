@@ -80,6 +80,12 @@ Usage:
 
 Options:
   -p, --print               Send the prompts, print the final answer, and exit
+      --output-format <format>
+                            Print-mode output: text (the final answer), json
+                            (one result object), or stream-json (every event,
+                            then the result object)
+  -                         Read the start of the prompt from standard input,
+                            waiting for it however long it takes
       --inline              Keep an interactive session in the terminal's
                             scrollback instead of the full screen
       --mode <mode>         Output: text (the final answer), json (every event),
@@ -141,7 +147,8 @@ Options:
   -v, --version             Show the version
 
 Messages are prompts, sent in order; piped standard input and @file arguments
-are prepended to the first. The agent starts with the read, bash, edit, and
+are prepended to the first. Beside a message or @file, piped input that sends
+nothing within 1 s is left unread, with a warning: pass - to wait for it. The agent starts with the read, bash, edit, and
 write tools, the background-job tools job_output, job_list, and job_kill, and
 the web tools web_search and web_fetch; grep, find, and ls are available
 through --tools, and grep and find need rg and fd on PATH. A session keeps its
@@ -175,6 +182,14 @@ The auth commands read the Bake home's models.json, auth.json, and
 settings.json, reach no network, and write nothing. A key reaches standard
 output only from 'auth print-api-key' and 'auth check --credentials', whose
 purpose is to print it.
+
+From a script or another agent, run one prompt and read one JSON object:
+
+  bake -p --output-format json 'Fix the failing test' < /dev/null
+
+It holds the answer (result), how the run ended (subtype, isError), the
+session to continue with --session <sessionId>, and the run's usage; the exit
+status is 0 only for a complete answer. See 'bake docs headless'.
 
 With --mode rpc, bake serves Pi's JSONL protocol instead of printing: it
 takes commands on standard input and writes responses, the json mode's events,

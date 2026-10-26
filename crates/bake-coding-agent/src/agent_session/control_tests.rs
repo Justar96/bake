@@ -44,6 +44,8 @@ pub(super) fn harness() -> Harness {
                     { "id": "faux-1", "reasoning": true },
                     { "id": "faux-2", "reasoning": true },
                     { "id": "plain" },
+                    // A model whose whole output allowance is two tokens.
+                    { "id": "short", "maxTokens": 2 },
                 ],
             }),
             Some("test-key".into()),
