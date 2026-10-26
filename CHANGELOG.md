@@ -4,6 +4,10 @@ Notable changes to Bake. `bake` compiles this file in, and `/changelog` shows it
 
 ## [Unreleased]
 
+## [0.4.4] - 2026-10-26
+
+Bake 0.4.4 is easier to run from scripts and other agents, groups `/settings` by the command each setting shapes, writes compaction summaries from the prompt cache, shows compaction as it runs, and can show token and cache usage in the status line. Linux remains its only released platform.
+
 - **Easier to run from scripts and other agents.** `bake -p --output-format json` prints one JSON object when the run ends: the answer, how the run ended (`success`, `error`, `truncated`, `budget_exhausted`, or `cancelled`), the session id and file to continue with `--session`, and the run's turns, model calls, time, tokens, and cost. `--output-format stream-json` prints every event and then that object, and `text` prints the answer, as Claude Code's and Gemini CLI's `--output-format` do. A startup failure, such as a model that does not exist, prints a result object too. `bake docs headless` describes it.
 - **No more hanging on an open standard input.** Beside a prompt argument, piped standard input that sends nothing within a second is left unread with a warning, so a caller that starts `bake -p "…"` with standard input open no longer waits forever. A bare `-` waits for piped input however long it takes; with no prompt argument, standard input is still read to its end.
 - **Cut-off answers fail.** As in Pi 1.4.0, print mode prints an answer cut off at the model's output limit, then says so on standard error and exits 1.
