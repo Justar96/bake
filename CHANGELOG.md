@@ -4,6 +4,10 @@ Notable changes to Bake. `bake` compiles this file in, and `/changelog` shows it
 
 ## [Unreleased]
 
+## [0.4.6] - 2026-11-12
+
+Bake 0.4.6 starts new sessions with full access, as Pi does, adds `/permission` and more answers to an approval, draws Mermaid diagrams in answers, adds an opt-in `visualize` tool for charts, tables, and diagrams drawn while the model writes them, and gives the status line a state dot, a context gauge, and one palette. Linux remains its only released platform.
+
 - **New sessions have full access, as in Pi.** A new session now starts with the `danger-full-access` preset: tools change any file you can, `bash` runs outside the sandbox, and nothing asks. Sessions you resume keep the permission they had. To keep the sandbox, set `"permission": { "defaultPreset": "workspace-write" }` in `settings.json` or run `bake --permission workspace-write`; a `defaultPreset` already saved, from `settings.json` or a 0.3 home, still applies. Under `never`, a Claude Code hook's `ask` is denied without asking; choose `workspace-write` to be asked.
 - **`/permission` switches the session.** `/permission` lists the presets with their sandbox and approval policy and switches this session; Ctrl+S also saves the default for new sessions, and `/permission workspace-write` switches at once. The session file keeps the switch, and the next prompt tells the model.
 - **More answers to an approval.** The approval panel says what the tool wants in words, such as `bash wants to run outside the sandbox`, shows the command or path first with the model's justification under it, and offers four choices, picked with ↑↓ or a key and confirmed with Enter: allow once (`y`), allow the same tool the same access for the rest of the session (`a`), switch the session to full access (`f`), or deny (`n`) with an optional note that the model reads with the refusal. Esc still cancels. A session grant is kept in the session file, so a resumed session does not ask again.
