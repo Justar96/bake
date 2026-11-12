@@ -3,20 +3,23 @@ name: Bake
 on:
   pull_request:
     branches: [main]
-  # A manual run from a scratch branch checks, during development, the
-  # platforms a developer cannot check locally. Linux x86_64 is checked
-  # before every push, so a manual run leaves it out unless asked.
+  # A manual run from a scratch branch checks, during development, a
+  # platform a developer cannot check locally. Linux x86_64 is checked
+  # before every push, so a manual run leaves it out unless asked. Windows
+  # and macOS are not released yet and run only when a manual run names
+  # them.
   workflow_dispatch:
     inputs:
       platforms:
         description: Platforms to check
         type: choice
-        default: windows-and-macos
+        default: linux-arm64
         options:
+          - linux-arm64
+          - linux
           - windows-and-macos
           - windows
           - macos
-          - linux-arm64
           - all
 
 permissions:
@@ -26,14 +29,16 @@ concurrency:
   group: bake-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# A release pull request validates the Cargo workspace on every platform
-# before main merges it; a manual run validates only the platforms it names.
+# A release pull request validates the Cargo workspace on the released
+# platforms, Linux x86_64 and arm64, before main merges it. Windows and macOS
+# are off there until Bake releases them; a manual run validates only the
+# platforms it names.
 jobs:
   rust:
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ fromJSON('{"all":["ubuntu-latest","ubuntu-24.04-arm","windows-latest","macos-latest"],"windows-and-macos":["windows-latest","macos-latest"],"windows":["windows-latest"],"macos":["macos-latest"],"linux-arm64":["ubuntu-24.04-arm"]}')[inputs.platforms || 'all'] }}
+        os: ${{ fromJSON('{"all":["ubuntu-latest","ubuntu-24.04-arm","windows-latest","macos-latest"],"linux":["ubuntu-latest","ubuntu-24.04-arm"],"windows-and-macos":["windows-latest","macos-latest"],"windows":["windows-latest"],"macos":["macos-latest"],"linux-arm64":["ubuntu-24.04-arm"]}')[inputs.platforms || 'linux'] }}
     name: bake (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     # Cold Wasmtime builds need extra time on Windows and arm64.
