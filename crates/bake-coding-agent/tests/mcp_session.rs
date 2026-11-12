@@ -1552,7 +1552,7 @@ async fn the_probe_observes_real_processes(_case: Arc<Case>) {
 /// The replay class of every tool `bake` composes with every opt-in on
 /// (scope 08, D37): reads rerun, effects do not, and no MCP server's own
 /// read-only claim is trusted.
-const REPLAY_CLASSES: [(&str, ToolReplay); 22] = [
+const REPLAY_CLASSES: [(&str, ToolReplay); 23] = [
     ("read", ToolReplay::Safe),
     ("bash", ToolReplay::Never),
     ("edit", ToolReplay::Never),
@@ -1577,6 +1577,8 @@ const REPLAY_CLASSES: [(&str, ToolReplay); 22] = [
     // Its scripts' nested calls may write, run commands, or leave the
     // machine.
     ("codemode", ToolReplay::Never),
+    // It only draws for the user and changes nothing.
+    ("visualize", ToolReplay::Safe),
 ];
 
 /// Writes `text` at `path`, writable by its owner only, as the home's
