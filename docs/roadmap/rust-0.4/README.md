@@ -365,6 +365,52 @@ The `diagram` kind (2026-11-12) draws Mermaid through the answers' renderer:
 5. Streaming UX: the time from the request to the first drawn row, and how often the card jumps (row count shrinking or height changing while streaming), counted from projector traces.
 6. Provider behaviour: which providers deliver arguments in one chunk, where the visual appears all at once.
 
+**Full access by default, wider approval answers, and `/permission` (2026-11-12).** Re-checked Pi's latest official release, v1.5.2 (`b4afdddf44e059c67ccf5097e5317d913521b470`): Pi has no sandbox or approvals and runs every tool with full access. New Bake sessions now start that way, and Bake keeps its sandbox, approvals, and presets for those who choose them. `/permission` keeps Bake 0.3's runtime command (`packages/interaction/permission-presets/src/index.ts` at `97ce6abba01fddb5ed532b60a2e25a1e134b5244`: its `apply`, `preset NAME`, and its usage text). The session grants, the full-access answer, and deny notes are Bake's own design.
+- `bake-sandbox`: `EscalationOutcome` gains `AllowedSession` (`allowed-session`) and `AllowedFullAccess` (`allowed-full-access`), with `allows()`; `refusal()` is `None` for every allowed outcome.
+- `bake-coding-agent`:
+  - `permissions::presets`: `KnobDefaults::PI` (`danger-full-access`, `never`) is the default, and `KnobDefaults::TYPESCRIPT` keeps `workspace-write` and `ask`, the default through 0.4.5.
+    - `PresetTable::default_preset` takes `permission.defaultPreset`, then (in `prepare_session_permission`, unchanged) the 0.3 import, then the first full-access preset, then the first `workspace-write`/`ask` one, then the first preset; only an empty table is an error.
+    - `full_access_preset` and `presets` are new. The default table's labels read "Workspace, ask for more" and "Full access".
+    - A seeded session without knobs takes the composition defaults, now full access.
+  - `permissions::state`: `PermissionChange` (`to_preset`, `append`) and `preset_change` write a switch as `bake.permission` entries.
+  - `permissions::approval`:
+    - `ApprovalOffers`, `ApprovalDecision` (an outcome and a rejection's note), and `with_note`.
+    - `Approver::decide`, whose default maps an answer that was not offered to `Unavailable`. `ApprovalRequest` carries `sandbox` and `offers`.
+    - A note is trimmed, cleared of control characters other than newline and tab, and bounded at `NOTE_CHARS` (2,000).
+  - `permissions::broker`: `ApprovalPrompt` carries `sandbox` and `offers`. `ApprovalAnswer` adds `AllowSession`, `AllowFullAccess`, and `RejectWithNote` and is no longer `Copy`. `answer` refuses an answer the prompt did not offer and leaves the request waiting.
+  - `permissions::history`:
+    - `decided` entries may carry `note` and `grantedBy`. `APPROVAL_ENTRY_VERSION` stays 1: Bake 0.4.5 ignores the new members and skips and reports an entry whose outcome it does not know, as it does any unreadable entry, and nothing reads the history to allow a call there.
+    - `SessionGrant` and `ApprovalHistory::session_grants` (the exact tool and mode an `allowed-session` answer named) are new.
+    - `ApprovalRecorder::record_switch`: the session's recorder writes the `decided` entry and the `bake.permission` switch in one durable group, and only while the admitted entry still allows.
+  - `permissions::engine`:
+    - `StandingPermissions` holds the session grants (`grant`, `grants`, `granted`, which applies only under `ask`) and the full-access preset an answer switches to.
+    - `PermissionEngine::approve` decides a granted request as `allowed-session` without asking and records the grant's id. It applies a new grant or a full-access switch only after its entries are written. A rejection's note goes to the model as `{refusal}. The user's note: {note}`; existing refusal texts are unchanged.
+  - `permissions`:
+    - `LivePermission` (the table, the standing permission, and whether anyone can answer).
+    - `ToolPermissions::escalation_targets()` now reads the standing permission at each call.
+    - `refresh_escalation_offer` rebuilds the `bash`, `write`, and `edit` schemas. `prepare_prompt_and_tools` applies it and restates the `permissions` section before each prompt.
+  - `AgentSession::set_permission`, `permission`, and `set_permission_preset` (serialized like the other changes; written before the standing permission changes; Ctrl+S saves `permission.defaultPreset` through the new `SettingsStore::set_default_permission_preset`).
+  - `cli::build_session` restores grants from `bake.approval` only when an approver exists, so print mode never uses them. A subagent derives its knobs from the live standing permission.
+  - The hook engine's `ask` returns an `ApprovalDecision`, so a deny note follows the hook's reason. Under `never`, the new default, a hook's `ask` is denied without asking.
+- `bake-tui-view`:
+  - `runtime::Approval` derives `Default` and gains `access`, `target`, `justification`, `session`, and `full_access`; `runtime::ApprovalAnswer` mirrors the broker's six answers.
+  - New: `state::ApprovalChoice`, `approval_choices`, `APPROVAL_NOTE_CHARS`, `State::approval_choice`, and `State::approval_note`.
+  - In the panel, ↑↓ or `y`/`a`/`f`/`n` choose, and Enter confirms. `n` or Enter on Deny opens a note: Enter sends it, and Esc goes back with Deny chosen. Otherwise Esc cancels, and PgUp/PgDn scroll.
+  - The burst and arming guards still apply to choosing, confirming, and sending. The panel's height does not change while one request shows.
+  - `/permission` is in `LIVE_CATALOG`.
+- `bake-tui`: `live::approvals` maps a prompt to the panel's fields (the access in words, `bash`'s command or the path first, and the justification apart from the other arguments). `/permission` lists the table (sandbox and approval as facts, the description as the about, Ctrl+S to save) or switches to a named preset, and it left the deferred list.
+
+Model-visible changes:
+- New sessions get the full-access `permissions` section, and `bash`, `write`, and `edit` have no escalation parameters, as `--permission danger-full-access` already gave.
+- A deny note follows the refusal.
+- After a switch by `/permission` or a full-access answer, the next prompt restates the `permissions` section and the tools' escalation offer. That changes the system prompt and tool schemas, so the prompt cache misses once.
+
+The paired live-model evaluation against a clean build of the base `develop` commit (`2290f5a36a`) is still owed: this change ran with no live-model access, and keyless fixtures do not measure model quality. It should measure:
+- task outcomes and tool use under the new default;
+- escalation requests and retries under `workspace-write` with `ask`;
+- how the model acts on a deny note;
+- the behaviour and cache cost after a mid-session switch.
+
 **Status line palette and indicators (2026-11-12).** Bake's own design; no Pi source applies. The status line takes its colours from one palette and gains indicators that follow the session:
 - `bake-tui-view`:
   - The new `palette` module names the row's colours: `Token::Muted` (the dim modifier), the warm attention scale `Ok`, `Notice`, `Warn`, and `Danger`, `Accent` (`activity::RUNNING`, the shimmer's resting orange, now public with `RUNNING_ANSI` and `Rgb`), and the cool scale `High`, `XHigh`, and `Max` for the thinking levels. `Token::style` resolves one under `Tones`, without colour under `NO_COLOR`. The renderer's status tones and the dialogs' waiting and asking colours go through it.

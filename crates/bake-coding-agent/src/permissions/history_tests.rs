@@ -23,10 +23,7 @@ fn asked(id: &str, call_id: &str) -> ApprovalEntry {
 }
 
 fn decided(id: &str, outcome: EscalationOutcome) -> ApprovalEntry {
-    ApprovalEntry::Decided {
-        id: id.to_owned(),
-        outcome,
-    }
+    ApprovalEntry::decided(id, outcome)
 }
 
 fn session() -> SessionManager {

@@ -138,6 +138,7 @@ mod tests {
             parent_call_id: None,
             reason: "secret reason".into(),
             arguments: "rm -rf secret".into(),
+            ..Default::default()
         }
     }
 

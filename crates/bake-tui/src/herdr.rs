@@ -586,6 +586,7 @@ mod tests {
             parent_call_id: None,
             reason: "access".into(),
             arguments: "rm -rf /secret".into(),
+            ..Default::default()
         }
     }
 

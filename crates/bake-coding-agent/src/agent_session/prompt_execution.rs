@@ -105,6 +105,9 @@ pub(super) struct PromptExecution {
     tool_hooks: run_journal::ToolHooks,
     /// The session's change turn ([`AgentSession::run_change`]).
     control: Arc<tokio::sync::Mutex<()>>,
+    /// The session's live permission, which the prompt states as it is at
+    /// admission.
+    permission: Option<crate::permissions::LivePermission>,
 }
 
 impl PromptExecution {
@@ -132,6 +135,7 @@ impl PromptExecution {
             pending_notices: Arc::clone(&session.pending_notices),
             tool_hooks: session.tool_hooks.clone(),
             control: Arc::clone(&session.control),
+            permission: session.permission.clone(),
         }
     }
 
@@ -807,6 +811,15 @@ impl PromptExecution {
             .filter_map(|name| self.tools.iter().find(|tool| &tool.name == name))
             .cloned()
             .collect();
+        // The escalation offer the permission makes now, which a switch
+        // since the tools were built may have changed.
+        if let Some(permission) = &self.permission {
+            let targets = permission.escalation_targets();
+            active = active
+                .into_iter()
+                .map(|tool| crate::permissions::refresh_escalation_offer(tool, targets))
+                .collect();
+        }
         // The MCP tools published now, one generation per server; the run
         // keeps these for its whole length.
         if let Some(mcp) = self.mcp.get() {
@@ -826,6 +839,9 @@ impl PromptExecution {
             .unwrap_or_else(PoisonError::into_inner) = hidden.clone();
         let mut options = self.prompt_options.clone();
         options.selected_tools = self.active_tool_names.clone();
+        if let Some(permission) = &self.permission {
+            options.permissions = permission.prompt_text();
+        }
         // The rules match the declarations the request carries, which
         // leave out the caller's hidden tools too.
         options.hidden_tools.extend(hidden);

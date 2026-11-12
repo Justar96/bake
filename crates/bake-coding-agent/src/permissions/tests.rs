@@ -32,8 +32,11 @@ const DFA: SandboxMode = SandboxMode::DangerFullAccess;
 const ASK: ApprovalPolicy = ApprovalPolicy::Ask;
 const NEVER: ApprovalPolicy = ApprovalPolicy::Never;
 
+/// The composition defaults the TypeScript cases ran under, `workspace-write`
+/// with `ask`; Bake's own default after 0.4.5 is Pi's full access
+/// ([`KnobDefaults::PI`]), which the Bake cases below name.
 fn defaults() -> KnobDefaults {
-    KnobDefaults::default()
+    KnobDefaults::TYPESCRIPT
 }
 
 fn spec(sandbox: SandboxMode, approval: ApprovalPolicy) -> PresetSpec {
@@ -119,7 +122,7 @@ fn options_present_labels_and_custom() {
         table.option_of("danger-full-access"),
         Ok(PresetOption {
             value: "danger-full-access".into(),
-            name: "danger-full-access".into(),
+            name: "Full access".into(),
             description: Some("Full file access without approval prompts.".into()),
         })
     );
@@ -288,9 +291,11 @@ fn the_default_preset_resolves_against_the_table() {
         sandbox: WW,
         approval: NEVER,
     };
+    // Bake: composition defaults that match no preset fall back to the
+    // 0.4.5 default, where the TypeScript constructor refused them.
     assert_eq!(
         table.default_preset(None, never),
-        Err("permission: composed sandbox and approval defaults match no preset; configure defaultPreset explicitly".into())
+        Ok("workspace-write".into())
     );
     assert!(table.default_preset(Some("yolo"), defaults()).is_err());
 }
@@ -458,21 +463,35 @@ fn a_resumed_session_gains_only_missing_facts() {
 }
 
 // Bake: `--permission`, `--sandbox`, and `--approval` at startup, the
-// imported default, and a stale imported name.
+// full-access default, the imported default, and a stale imported name.
 #[test]
 fn startup_settles_the_permission() {
+    let mut plain = session();
+    let settled =
+        prepare_session_permission(&mut plain, &PermissionInputs::default()).expect("settled");
+    assert_eq!(
+        (settled.sandbox, settled.approval, settled.preset.as_str()),
+        (DFA, NEVER, "danger-full-access")
+    );
+    assert_eq!(
+        permission_entries(&plain),
+        [
+            json!({ "preset": "danger-full-access", "sandbox": "danger-full-access", "approval": "never" })
+        ]
+    );
+    // A 0.3 home's saved preset still comes before the default.
     let mut fresh = session();
     let settled = prepare_session_permission(
         &mut fresh,
         &PermissionInputs {
-            imported_default_preset: Some("danger-full-access"),
+            imported_default_preset: Some("workspace-write"),
             ..PermissionInputs::default()
         },
     )
     .expect("settled");
     assert_eq!(
         (settled.sandbox, settled.approval, settled.preset.as_str()),
-        (DFA, NEVER, "danger-full-access")
+        (WW, ASK, "workspace-write")
     );
     assert!(settled.warnings.is_empty());
 
@@ -499,7 +518,7 @@ fn startup_settles_the_permission() {
         },
     )
     .expect("settled");
-    assert_eq!(settled.preset, "workspace-write");
+    assert_eq!(settled.preset, "danger-full-access");
     assert_eq!(
         settled.warnings,
         [
@@ -641,14 +660,14 @@ fn only_reachable_escalations_are_offered() {
         )
     };
     let read_only = tools(RO, ASK);
-    assert_eq!(read_only.escalation_targets, &[WW, DFA]);
+    assert_eq!(read_only.escalation_targets(), &[WW, DFA]);
     // A grant to workspace-write can still be retried wider; full access cannot.
     assert!(read_only.offers_escalation_beyond(RO));
     assert!(read_only.offers_escalation_beyond(WW));
     assert!(!read_only.offers_escalation_beyond(DFA));
     assert!(!tools(WW, NEVER).offers_escalation_beyond(WW));
     let headless = tools(WW, ASK).without_escalation();
-    assert_eq!(headless.escalation_targets, &[] as &[SandboxMode]);
+    assert_eq!(headless.escalation_targets(), &[] as &[SandboxMode]);
     assert!(!headless.offers_escalation_beyond(WW));
     // The prompt states `never` exactly when the tools offer nothing for
     // want of an answerer.
@@ -789,6 +808,8 @@ fn request() -> ApprovalRequest {
         parent_tool_call_id: None,
         reason: "escalate sandbox to workspace-write: needed".into(),
         arguments: serde_json::json!({ "command": "make" }),
+        sandbox: Some(SandboxMode::WorkspaceWrite),
+        offers: ApprovalOffers::default(),
     }
 }
 
@@ -1248,4 +1269,304 @@ async fn layers_compose_in_order() {
         .await,
         Err("permission: no policy layer resolved a sandbox policy for this bash call".into())
     );
+}
+
+// ---- Bake: full access by default, session grants, and deny notes ----
+
+// Bake: new sessions default to Pi's full access. A configured name wins; a
+// table without a full-access preset falls back to the 0.4.5 default of
+// `workspace-write` with `ask`, then to its first preset; an empty table has
+// no default.
+#[test]
+fn new_sessions_default_to_full_access_as_in_pi() {
+    assert_eq!(KnobDefaults::default(), KnobDefaults::PI);
+    assert_eq!(
+        (KnobDefaults::PI.sandbox, KnobDefaults::PI.approval),
+        (DFA, NEVER)
+    );
+    assert_eq!(
+        (
+            KnobDefaults::TYPESCRIPT.sandbox,
+            KnobDefaults::TYPESCRIPT.approval
+        ),
+        (WW, ASK)
+    );
+    let table = PresetTable::default();
+    assert_eq!(
+        table.default_preset(None, KnobDefaults::default()),
+        Ok("danger-full-access".into())
+    );
+    assert_eq!(
+        table.default_preset(Some("workspace-write"), KnobDefaults::default()),
+        Ok("workspace-write".into())
+    );
+    assert!(
+        table
+            .default_preset(Some("yolo"), KnobDefaults::default())
+            .is_err()
+    );
+    assert_eq!(table.full_access_preset(), Some("danger-full-access"));
+    let labels: Vec<Option<&str>> = table
+        .presets()
+        .map(|(_, spec)| spec.name.as_deref())
+        .collect();
+    assert_eq!(
+        labels,
+        [Some("Workspace, ask for more"), Some("Full access")]
+    );
+    let sandboxed = PresetTable::new(vec![
+        ("review".into(), spec(RO, NEVER)),
+        ("work".into(), spec(WW, ASK)),
+    ])
+    .expect("table");
+    assert_eq!(
+        sandboxed.default_preset(None, KnobDefaults::default()),
+        Ok("work".into())
+    );
+    assert_eq!(sandboxed.full_access_preset(), None);
+    let review = PresetTable::new(vec![("review".into(), spec(RO, NEVER))]).expect("table");
+    assert_eq!(
+        review.default_preset(None, KnobDefaults::default()),
+        Ok("review".into())
+    );
+    let empty = PresetTable::new(Vec::new()).expect("table");
+    assert_eq!(
+        empty.default_preset(None, KnobDefaults::default()),
+        Err(
+            "permission: settings.json permission.presets names no preset; configure at least one"
+                .into()
+        )
+    );
+    // `settings.json` with an empty table is refused at startup.
+    assert!(
+        PresetTable::from_settings(Some(&json!({ "presets": {} })))
+            .expect("table")
+            .default_preset(None, KnobDefaults::default())
+            .is_err()
+    );
+}
+
+/// An engine over a `workspace-write` session under `ask` whose answerer
+/// answers `outcome` with `note`, offering full access when `full_access`.
+fn answering(
+    outcome: EscalationOutcome,
+    note: Option<&str>,
+    full_access: bool,
+) -> (PermissionEngine, Arc<StandingPermissions>, Arc<AtomicUsize>) {
+    struct Noting {
+        decision: ApprovalDecision,
+        asked: Arc<AtomicUsize>,
+    }
+    impl Approver for Noting {
+        fn request(
+            &self,
+            _request: ApprovalRequest,
+            _cancel: Option<bake_ai::AbortSignal>,
+        ) -> ApprovalFuture {
+            unreachable!("decided through decide")
+        }
+
+        fn decide(
+            &self,
+            request: ApprovalRequest,
+            _cancel: Option<bake_ai::AbortSignal>,
+        ) -> super::approval::DecisionFuture {
+            self.asked.fetch_add(1, Ordering::SeqCst);
+            let decision = super::approval::offered(request.offers, self.decision.clone());
+            Box::pin(std::future::ready(decision))
+        }
+    }
+    let asked = Arc::new(AtomicUsize::new(0));
+    let standing = Arc::new(
+        StandingPermissions::new(
+            WW,
+            ASK,
+            "workspace-write",
+            "/session-project",
+            Some("sess".into()),
+        )
+        .with_full_access_preset(full_access.then(|| "danger-full-access".into())),
+    );
+    let approver = PolicyApprover::new(
+        Arc::clone(&standing),
+        Arc::new(Noting {
+            decision: ApprovalDecision {
+                outcome,
+                note: note.map(str::to_owned),
+            },
+            asked: Arc::clone(&asked),
+        }),
+    );
+    (
+        PermissionEngine::standard(Arc::clone(&standing), Arc::new(approver)),
+        standing,
+        asked,
+    )
+}
+
+async fn resolve_tool(
+    engine: &PermissionEngine,
+    tool: &str,
+    args: Value,
+) -> Result<SandboxPolicy, String> {
+    let call = ToolCall {
+        tool_name: tool,
+        call_id: "call-1",
+        parent_tool_call_id: None,
+        args: &args,
+        subject: "command",
+        blank_justification: BASH,
+    };
+    engine.resolve(&call, None).await
+}
+
+// Bake: `allowed-session` runs the call with its mode and decides later
+// requests of the same tool for the same mode unasked; another tool or
+// mode asks, the standing mode does not change, and under `never` no grant
+// applies.
+#[tokio::test]
+async fn a_session_grant_answers_its_tool_and_mode_under_ask_only() {
+    let (engine, standing, asked) = answering(EscalationOutcome::AllowedSession, None, true);
+    let wide = json!({ "sandbox_permissions": "danger-full-access", "justification": "why" });
+    for _ in 0..2 {
+        assert_eq!(
+            resolve_tool(&engine, "bash", wide.clone())
+                .await
+                .map(|policy| policy.mode),
+            Ok(DFA)
+        );
+    }
+    assert_eq!(asked.load(Ordering::SeqCst), 1, "the second is granted");
+    let grants: Vec<(String, SandboxMode)> = standing
+        .grants()
+        .into_iter()
+        .map(|grant| (grant.tool_name, grant.sandbox))
+        .collect();
+    assert_eq!(grants, [("bash".to_owned(), DFA)]);
+    assert_eq!((standing.sandbox(), standing.approval()), (WW, ASK));
+    assert_eq!(
+        resolve_tool(&engine, "bash", json!({}))
+            .await
+            .map(|policy| policy.mode),
+        Ok(WW)
+    );
+    resolve_tool(&engine, "write", wide.clone())
+        .await
+        .expect("granted");
+    assert_eq!(asked.load(Ordering::SeqCst), 2, "another tool asks");
+    // Granting again keeps one grant per tool and mode.
+    standing.grant(SessionGrant {
+        tool_name: "bash".into(),
+        sandbox: DFA,
+        granted_by: "again".into(),
+    });
+    assert_eq!(standing.grants().len(), 2);
+    // Under `never`, the policy refuses before any grant.
+    standing.set(WW, NEVER, "custom");
+    assert_eq!(standing.granted("bash", DFA), None);
+    assert_eq!(
+        resolve_tool(&engine, "bash", wide).await,
+        Err("the user rejected escalating this command to \"danger-full-access\"".into())
+    );
+    assert_eq!(asked.load(Ordering::SeqCst), 2);
+}
+
+// Bake: a grant for one mode does not decide a request for another.
+#[tokio::test]
+async fn a_grant_for_one_mode_does_not_cover_another() {
+    let (engine, standing, asked) = answering(EscalationOutcome::AllowedSession, None, true);
+    standing.set(RO, ASK, "custom");
+    let to = |mode: &str| json!({ "sandbox_permissions": mode, "justification": "why" });
+    resolve_tool(&engine, "bash", to("workspace-write"))
+        .await
+        .expect("granted");
+    resolve_tool(&engine, "bash", to("workspace-write"))
+        .await
+        .expect("granted");
+    assert_eq!(asked.load(Ordering::SeqCst), 1);
+    resolve_tool(&engine, "bash", to("danger-full-access"))
+        .await
+        .expect("granted");
+    assert_eq!(asked.load(Ordering::SeqCst), 2);
+}
+
+// Bake: the full-access answer runs the call and switches the session to
+// the table's full-access preset; where the table has none it is not
+// offered, and such an answer fails closed as `unavailable`.
+#[tokio::test]
+async fn a_full_access_answer_switches_only_where_offered() {
+    let wide = json!({ "sandbox_permissions": "danger-full-access", "justification": "why" });
+    let (engine, standing, _) = answering(EscalationOutcome::AllowedFullAccess, None, true);
+    assert_eq!(
+        resolve_tool(&engine, "bash", wide.clone())
+            .await
+            .map(|policy| policy.mode),
+        Ok(DFA)
+    );
+    assert_eq!(
+        (standing.sandbox(), standing.approval(), standing.preset()),
+        (DFA, NEVER, "danger-full-access".to_owned())
+    );
+    assert!(standing.grants().is_empty());
+    let (engine, standing, _) = answering(EscalationOutcome::AllowedFullAccess, None, false);
+    assert_eq!(
+        resolve_tool(&engine, "bash", wide).await,
+        Err("sandbox escalation to \"danger-full-access\" requires approval, but no approval channel is available".into())
+    );
+    assert_eq!((standing.sandbox(), standing.approval()), (WW, ASK));
+}
+
+// Bake: a rejection's note follows the refusal the model reads; a note with
+// any other answer is dropped.
+#[tokio::test]
+async fn a_rejections_note_follows_its_refusal() {
+    let wide = json!({ "sandbox_permissions": "danger-full-access", "justification": "why" });
+    let (engine, _, _) = answering(
+        EscalationOutcome::Rejected,
+        Some("use the cache instead"),
+        true,
+    );
+    assert_eq!(
+        resolve_tool(&engine, "bash", wide.clone()).await,
+        Err("the user rejected escalating this command to \"danger-full-access\". The user's note: use the cache instead".into())
+    );
+    let (engine, _, _) = answering(EscalationOutcome::AllowedOnce, Some("fine"), true);
+    assert!(resolve_tool(&engine, "bash", wide).await.is_ok());
+}
+
+#[test]
+fn a_note_is_trimmed_cleaned_and_bounded() {
+    use super::approval::{NOTE_CHARS, clean_note, with_note};
+    assert_eq!(clean_note("  \n "), None);
+    assert_eq!(
+        clean_note(" use\u{1b}[31m the\tcache\n "),
+        Some("use[31m the\tcache".into())
+    );
+    assert_eq!(
+        clean_note(&"x".repeat(NOTE_CHARS + 5)).map(|note| note.chars().count()),
+        Some(NOTE_CHARS)
+    );
+    assert_eq!(with_note("refused".into(), None), "refused");
+    assert_eq!(
+        with_note("refused".into(), Some("why")),
+        "refused. The user's note: why"
+    );
+}
+
+// Bake: an answer the request did not offer fails closed as `unavailable`,
+// so no answerer can grant more than the prompt showed.
+#[tokio::test]
+async fn the_policy_gate_maps_an_answer_not_offered_to_unavailable() {
+    let decision = super::approval::offered(
+        ApprovalOffers::default(),
+        EscalationOutcome::AllowedSession.into(),
+    );
+    assert_eq!(decision.outcome, EscalationOutcome::Unavailable);
+    let offers = ApprovalOffers {
+        session: true,
+        full_access: false,
+    };
+    assert!(offers.take(EscalationOutcome::AllowedSession));
+    assert!(!offers.take(EscalationOutcome::AllowedFullAccess));
+    assert!(offers.take(EscalationOutcome::Rejected));
 }

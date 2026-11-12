@@ -67,7 +67,7 @@ A failure during startup, such as a model that does not exist, a session that ca
 
 ## Permissions and limits
 
-- Print mode cannot ask for approval, so a call that needs wider access is refused. Choose the access before the run: `--sandbox read-only` for review and questions, the default `workspace-write` to change files in the project, and `--permission danger-full-access` only where nothing outside the task can be harmed (`bake docs permissions`).
+- Print mode cannot ask for approval, so a call that needs wider access is refused. Choose the access before the run: `--sandbox read-only` for review and questions, `--permission workspace-write` to change files only in the project, and the default, `danger-full-access` with no prompts, only where nothing outside the task can be harmed (`bake docs permissions`).
 - `--max-model-calls <n>` and `--run-timeout-ms <n>` bound a run's requests and time; either one stops the run with `budget_exhausted`.
 - `--tools`, `--no-mcp`, `--no-context-files`, and `--no-skills` limit what the run can use and read (`bake docs cli`).
 - After the last prompt, Bake waits up to 10 minutes for background jobs and subagent runs it started and for the turns their results open, so the answer printed is the last one; it then stops what is still running and says so on standard error.

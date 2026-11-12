@@ -130,7 +130,6 @@ const DEFERRED_COMMANDS: &[&str] = &[
     // Bake 0.3's runtime.
     "goal",
     "feedback",
-    "permission",
 ];
 
 /// A session the command line set up for interactive mode.

@@ -34,7 +34,8 @@ use crate::palette::Token;
 use crate::runtime::Target;
 use crate::selection::line_columns;
 use crate::state::{
-    ActivityKind, Area, DraftSpot, FileMenu, Focus, Notice, Outcome, ScrollTrack, Spot, State,
+    ActivityKind, ApprovalChoice, Area, DraftSpot, FileMenu, Focus, Notice, Outcome, ScrollTrack,
+    Spot, State, approval_choices,
 };
 use crate::status::{self, Tone};
 use crate::tasks;
@@ -1021,25 +1022,62 @@ fn inner_width(width: u16) -> u16 {
     }
 }
 
-/// Detail rows the approval panel asks for; a longer detail scrolls.
-const APPROVAL_DETAIL_ROWS: usize = 12;
+/// Detail rows the approval panel shows at most; a longer detail scrolls.
+const APPROVAL_DETAIL_ROWS: usize = 8;
 
-/// The rows the approval panel wants: its title, its detail up to
-/// [`APPROVAL_DETAIL_ROWS`], and its keys.
-fn approval_rows(app: &State, width: u16) -> u16 {
-    if app.approval().is_none() {
-        return 0;
-    }
-    let detail = approval_detail(app, width)
-        .len()
-        .clamp(1, APPROVAL_DETAIL_ROWS);
-    u16::try_from(detail + 2).unwrap_or(u16::MAX)
+/// The inline code colour of Markdown answers, for a command the panel
+/// shows: the same text reads as code wherever it appears.
+const CODE: ((u8, u8, u8), Color) = ((0xc4, 0xb5, 0xfd), Color::Magenta);
+
+/// How one row of a request's detail is drawn.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DetailKind {
+    /// `bash`'s command, in the code style.
+    Command,
+    /// The path `write` or `edit` changes, bold.
+    Path,
+    /// The model's justification, quoted.
+    Quote,
+    /// Why a hook asks.
+    Reason,
+    /// The heading over the other arguments.
+    Heading,
+    /// One of the other arguments.
+    Argument,
 }
 
-/// The displayed request's detail as rows of at most `width` cells: the
-/// reason, then the call's arguments under a heading, each in full. The
-/// text is sanitized, so model-written text cannot reach the terminal as
-/// an escape sequence; tabs become spaces.
+/// Whether the panel draws its frame: where it is wide and tall enough to
+/// keep a whole panel inside it.
+fn approval_framed(width: u16, height: u16, least: usize) -> bool {
+    width >= SHEET_FRAME_COLUMNS && usize::from(height) >= least + 2
+}
+
+/// The rows of the panel's chrome with `choices` answers: the title, at
+/// least one detail row, the answers, and the keys.
+fn approval_least(choices: usize) -> usize {
+    3 + choices
+}
+
+/// The rows the approval panel wants: its frame, its title, its detail up
+/// to [`APPROVAL_DETAIL_ROWS`], its answers, and its keys. The count does
+/// not change while the same request shows, typing a note included.
+fn approval_rows(app: &State, width: u16) -> u16 {
+    let Some(approval) = app.approval() else {
+        return 0;
+    };
+    let choices = approval_choices(approval).len();
+    let framed = width >= SHEET_FRAME_COLUMNS;
+    let inner = if framed { width - 4 } else { width };
+    let detail = approval_detail(app, inner.saturating_sub(DETAIL_INDENT))
+        .len()
+        .clamp(1, APPROVAL_DETAIL_ROWS);
+    u16::try_from(detail + 2 + choices + if framed { 2 } else { 0 }).unwrap_or(u16::MAX)
+}
+
+/// Cells the detail sits in from the panel's edge, under the title's text
+/// rather than its mark.
+const DETAIL_INDENT: u16 = 2;
+
 /// Characters of a call id an approval's head shows for the `codemode`
 /// call that made the call it asks about; the call's own id beside it
 /// already holds the whole id.
@@ -1054,33 +1092,95 @@ fn short_id(id: &str) -> String {
     format!("{kept}…")
 }
 
-fn approval_detail(app: &State, width: u16) -> Vec<String> {
+/// The displayed request's detail as rows of at most `width` cells: what
+/// the call would run or change (`bash`'s command after `$`, or the path),
+/// the model's justification in quotes, or, for a hook's `ask`, its
+/// reason, then the call's other arguments under a heading, each in full.
+/// The text is sanitized, so model-written text cannot reach the terminal
+/// as an escape sequence; tabs become spaces.
+fn approval_detail(app: &State, width: u16) -> Vec<(String, DetailKind)> {
     let Some(approval) = app.approval() else {
         return Vec::new();
     };
+    let classic = app.frame == FrameStyle::Classic;
     let width = usize::from(width.max(1));
-    let wrap = |text: &str| -> Vec<String> {
+    let wrap = |text: &str, width: usize| -> Vec<String> {
         editor::sanitize(text)
             .replace('\t', "  ")
             .split('\n')
-            .flat_map(|part| transcript::wrap(part, width))
+            .flat_map(|part| transcript::wrap(part, width.max(1)))
             .collect()
     };
-    let mut rows = wrap(&approval.reason);
+    let mut rows = Vec::new();
+    if let Some(target) = approval.target.as_deref() {
+        if approval.tool == "bash" {
+            // `$ ` leads the command; its later and wrapped lines hang
+            // under its first character.
+            for (i, part) in wrap(target, width.saturating_sub(2))
+                .into_iter()
+                .enumerate()
+            {
+                let lead = if i == 0 { "$ " } else { "  " };
+                rows.push((format!("{lead}{part}"), DetailKind::Command));
+            }
+        } else {
+            rows.extend(
+                wrap(target, width)
+                    .into_iter()
+                    .map(|row| (row, DetailKind::Path)),
+            );
+        }
+    }
+    match (&approval.access, approval.justification.as_deref()) {
+        (Some(_), Some(justification)) => {
+            let (open, close) = if classic {
+                ("\"", "\"")
+            } else {
+                ("“", "”")
+            };
+            rows.extend(
+                wrap(&format!("{open}{justification}{close}"), width)
+                    .into_iter()
+                    .map(|row| (row, DetailKind::Quote)),
+            );
+        }
+        _ => rows.extend(
+            wrap(&approval.reason, width)
+                .into_iter()
+                .map(|row| (row, DetailKind::Reason)),
+        ),
+    }
     if !approval.arguments.trim().is_empty() {
-        rows.push(copy::APPROVAL_ARGUMENTS.to_owned());
-        rows.extend(wrap(&approval.arguments));
+        rows.push((copy::APPROVAL_ARGUMENTS.to_owned(), DetailKind::Heading));
+        rows.extend(
+            wrap(&approval.arguments, width)
+                .into_iter()
+                .map(|row| (row, DetailKind::Argument)),
+        );
     }
     rows
 }
 
-/// The approval panel for the displayed request, as the TypeScript
-/// `ApprovalView` orders it: what is asked (the tool and its exact call
-/// id, with the queue's length when others wait and the codemode call it
-/// came from when that fits), its detail, scrolled to
-/// [`State::approval_scroll`] with a row that says where while it does not
-/// all fit, then the keys. Records which request it showed whole: its
-/// title, at least one detail row, and its keys.
+/// An answer's label and the dim words after it.
+fn choice_text(choice: ApprovalChoice) -> (&'static str, &'static str) {
+    match choice {
+        ApprovalChoice::Once => (copy::APPROVAL_ONCE, ""),
+        ApprovalChoice::Session => (copy::APPROVAL_SESSION, copy::APPROVAL_SESSION_HINT),
+        ApprovalChoice::FullAccess => (copy::APPROVAL_FULL_ACCESS, copy::APPROVAL_FULL_ACCESS_HINT),
+        ApprovalChoice::Deny => (copy::APPROVAL_DENY, copy::APPROVAL_DENY_HINT),
+    }
+}
+
+/// The approval panel for the displayed request, in a dim frame where it
+/// fits. Its title says, in the waiting tone, which tool wants what wider
+/// access, with the call's id, the queue's length when others wait, and
+/// the codemode call it came from when that fits. Under it the detail
+/// ([`approval_detail`]), scrolled to [`State::approval_scroll`] with a row
+/// that says where while it does not all fit; then the answers, each with
+/// its key, the chosen one marked; then the keys. While `n` types a note,
+/// the answers' rows hold the note instead, so the panel keeps its height.
+/// Records which request it showed whole: its title, at least one detail
+/// row, its answers, and its keys.
 fn render_approval(app: &mut State, area: Rect, buf: &mut Buffer) {
     app.approval_on_screen = None;
     let Some(approval) = app.approval().cloned() else {
@@ -1089,13 +1189,57 @@ fn render_approval(app: &mut State, area: Rect, buf: &mut Buffer) {
     if area.is_empty() {
         return;
     }
+    let classic = app.frame == FrameStyle::Classic;
+    let glyphs = app.frame.glyphs();
+    let tones = app.tones;
+    let choices = approval_choices(&approval);
+    let least = approval_least(choices.len());
+    let inner = if approval_framed(area.width, area.height, least) {
+        let frame = dim();
+        let horizontal = glyphs.horizontal.repeat(usize::from(area.width - 2));
+        line(
+            buf,
+            Rect::new(area.x, area.y, area.width, 1),
+            Line::styled(
+                format!("{}{horizontal}{}", glyphs.top_left, glyphs.top_right),
+                frame,
+            ),
+        );
+        line(
+            buf,
+            Rect::new(area.x, area.bottom() - 1, area.width, 1),
+            Line::styled(
+                format!("{}{horizontal}{}", glyphs.bottom_left, glyphs.bottom_right),
+                frame,
+            ),
+        );
+        for y in area.y + 1..area.bottom() - 1 {
+            line(
+                buf,
+                Rect::new(area.x, y, 1, 1),
+                Line::styled(glyphs.vertical, frame),
+            );
+            line(
+                buf,
+                Rect::new(area.right() - 1, y, 1, 1),
+                Line::styled(glyphs.vertical, frame),
+            );
+        }
+        Rect::new(area.x + 2, area.y + 1, area.width - 4, area.height - 2)
+    } else {
+        area
+    };
+    let width = usize::from(inner.width);
     let clean = |text: &str| editor::sanitize(text).replace(['\n', '\t'], " ");
-    let waiting = Token::Notice.style(app.tones).add_modifier(Modifier::BOLD);
+    let waiting = Token::Notice.style(tones);
+    let tool = clean(&approval.tool);
+    let title = match &approval.access {
+        Some(access) => format!("{tool} {} {}", copy::APPROVAL_WANTS, clean(access)),
+        None => format!("{tool} {}", copy::APPROVAL_CONFIRM_TITLE),
+    };
     let mut head = vec![
-        Span::styled(
-            format!("{}: {}", copy::APPROVAL_TITLE, clean(&approval.tool)),
-            waiting,
-        ),
+        Span::styled(if classic { "? " } else { "◆ " }, waiting),
+        Span::styled(title, waiting.add_modifier(Modifier::BOLD)),
         Span::styled(format!("  {}", clean(&approval.call_id)), dim()),
     ];
     if app.approvals.len() > 1 {
@@ -1113,20 +1257,22 @@ fn render_approval(app: &mut State, area: Rect, buf: &mut Buffer) {
             dim(),
         );
         let used: usize = head.iter().map(Span::width).sum();
-        if used + from.width() <= usize::from(area.width) {
+        if used + from.width() <= width {
             head.push(from);
         }
     }
     line(
         buf,
-        Rect::new(area.x, area.y, area.width, 1),
+        Rect::new(inner.x, inner.y, inner.width, 1),
         Line::from(head),
     );
-    if area.height < 3 {
+    let fixed = 2 + choices.len();
+    if usize::from(inner.height) <= fixed {
         return;
     }
-    let detail = approval_detail(app, area.width);
-    let rows = usize::from(area.height - 2);
+    let detail = approval_detail(app, inner.width.saturating_sub(DETAIL_INDENT));
+    let indent = DETAIL_INDENT.min(inner.width);
+    let rows = usize::from(inner.height) - fixed;
     // A detail longer than its rows gives its last row to where the view
     // is and the keys that move it, cut to fit, so even a narrow terminal
     // shows that more is there.
@@ -1136,15 +1282,23 @@ fn render_approval(app: &mut State, area: Rect, buf: &mut Buffer) {
     app.approval_scroll = app.approval_scroll.min(last);
     app.approval_page = page;
     let first = app.approval_scroll;
-    for (i, row) in detail.iter().skip(first).take(page).enumerate() {
-        let style = if row == copy::APPROVAL_ARGUMENTS {
-            dim()
-        } else {
-            Style::new()
+    let code = transcript::colour(tones, CODE.0, CODE.1);
+    for (i, (row, kind)) in detail.iter().skip(first).take(page).enumerate() {
+        let style = match kind {
+            DetailKind::Command => code,
+            DetailKind::Path => Style::new().add_modifier(Modifier::BOLD),
+            DetailKind::Quote => dim().add_modifier(Modifier::ITALIC),
+            DetailKind::Heading => dim(),
+            DetailKind::Reason | DetailKind::Argument => Style::new(),
         };
         line(
             buf,
-            Rect::new(area.x, area.y + 1 + i as u16, area.width, 1),
+            Rect::new(
+                inner.x + indent,
+                inner.y + 1 + i as u16,
+                inner.width - indent,
+                1,
+            ),
             Line::styled(row.clone(), style),
         );
     }
@@ -1158,25 +1312,100 @@ fn render_approval(app: &mut State, area: Rect, buf: &mut Buffer) {
         );
         line(
             buf,
-            Rect::new(area.x, area.y + 1 + page as u16, area.width, 1),
-            Line::styled(fit(&position, usize::from(area.width)), dim()),
+            Rect::new(
+                inner.x + indent,
+                inner.y + 1 + page as u16,
+                inner.width - indent,
+                1,
+            ),
+            Line::styled(fit(&position, width - usize::from(indent)), dim()),
         );
     }
-    let keys = if app.approval_chosen() {
-        Line::from(vec![
-            Span::styled(copy::APPROVAL_CONFIRM, waiting),
-            Span::styled(format!(" · {}", copy::APPROVAL_CONFIRM_KEYS), dim()),
-        ])
+    let top = inner.y + 1 + rows as u16;
+    let note = app.approval_note().map(str::to_owned);
+    let chosen = app.approval_choice();
+    if let Some(note) = &note {
+        line(
+            buf,
+            Rect::new(inner.x, top, inner.width, 1),
+            Line::styled(
+                fit(copy::APPROVAL_NOTE, width),
+                waiting.add_modifier(Modifier::BOLD),
+            ),
+        );
+        // The note's end, so the caret stays in view however long it is.
+        let caret = if classic { "_" } else { "▏" };
+        let lead = if classic { "> " } else { "› " };
+        let room = width.saturating_sub(lead.width() + caret.width());
+        let shown = editor::sanitize(note).replace(['\n', '\t'], " ");
+        let shown = fit_start(&shown, room);
+        line(
+            buf,
+            Rect::new(inner.x, top + 1, inner.width, 1),
+            Line::from(vec![
+                Span::styled(lead, waiting),
+                Span::raw(shown),
+                Span::styled(caret, waiting),
+            ]),
+        );
+    } else {
+        // The hints line up after the longest label.
+        let column = choices
+            .iter()
+            .map(|choice| choice_text(*choice).0.width())
+            .max()
+            .unwrap_or(0);
+        for (i, choice) in choices.iter().enumerate() {
+            let selected = chosen == Some(*choice);
+            let (label, hint) = choice_text(*choice);
+            let pad = " ".repeat(column - label.width());
+            let marker = match (selected, classic) {
+                (false, _) => " ",
+                (true, false) => "▸",
+                (true, true) => ">",
+            };
+            let mut spans = vec![
+                Span::styled(format!("{marker} "), waiting),
+                Span::styled(
+                    format!("{}  ", choice.key()),
+                    if selected { waiting } else { dim() },
+                ),
+                Span::styled(
+                    label,
+                    if selected {
+                        waiting.add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::new()
+                    },
+                ),
+            ];
+            let used: usize = spans.iter().map(Span::width).sum();
+            if !hint.is_empty() && used + pad.len() + 2 + hint.width() <= width {
+                spans.push(Span::styled(format!("{pad}  {hint}"), dim()));
+            }
+            line(
+                buf,
+                Rect::new(inner.x, top + i as u16, inner.width, 1),
+                Line::from(spans),
+            );
+        }
+    }
+    let keys = if note.is_some() {
+        copy::APPROVAL_NOTE_KEYS
     } else if app.approval_armed() {
-        Line::styled(copy::APPROVAL_KEYS, dim())
+        if classic {
+            copy::APPROVAL_KEYS_ASCII
+        } else {
+            copy::APPROVAL_KEYS
+        }
     } else {
         // Not armed yet: keys cannot answer, so none are offered but Esc.
-        Line::styled(copy::APPROVAL_PREPARING, dim())
+        copy::APPROVAL_PREPARING
     };
     line(
         buf,
-        Rect::new(area.x, area.bottom() - 1, area.width, 1),
-        keys,
+        Rect::new(inner.x, inner.bottom() - 1, inner.width, 1),
+        Line::styled(fit(keys, width), dim()),
     );
     app.approval_on_screen = Some(approval.generation);
 }
@@ -4373,6 +4602,7 @@ mod tests {
                 parent_call_id: None,
                 reason: "r".into(),
                 arguments: "a".into(),
+                ..Default::default()
             }])),
         );
         check(
@@ -5022,14 +5252,14 @@ mod tests {
         let (rows, _) = draw(&mut app, 80, 30);
         // The box's top edge; with nothing on the bar, the menu is over it.
         let bar = row_index(&rows, "❯") - 1;
-        // Eight of seventeen commands, the frequent ones first, then a count.
+        // Eight of eighteen commands, the frequent ones first, then a count.
         let first = row_index(&rows, "/model");
         assert_eq!(first + 9, bar);
         assert!(rows[first].starts_with("  ▸ /model           [search]  Choose the model"));
         assert!(rows[first + 1].starts_with("    /resume          Resume a saved session"));
         assert_eq!(
             rows[first + 8].trim_end(),
-            "    +9 more, keep typing to narrow"
+            "    +10 more, keep typing to narrow"
         );
         // The box's edge names the menu's key.
         assert!(rows.iter().any(|r| r.contains("Tab completes")));
@@ -5265,6 +5495,23 @@ mod tests {
 
     // ---- Approvals ----
 
+    /// An escalated `bash` request that offers every answer.
+    fn escalated(generation: u64) -> crate::runtime::Approval {
+        crate::runtime::Approval {
+            generation,
+            tool: "bash".into(),
+            call_id: "call_1".into(),
+            reason: "escalate sandbox to danger-full-access: The build cache lives outside the workspace.".into(),
+            arguments: "timeout: 30".into(),
+            access: Some("run outside the sandbox".into()),
+            target: Some("touch ~/.cache/tool/stamp".into()),
+            justification: Some("The build cache lives outside the workspace.".into()),
+            session: true,
+            full_access: true,
+            ..Default::default()
+        }
+    }
+
     fn asking(reason: &str, arguments: &str) -> State {
         let mut app = State::live(FrameStyle::default(), Tones::None, Vec::new());
         update(&mut app, Msg::Key(KeyInput::plain(Key::Char('d'))));
@@ -5278,10 +5525,340 @@ mod tests {
                     parent_call_id: None,
                     reason: reason.into(),
                     arguments: arguments.into(),
+                    ..Default::default()
                 },
             ])),
         );
         app
+    }
+
+    /// `app` showing [`escalated`] armed, with `chosen` typed, drawn at
+    /// `width` by 20.
+    fn panel_app(frame: FrameStyle, tones: Tones, width: u16, typed: &str) -> State {
+        let mut app = State::live(frame, tones, Vec::new());
+        update(
+            &mut app,
+            Msg::Runtime(crate::runtime::RuntimeUpdate::Approvals(vec![escalated(4)])),
+        );
+        draw(&mut app, width, 20);
+        let token = app.approval_drawn().expect("shown whole");
+        update(&mut app, Msg::ApprovalArmed(token));
+        for c in typed.chars() {
+            key(&mut app, Key::Char(c));
+        }
+        app
+    }
+
+    /// The panel's rows, its frame included, with trailing blanks trimmed.
+    fn panel_rows(app: &mut State, width: u16) -> Vec<String> {
+        let (rows, _) = draw(app, width, 20);
+        let title = row_index(&rows, "bash wants to");
+        rows[title - 1..title + 11]
+            .iter()
+            .map(|row| row.trim_end().to_owned())
+            .collect()
+    }
+
+    /// One framed row of the panel at `width` columns: two cells of
+    /// margin, the frame, a space, `text` padded, a space, the frame.
+    fn boxed(width: usize, text: &str, classic: bool) -> String {
+        let side = if classic { "|" } else { "│" };
+        let inner = width - 8;
+        format!("  {side} {text:<inner$} {side}")
+    }
+
+    fn edge(width: usize, top: bool, classic: bool) -> String {
+        let (left, line, right) = match (classic, top) {
+            (true, _) => ("+", "-", "+"),
+            (false, true) => ("╭", "─", "╮"),
+            (false, false) => ("╰", "─", "╯"),
+        };
+        format!("  {left}{}{right}", line.repeat(width - 6))
+    }
+
+    // Bake: the approval panel says in words what the call wants, shows
+    // the command and the model's justification apart from the other
+    // arguments, and lists the answers with their keys, the hints lined up
+    // where they fit.
+    #[test]
+    fn the_approval_panel_reads_as_this_at_two_widths_and_in_the_classic_frame() {
+        let expected = |width: usize, classic: bool, hints: bool, choices: [&str; 4]| {
+            let quote = if classic {
+                "\"The build cache lives outside the workspace.\""
+            } else {
+                "“The build cache lives outside the workspace.”"
+            };
+            let mark = if classic { "?" } else { "◆" };
+            let hint = |label: &str, hint: &str| {
+                if hints {
+                    format!("{label:<27}  {hint}")
+                } else {
+                    label.to_owned()
+                }
+            };
+            vec![
+                edge(width, true, classic),
+                boxed(
+                    width,
+                    &format!("{mark} bash wants to run outside the sandbox  call_1"),
+                    classic,
+                ),
+                boxed(width, "  $ touch ~/.cache/tool/stamp", classic),
+                boxed(width, &format!("  {quote}"), classic),
+                boxed(width, "  Arguments:", classic),
+                boxed(width, "  timeout: 30", classic),
+                boxed(width, choices[0], classic),
+                boxed(
+                    width,
+                    &hint(choices[1], copy::APPROVAL_SESSION_HINT),
+                    classic,
+                ),
+                boxed(
+                    width,
+                    &hint(choices[2], copy::APPROVAL_FULL_ACCESS_HINT),
+                    classic,
+                ),
+                boxed(width, &hint(choices[3], copy::APPROVAL_DENY_HINT), classic),
+                boxed(
+                    width,
+                    if classic {
+                        copy::APPROVAL_KEYS_ASCII
+                    } else {
+                        copy::APPROVAL_KEYS
+                    },
+                    classic,
+                ),
+                edge(width, false, classic),
+            ]
+        };
+        let round = [
+            "  y  Allow once",
+            "▸ a  Allow for this session",
+            "  f  Switch to full access",
+            "  n  Deny",
+        ];
+        for width in [80, 60] {
+            let mut app = panel_app(FrameStyle::Round, Tones::TrueColor, width, "a");
+            assert_eq!(
+                panel_rows(&mut app, width),
+                expected(usize::from(width), false, true, round),
+                "{width} columns"
+            );
+        }
+        // Too narrow for the hints: the labels stand alone, and the title
+        // and quote wrap or cut.
+        let mut app = panel_app(FrameStyle::Round, Tones::TrueColor, 40, "a");
+        let (rows, _) = draw(&mut app, 40, 20);
+        let title = row_index(&rows, "bash wants to");
+        assert_eq!(
+            rows[title].trim_end(),
+            "  │ ◆ bash wants to run outside the  │"
+        );
+        assert_eq!(
+            rows[title + 2].trim_end(),
+            "  │   “The build cache lives outside │"
+        );
+        assert_eq!(
+            rows[title + 3].trim_end(),
+            "  │   the workspace.”                │"
+        );
+        assert_eq!(
+            rows[title + 7].trim_end(),
+            "  │ ▸ a  Allow for this session      │"
+        );
+        let classic = [
+            "  y  Allow once",
+            "> a  Allow for this session",
+            "  f  Switch to full access",
+            "  n  Deny",
+        ];
+        let mut app = panel_app(FrameStyle::Classic, Tones::None, 80, "a");
+        assert_eq!(panel_rows(&mut app, 80), expected(80, true, true, classic));
+    }
+
+    #[test]
+    fn a_deny_note_takes_the_answers_rows_and_keeps_the_panels_height() {
+        for (frame, lead, caret) in [
+            (FrameStyle::Round, "›", "▏"),
+            (FrameStyle::Classic, ">", "_"),
+        ] {
+            let classic = frame == FrameStyle::Classic;
+            let mut app = panel_app(frame, Tones::None, 80, "nuse the cache");
+            let rows = panel_rows(&mut app, 80);
+            assert_eq!(rows.len(), 12);
+            assert_eq!(rows[6], boxed(80, copy::APPROVAL_NOTE, classic));
+            assert_eq!(
+                rows[7],
+                boxed(80, &format!("{lead} use the cache{caret}"), classic)
+            );
+            assert_eq!(rows[8], boxed(80, "", classic));
+            assert_eq!(rows[9], boxed(80, "", classic));
+            assert_eq!(rows[10], boxed(80, copy::APPROVAL_NOTE_KEYS, classic));
+            assert_eq!(rows[11], edge(80, false, classic));
+        }
+        // A note longer than its row shows its end, where the caret is.
+        let long = format!("n{}end", "x".repeat(100));
+        let mut app = panel_app(FrameStyle::Round, Tones::None, 60, &long);
+        let rows = panel_rows(&mut app, 60);
+        assert!(rows[7].contains("xxxend▏"), "{}", rows[7]);
+    }
+
+    /// The cells of row `y` of a `width` by 20 screen, the reset colour
+    /// read as none.
+    fn row_cells(app: &mut State, width: u16, y: u16) -> Vec<(String, Style)> {
+        let mut terminal = Terminal::new(TestBackend::new(width, 20)).unwrap();
+        terminal.draw(|f| render(app, f)).unwrap();
+        let buffer = terminal.backend().buffer();
+        (0..width)
+            .map(|x| &buffer[(x, y)])
+            .filter(|cell| !cell.symbol().is_empty())
+            .map(|cell| {
+                let mut style = cell.style();
+                style.fg = style.fg.filter(|&fg| fg != Color::Reset);
+                style.bg = style.bg.filter(|&bg| bg != Color::Reset);
+                (cell.symbol().to_owned(), style)
+            })
+            .collect()
+    }
+
+    // Bake: the panel's colours under each colour level: the title and
+    // the chosen answer in the waiting yellow, the command in the code
+    // colour of Markdown answers, the justification dim and italic, the
+    // frame, keys, and hints dim. Under NO_COLOR only the modifiers stay.
+    #[test]
+    fn the_approval_panel_colours_follow_the_palette_under_every_level() {
+        let rgb = |r, g, b| Some(Color::Rgb(r, g, b));
+        for (tones, notice, code) in [
+            (
+                Tones::TrueColor,
+                rgb(0xfa, 0xcc, 0x15),
+                rgb(0xc4, 0xb5, 0xfd),
+            ),
+            (Tones::Ansi, Some(Color::Yellow), Some(Color::Magenta)),
+            (Tones::None, None, None),
+        ] {
+            let mut app = panel_app(FrameStyle::Round, tones, 80, "a");
+            let (rows, _) = draw(&mut app, 80, 20);
+            let title = u16::try_from(row_index(&rows, "bash wants to")).unwrap();
+            let at = |app: &mut State, y: u16, needle: &str| -> Style {
+                style_at(&row_cells(app, 80, y), needle, 0)
+            };
+            let fg_mods = |style: Style| (style.fg, style.add_modifier);
+            assert_eq!(
+                fg_mods(at(&mut app, title - 1, "╭")),
+                (None, Modifier::DIM),
+                "{tones:?}"
+            );
+            assert_eq!(
+                fg_mods(at(&mut app, title, "◆")),
+                (notice, Modifier::empty())
+            );
+            assert_eq!(
+                fg_mods(at(&mut app, title, "bash wants")),
+                (notice, Modifier::BOLD)
+            );
+            assert_eq!(
+                fg_mods(at(&mut app, title, "call_1")),
+                (None, Modifier::DIM)
+            );
+            assert_eq!(
+                fg_mods(at(&mut app, title + 1, "$ touch")),
+                (code, Modifier::empty())
+            );
+            assert_eq!(
+                fg_mods(at(&mut app, title + 2, "“The")),
+                (None, Modifier::DIM | Modifier::ITALIC)
+            );
+            assert_eq!(
+                fg_mods(at(&mut app, title + 3, "Arguments:")),
+                (None, Modifier::DIM)
+            );
+            assert_eq!(
+                fg_mods(at(&mut app, title + 4, "timeout")),
+                (None, Modifier::empty())
+            );
+            // The answers: the chosen one marked and bold in the waiting
+            // tone, the others plain with a dim key.
+            assert_eq!(
+                fg_mods(at(&mut app, title + 5, "y ")),
+                (None, Modifier::DIM)
+            );
+            assert_eq!(
+                fg_mods(at(&mut app, title + 5, "Allow once")),
+                (None, Modifier::empty())
+            );
+            assert_eq!(
+                fg_mods(at(&mut app, title + 6, "▸")),
+                (notice, Modifier::empty())
+            );
+            assert_eq!(
+                fg_mods(at(&mut app, title + 6, "a ")),
+                (notice, Modifier::empty())
+            );
+            assert_eq!(
+                fg_mods(at(&mut app, title + 6, "Allow for")),
+                (notice, Modifier::BOLD)
+            );
+            assert_eq!(
+                fg_mods(at(&mut app, title + 6, "same tool")),
+                (None, Modifier::DIM)
+            );
+            assert_eq!(
+                fg_mods(at(&mut app, title + 9, "↑↓")),
+                (None, Modifier::DIM)
+            );
+        }
+    }
+
+    // Bake: a hook's `ask` has no access or justification: the title says
+    // the tool needs confirmation, the hook's reason stands in the detail,
+    // and only allow once and deny are offered.
+    #[test]
+    fn a_hooks_ask_shows_its_reason_and_offers_once_and_deny() {
+        let mut app = State::live(FrameStyle::Round, Tones::None, Vec::new());
+        update(
+            &mut app,
+            Msg::Runtime(crate::runtime::RuntimeUpdate::Approvals(vec![
+                crate::runtime::Approval {
+                    generation: 2,
+                    tool: "write".into(),
+                    call_id: "call_9".into(),
+                    reason: "PreToolUse hook asks: writes to the release notes".into(),
+                    target: Some("NOTES.md".into()),
+                    arguments: "content: hi".into(),
+                    ..Default::default()
+                },
+            ])),
+        );
+        let (rows, _) = draw(&mut app, 80, 20);
+        let title = row_index(&rows, "needs your confirmation");
+        let text: Vec<&str> = rows[title..title + 8]
+            .iter()
+            .map(|r| r.trim_end())
+            .collect();
+        assert_eq!(
+            text,
+            [
+                boxed(80, "◆ write needs your confirmation  call_9", false).as_str(),
+                boxed(80, "  NOTES.md", false).as_str(),
+                boxed(
+                    80,
+                    "  PreToolUse hook asks: writes to the release notes",
+                    false
+                )
+                .as_str(),
+                boxed(80, "  Arguments:", false).as_str(),
+                boxed(80, "  content: hi", false).as_str(),
+                boxed(80, "  y  Allow once", false).as_str(),
+                boxed(
+                    80,
+                    &format!("  n  Deny{:<6}  {}", "", copy::APPROVAL_DENY_HINT),
+                    false
+                )
+                .as_str(),
+                boxed(80, copy::APPROVAL_PREPARING, false).as_str(),
+            ]
+        );
     }
 
     #[test]
@@ -5297,7 +5874,7 @@ mod tests {
             "{screen}"
         );
         assert!(
-            screen.contains("Approval required: bash[31m  call-4"),
+            screen.contains("◆ bash[31m needs your confirmation  call-4"),
             "{screen}"
         );
         assert!(screen.contains("escalate sandbox to danger-full-access: ]52;c;aGk=fetch"));
@@ -5338,6 +5915,7 @@ mod tests {
             parent_call_id: Some(parent.into()),
             reason: "escalate sandbox to danger-full-access: needs the network".into(),
             arguments: "command: curl -fsS https://example.com".into(),
+            ..Default::default()
         };
         update(
             &mut app,
@@ -5348,7 +5926,7 @@ mod tests {
         let (rows, _) = draw(&mut app, 80, 24);
         let screen = rows.join("\n");
         assert!(
-            screen.contains("Approval required: bash  call_1/2  from codemode call_1"),
+            screen.contains("◆ bash needs your confirmation  call_1/2  from codemode call_1"),
             "{screen}"
         );
         // A long id is cut, since the call's own id holds all of it.
@@ -5377,15 +5955,15 @@ mod tests {
             ])),
         );
         let (rows, _) = draw(&mut app, 80, 24);
-        let head = &rows[row_index(&rows, "Approval required")];
+        let head = &rows[row_index(&rows, "needs your confirmation")];
         assert!(
-            head.contains(&format!("Approval required: bash  {id}/2  1/2")),
+            head.contains(&format!("needs your confirmation  {id}/2  1/2")),
             "{head}"
         );
         assert!(!head.contains(copy::APPROVAL_FROM_CODEMODE), "{head}");
         // Where the label fits, it follows the count.
         let (rows, _) = draw(&mut app, 120, 24);
-        let head = &rows[row_index(&rows, "Approval required")];
+        let head = &rows[row_index(&rows, "needs your confirmation")];
         assert!(
             head.contains(&format!("{id}/2  1/2  from codemode toolu_01abc…")),
             "{head}"
@@ -5399,8 +5977,8 @@ mod tests {
         let mut app = asking(&"needs it ".repeat(20), &arguments);
         let (rows, _) = draw(&mut app, 40, 30);
         let screen = rows.join("\n");
-        // Eleven detail rows, then where they are in the whole.
-        assert!(screen.contains("1-11/"), "{screen}");
+        // Seven detail rows, then where they are in the whole.
+        assert!(screen.contains("1-7/"), "{screen}");
         assert_eq!(app.approval_drawn(), Some(1));
         // Paging reaches the last line, and no further.
         for _ in 0..20 {
@@ -5409,18 +5987,20 @@ mod tests {
         let (rows, _) = draw(&mut app, 40, 30);
         let screen = rows.join("\n");
         assert!(screen.contains("line 40"), "{screen}");
-        let total = approval_detail(&app, 36).len();
-        assert_eq!(app.approval_scroll, total - 11);
+        let total = approval_detail(&app, 30).len();
+        assert_eq!(app.approval_scroll, total - 7);
         assert_eq!(app.approval_drawn(), None, "still the same showing");
-        // Title and keys alone, without a detail row, are not shown whole.
+        // Title, answers, and keys alone, without a detail row, are not
+        // shown whole.
         let mut short = asking("why", "command: x");
         let (rows, _) = draw(&mut short, 80, 2);
-        assert!(rows.join("\n").contains("Approval required"));
+        assert!(rows.join("\n").contains("needs your confirmation"));
         assert_eq!(short.approval_drawn(), None);
-        // Four rows: the draft's first row, then title, one detail row, keys.
-        let (_, _) = draw(&mut short, 80, 3);
+        // Six rows: the draft's first row, then title, one detail row, two
+        // answers, and keys.
+        let (_, _) = draw(&mut short, 80, 5);
         assert_eq!(short.approval_drawn(), None);
-        let (_, _) = draw(&mut short, 80, 4);
+        let (_, _) = draw(&mut short, 80, 6);
         assert_eq!(short.approval_drawn(), Some(1));
     }
 

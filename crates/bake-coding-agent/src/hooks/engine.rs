@@ -13,7 +13,6 @@ use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use bake_ai::AbortSignal;
-use bake_sandbox::EscalationOutcome;
 use serde_json::{Map, Value, json};
 
 use super::codec::HookOutput;
@@ -23,7 +22,7 @@ use super::merge::{MergedDecision, MergedOutcome, merge_hook_outputs};
 use super::runner::{HookProcesses, HookRun, run_hook};
 use super::{HookDialect, HookEvent, HookFile, HookScope, HooksOptions};
 use crate::owned_work::WorkGate;
-use crate::permissions::{ApprovalRequest, Approver, PolicyApprover};
+use crate::permissions::{ApprovalDecision, ApprovalRequest, Approver, PolicyApprover};
 
 /// The model's text for a call a `PreToolUse` hook denied without a reason.
 pub const PRE_TOOL_USE_BLOCKED: &str = "blocked by PreToolUse hook";
@@ -433,13 +432,14 @@ impl Hooks {
     }
 
     /// Asks the user about a call a Claude Code `PreToolUse` hook asked
-    /// about, under the session's approval policy.
+    /// about, under the session's approval policy: allow once, or reject,
+    /// with the user's note when they gave one.
     pub async fn ask(
         &self,
         request: ApprovalRequest,
         signal: Option<AbortSignal>,
-    ) -> EscalationOutcome {
-        self.approver.request(request, signal).await
+    ) -> ApprovalDecision {
+        self.approver.decide(request, signal).await
     }
 }
 

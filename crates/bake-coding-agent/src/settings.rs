@@ -1014,6 +1014,24 @@ impl SettingsStore {
         self.update(|object| set_member(object, "followUpMode", queue_mode_name(mode).into()))
     }
 
+    /// Bake's `permission.defaultPreset`, the preset new sessions take
+    /// (`/permission`'s Ctrl+S), keeping the section's other members. A
+    /// `permission` that is not an object is replaced.
+    pub fn set_default_permission_preset(&self, preset: &str) -> Result<Settings, StoreError> {
+        self.update(|object| {
+            let section = object
+                .entry("permission")
+                .or_insert_with(|| Value::Object(Map::new()));
+            if !section.is_object() {
+                *section = Value::Object(Map::new());
+            }
+            match section.as_object_mut() {
+                Some(section) => set_member(section, "defaultPreset", preset.into()),
+                None => false,
+            }
+        })
+    }
+
     /// Pi's `setCompactionEnabled`: `compaction.enabled`, keeping the
     /// section's other members. A `compaction` that is not an object is
     /// replaced.

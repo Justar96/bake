@@ -54,7 +54,7 @@ Bake reaches models through your providers. Run `/login` in a session to connect
 - Type a prompt and press Enter; `@` references a file and `/` lists the commands, such as `/model`, `/thinking`, `/resume`, `/compact`, and `/settings`.
 - `bake -p "explain this repository"` prints one answer and exits; from a script or another agent, `bake -p --output-format json "…"` prints one JSON result with the answer and the session to continue (`bake docs headless`).
 - `bake --inline` keeps the session in your terminal's scrollback instead of the full screen.
-- `bake --permission workspace-write` or `danger-full-access` picks the permission preset; `bake docs permissions` explains them.
+- New sessions have full access and never ask, as in Pi. `bake --permission workspace-write`, or `/permission` in a session, keeps changes inside the project and asks before more; `bake docs permissions` explains the presets.
 - `bake docs` lists the built-in documentation, and `bake --help` the launch options.
 
 Bake keeps sessions, settings, and credentials in `~/.bake`. Set `BAKE_HOME` to use another directory; the earlier `DSH_HOME` name still works when `BAKE_HOME` is unset.

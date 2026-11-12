@@ -222,7 +222,10 @@ fn ask_text(reason: Option<&str>) -> String {
 /// the user allowed the call.
 fn refusal(outcome: EscalationOutcome, reason: Option<&str>) -> Option<String> {
     let base = match outcome {
-        EscalationOutcome::AllowedOnce => return None,
+        // A hook's `ask` offers no wider answer, so only allow-once runs.
+        EscalationOutcome::AllowedOnce
+        | EscalationOutcome::AllowedSession
+        | EscalationOutcome::AllowedFullAccess => return None,
         EscalationOutcome::Unavailable => {
             "a PreToolUse hook asked to confirm this call, but no approval channel is available"
         }
@@ -315,13 +318,19 @@ pub(super) fn before_tool_call(
                         parent_tool_call_id: parent_tool_call_id.map(str::to_owned),
                         reason: ask_text(reason.as_deref()),
                         arguments: args.clone(),
+                        sandbox: None,
+                        offers: crate::permissions::ApprovalOffers::default(),
                     };
-                    let outcome = hooks.engine.ask(request, signal.clone()).await;
+                    let decision = hooks.engine.ask(request, signal.clone()).await;
                     if is_aborted(signal.as_ref()) {
                         return Ok(Some(aborted()));
                     }
+                    let outcome = decision.outcome;
                     facts.insert("approval".into(), outcome.as_str().into());
-                    match refusal(outcome, reason.as_deref()) {
+                    let refused = refusal(outcome, reason.as_deref()).map(|text| {
+                        crate::permissions::approval::with_note(text, decision.note.as_deref())
+                    });
+                    match refused {
                         None => ("allow", None, false),
                         Some(text) => {
                             facts.insert("reason".into(), text.clone().into());

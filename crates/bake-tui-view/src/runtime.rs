@@ -90,8 +90,9 @@ pub struct Pending {
 }
 
 /// One approval request the runtime is waiting on a person to answer: a
-/// tool call that asks for more access than the session's sandbox gives.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// tool call that asks for more access than the session's sandbox gives,
+/// or one a hook asked to confirm.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Approval {
     /// The request's identity. An answer names it, so an answer meant for
     /// one request never settles another, even for the same call id.
@@ -106,17 +107,38 @@ pub struct Approval {
     /// Why the tool asks, such as `escalate sandbox to …: <justification>`.
     pub reason: String,
     /// The call's arguments as the runtime words them, one line each, so
-    /// the person sees what would run.
+    /// the person sees what would run; without [`Self::target`] and the
+    /// escalation's own pair.
     pub arguments: String,
+    /// The wider access the call asks for, in plain words that follow
+    /// "wants to", such as `run outside the sandbox`; `None` for a hook's
+    /// `ask`, which [`Self::reason`] explains.
+    pub access: Option<String>,
+    /// What the call would run or change, shown first: `bash`'s command,
+    /// or the path `write` or `edit` changes.
+    pub target: Option<String>,
+    /// The model's one-sentence justification for the wider access.
+    pub justification: Option<String>,
+    /// Whether the request takes "allow for this session".
+    pub session: bool,
+    /// Whether the request takes "switch the session to full access".
+    pub full_access: bool,
 }
 
 /// A person's answer to the displayed approval request.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ApprovalAnswer {
     /// The one call runs with the access it asked for.
     AllowOnce,
+    /// This call, and later requests of the same tool for the same access
+    /// in this session.
+    AllowSession,
+    /// This call, and the session switches to full access.
+    AllowFullAccess,
     /// The call is refused.
     Reject,
+    /// The call is refused, with a note for the model.
+    RejectWithNote(String),
     /// The request is withdrawn without a decision, which also refuses it.
     Cancel,
 }

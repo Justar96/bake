@@ -337,8 +337,9 @@ pub fn create_sandboxed_bash_tool_definition(
     let cwd = cwd.to_path_buf();
     let permissions = permissions.clone();
     let background = options.jobs.is_some();
-    tool.description = sandboxed_bash_tool_description(permissions.escalation_targets, background);
-    tool.parameters = sandboxed_bash_tool_parameters(permissions.escalation_targets, background);
+    tool.description =
+        sandboxed_bash_tool_description(permissions.escalation_targets(), background);
+    tool.parameters = sandboxed_bash_tool_parameters(permissions.escalation_targets(), background);
     tool.execute = Arc::new(
         move |id: String, args: Value, signal: Option<AbortSignal>, on_update, ctx| {
             let cwd = cwd.clone();

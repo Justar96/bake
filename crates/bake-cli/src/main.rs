@@ -133,7 +133,7 @@ Options:
       --permission <preset> Permission preset: workspace-write or
                             danger-full-access, or one from settings.json;
                             new sessions default to the saved preset, else
-                            workspace-write
+                            danger-full-access
       --sandbox <mode>      read-only, workspace-write, or danger-full-access
       --approval <policy>   ask or never
       --offline             Run no startup network operation (BAKE_OFFLINE,
@@ -155,9 +155,10 @@ through --tools, and grep and find need rg and fd on PATH. A session keeps its
 permission: write and edit change files only where its sandbox mode allows,
 and bash runs only under a sandbox that enforces it: bubblewrap or Landlock
 on Linux and Seatbelt on macOS. Without one (Windows, for now), confined bash
-calls are refused. Escalations need approval: under --approval ask an
-interactive session asks, Y then Enter allowing that one call; print mode
-cannot ask, so it refuses.
+calls are refused. New sessions have full access and never ask, as in Pi.
+Under --approval ask, an escalation needs approval: an interactive session
+asks, offering allow once, allow for the session, full access, or deny with
+a note; print mode cannot ask, so it refuses.
 
 bake is interactive when both standard streams are terminals and neither
 -p nor --mode is given; otherwise it prints. Interactive messages run in

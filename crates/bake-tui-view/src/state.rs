@@ -550,8 +550,13 @@ pub struct State {
     approval_showings: u64,
     /// The showing the input thread has armed ([`Msg::ApprovalArmed`]).
     approval_armed: Option<u64>,
-    /// The showing in which `y` chose to allow; Enter confirms.
-    approval_chosen: Option<u64>,
+    /// The showing in which a key or ↑↓ chose an answer, and that answer;
+    /// Enter confirms it.
+    approval_chosen: Option<(u64, ApprovalChoice)>,
+    /// The displayed request's note to the model while `n` is typing one:
+    /// its generation and the note so far. A showing that ends keeps it;
+    /// another request drops it.
+    approval_note: Option<(u64, String)>,
     /// The request the last rendered frame drew whole: its title, at
     /// least one row of its detail, and its keys.
     pub(crate) approval_on_screen: Option<u64>,
@@ -651,6 +656,7 @@ impl State {
             approval_showings: 0,
             approval_armed: None,
             approval_chosen: None,
+            approval_note: None,
             approval_on_screen: None,
             approval_answered: None,
             approval_scroll: 0,
@@ -926,11 +932,27 @@ impl State {
             .is_some_and(|token| self.approval_armed == Some(token))
     }
 
-    /// Whether `y` has chosen to allow the displayed request in its current
+    /// Whether an answer to the displayed request is chosen in its current
     /// showing, so Enter confirms it.
     pub fn approval_chosen(&self) -> bool {
-        self.showing()
-            .is_some_and(|token| self.approval_chosen == Some(token))
+        self.approval_choice().is_some()
+    }
+
+    /// The answer chosen for the displayed request in its current showing.
+    pub fn approval_choice(&self) -> Option<ApprovalChoice> {
+        let token = self.showing()?;
+        self.approval_chosen
+            .filter(|(chosen, _)| *chosen == token)
+            .map(|(_, choice)| choice)
+    }
+
+    /// The note `n` is typing for the displayed request, while it is.
+    pub fn approval_note(&self) -> Option<&str> {
+        let front = self.approval()?.generation;
+        self.approval_note
+            .as_ref()
+            .filter(|(generation, _)| *generation == front)
+            .map(|(_, note)| note.as_str())
     }
 
     /// The displayed approval request, if any waits.
@@ -1086,7 +1108,13 @@ fn apply(state: &mut State, msg: Msg) -> Vec<Effect> {
         Msg::KeyRead { key, burst } if !state.approvals.is_empty() => {
             return approval_key(state, key, burst);
         }
-        Msg::KeyRepeat(_) if !state.approvals.is_empty() => {}
+        // A held key repeats only into a note being typed.
+        Msg::KeyRepeat(input) if !state.approvals.is_empty() => {
+            if state.approval_note().is_some() && matches!(input.key, Key::Backspace | Key::Char(_))
+            {
+                edit_note(state, input);
+            }
+        }
         // Typed for what had the keyboard before the handoff: dropped, but
         // Ctrl+C keeps its quit gesture.
         Msg::Key(input) | Msg::KeyRepeat(input) | Msg::KeyRead { key: input, .. }
@@ -1117,10 +1145,19 @@ fn apply(state: &mut State, msg: Msg) -> Vec<Effect> {
             }
         }
         // A paste is taken and dropped while an approval waits: pasted text
-        // that happens to read `y` is not a decision.
-        Msg::Paste(_) if !state.approvals.is_empty() => {
-            state.approval_chosen = None;
-            state.notice = Some(Notice::ApprovalKeys);
+        // that happens to read `y` is not a decision. A note being typed
+        // takes it, on one line.
+        Msg::Paste(text) if !state.approvals.is_empty() => {
+            if let Some((_, note)) = state.approval_note.as_mut().filter(|(generation, _)| {
+                Some(*generation) == state.approvals.first().map(|a| a.generation)
+            }) {
+                for c in text.chars() {
+                    push_note(note, if c.is_control() { ' ' } else { c });
+                }
+            } else {
+                state.approval_chosen = None;
+                state.notice = Some(Notice::ApprovalKeys);
+            }
         }
         Msg::Paste(text) if state.dialog.is_some() => {
             if state.dialog_ready()
@@ -1301,6 +1338,7 @@ fn runtime(state: &mut State, update: RuntimeUpdate) {
             if state.approval().map(|a| a.generation) != front {
                 state.end_showing();
                 state.approval_scroll = 0;
+                state.approval_note = None;
             }
             if state
                 .approval_answered
@@ -1811,35 +1849,110 @@ fn quit_key(state: &mut State, bound: Option<Action>) -> Option<Vec<Effect>> {
     None
 }
 
+/// One answer the approval panel offers, in the panel's order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ApprovalChoice {
+    /// Allow this call once (`y`).
+    Once,
+    /// Allow this call and later ones of the same tool for the same access
+    /// this session (`a`).
+    Session,
+    /// Allow this call and switch the session to full access (`f`).
+    FullAccess,
+    /// Deny, with an optional note to the model (`n`).
+    Deny,
+}
+
+impl ApprovalChoice {
+    /// The key that chooses it.
+    pub fn key(self) -> char {
+        match self {
+            Self::Once => 'y',
+            Self::Session => 'a',
+            Self::FullAccess => 'f',
+            Self::Deny => 'n',
+        }
+    }
+}
+
+/// The answers `approval` offers, in order: once, the wider ones it takes,
+/// then deny.
+pub fn approval_choices(approval: &Approval) -> Vec<ApprovalChoice> {
+    let mut choices = vec![ApprovalChoice::Once];
+    if approval.session {
+        choices.push(ApprovalChoice::Session);
+    }
+    if approval.full_access {
+        choices.push(ApprovalChoice::FullAccess);
+    }
+    choices.push(ApprovalChoice::Deny);
+    choices
+}
+
+/// The longest note to the model the panel takes, in characters.
+pub const APPROVAL_NOTE_CHARS: usize = 2000;
+
+fn push_note(note: &mut String, c: char) {
+    if note.chars().count() < APPROVAL_NOTE_CHARS {
+        note.push(c);
+    }
+}
+
+/// A printable key or Backspace edits the note being typed.
+fn edit_note(state: &mut State, input: KeyInput) {
+    let front = state.approval().map(|a| a.generation);
+    let Some((_, note)) = state
+        .approval_note
+        .as_mut()
+        .filter(|(generation, _)| Some(*generation) == front)
+    else {
+        return;
+    };
+    match input.key {
+        Key::Backspace => {
+            note.pop();
+        }
+        Key::Char(c)
+            if (input.mods == Mods::NONE || input.mods == Mods::SHIFT) && !c.is_control() =>
+        {
+            push_note(note, c);
+        }
+        _ => {}
+    }
+}
+
 /// A key while an approval request waits; `burst` when it was read in one
 /// sweep with other keys.
 ///
-/// As the TypeScript `ApprovalView`, `n` rejects the call, and Esc
-/// withdraws the request, as the TypeScript controller's cancel does. To
-/// allow, `y` chooses and Enter confirms: a terminal that repeats a held
-/// key as fresh presses can then repeat `y` into no grant, and Enter alone
-/// never allows. Only keys read alone after the input thread armed the
-/// request ([`Msg::ApprovalArmed`]) choose, confirm, or reject, so a key
-/// typed before the prompt appeared, still waiting, or one inside a burst
-/// of typed or pasted text decides nothing; it says how to answer instead.
-/// The arrow and page keys scroll the request's detail. Nothing touches
-/// the draft, its caret, or its staged images, and Ctrl+C keeps its quit
-/// gesture.
+/// The panel lists its answers ([`approval_choices`]): ↑↓ or an answer's
+/// key (`y` once, `a` session, `f` full access) chooses one, and Enter
+/// confirms it, so a terminal that repeats a held key as fresh presses can
+/// repeat a choice into no grant, and Enter alone never allows. `n`, or
+/// Enter on Deny, starts a note to the model: printable keys and pastes
+/// type it, Backspace erases, Enter sends the rejection with it, and Esc
+/// goes back to the answers. Elsewhere Esc withdraws the request, as the
+/// TypeScript controller's cancel does. Only keys read alone after the
+/// input thread armed the request ([`Msg::ApprovalArmed`]) choose, confirm,
+/// or send, so a key typed before the prompt appeared, still waiting, or
+/// one inside a burst of typed or pasted text decides nothing; it says how
+/// to answer instead. The page keys scroll the request's detail. Nothing
+/// touches the draft, its caret, or its staged images, and Ctrl+C keeps
+/// its quit gesture.
 fn approval_key(state: &mut State, input: KeyInput, burst: bool) -> Vec<Effect> {
     let bound = keys::action(state.focus.scope(), input);
     if let Some(effects) = quit_key(state, bound) {
         return effects;
     }
-    let Some(generation) = state.approval().map(|a| a.generation) else {
+    let Some(approval) = state.approval() else {
         return Vec::new();
     };
+    let generation = approval.generation;
+    let choices = approval_choices(approval);
     if state.approval_answered == Some(generation) {
         return Vec::new();
     }
     let page = state.approval_page.max(1);
     let scroll = match input.key {
-        Key::Up => Some(-1),
-        Key::Down => Some(1),
         Key::PageUp => Some(-(page as isize)),
         Key::PageDown => Some(page as isize),
         _ => None,
@@ -1852,28 +1965,91 @@ fn approval_key(state: &mut State, input: KeyInput, burst: bool) -> Vec<Effect> 
     let plain = input.mods == Mods::NONE || input.mods == Mods::SHIFT;
     let showing = state.showing();
     let ready = plain && !burst && showing.is_some() && state.approval_armed == showing;
-    let chosen = showing.is_some() && state.approval_chosen == showing;
-    let answer = match input.key {
-        Key::Esc if input.mods == Mods::NONE => ApprovalAnswer::Cancel,
-        Key::Char('n' | 'N') if ready => ApprovalAnswer::Reject,
-        Key::Enter if ready && chosen && input.mods == Mods::NONE => ApprovalAnswer::AllowOnce,
-        Key::Char('y' | 'Y') if ready => {
-            state.approval_chosen = showing;
-            state.notice = None;
-            return Vec::new();
+    if let Some(note) = state.approval_note().map(str::to_owned) {
+        match input.key {
+            Key::Esc if input.mods == Mods::NONE => {
+                state.approval_note = None;
+                state.approval_chosen = showing.map(|token| (token, ApprovalChoice::Deny));
+                state.notice = None;
+                return Vec::new();
+            }
+            Key::Enter if ready && input.mods == Mods::NONE => {
+                let answer = if note.trim().is_empty() {
+                    ApprovalAnswer::Reject
+                } else {
+                    ApprovalAnswer::RejectWithNote(note)
+                };
+                return answered(state, generation, answer);
+            }
+            Key::Enter => state.notice = Some(Notice::ApprovalKeys),
+            _ => edit_note(state, input),
         }
-        Key::Enter if ready && input.mods == Mods::NONE => {
-            state.notice = Some(Notice::ApprovalChooseFirst);
-            return Vec::new();
-        }
-        _ => {
-            state.approval_chosen = None;
-            state.notice = Some(Notice::ApprovalKeys);
-            return Vec::new();
-        }
+        return Vec::new();
+    }
+    if input.key == Key::Esc && input.mods == Mods::NONE {
+        return answered(state, generation, ApprovalAnswer::Cancel);
+    }
+    let chosen = state.approval_choice();
+    let pick = |state: &mut State, choice: ApprovalChoice| {
+        state.approval_chosen = showing.map(|token| (token, choice));
+        state.notice = None;
+        Vec::new()
     };
+    let note = |state: &mut State| {
+        state.approval_chosen = showing.map(|token| (token, ApprovalChoice::Deny));
+        state.approval_note = Some((generation, String::new()));
+        state.notice = None;
+        Vec::new()
+    };
+    let offered = |key: char| {
+        choices
+            .iter()
+            .copied()
+            .find(|choice| choice.key() == key.to_ascii_lowercase())
+    };
+    match input.key {
+        _ if !ready => {}
+        Key::Up | Key::Down if input.mods == Mods::NONE => {
+            let last = choices.len() - 1;
+            let at = chosen.and_then(|choice| choices.iter().position(|c| *c == choice));
+            let next = match (input.key, at) {
+                (Key::Up, None) => last,
+                (_, None) => 0,
+                (Key::Up, Some(at)) => at.saturating_sub(1),
+                (_, Some(at)) => (at + 1).min(last),
+            };
+            return pick(state, choices[next]);
+        }
+        Key::Char(key) => match offered(key) {
+            Some(ApprovalChoice::Deny) => return note(state),
+            Some(choice) => return pick(state, choice),
+            None => {}
+        },
+        Key::Enter if input.mods == Mods::NONE => {
+            let answer = match chosen {
+                None => {
+                    state.notice = Some(Notice::ApprovalChooseFirst);
+                    return Vec::new();
+                }
+                Some(ApprovalChoice::Deny) => return note(state),
+                Some(ApprovalChoice::Once) => ApprovalAnswer::AllowOnce,
+                Some(ApprovalChoice::Session) => ApprovalAnswer::AllowSession,
+                Some(ApprovalChoice::FullAccess) => ApprovalAnswer::AllowFullAccess,
+            };
+            return answered(state, generation, answer);
+        }
+        _ => {}
+    }
+    state.approval_chosen = None;
+    state.notice = Some(Notice::ApprovalKeys);
+    Vec::new()
+}
+
+/// Sends `answer` for request `generation`, once.
+fn answered(state: &mut State, generation: u64, answer: ApprovalAnswer) -> Vec<Effect> {
     state.notice = None;
     state.approval_chosen = None;
+    state.approval_note = None;
     state.approval_answered = Some(generation);
     vec![Effect::Answer { generation, answer }]
 }
@@ -3229,6 +3405,7 @@ mod tests {
                 parent_call_id: None,
                 reason: "r".into(),
                 arguments: String::new(),
+                ..Default::default()
             }]),
         );
         assert_eq!(
@@ -3476,6 +3653,7 @@ mod tests {
                 parent_call_id: None,
                 reason: "r".into(),
                 arguments: "a".into(),
+                ..Default::default()
             }]),
         );
         assert_eq!(state.session_state(), SessionState::Waiting);
@@ -4385,6 +4563,7 @@ mod tests {
             parent_call_id: None,
             reason: "escalate sandbox to danger-full-access: needs the network".into(),
             arguments: "command: curl -fsS https://example.com".into(),
+            ..Default::default()
         }
     }
 
@@ -4519,8 +4698,14 @@ mod tests {
         assert_eq!(read(&mut state, Key::Char('y'), false), []);
         assert_eq!(update(&mut state, Msg::Paste("x".into())), []);
         assert!(!state.approval_chosen(), "a paste withdraws the choice");
+        // `n` opens the note; Enter in a burst sends nothing, Enter alone
+        // denies.
+        assert_eq!(read(&mut state, Key::Char('n'), false), []);
+        assert_eq!(state.approval_note(), Some(""));
+        assert_eq!(read(&mut state, Key::Enter, true), [], "Enter in a burst");
+        assert_eq!(state.notice, Some(Notice::ApprovalKeys));
         assert_eq!(
-            read(&mut state, Key::Char('n'), false),
+            read(&mut state, Key::Enter, false),
             answer(9, ApprovalAnswer::Reject)
         );
         // The next request is unarmed and unchosen until its own showing is
@@ -4573,18 +4758,168 @@ mod tests {
     }
 
     #[test]
-    fn the_arrow_and_page_keys_scroll_the_detail_and_keep_the_choice() {
+    fn the_page_keys_scroll_the_detail_and_keep_the_choice() {
         let mut state = asking("", 3);
         state.approval_page = 4;
         press(&mut state, Key::Char('y'));
         press(&mut state, Key::PageDown);
-        press(&mut state, Key::Down);
-        assert_eq!(state.approval_scroll, 5);
-        press(&mut state, Key::Up);
+        press(&mut state, Key::PageDown);
+        assert_eq!(state.approval_scroll, 8);
+        press(&mut state, Key::PageUp);
         press(&mut state, Key::PageUp);
         press(&mut state, Key::PageUp);
         assert_eq!(state.approval_scroll, 0);
-        assert!(state.approval_chosen());
+        assert_eq!(state.approval_choice(), Some(ApprovalChoice::Once));
+    }
+
+    /// A request that offers every answer.
+    fn offering(generation: u64) -> crate::runtime::Approval {
+        crate::runtime::Approval {
+            session: true,
+            full_access: true,
+            ..waiting(generation)
+        }
+    }
+
+    /// [`asking`] for [`offering`].
+    fn asking_all(generation: u64) -> State {
+        let mut state = State::live(FrameStyle::default(), Tones::None, Vec::new());
+        runtime(
+            &mut state,
+            RuntimeUpdate::Approvals(vec![offering(generation)]),
+        );
+        state.approval_on_screen = Some(generation);
+        let token = state.approval_drawn().expect("a new showing");
+        update(&mut state, Msg::ApprovalArmed(token));
+        state
+    }
+
+    #[test]
+    fn the_answers_offered_follow_the_request() {
+        use ApprovalChoice::{Deny, FullAccess, Once, Session};
+        assert_eq!(approval_choices(&waiting(1)), [Once, Deny]);
+        assert_eq!(
+            approval_choices(&offering(1)),
+            [Once, Session, FullAccess, Deny]
+        );
+        let session_only = crate::runtime::Approval {
+            session: true,
+            ..waiting(1)
+        };
+        assert_eq!(approval_choices(&session_only), [Once, Session, Deny]);
+        assert_eq!(
+            [Once, Session, FullAccess, Deny].map(ApprovalChoice::key),
+            ['y', 'a', 'f', 'n']
+        );
+    }
+
+    #[test]
+    fn the_arrows_choose_an_answer_and_enter_confirms_it() {
+        use ApprovalChoice::{Deny, FullAccess, Once, Session};
+        let mut state = asking_all(6);
+        assert_eq!(state.approval_choice(), None);
+        // Down from nothing chooses the first, Up the last; both stop at
+        // the ends.
+        press(&mut state, Key::Down);
+        assert_eq!(state.approval_choice(), Some(Once));
+        press(&mut state, Key::Up);
+        assert_eq!(state.approval_choice(), Some(Once));
+        for expected in [Session, FullAccess, Deny, Deny] {
+            press(&mut state, Key::Down);
+            assert_eq!(state.approval_choice(), Some(expected));
+        }
+        let mut other = asking_all(6);
+        press(&mut other, Key::Up);
+        assert_eq!(other.approval_choice(), Some(Deny));
+        // A key chooses its answer; one not offered withdraws the choice.
+        let mut state = asking_all(6);
+        press(&mut state, Key::Char('a'));
+        assert_eq!(state.approval_choice(), Some(Session));
+        assert_eq!(
+            press(&mut state, Key::Enter),
+            answer(6, ApprovalAnswer::AllowSession)
+        );
+        let mut state = asking_all(7);
+        press(&mut state, Key::Char('F'));
+        assert_eq!(state.approval_choice(), Some(FullAccess));
+        assert_eq!(
+            press(&mut state, Key::Enter),
+            answer(7, ApprovalAnswer::AllowFullAccess)
+        );
+        // Without the wider offers, `a` and `f` are not answers.
+        let mut state = asking("", 8);
+        for key in ['a', 'f'] {
+            assert_eq!(press(&mut state, Key::Char(key)), []);
+            assert_eq!(state.approval_choice(), None);
+            assert_eq!(state.notice, Some(Notice::ApprovalKeys));
+        }
+        press(&mut state, Key::Down);
+        press(&mut state, Key::Down);
+        assert_eq!(state.approval_choice(), Some(Deny));
+        // Enter on Deny opens the note rather than denying.
+        assert_eq!(press(&mut state, Key::Enter), []);
+        assert_eq!(state.approval_note(), Some(""));
+    }
+
+    #[test]
+    fn a_deny_takes_an_optional_note_for_the_model() {
+        let mut state = asking("draft", 4);
+        press(&mut state, Key::Char('n'));
+        assert_eq!(state.approval_note(), Some(""));
+        // Letters, `y` and `n` among them, type the note; a held key
+        // repeats into it; Backspace erases; a paste joins it on one line.
+        type_str(&mut state, "nay, use");
+        update(&mut state, Msg::KeyRepeat(KeyInput::plain(Key::Char('!'))));
+        press(&mut state, Key::Backspace);
+        update(&mut state, Msg::Paste(" the\ncache".into()));
+        chord(&mut state, Key::Char('x'), Mods::CTRL);
+        assert_eq!(state.approval_note(), Some("nay, use the cache"));
+        // Esc goes back to the answers with Deny chosen, dropping the note.
+        assert_eq!(press(&mut state, Key::Esc), []);
+        assert_eq!(state.approval_note(), None);
+        assert_eq!(state.approval_choice(), Some(ApprovalChoice::Deny));
+        // Enter on Deny opens it afresh; Enter there denies with the note.
+        press(&mut state, Key::Enter);
+        type_str(&mut state, "  use the cache  ");
+        assert_eq!(
+            press(&mut state, Key::Enter),
+            answer(
+                4,
+                ApprovalAnswer::RejectWithNote("  use the cache  ".into())
+            )
+        );
+        assert_eq!(state.draft.text(), "draft", "the draft is untouched");
+        // A blank note is a plain deny.
+        let mut state = asking("", 5);
+        press(&mut state, Key::Char('n'));
+        type_str(&mut state, "   ");
+        assert_eq!(
+            press(&mut state, Key::Enter),
+            answer(5, ApprovalAnswer::Reject)
+        );
+    }
+
+    #[test]
+    fn a_note_stays_with_its_request_and_within_its_bound() {
+        let mut state = asking("", 4);
+        press(&mut state, Key::Char('n'));
+        update(&mut state, Msg::Paste("x".repeat(APPROVAL_NOTE_CHARS + 10)));
+        assert_eq!(
+            state.approval_note().map(|note| note.chars().count()),
+            Some(APPROVAL_NOTE_CHARS)
+        );
+        // Another request in front drops the note and its choice.
+        runtime(
+            &mut state,
+            RuntimeUpdate::Approvals(vec![waiting(5), waiting(4)]),
+        );
+        assert_eq!(state.approval_note(), None);
+        assert_eq!(state.approval_choice(), None);
+        // Esc while no note is typed cancels.
+        assert_eq!(
+            press(&mut state, Key::Esc),
+            answer(5, ApprovalAnswer::Cancel)
+        );
     }
 
     #[test]

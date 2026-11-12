@@ -1911,6 +1911,7 @@ mod tests {
             parent_call_id: None,
             reason: "escalate sandbox to workspace-write: create notes.txt".into(),
             arguments: "path: notes.txt\ncontent: hello".into(),
+            ..Default::default()
         }
     }
 
@@ -2065,7 +2066,7 @@ mod tests {
         assert_eq!(shown, 1, "the loop published the request's showing");
         let drawn = &screen.screens[1];
         assert!(
-            drawn.contains("Approval required: write  call-7"),
+            drawn.contains("write needs your confirmation  call-7"),
             "{drawn}"
         );
         assert!(drawn.contains("escalate sandbox to workspace-write: create notes.txt"));
@@ -2076,10 +2077,10 @@ mod tests {
         );
         let armed = &screen.screens[2];
         assert!(
-            armed.contains("Y then Enter allows once · N rejects · Esc cancels"),
+            armed.contains("↑↓ choose · Enter confirms · Esc cancels"),
             "{armed}"
         );
-        assert!(screen.screens[3].contains("Allow this call once?"));
+        assert!(screen.screens[3].contains(CONFIRM_LINE));
         // The draft and its caret stayed as typed before the prompt.
         assert_eq!((state.draft.text(), state.draft.caret()), ("k", 1));
     }
@@ -2100,7 +2101,12 @@ mod tests {
                 read(Key::Char('y')),
                 read(Key::Enter),
             ],
-            vec![armed(2), read(Key::Char('n')), read(Key::Esc)],
+            vec![
+                armed(2),
+                read(Key::Char('n')),
+                read(Key::Enter),
+                read(Key::Esc),
+            ],
             vec![approvals(Vec::new())],
             vec![ctrl('c'), ctrl('c')],
         ]);
@@ -2154,7 +2160,7 @@ mod tests {
         );
         // Shrunk: the title alone, without its detail or keys.
         assert!(
-            !screen.screens[3].contains("Y then Enter"),
+            !screen.screens[3].contains("Enter confirms"),
             "{}",
             screen.screens[3]
         );
@@ -2165,7 +2171,7 @@ mod tests {
         );
     }
 
-    const CONFIRM_LINE: &str = "Allow this call once?";
+    const CONFIRM_LINE: &str = "▸ y  Allow once";
 
     #[test]
     fn esc_withdraws_a_prompt_even_before_it_is_armed() {

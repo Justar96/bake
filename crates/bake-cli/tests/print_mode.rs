@@ -601,11 +601,12 @@ fn print_mode_answers_saves_and_continues() {
             "message:assistant",
         ]
     );
-    // D24: a new session pins the default preset, outside the model's view.
+    // D24: a new session pins the default preset, Pi's full access, outside
+    // the model's view.
     assert_eq!(entries[1]["customType"], "bake.permission");
     assert_eq!(
         entries[1]["data"],
-        json!({"preset": "workspace-write", "sandbox": "workspace-write", "approval": "ask"})
+        json!({"preset": "danger-full-access", "sandbox": "danger-full-access", "approval": "never"})
     );
     // The child reads its working directory with the links resolved, as
     // macOS's `/var` to `/private/var`.

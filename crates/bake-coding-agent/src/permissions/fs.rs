@@ -9,7 +9,8 @@
 //! and `mapError`, which turns `FS_SANDBOX_DENIED` into the denial marker
 //! and the escalation hint). The parameters and the hint appear only when
 //! the session can reach a wider mode
-//! ([`ToolPermissions::escalation_targets`]); TypeScript always added them.
+//! ([`ToolPermissions::escalation_targets`], which a session refreshes at
+//! each prompt); TypeScript always added them.
 //!
 //! The check runs inside the file's mutation queue, after Pi's first abort
 //! check and before any effect (for `edit`, before the file is checked or
@@ -210,7 +211,7 @@ pub fn containment_guard(policy: SandboxPolicy, escalation_hint: bool) -> Mutati
 fn fs_parameters(parameters: Value, permissions: &ToolPermissions) -> Value {
     with_escalation_parameters(
         parameters,
-        permissions.escalation_targets,
+        permissions.escalation_targets(),
         FS_SANDBOX_PERMISSIONS_DESCRIPTION,
         FS_JUSTIFICATION_DESCRIPTION,
     )

@@ -392,21 +392,35 @@ pub const INTERRUPTED: &str = "Interrupted";
 /// `approval` and `approve`, with `y` choosing and Enter confirming, and
 /// the cancel key; the line once `y` has chosen; the scroll keys; and the
 /// line shown until the request is armed and keys can answer it.
-pub const APPROVAL_TITLE: &str = "Approval required";
+/// Between the tool and the access it asks for: `bash wants to run
+/// outside the sandbox`.
+pub const APPROVAL_WANTS: &str = "wants to";
+/// After the tool, for a call a hook asked to confirm.
+pub const APPROVAL_CONFIRM_TITLE: &str = "needs your confirmation";
 /// Before the id of the `codemode` call whose script made the call an
 /// approval is for: `from codemode call_1`.
 pub const APPROVAL_FROM_CODEMODE: &str = "from codemode";
 pub const APPROVAL_ARGUMENTS: &str = "Arguments:";
-pub const APPROVAL_KEYS: &str = "Y then Enter allows once · N rejects · Esc cancels";
-pub const APPROVAL_CONFIRM: &str = "Allow this call once?";
-pub const APPROVAL_CONFIRM_KEYS: &str = "Enter allows · N rejects · Esc cancels";
-pub const APPROVAL_SCROLL: &str = "↑↓ PgUp/PgDn";
+/// The panel's answers and the dim words after them.
+pub const APPROVAL_ONCE: &str = "Allow once";
+pub const APPROVAL_SESSION: &str = "Allow for this session";
+pub const APPROVAL_SESSION_HINT: &str = "same tool, same access";
+pub const APPROVAL_FULL_ACCESS: &str = "Switch to full access";
+pub const APPROVAL_FULL_ACCESS_HINT: &str = "no sandbox, no prompts";
+pub const APPROVAL_DENY: &str = "Deny";
+pub const APPROVAL_DENY_HINT: &str = "add a note if you like";
+/// Over the note `n` types.
+pub const APPROVAL_NOTE: &str = "Deny · note to the model (optional)";
+pub const APPROVAL_KEYS: &str = "↑↓ choose · Enter confirms · Esc cancels";
+pub const APPROVAL_KEYS_ASCII: &str = "Up/Down choose · Enter confirms · Esc cancels";
+pub const APPROVAL_NOTE_KEYS: &str = "Enter denies · Esc goes back";
+pub const APPROVAL_SCROLL: &str = "PgUp/PgDn";
 pub const APPROVAL_PREPARING: &str = "Preparing approval… · Esc cancels";
 /// Why a key or paste did not answer the waiting approval.
-pub const APPROVAL_KEYS_ONLY: &str =
-    "To answer, press Y then Enter, or N, each on its own once the request shows; Esc cancels";
-/// Why Enter did not allow the waiting approval.
-pub const APPROVAL_CHOOSE_FIRST: &str = "Press Y first, then Enter, to allow this call once";
+pub const APPROVAL_KEYS_ONLY: &str = "To answer, choose with ↑↓ or Y, A, F, or N, then press Enter, each key on its own once the request shows; Esc cancels";
+/// Why Enter did not answer the waiting approval.
+pub const APPROVAL_CHOOSE_FIRST: &str =
+    "Choose an answer first with ↑↓ or Y, A, F, or N, then press Enter";
 
 /// `/changelog`'s heading over the entries, Pi's `What's New`, and what it
 /// says when the changelog has no released entries.

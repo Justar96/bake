@@ -1,7 +1,18 @@
-//! The commands a live session runs: `/model`, `/thinking`, `/settings`,
-//! `/session`, `/name`, `/new`, `/resume`, `/tree`, `/fork`, `/clone`,
-//! `/compact`, `/login`, `/logout`, `/refresh-models`, `/changelog`,
-//! `/share`, and `/bug`.
+//! The commands a live session runs: `/model`, `/thinking`, `/permission`,
+//! `/settings`, `/session`, `/name`, `/new`, `/resume`, `/tree`, `/fork`,
+//! `/clone`, `/compact`, `/login`, `/logout`, `/refresh-models`,
+//! `/changelog`, `/share`, and `/bug`.
+//!
+//! `/permission [preset]` keeps Bake 0.3's runtime command
+//! (`packages/interaction/permission-presets/src/index.ts` at
+//! `97ce6abba01fddb5ed532b60a2e25a1e134b5244`): a preset named exactly
+//! switches the session at once and answers `preset NAME`; an unknown name
+//! is refused with the presets and the usage, on one line where the
+//! TypeScript text took two, since the draft's notice is one row. Without
+//! a name, a list of
+//! the preset table opens, as `/thinking`'s does: Enter switches this
+//! session, and Ctrl+S also saves `permission.defaultPreset` for new
+//! sessions ([`AgentSession::set_permission_preset`]).
 //!
 //! `/model`, `/thinking`, and `/settings` follow Pi v1.2.0
 //! `packages/coding-agent/src/modes/interactive/interactive-mode.ts`
@@ -131,6 +142,7 @@ use tokio::sync::mpsc;
 pub const COMMANDS: &[&str] = &[
     "model",
     "thinking",
+    "permission",
     "settings",
     "login",
     "logout",
@@ -483,6 +495,7 @@ pub async fn run(name: &str, argument: String, mut context: Context) -> Outcome 
     let outcome = match name {
         "model" => model(&mut context, &argument).await,
         "thinking" => thinking(&mut context, &argument).await,
+        "permission" => permission(&mut context, &argument).await,
         "settings" => settings::settings(&mut context).await,
         "login" => login(&mut context).await,
         "logout" => logout(&context).await,
@@ -815,6 +828,65 @@ async fn thinking(context: &mut Context, argument: &str) -> Outcome {
         &format!("Thinking level: {}", applied.as_str()),
         &result,
     )))
+}
+
+/// `/permission [preset]`: switches the session to a preset, named or
+/// chosen from the table's list. The list shows each preset's sandbox and
+/// approval policy, marks the one in force, and describes the selected
+/// one; Ctrl+S there also saves it as the default for new sessions.
+async fn permission(context: &mut Context, argument: &str) -> Outcome {
+    let Some(live) = context.session.permission().cloned() else {
+        return Err("This session's permission cannot be switched.".into());
+    };
+    let names: Vec<String> = live.table.names().into_iter().map(str::to_owned).collect();
+    let (name, save) = if argument.is_empty() {
+        let current = live.standing.preset();
+        let answer = context
+            .ask(DialogKind::List(ListDialog {
+                title: "Permission".into(),
+                items: live
+                    .table
+                    .presets()
+                    .map(|(name, spec)| ListItem {
+                        value: name.to_owned(),
+                        label: spec.name.clone().unwrap_or_else(|| name.to_owned()),
+                        facts: vec![
+                            spec.sandbox.as_str().to_owned(),
+                            spec.approval.as_str().to_owned(),
+                        ],
+                        about: spec.description.clone(),
+                        ..ListItem::default()
+                    })
+                    .collect(),
+                current: names.iter().position(|name| *name == current),
+                selected: None,
+                filterable: false,
+                saves_default: true,
+                note: None,
+                search: None,
+            }))
+            .await;
+        let DialogAnswer::Chose {
+            value,
+            save_default,
+        } = answer
+        else {
+            return Err(CANCELLED.into());
+        };
+        if !names.contains(&value) {
+            return Err(CANCELLED.into());
+        }
+        (value, save_default)
+    } else if names.iter().any(|name| name == argument) {
+        (argument.to_owned(), false)
+    } else {
+        return Err(format!(
+            "Unknown preset \"{argument}\" (available: {}). Usage: /permission [preset]",
+            names.join(", ")
+        ));
+    };
+    let result = context.session.set_permission_preset(&name, save).await?;
+    Ok(Done::Note(saved(&format!("preset {name}"), &result)))
 }
 
 /// `/session`, Pi's `handleSessionCommand` as a read-only sheet: the
