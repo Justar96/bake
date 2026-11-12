@@ -12,7 +12,7 @@ bake reads its settings from `settings.json` in the Bake home, a JSON object rea
 | `modelThinkingLevels` | Thinking levels for particular models, keyed `provider/id`, used when a new session is given no thinking level |
 | `steeringMode`, `followUpMode` | How prompts sent while a turn runs are delivered: `one-at-a-time` (the default) or `all` at the next step |
 | `cliproxyapi` | The CLIProxyAPI account's route, or `null` once signed out; written by `/login` (`bake docs models`) |
-| `defaultTools` | The tool names a session starts with, in place of `read`, `bash`, `edit`, `write`, the job tools, the web tools `web_search` and `web_fetch`, and `codemode`; a list of only `+name` and `-name` entries adds to or removes from those defaults instead, so `["+grep"]` keeps `codemode` |
+| `defaultTools` | The tool names a session starts with, in place of `read`, `bash`, `edit`, `write`, the job tools, the web tools `web_search` and `web_fetch`, and `codemode`; a list of only `+name` and `-name` entries adds to or removes from those defaults instead, so `["+grep"]` keeps `codemode`, and `["+visualize"]` turns on the chart and table tool (`bake docs cli`) |
 | `webSearch.model` | The CLIProxyAPI route model `web_search` runs on: the id of one of the route's Anthropic Messages models, with or without `cliproxyapi/` |
 | `maxConcurrentReadTools` | Optional integer from 1 to 64; bounds concurrent native read tools and runs batches containing other tools sequentially. Absent preserves existing unlimited parallel batches |
 | `taskDocuments` | When `true`, enables the versioned `task_document` tool for plans, todos, and user-requested goals; default `false` |

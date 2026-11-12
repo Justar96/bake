@@ -187,6 +187,7 @@ dependencies = [
  "serde-saphyr",
  "serde_json",
  "tokio",
+ "unicode-width",
  "wasmparser 0.261.0",
  "wasmtime",
  "wasmtime-wasi",

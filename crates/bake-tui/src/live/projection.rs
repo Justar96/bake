@@ -10,6 +10,10 @@
 //! calls failed with the response's error, as Pi's `message_end` handler
 //! does.
 //!
+//! A `visualize` call reads as the chart or table its arguments describe,
+//! drawn from them on every update while the model writes them, and again
+//! when a session is replayed ([`visual`]).
+//!
 //! A `codemode` call reads as one block: its script, then the calls the
 //! script made from its result's `details.calls`, which partial results
 //! publish while it runs, so the live block and a replayed one come from
@@ -24,7 +28,7 @@
 //! Nothing here touches the terminal or the session: [`Projector::apply`]
 //! takes one event and returns the view updates it causes.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use bake_agent::{AgentEvent, AgentMessage, AgentToolResult};
@@ -43,6 +47,7 @@ use bake_coding_agent::subagents::messages as subagents;
 use bake_coding_agent::tools::bash::BACKGROUND_JOB_DETAIL;
 use bake_coding_agent::tools::codemode::CODEMODE_TOOL_NAME;
 use bake_coding_agent::tools::job_tools::STILL_RUNNING;
+use bake_coding_agent::tools::visualize::VISUALIZE_TOOL_NAME;
 use bake_coding_agent::tools::web_tools::EXTERNAL_WEB_CONTENT_NOTICE;
 use bake_tui_view::cards;
 use bake_tui_view::codemode::{self, Codemode, NestedCall, NestedStatus};
@@ -56,10 +61,12 @@ mod calls;
 mod replay;
 #[cfg(test)]
 mod tests;
+mod visual;
 
 use calls::{action, call_row, interrupted_drops_output, learn, partial, settled};
 use replay::notice_row;
 pub use replay::{replay, replay_compacted};
+use visual::{Args, visual_row};
 
 /// Pi's text for a response the user aborted.
 pub const ABORTED: &str = "Operation aborted";
@@ -79,6 +86,9 @@ pub struct Projector {
     /// Each started call's tool and arguments, by call id, so its card is
     /// drawn from them again as its results arrive, as a replay draws it.
     args: HashMap<String, (String, Value)>,
+    /// The calls of the streaming message whose arguments the provider has
+    /// finished, by call id.
+    closed: HashSet<String>,
     /// What each background job and subagent the session started is called.
     labels: Labels,
     /// The calls running now, as call id and tool name, in start order.
@@ -317,8 +327,16 @@ impl Projector {
                 updates.push(RuntimeUpdate::Commit(vec![row]));
                 updates
             }
-            AgentEvent::MessageUpdate { message, .. } => match message.as_assistant() {
+            AgentEvent::MessageUpdate {
+                message,
+                assistant_message_event,
+            } => match message.as_assistant() {
                 Some(assistant) => {
+                    if let bake_ai::AssistantMessageEvent::ToolCallEnd { tool_call, .. } =
+                        assistant_message_event
+                    {
+                        self.closed.insert(tool_call.id.clone());
+                    }
                     let mut updates = self.set_phase(streaming_phase(assistant));
                     self.project(assistant, false);
                     updates.push(self.live());
@@ -423,8 +441,14 @@ impl Projector {
                 _ => None,
             })
             .flatten();
-        let (rows, calls) =
-            assistant_rows(assistant, &self.settled, &self.labels, failure.as_deref());
+        let open = open_call(assistant, finished, &self.closed);
+        let (rows, calls) = assistant_rows(
+            assistant,
+            &self.settled,
+            &self.labels,
+            failure.as_deref(),
+            open,
+        );
         // Calls that started without appearing in the message keep their rows.
         let mut extra: Vec<(String, Row)> = self
             .calls
@@ -459,7 +483,7 @@ impl Projector {
         // replay draws it: a `write` shows its content, and a running
         // `job_output` that waits keeps saying so.
         if let Some((tool, args)) = self.args.get(id)
-            && matches!(self.rows[index], Row::Call { .. })
+            && matches!(self.rows[index], Row::Call { .. } | Row::Visual(_))
         {
             self.rows[index] = call_row(tool, args, &self.labels, outcome);
             return;
@@ -515,6 +539,7 @@ impl Projector {
             self.calls.clear();
             self.settled.clear();
             self.args.clear();
+            self.closed.clear();
             self.running.clear();
             return Vec::new();
         }
@@ -535,6 +560,7 @@ impl Projector {
             }
         }
         self.args.clear();
+        self.closed.clear();
         let mut rows = std::mem::take(&mut self.rows);
         for row in &mut rows {
             match row {
@@ -549,6 +575,12 @@ impl Projector {
                     script.state = CallState::Failed;
                     script.summary = Some(INTERRUPTED.into());
                     script.calls.clear();
+                }
+                // A visual keeps what it drew, as its replay draws it.
+                Row::Visual(shown) if shown.state == CallState::Running => {
+                    shown.state = CallState::Failed;
+                    shown.summary = Some(INTERRUPTED.into());
+                    shown.streaming = false;
                 }
                 _ => {}
             }
@@ -742,14 +774,39 @@ fn user_text(content: &UserContent) -> String {
     }
 }
 
+/// The call whose arguments may be partial, and how: the message's last
+/// block when it is a call, while the message streams and the provider has
+/// not closed it, or once the message stopped on an abort or an error.
+fn open_call<'a>(
+    assistant: &'a AssistantMessage,
+    finished: bool,
+    closed: &HashSet<String>,
+) -> Option<(&'a str, Args)> {
+    let Some(AssistantContentBlock::ToolCall(call)) = assistant.content.last() else {
+        return None;
+    };
+    if finished {
+        matches!(
+            assistant.stop_reason,
+            StopReason::Aborted | StopReason::Error
+        )
+        .then_some((call.id.as_str(), Args::Cut))
+    } else {
+        (!closed.contains(&call.id)).then_some((call.id.as_str(), Args::Streaming))
+    }
+}
+
 /// The rows of an assistant message: reasoning, text, and its tool calls,
 /// each call settled from `settled` when its result is known, and failed
-/// with `failure` when the response failed before it ran.
+/// with `failure` when the response failed before it ran. A `visualize`
+/// call is drawn from as much of its arguments as `open` says arrived, and
+/// one that never ran keeps its drawing, marked interrupted.
 fn assistant_rows(
     assistant: &AssistantMessage,
     settled: &HashMap<String, Outcome>,
     labels: &Labels,
     failure: Option<&str>,
+    open: Option<(&str, Args)>,
 ) -> (Vec<Row>, HashMap<String, usize>) {
     let mut rows = Vec::new();
     let mut calls = HashMap::new();
@@ -765,13 +822,25 @@ fn assistant_rows(
             }
             AssistantContentBlock::ToolCall(call) => {
                 let args = Value::Object(call.arguments.clone());
+                let visualize = call.name == VISUALIZE_TOOL_NAME;
                 let outcome = match (settled.get(&call.id), failure) {
                     (Some(outcome), _) => outcome.clone(),
+                    (None, Some(_)) if visualize => Outcome {
+                        summary: Some(INTERRUPTED.into()),
+                        ..Outcome::failed(Vec::new())
+                    },
                     (None, Some(failure)) => Outcome::failed(vec![failure.to_owned()]),
                     (None, None) => Outcome::running(Vec::new()),
                 };
                 calls.insert(call.id.clone(), rows.len());
-                rows.push(call_row(&call.name, &args, labels, outcome));
+                rows.push(if visualize {
+                    let read = open
+                        .filter(|(id, _)| *id == call.id)
+                        .map_or(Args::Complete, |(_, read)| read);
+                    visual_row(&args, outcome, read)
+                } else {
+                    call_row(&call.name, &args, labels, outcome)
+                });
             }
             _ => {}
         }

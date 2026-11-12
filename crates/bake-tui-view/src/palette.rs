@@ -1,13 +1,16 @@
 //! The status line's palette: a few named tokens, each a truecolor value and
-//! its nearest ANSI colour, so the row has one source of colour.
+//! its nearest ANSI colour, so the row has one source of colour. Charts take
+//! their series colours from it too ([`SERIES`]).
 //!
 //! Most of the row is [`Token::Muted`]. The warm scale means attention and
 //! nothing else: [`Token::Ok`], [`Token::Notice`], [`Token::Warn`], and
 //! [`Token::Danger`], green through red. [`Token::Accent`] is Bake's orange,
 //! the running turn's shimmer, for work in progress. The cool scale is
 //! information, the thinking levels from [`Token::High`] to [`Token::Max`],
-//! so a high level never reads as a warning. The values are mid-tones that
-//! read on dark and light backgrounds alike; Bake does not detect which.
+//! so a high level never reads as a warning. A chart's series are cool and
+//! neutral hues, [`SERIES`], so no series reads as a warning either. The
+//! values are mid-tones that read on dark and light backgrounds alike; Bake
+//! does not detect which.
 
 use ratatui_core::style::{Color, Modifier, Style};
 
@@ -35,7 +38,28 @@ pub enum Token {
     XHigh,
     /// The `max` thinking level.
     Max,
+    /// A chart series: teal.
+    Teal,
+    /// A chart series: slate, a neutral grey-blue.
+    Slate,
+    /// A chart series: indigo.
+    Indigo,
+    /// A chart series: a pale, near-white blue.
+    Ice,
 }
+
+/// A chart's series colours, in the order its series take them: cool and
+/// neutral hues, set apart from their neighbours, so the warm scale keeps
+/// meaning attention. A chart has at most seven series.
+pub const SERIES: [Token; 7] = [
+    Token::Teal,
+    Token::XHigh,
+    Token::High,
+    Token::Slate,
+    Token::Max,
+    Token::Indigo,
+    Token::Ice,
+];
 
 impl Token {
     /// The truecolor value and nearest ANSI colour; `None` for
@@ -51,6 +75,10 @@ impl Token {
             Self::High => ((0x38, 0xbd, 0xf8), Color::LightBlue),
             Self::XHigh => ((0xa7, 0x8b, 0xfa), Color::Magenta),
             Self::Max => ((0xf4, 0x72, 0xb6), Color::LightMagenta),
+            Self::Teal => ((0x2d, 0xd4, 0xbf), Color::Cyan),
+            Self::Slate => ((0x94, 0xa3, 0xb8), Color::Gray),
+            Self::Indigo => ((0x81, 0x8c, 0xf8), Color::Blue),
+            Self::Ice => ((0xe2, 0xe8, 0xf0), Color::White),
         })
     }
 
@@ -74,7 +102,7 @@ impl Token {
 mod tests {
     use super::*;
 
-    const ALL: [Token; 9] = [
+    const ALL: [Token; 13] = [
         Token::Muted,
         Token::Ok,
         Token::Notice,
@@ -84,6 +112,10 @@ mod tests {
         Token::High,
         Token::XHigh,
         Token::Max,
+        Token::Teal,
+        Token::Slate,
+        Token::Indigo,
+        Token::Ice,
     ];
 
     #[test]
@@ -108,5 +140,22 @@ mod tests {
             Some(Color::Red),
             "ANSI takes the nearest colour"
         );
+    }
+
+    #[test]
+    fn chart_series_are_distinct_and_never_warm() {
+        let warm = [
+            Token::Ok,
+            Token::Notice,
+            Token::Warn,
+            Token::Danger,
+            Token::Accent,
+        ];
+        let distinct: std::collections::HashSet<_> = SERIES.iter().collect();
+        assert_eq!(distinct.len(), SERIES.len());
+        for token in SERIES {
+            assert!(!warm.contains(&token), "{token:?}");
+            assert!(token.colour().is_some(), "{token:?}");
+        }
     }
 }

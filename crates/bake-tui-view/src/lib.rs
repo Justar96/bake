@@ -38,4 +38,5 @@ pub mod syntax;
 pub mod tasks;
 pub mod tips;
 pub mod transcript;
+pub mod visual;
 pub mod wheel;

@@ -88,7 +88,7 @@ Herdr 0.9.2 and later can reopen a saved session after a server restart. Bake re
 
 ## Tools
 
-A session starts with `read`, `bash`, `edit`, `write`, the background-job tools `job_output`, `job_list`, and `job_kill`, the web tools `web_search` and `web_fetch`, and `codemode` (or the `defaultTools` setting). `grep`, `find`, and `ls` are also available; `grep` and `find` need `rg` and `fd` (or `fdfind`) on `PATH`.
+A session starts with `read`, `bash`, `edit`, `write`, the background-job tools `job_output`, `job_list`, and `job_kill`, the web tools `web_search` and `web_fetch`, and `codemode` (or the `defaultTools` setting). `grep`, `find`, `ls`, and `visualize` are also available; `grep` and `find` need `rg` and `fd` (or `fdfind`) on `PATH`.
 
 - `-t`, `--tools <list>` gives a comma-separated list. Names and `*` patterns allow only those tools; `+name` and `-name` add to or remove from the default set.
 - `-xt`, `--exclude-tools <list>` removes tools by name or `*` pattern.
@@ -98,6 +98,20 @@ A session starts with `read`, `bash`, `edit`, `write`, the background-job tools 
 For example, `bake -t +grep,+find -p "..."` adds `grep` and `find` to the defaults.
 
 `codemode`, which runs a model-written JavaScript script that calls the other tools, is in the default set: `-xt codemode`, a `-t` list or `-name` entry without it, or a `defaultTools` list without it turns it off (`bake docs codemode`).
+
+## Charts and tables
+
+The `visualize` tool lets the model show you a bar chart, a line chart, or a table in the conversation. It is off by default while its effect on models is measured: turn it on for a run with `bake -t +visualize`, or for every session with `"defaultTools": ["+visualize"]` (`bake docs settings`). It has no side effects, so it needs no approval, and code mode's scripts cannot call it.
+
+The model gives the kind, a title, the column names, the value axis's bounds and unit if the data should not set them, and up to 500 rows of up to 8 columns. The first column labels each row, its category or x; in a chart, the other columns are series of numbers, and `null` marks a missing value. The terminal draws the visual as text while the model is still writing it, and draws it again at the new width after a resize and when a session is resumed:
+
+- A bar chart has a bar for each row and series, in eighth-of-a-cell steps, each ending in its value.
+- A line chart is a braille plot ten rows high, with its value axis and the first, middle, and last x labels.
+- A table has box-drawing borders, with numbers aligned right.
+
+A chart of several series colours each one and adds a legend. With `NO_COLOR` set, the series are told apart by glyph instead (`█▓▒░` bars, `•×+o` points), and the classic frame draws charts and tables in ASCII (`#` and `=` bars, `*o+x` points, `+-|` borders). A card shows up to 24 rows of its drawing and counts the rest; Ctrl+O shows up to 400. Arguments larger than about 32 KB are drawn once the model has finished them.
+
+The model gets one line back, such as `Shown to the user: bar chart "Build time by crate" (12 rows, 2 series)`, with any warnings, such as values shown as gaps, and never the drawing. A call that breaks a rule, such as a row with the wrong number of values, fails with a message that says what to fix, such as `rows[4] has 3 values; columns has 2`. Only the interactive terminal draws visuals: in print and RPC modes, and in an exported page, the call shows as its arguments.
 
 ## Web tools
 

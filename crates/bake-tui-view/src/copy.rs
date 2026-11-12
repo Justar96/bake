@@ -191,6 +191,25 @@ pub const FILE_NOUNS: (&str, &str) = ("file", "files");
 pub const DIRECTORY_NOUNS: (&str, &str) = ("directory", "directories");
 pub const ENTRY_NOUNS: (&str, &str) = ("entry", "entries");
 pub const RESULT_NOUNS: (&str, &str) = ("result", "results");
+/// A `visualize` card's counts: `12 rows · 2 series`, `4 rows · 3
+/// columns`, and the rows its preview leaves out, `⋯ 9 more rows`.
+pub const ROW_NOUNS: (&str, &str) = ("row", "rows");
+pub const SERIES_NOUNS: (&str, &str) = ("series", "series");
+pub const COLUMN_NOUNS: (&str, &str) = ("column", "columns");
+pub const MORE_ROW_NOUNS: (&str, &str) = ("more row", "more rows");
+/// A `visualize` card's title, by the kind of visual it draws, and before
+/// its kind has arrived.
+pub const VISUAL_BAR: &str = "Bar chart";
+pub const VISUAL_LINE: &str = "Line chart";
+pub const VISUAL_TABLE: &str = "Table";
+pub const VISUALIZE: &str = "Visualize";
+/// A `visualize` card's status while the model is still writing its data.
+pub const STREAMING: &str = "streaming";
+/// What a `visualize` card draws while arguments too large to redraw on
+/// every update are still arriving.
+pub const TOO_LARGE_TO_PREVIEW: &str = "too large to preview until the call ends";
+/// A bar chart's mark for a value that is missing.
+pub const NO_VALUE: &str = "–";
 pub const MORE: &str = "more";
 /// A card's status when its tool found nothing, read an empty file or
 /// directory, returned only part of what it found, or stopped at its count

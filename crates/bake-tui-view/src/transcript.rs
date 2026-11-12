@@ -49,6 +49,7 @@ use crate::markdown;
 use crate::mermaid::Mermaid;
 use crate::shell_output::{self, Family, Styled};
 use crate::syntax::{self, Carry, Lang};
+use crate::visual::{self, Visual};
 
 /// Column a user's words, reasoning, answers, and call marks start at.
 pub const RAIL: usize = 2;
@@ -148,6 +149,9 @@ pub enum Row {
     /// A `codemode` call: its script, the calls the script made, and what
     /// went back to the model.
     Codemode(Codemode),
+    /// A `visualize` call: the chart or table its arguments describe, drawn
+    /// at each width ([`crate::visual`]).
+    Visual(Visual),
 }
 
 /// What the live terminal's [`Row::Banner`] shows.
@@ -936,7 +940,7 @@ pub(crate) fn hang_runs(
 /// `line` cut to `width` cells. A wrapped row can run past its room when
 /// the spaces a wrap leaves at its end are followed by a character of no
 /// width, such as U+200B, which `trim_end` keeps.
-fn clip_line(line: Line<'static>, width: usize) -> Line<'static> {
+pub(crate) fn clip_line(line: Line<'static>, width: usize) -> Line<'static> {
     if line.width() <= width {
         return line;
     }
@@ -1135,6 +1139,14 @@ fn present_row(
             let mut block = codemode::present(script, inner, look, detail);
             counted = hint_count(&mut block, inner, look, hinted);
             if let Some(bg) = box_colour(script.state, look.tones) {
+                card(&mut block, width, bg);
+            }
+            lines.extend(block);
+        }
+        Row::Visual(shown) => {
+            let mut block = visual::present(shown, inner, look, detail);
+            counted = hint_count(&mut block, inner, look, hinted);
+            if let Some(bg) = box_colour(shown.state, look.tones) {
                 card(&mut block, width, bg);
             }
             lines.extend(block);
@@ -2786,6 +2798,7 @@ impl Transcript {
                         .iter()
                         .any(|call| call.status == NestedStatus::Running)
             }
+            Row::Visual(shown) => shown.state == CallState::Running,
             _ => false,
         })
     }

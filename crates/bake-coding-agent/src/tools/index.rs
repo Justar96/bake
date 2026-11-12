@@ -20,6 +20,12 @@
 //! 2026-10-20 that code mode is on by default, where Pi leaves it
 //! registered but inactive (D42). Pi's names, sets, and selection rules
 //! are unchanged.
+//!
+//! Bake's [`crate::tools::visualize`] tool is registered with them but is
+//! opt-in, as `grep`, `find`, and `ls` are: `--tools +visualize` or a
+//! `defaultTools` entry turns it on. It stays out of
+//! [`BAKE_DEFAULT_TOOL_NAMES`] until a paired live-model evaluation has
+//! measured it.
 
 use std::path::Path;
 
@@ -33,6 +39,7 @@ use crate::tools::grep::owned_grep_tool_definition;
 use crate::tools::job_tools::create_job_tool_definitions;
 use crate::tools::ls::owned_ls_tool_definition;
 use crate::tools::read::{ReadToolOptions, owned_read_tool_definition};
+use crate::tools::visualize::create_visualize_tool_definition;
 use crate::tools::web_tools::{WebTools, create_web_tool_definitions};
 use crate::tools::write::owned_write_tool_definition;
 
@@ -161,8 +168,8 @@ pub fn create_all_tool_definitions(cwd: &Path, options: &ToolsOptions) -> Vec<To
 }
 
 /// Pi's `createAllToolDefinitions`, then the job tools when
-/// [`ToolsOptions::jobs`] is set and the web tools when
-/// [`ToolsOptions::web`] is.
+/// [`ToolsOptions::jobs`] is set, the web tools when [`ToolsOptions::web`]
+/// is, and the opt-in `visualize` tool.
 pub fn create_bake_tool_definitions(cwd: &Path, options: &ToolsOptions) -> Vec<ToolDefinition> {
     let mut all = create_all_tool_definitions(cwd, options);
     if let Some(jobs) = &options.jobs {
@@ -171,6 +178,7 @@ pub fn create_bake_tool_definitions(cwd: &Path, options: &ToolsOptions) -> Vec<T
     if let Some(web) = &options.web {
         all.extend(create_web_tool_definitions(web));
     }
+    all.push(create_visualize_tool_definition());
     all
 }
 
@@ -477,6 +485,49 @@ mod tests {
         assert_eq!(
             restrictions(None, Some(&["mcp__a__*"]), None).1,
             ["mcp__a__*"]
+        );
+    }
+
+    // `visualize` is registered but opt-in: a session starts without it,
+    // and `--tools +visualize`, a `defaultTools` entry, or naming it turns
+    // it on.
+    #[test]
+    fn visualize_is_registered_but_not_a_default() {
+        let names =
+            |entries: &[&str]| -> Vec<String> { entries.iter().map(|e| (*e).to_owned()).collect() };
+        assert!(!BAKE_DEFAULT_TOOL_NAMES.contains(&"visualize"));
+        let registered: Vec<String> =
+            create_bake_tool_definitions(Path::new("/"), &ToolsOptions::default())
+                .iter()
+                .map(|definition| definition.name().to_owned())
+                .collect();
+        assert!(registered.iter().any(|name| name == "visualize"));
+        let mut available = names(&BAKE_DEFAULT_TOOL_NAMES);
+        available.push("visualize".into());
+        let defaults = names(&BAKE_DEFAULT_TOOL_NAMES);
+        let select = |tools: Option<&[&str]>, default_tools: &[String]| {
+            select_tools(
+                &ToolSelectionOptions {
+                    tools: tools.map(names),
+                    ..Default::default()
+                },
+                Some(default_tools),
+                &available,
+            )
+            .expect("selection")
+        };
+        let started = select(None, &defaults);
+        assert!(!started.active.iter().any(|name| name == "visualize"));
+        assert!(started.registered.iter().any(|name| name == "visualize"));
+        let added = select(Some(&["+visualize"]), &defaults);
+        assert_eq!(added.active.last().map(String::as_str), Some("visualize"));
+        assert!(added.active.iter().any(|name| name == "codemode"));
+        let setting = resolve_default_tools_over(&names(&["+visualize"]), &defaults);
+        assert!(
+            select(None, &setting)
+                .active
+                .iter()
+                .any(|name| name == "visualize")
         );
     }
 

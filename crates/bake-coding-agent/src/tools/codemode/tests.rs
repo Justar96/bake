@@ -368,6 +368,25 @@ fn tools_scripts_cannot_call_keep_their_declarations() {
     );
 }
 
+/// `visualize` draws only for a model's own call, so scripts cannot call
+/// it and `only` keeps it declared.
+#[test]
+fn the_visualize_tool_stays_declared_in_only_mode() {
+    let visualize = crate::tools::visualize::create_visualize_tool_definition().tool;
+    let declared = vec![
+        tool("read", "Read a file."),
+        Arc::new(visualize),
+        Arc::new(create_codemode_tool(None)),
+    ];
+    let only = loadout(&declared, CodemodeMode::Only, None);
+    assert_eq!(only.hidden_declarations, ["read"]);
+    assert!(
+        !description_of(&only, "codemode")
+            .unwrap()
+            .contains("visualize")
+    );
+}
+
 #[test]
 fn describes_structured_results_by_their_fields() {
     assert_eq!(

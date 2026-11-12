@@ -9,6 +9,9 @@ use super::*;
 /// A tool call's card: its title, its main argument, the job or agent it
 /// reached, and its outcome. A running `job_output` that waits says so.
 pub(super) fn call_row(tool: &str, args: &Value, labels: &Labels, outcome: Outcome) -> Row {
+    if tool == VISUALIZE_TOOL_NAME {
+        return visual_row(args, outcome, Args::Complete);
+    }
     if tool == CODEMODE_TOOL_NAME {
         return Row::Codemode(Codemode {
             code: args

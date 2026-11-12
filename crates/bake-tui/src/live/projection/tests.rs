@@ -1977,3 +1977,366 @@ mod properties {
         }
     }
 }
+
+/// The `visualize` call `id` with the arguments `text` parsed as a stream
+/// parses them, as one assistant message.
+fn visual_message(text: &str, stop: StopReason) -> AssistantMessage {
+    let arguments = bake_ai::utils::json_parse::parse_streaming_json_object(Some(text));
+    faux_assistant_blocks(
+        vec![faux_tool_call(
+            VISUALIZE_TOOL_NAME,
+            Value::Object(arguments),
+            Some("v"),
+        )],
+        stop,
+    )
+}
+
+/// The update a provider sends as the arguments reach `text`.
+fn visual_delta(text: &str) -> AgentEvent {
+    let partial = visual_message(text, StopReason::ToolUse);
+    AgentEvent::MessageUpdate {
+        message: Message::Assistant(partial.clone()).into(),
+        assistant_message_event: bake_ai::AssistantMessageEvent::ToolCallDelta {
+            content_index: 0,
+            delta: String::new(),
+            partial,
+        },
+    }
+}
+
+/// The update a provider sends once the arguments are complete.
+fn visual_closed(text: &str) -> AgentEvent {
+    let partial = visual_message(text, StopReason::ToolUse);
+    let AssistantContentBlock::ToolCall(tool_call) = partial.content[0].clone() else {
+        unreachable!()
+    };
+    AgentEvent::MessageUpdate {
+        message: Message::Assistant(partial.clone()).into(),
+        assistant_message_event: bake_ai::AssistantMessageEvent::ToolCallEnd {
+            content_index: 0,
+            tool_call,
+            partial,
+        },
+    }
+}
+
+fn shown_visual(row: &Row) -> &bake_tui_view::visual::Visual {
+    match row {
+        Row::Visual(visual) => visual,
+        other => panic!("{other:?}"),
+    }
+}
+
+const VISUAL_ARGS: &str = r#"{"kind":"bar","title":"Build","columns":["crate","s"],"y":{"unit":"s"},"rows":[["a",1],["b",125],["c",3]]}"#;
+
+#[test]
+fn a_visual_draws_while_its_arguments_stream_then_settles_and_replays() {
+    let mut projector = Projector::default();
+    projector.begin(None);
+    // Cut inside `125`: the cut row is left out, and the card streams.
+    let at = VISUAL_ARGS.find("125").expect("value") + 2;
+    let rows = live_rows(run(&mut projector, visual_delta(&VISUAL_ARGS[..at])));
+    let streaming = shown_visual(&rows[0]);
+    assert!(streaming.streaming);
+    assert_eq!(streaming.state, CallState::Running);
+    assert_eq!(streaming.spec.rows.len(), 1);
+    assert_eq!(streaming.spec.title, "Build");
+    assert_eq!(streaming.spec.unit, "s");
+    // Once the provider closes the arguments, every row shows.
+    let rows = live_rows(run(&mut projector, visual_closed(VISUAL_ARGS)));
+    let closed = shown_visual(&rows[0]);
+    assert!(!closed.streaming);
+    assert_eq!(closed.spec.rows.len(), 3);
+    let message = visual_message(VISUAL_ARGS, StopReason::ToolUse);
+    run(
+        &mut projector,
+        AgentEvent::MessageEnd {
+            message: Message::Assistant(message.clone()).into(),
+        },
+    );
+    let args = Value::Object(bake_ai::utils::json_parse::parse_streaming_json_object(
+        Some(VISUAL_ARGS),
+    ));
+    run(&mut projector, start("v", VISUALIZE_TOOL_NAME, args));
+    let text = "Shown to the user: bar chart \"Build\" (3 rows, 1 series). The user can see it; do not repeat the data in prose.";
+    let done = live_rows(run(
+        &mut projector,
+        end("v", VISUALIZE_TOOL_NAME, text, None),
+    ));
+    let settled = shown_visual(&done[0]);
+    assert_eq!(settled.state, CallState::Done);
+    assert!(settled.error.is_empty() && settled.summary.is_none());
+    assert_eq!(settled.spec, closed.spec);
+    let logged = tool_result("v", VISUALIZE_TOOL_NAME, text, false, None);
+    assert_eq!(replay(&[Message::Assistant(message).into(), logged]), done);
+}
+
+#[test]
+fn an_aborted_visual_keeps_its_drawing_marked_interrupted_live_and_replayed() {
+    let mut projector = Projector::default();
+    projector.begin(None);
+    let at = VISUAL_ARGS.find("125").expect("value") + 2;
+    run(&mut projector, visual_delta(&VISUAL_ARGS[..at]));
+    let aborted = visual_message(&VISUAL_ARGS[..at], StopReason::Aborted);
+    let rows = live_rows(run(
+        &mut projector,
+        AgentEvent::MessageEnd {
+            message: Message::Assistant(aborted.clone()).into(),
+        },
+    ));
+    let cut = shown_visual(&rows[0]);
+    assert_eq!(
+        (cut.state, cut.summary.as_deref(), cut.streaming),
+        (CallState::Failed, Some(INTERRUPTED), false)
+    );
+    assert_eq!(cut.spec.rows.len(), 1, "the cut row stays out");
+    assert_eq!(rows[1], Row::Error(ABORTED.into()));
+    let Some(RuntimeUpdate::Commit(committed)) = projector.finish().pop() else {
+        panic!("the turn commits");
+    };
+    assert_eq!(committed, rows);
+    assert_eq!(replay(&[Message::Assistant(aborted).into()]), committed);
+    // A complete call that never ran keeps its whole drawing.
+    let mut projector = Projector::default();
+    projector.begin(None);
+    let message = visual_message(VISUAL_ARGS, StopReason::ToolUse);
+    run(
+        &mut projector,
+        AgentEvent::MessageEnd {
+            message: Message::Assistant(message.clone()).into(),
+        },
+    );
+    let Some(RuntimeUpdate::Commit(committed)) = projector.finish().pop() else {
+        panic!("the turn commits");
+    };
+    let unrun = shown_visual(&committed[0]);
+    assert_eq!(
+        (unrun.state, unrun.summary.as_deref(), unrun.spec.rows.len()),
+        (CallState::Failed, Some(INTERRUPTED), 3)
+    );
+    assert_eq!(replay(&[Message::Assistant(message).into()]), committed);
+}
+
+#[test]
+fn a_visual_the_tool_refused_shows_the_error() {
+    let refused = outcome(
+        VISUALIZE_TOOL_NAME,
+        true,
+        &[UserContentBlock::Text(TextContent::new(
+            "rows[4] has 3 values; columns has 2",
+        ))],
+        None,
+    );
+    let row = call_row(
+        VISUALIZE_TOOL_NAME,
+        &json!({ "kind": "bar", "columns": ["a", "b"], "rows": [["x", 1]] }),
+        &Labels::new(),
+        refused,
+    );
+    let shown = shown_visual(&row);
+    assert_eq!(shown.state, CallState::Failed);
+    assert_eq!(shown.error, ["rows[4] has 3 values; columns has 2"]);
+}
+
+#[test]
+fn a_visual_too_large_to_redraw_waits_for_its_arguments() {
+    let rows: Vec<String> = (0..2000).map(|i| format!("[\"row {i}\",{i}]")).collect();
+    let text = format!(
+        r#"{{"kind":"bar","columns":["k","v"],"rows":[{}]}}"#,
+        rows.join(",")
+    );
+    let mut projector = Projector::default();
+    projector.begin(None);
+    let live = live_rows(run(&mut projector, visual_delta(&text[..text.len() - 2])));
+    let streaming = shown_visual(&live[0]);
+    assert!(streaming.too_large && streaming.spec.rows.is_empty());
+    let live = live_rows(run(&mut projector, visual_closed(&text)));
+    let closed = shown_visual(&live[0]);
+    assert!(!closed.too_large);
+    assert_eq!(
+        closed.spec.rows.len(),
+        bake_coding_agent::tools::visualize::MAX_ROWS
+    );
+}
+
+mod visual_properties {
+    use bake_tui_view::activity::Tones;
+    use bake_tui_view::transcript::{Look, present};
+    use proptest::prelude::*;
+
+    use super::*;
+
+    const LOOKS: [Look; 4] = [
+        Look {
+            tones: Tones::TrueColor,
+            classic: false,
+            lit: true,
+            mermaid: bake_tui_view::mermaid::Mermaid::Streaming,
+        },
+        Look {
+            tones: Tones::Ansi,
+            classic: false,
+            lit: true,
+            mermaid: bake_tui_view::mermaid::Mermaid::Streaming,
+        },
+        Look {
+            tones: Tones::None,
+            classic: false,
+            lit: true,
+            mermaid: bake_tui_view::mermaid::Mermaid::Streaming,
+        },
+        Look {
+            tones: Tones::Ansi,
+            classic: true,
+            lit: true,
+            mermaid: bake_tui_view::mermaid::Mermaid::Streaming,
+        },
+    ];
+
+    fn any_json() -> impl Strategy<Value = Value> {
+        let leaf = prop_oneof![
+            Just(Value::Null),
+            any::<bool>().prop_map(Value::from),
+            any::<f64>()
+                .prop_map(|v| serde_json::Number::from_f64(v).map_or(Value::Null, Value::Number)),
+            any::<i64>().prop_map(Value::from),
+            "\\PC{0,30}|[\\x00-\\x1f\\u{1b}a\\[m]{0,10}".prop_map(Value::from),
+            prop_oneof![Just("bar"), Just("line"), Just("table")].prop_map(Value::from),
+        ];
+        leaf.prop_recursive(4, 64, 8, |inner| {
+            prop_oneof![
+                prop::collection::vec(inner.clone(), 0..8).prop_map(Value::from),
+                prop::collection::vec(
+                    (
+                        prop_oneof![
+                            Just("kind".to_owned()),
+                            Just("title".to_owned()),
+                            Just("columns".to_owned()),
+                            Just("y".to_owned()),
+                            Just("rows".to_owned()),
+                            Just("min".to_owned()),
+                            Just("max".to_owned()),
+                            Just("unit".to_owned()),
+                            "[a-z]{1,4}",
+                        ],
+                        inner,
+                    ),
+                    0..6
+                )
+                .prop_map(|members| Value::Object(members.into_iter().collect())),
+            ]
+        })
+    }
+
+    /// Valid bar arguments, as the model would write them.
+    fn bar_args() -> impl Strategy<Value = String> {
+        (
+            "[a-z ]{0,12}",
+            prop::collection::vec(
+                (
+                    "[a-z0-9]{1,8}",
+                    prop_oneof![
+                        (-1e4..1e4f64).prop_map(Value::from),
+                        any::<i32>().prop_map(Value::from),
+                        Just(Value::Null)
+                    ],
+                ),
+                1..12,
+            ),
+        )
+            .prop_map(|(title, rows)| {
+                let rows: Vec<Value> = rows
+                    .into_iter()
+                    .map(|(label, value)| json!([label, value]))
+                    .collect();
+                serde_json::to_string(&json!({
+                    "kind": "bar",
+                    "title": title,
+                    "columns": ["k", "v"],
+                    "rows": rows,
+                }))
+                .expect("JSON")
+            })
+    }
+
+    fn check_lines(row: &Row, width: usize) -> Result<(), TestCaseError> {
+        for look in LOOKS {
+            for line in present(std::slice::from_ref(row), 0, width, look) {
+                prop_assert!(line.width() <= width, "{width}: {line:?}");
+                for span in &line.spans {
+                    prop_assert!(!span.content.chars().any(char::is_control), "{span:?}");
+                }
+            }
+        }
+        Ok(())
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(128))]
+
+        // Any arguments draw a card inside its width, with no control
+        // character, whether they are still arriving or complete.
+        #[test]
+        fn any_arguments_draw_inside_the_width(
+            args in any_json(),
+            width in 1usize..120,
+            read in 0usize..3,
+        ) {
+            let read = [Args::Complete, Args::Streaming, Args::Cut][read];
+            let row = visual::visual_row(&args, Outcome::running(Vec::new()), read);
+            check_lines(&row, width)?;
+        }
+
+        // Every prefix of valid arguments draws without a panic, a bar
+        // chart never loses a row as more arrive, and once the call
+        // settles it reads as the replay draws the final arguments.
+        #[test]
+        fn streamed_arguments_grow_and_settle_as_the_final_drawing(
+            text in bar_args(),
+            width in 20usize..100,
+        ) {
+            let mut projector = Projector::default();
+            projector.begin(None);
+            let mut rows = 0;
+            let mut lines = 0;
+            let ends: Vec<usize> = text
+                .char_indices()
+                .map(|(at, c)| at + c.len_utf8())
+                .collect();
+            for &at in &ends {
+                let live = live_rows(run(&mut projector, visual_delta(&text[..at])));
+                let shown = shown_visual(&live[0]);
+                prop_assert!(shown.streaming);
+                prop_assert!(shown.spec.rows.len() >= rows, "{}", &text[..at]);
+                rows = shown.spec.rows.len();
+                let drawn = bake_tui_view::visual::draw(&shown.spec, width, LOOKS[0]).len();
+                prop_assert!(drawn >= lines, "{}", &text[..at]);
+                lines = drawn;
+                check_lines(&live[0], width)?;
+            }
+            run(&mut projector, visual_closed(&text));
+            let message = visual_message(&text, StopReason::ToolUse);
+            run(
+                &mut projector,
+                AgentEvent::MessageEnd {
+                    message: Message::Assistant(message.clone()).into(),
+                },
+            );
+            let args = serde_json::from_str::<Value>(&text).expect("valid");
+            run(&mut projector, start("v", VISUALIZE_TOOL_NAME, args));
+            let live = live_rows(run(&mut projector, end("v", VISUALIZE_TOOL_NAME, "Shown.", None)));
+            let replayed = replay(&[
+                Message::Assistant(message).into(),
+                tool_result("v", VISUALIZE_TOOL_NAME, "Shown.", false, None),
+            ]);
+            prop_assert_eq!(&live, &replayed);
+            for look in LOOKS {
+                prop_assert_eq!(
+                    present(&live, 0, width, look),
+                    present(&replayed, 0, width, look)
+                );
+            }
+        }
+    }
+}
