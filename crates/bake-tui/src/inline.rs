@@ -83,6 +83,7 @@ impl Inline {
             tones: state.tones,
             classic: state.frame == FrameStyle::Classic,
             lit: true,
+            mermaid: state.mermaid,
         };
         // The scrollbar's reserved column matches the existing transcript
         // component; presenting against the whole sequence keeps separators.
@@ -312,6 +313,7 @@ mod tests {
             tones: bake_tui_view::activity::Tones::None,
             classic: true,
             lit: true,
+            mermaid: bake_tui_view::mermaid::Mermaid::Streaming,
         };
         let mut output = Vec::new();
         for index in 0..rows.len() {

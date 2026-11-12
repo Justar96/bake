@@ -130,7 +130,6 @@ const DEFERRED_COMMANDS: &[&str] = &[
     // Bake 0.3's runtime.
     "goal",
     "feedback",
-    "permission",
 ];
 
 /// A session the command line set up for interactive mode.
@@ -191,6 +190,11 @@ impl LiveSession {
 /// published, or `None` when there is none or the check failed.
 pub type UpdateCheck =
     std::pin::Pin<Box<dyn std::future::Future<Output = Option<Notice>> + std::marker::Send>>;
+
+/// How the view draws Mermaid fences: the session's `markdown.mermaid`.
+pub fn mermaid_mode(session: &AgentSession) -> bake_tui_view::mermaid::Mermaid {
+    bake_tui_view::mermaid::Mermaid::parse(session.settings().mermaid.name())
+}
 
 /// The banner's access tags for a session's standing `permission`: a
 /// custom preset's name, pink, when it is not a sandbox mode's; the sandbox

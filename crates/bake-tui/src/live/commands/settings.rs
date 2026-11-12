@@ -14,6 +14,7 @@
 use bake_agent::QueueMode;
 use bake_coding_agent::agent_session::{AgentSession, DefaultSave};
 use bake_coding_agent::compaction::{CompactionSettings, DEFAULT_COMPACTION_SETTINGS};
+use bake_coding_agent::settings::MermaidRendering;
 use bake_tui_view::dialog::{DialogAnswer, DialogKind, ListDialog, ListItem};
 use bake_tui_view::transcript::Row;
 
@@ -27,6 +28,8 @@ pub const QUEUE: &str = "Prompts sent during a turn";
 pub const TREE: &str = "Branches · /tree";
 /// What the status line under the composer shows.
 pub const STATUS_LINE: &str = "Status line";
+/// How answers draw.
+pub const ANSWERS: &str = "Answers";
 
 /// What the sheet shows, read when it opens and after each change.
 #[derive(Debug, Clone, PartialEq)]
@@ -44,6 +47,8 @@ pub struct View {
     /// The status line's token totals and prompt cache.
     pub status_tokens: bool,
     pub status_cache: bool,
+    /// `markdown.mermaid`.
+    pub mermaid: MermaidRendering,
 }
 
 impl View {
@@ -64,6 +69,7 @@ impl View {
             skip_branch_summary: settings.branch_summary_skip_prompt,
             status_tokens: settings.status_line.tokens,
             status_cache: settings.status_line.cache,
+            mermaid: settings.mermaid,
         }
     }
 
@@ -192,6 +198,13 @@ pub fn rows(view: &View) -> Vec<ListItem> {
             on_off(view.status_cache).into(),
             "The latest prompt's cache hit, then the cache's reads and writes.".into(),
         ),
+        row(
+            "mermaid",
+            ANSWERS,
+            "Mermaid diagrams",
+            view.mermaid.name().into(),
+            "Draw Mermaid code blocks as Unicode diagrams.".into(),
+        ),
     ]
 }
 
@@ -250,6 +263,15 @@ pub fn choices(setting: &str, view: &View) -> Option<Choices> {
             on_off(view.cached),
             Some(
                 "Repeats the conversation the provider cached and asks for the summary; Pi's summary runs when the cache cannot be read."
+                    .into(),
+            ),
+        ),
+        "mermaid" => simple(
+            "Mermaid diagrams",
+            &["off", "final", "streaming"],
+            view.mermaid.name(),
+            Some(
+                "final draws a diagram once its code block is complete; streaming also draws it while it is written."
                     .into(),
             ),
         ),
@@ -377,6 +399,10 @@ async fn apply(session: &AgentSession, setting: &str, value: &str) -> Result<Def
         }
         "status-tokens" => session.set_status_line_tokens(value == "on").await,
         "status-cache" => session.set_status_line_cache(value == "on").await,
+        "mermaid" => {
+            let mode = MermaidRendering::from_value(Some(&value.into()));
+            session.set_mermaid_rendering(mode).await
+        }
         _ => Err(format!("{setting} is not a setting.")),
     }
 }
@@ -452,6 +478,12 @@ pub async fn settings(context: &mut Context) -> Outcome {
                 crate::live::publish::read_status(&session),
             ));
         }
+        if setting == "mermaid" {
+            // Every answer draws again with the new mode.
+            (context.send)(bake_tui_view::runtime::RuntimeUpdate::Mermaid(
+                crate::live::mermaid_mode(&session),
+            ));
+        }
         changes.push(saved(format!("{}: {label}", choices.title), result));
         if context.signal.aborted() {
             break;
@@ -479,6 +511,7 @@ mod tests {
             skip_branch_summary: false,
             status_tokens: false,
             status_cache: true,
+            mermaid: MermaidRendering::Streaming,
         }
     }
 
@@ -509,6 +542,7 @@ mod tests {
                 (TREE, "Branch summary", "ask"),
                 (STATUS_LINE, "Token totals", "off"),
                 (STATUS_LINE, "Prompt cache", "on"),
+                (ANSWERS, "Mermaid diagrams", "streaming"),
             ]
         );
         assert!(rows.iter().all(|row| row.about.is_some()));
@@ -695,7 +729,8 @@ mod tests {
     }
 
     // The sheet draws each group's heading over its rows, the values in one
-    // column, and the selected row's description under the list.
+    // column, and the selected row's description under the list; at 30
+    // rows the last rows wait below the fold.
     #[test]
     fn the_sheet_draws_groups_values_and_the_description() {
         let mut shown = view();
@@ -715,30 +750,30 @@ mod tests {
                 "  ╭──────────────────────────────────────────────────────────────────────────╮",
                 "  │ Settings                                                                 │",
                 "  │ Saved to settings.json; applies now.                                     │",
+                "  │                                                                          │",
                 "  │ Compaction · /compact 4 ──────────────────────────────────────────────── │",
-                "  │   Auto-compaction  on                                                    │",
-                "  │ ▸ Compact at       80%                                                   │",
-                "  │   Keep recent      20k tokens                                            │",
-                "  │   Cached summary   on                                                    │",
+                "  │   Auto-compaction   on                                                   │",
+                "  │ ▸ Compact at        80%                                                  │",
+                "  │   Keep recent       20k tokens                                           │",
+                "  │   Cached summary    on                                                   │",
                 "  │ Prompts sent during a turn 2 ─────────────────────────────────────────── │",
-                "  │   Steering mode    one-at-a-time                                         │",
-                "  │   Follow-up mode   all                                                   │",
+                "  │   Steering mode     one-at-a-time                                        │",
+                "  │   Follow-up mode    all                                                  │",
                 "  │ Branches · /tree 1 ───────────────────────────────────────────────────── │",
-                "  │   Branch summary   ask                                                   │",
+                "  │   Branch summary    ask                                                  │",
                 "  │ Status line 2 ────────────────────────────────────────────────────────── │",
-                "  │   Token totals     off                                                   │",
-                "  │   Prompt cache     on                                                    │",
+                "  │   Token totals      off                                                  │",
+                "  │   ↓ 2 more                                                               │",
                 "  │   Auto-compaction starts past 160k of 200k tokens.                       │",
-                "  │ ↑↓ choose · Enter select · Esc cancel                                2/9 │",
+                "  │ ↑↓ choose · Enter select · Esc cancel                               2/10 │",
                 "  ╰──────────────────────────────────────────────────────────────────────────╯",
-                "╭──────────────────────────────────────────────────────────────────────────────╮",
             ],
             "{text}"
         );
         // The status line is the screen's last row, under the box.
         assert_eq!(
             screen.last().map(|line| line.trim_end()),
-            Some("  no model")
+            Some("  ◆ no model")
         );
     }
 

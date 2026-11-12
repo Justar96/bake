@@ -9,6 +9,11 @@
 //! [`PolicyApprover`] is the service in front of it. The `approval/asked`
 //! and `approval/decided` audit events are written around it by the engine
 //! ([`super::history`]).
+//!
+//! Bake adds three answers a person can give in its terminal
+//! ([`ApprovalOffers`]): allow for the rest of the session, allow and switch
+//! the session to full access, and reject with a note the model reads
+//! ([`ApprovalDecision::note`]).
 
 use std::fmt;
 use std::future::Future;
@@ -20,7 +25,7 @@ use std::task::{Context, Poll};
 
 use bake_agent::BoxFuture;
 use bake_ai::AbortSignal;
-use bake_sandbox::EscalationOutcome;
+use bake_sandbox::{EscalationOutcome, SandboxMode};
 
 use super::engine::StandingPermissions;
 
@@ -94,6 +99,80 @@ pub fn approval_policy_sentence(policy: ApprovalPolicy) -> &'static str {
     }
 }
 
+/// The answers beyond allow-once, reject, and cancel that a request takes.
+/// Only an escalation the engine asks offers them; a hook's `ask` offers
+/// neither.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct ApprovalOffers {
+    /// `allowed-session`: later requests of the same tool for the same
+    /// mode are allowed without asking ([`super::history`]).
+    pub session: bool,
+    /// `allowed-full-access`: the session switches to the table's
+    /// full-access preset ([`super::PresetTable::full_access_preset`]).
+    pub full_access: bool,
+}
+
+impl ApprovalOffers {
+    /// Whether a request with these offers takes `outcome` as an answer.
+    pub fn take(self, outcome: EscalationOutcome) -> bool {
+        match outcome {
+            EscalationOutcome::AllowedSession => self.session,
+            EscalationOutcome::AllowedFullAccess => self.full_access,
+            _ => true,
+        }
+    }
+}
+
+/// An answer and what came with it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ApprovalDecision {
+    /// The answer.
+    pub outcome: EscalationOutcome,
+    /// What the person told the model with a rejection, trimmed and never
+    /// empty; `None` otherwise.
+    pub note: Option<String>,
+}
+
+impl From<EscalationOutcome> for ApprovalDecision {
+    fn from(outcome: EscalationOutcome) -> Self {
+        Self {
+            outcome,
+            note: None,
+        }
+    }
+}
+
+impl PartialEq<EscalationOutcome> for ApprovalDecision {
+    fn eq(&self, other: &EscalationOutcome) -> bool {
+        self.outcome == *other
+    }
+}
+
+/// `note` as a rejection keeps it: trimmed, sanitized of control
+/// characters other than newlines and tabs, at most [`NOTE_CHARS`]
+/// characters, and `None` when nothing is left.
+pub fn clean_note(note: &str) -> Option<String> {
+    let kept: String = note
+        .trim()
+        .chars()
+        .filter(|c| !c.is_control() || *c == '\n' || *c == '\t')
+        .take(NOTE_CHARS)
+        .collect();
+    let kept = kept.trim().to_owned();
+    (!kept.is_empty()).then_some(kept)
+}
+
+/// The longest note a rejection keeps, in characters.
+pub const NOTE_CHARS: usize = 2000;
+
+/// A refusal with the person's note after it, as the model reads it.
+pub fn with_note(refusal: String, note: Option<&str>) -> String {
+    match note {
+        Some(note) => format!("{refusal}. The user's note: {note}"),
+        None => refusal,
+    }
+}
+
 /// One permission question (`ApprovalRequest` without the agent, which the
 /// session-scoped approver already knows), with the call's arguments,
 /// which Bake adds so a person can see what would run.
@@ -110,18 +189,46 @@ pub struct ApprovalRequest {
     pub reason: String,
     /// The call's validated arguments.
     pub arguments: serde_json::Value,
+    /// The sandbox mode an allowed answer runs the call under, for an
+    /// escalation; `None` for a hook's `ask`.
+    pub sandbox: Option<SandboxMode>,
+    /// The wider answers the request takes.
+    pub offers: ApprovalOffers,
 }
 
 /// The answer to one [`ApprovalRequest`].
 pub type ApprovalFuture = BoxFuture<'static, EscalationOutcome>;
 
+/// The answer to one [`ApprovalRequest`], with its note.
+pub type DecisionFuture = BoxFuture<'static, ApprovalDecision>;
+
 /// Answers approval requests: a person through a UI, or a fixed policy.
 /// The future owns everything it needs; dropping it withdraws the question.
-/// `allowed-once` grants only the request asked.
+/// `allowed-once` grants only the request asked; the wider answers are for
+/// the requests that offer them ([`ApprovalOffers`]).
 pub trait Approver: Send + Sync {
     /// Decides `request`. Aborting `cancel` withdraws the question; the
     /// answer should then be [`EscalationOutcome::Cancelled`].
     fn request(&self, request: ApprovalRequest, cancel: Option<AbortSignal>) -> ApprovalFuture;
+
+    /// [`Self::request`] with what came with the answer: a rejection's
+    /// note. An answerer that takes notes overrides it; the default has
+    /// none. An answer `request` does not offer is `unavailable`, so it
+    /// fails closed.
+    fn decide(&self, request: ApprovalRequest, cancel: Option<AbortSignal>) -> DecisionFuture {
+        let offers = request.offers;
+        let answer = self.request(request, cancel);
+        Box::pin(async move { offered(offers, answer.await.into()) })
+    }
+}
+
+/// `decision` when `offers` takes it, else `unavailable`.
+pub(crate) fn offered(offers: ApprovalOffers, decision: ApprovalDecision) -> ApprovalDecision {
+    if offers.take(decision.outcome) {
+        decision
+    } else {
+        EscalationOutcome::Unavailable.into()
+    }
 }
 
 /// Rejects every request: the deterministic headless stance.
@@ -174,21 +281,28 @@ impl fmt::Debug for PolicyApprover {
 
 impl Approver for PolicyApprover {
     fn request(&self, request: ApprovalRequest, cancel: Option<AbortSignal>) -> ApprovalFuture {
+        let decision = self.decide(request, cancel);
+        Box::pin(async move { decision.await.outcome })
+    }
+
+    fn decide(&self, request: ApprovalRequest, cancel: Option<AbortSignal>) -> DecisionFuture {
         let policy = self.standing.approval();
         let answerer = Arc::clone(&self.answerer);
         Box::pin(async move {
+            let cancelled = || ApprovalDecision::from(EscalationOutcome::Cancelled);
             if cancel.as_ref().is_some_and(AbortSignal::aborted) {
-                return EscalationOutcome::Cancelled;
+                return cancelled();
             }
             // Decided here, before any answerer: no answerer can bypass it.
             if policy == ApprovalPolicy::Never {
-                return EscalationOutcome::Rejected;
+                return EscalationOutcome::Rejected.into();
             }
+            let offers = request.offers;
             let answer_cancel = cancel.clone();
             // Construct the answerer's future inside the protected poll too:
             // a synchronous request failure must fail closed like a poll failure.
             let answer = CatchUnwind(Box::pin(async move {
-                answerer.request(request, answer_cancel).await
+                answerer.decide(request, answer_cancel).await
             }));
             let withdrawn = async {
                 match &cancel {
@@ -201,15 +315,15 @@ impl Approver for PolicyApprover {
                 // ready, nothing is granted, and a late answer is dropped
                 // with its future.
                 biased;
-                () = withdrawn => return EscalationOutcome::Cancelled,
-                answer = answer => answer.unwrap_or(EscalationOutcome::Unavailable),
+                () = withdrawn => return cancelled(),
+                answer = answer => answer.unwrap_or_else(|| EscalationOutcome::Unavailable.into()),
             };
             // An answerer that saw the abort and answered anyway is
             // overruled.
             if cancel.as_ref().is_some_and(AbortSignal::aborted) {
-                return EscalationOutcome::Cancelled;
+                return cancelled();
             }
-            answer
+            offered(offers, answer)
         })
     }
 }

@@ -49,6 +49,7 @@ pub fn replay(messages: &[AgentMessage]) -> Vec<Row> {
                 &settled,
                 &labels,
                 Some(failure.as_deref().unwrap_or(INTERRUPTED)),
+                open_call(assistant, true, &HashSet::new()),
             );
             for row in &mut assistant_rows {
                 // A call with no result in the log never finished.

@@ -1,0 +1,11 @@
+dstateDiagram-v2
+    [*] --> Draft
+    Draft --> Done: submit
+    Done --> [*]
+classDiagram
+    class A {
+    +id
+    }
+    A <|-- B
+erDiagram
+    A ||--o{ B : has

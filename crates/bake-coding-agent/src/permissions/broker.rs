@@ -11,12 +11,14 @@
 //! `cancelled` and keeps the frontend, and closing settles every request
 //! as `cancelled` and fails later ones closed. The answer is `allowed-once` or
 //! `rejected`, as `interactions.ts` decodes it, or `cancelled` for a
-//! withdrawal.
+//! withdrawal; Bake adds `allowed-session`, `allowed-full-access`, and a
+//! rejection with a note, each only for a request that offers it
+//! ([`super::ApprovalOffers`]).
 //!
 //! [`ApprovalBroker`] sits behind [`super::PolicyApprover`], so the session's
-//! `never` policy rejects a request before it is queued, and the grant is
-//! for the one call the request names. It grants nothing else: no standing
-//! permission, preset, or later call changes.
+//! `never` policy rejects a request before it is queued. The broker only
+//! carries the answer: what a wider answer grants, and its record, are the
+//! engine's ([`super::PermissionEngine`]).
 //!
 //! One frontend [connects](ApprovalBroker::connect) a listener that
 //! receives the whole queue, oldest first, whenever it changes. No lock is
@@ -42,7 +44,11 @@ use tokio::sync::oneshot;
 
 use serde_json::Value;
 
-use super::approval::{ApprovalFuture, ApprovalRequest, Approver};
+use super::approval::{
+    ApprovalDecision, ApprovalFuture, ApprovalOffers, ApprovalRequest, Approver, DecisionFuture,
+    clean_note,
+};
+use bake_sandbox::SandboxMode;
 
 /// One queued approval request as a frontend shows it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,26 +68,48 @@ pub struct ApprovalPrompt {
     pub reason: String,
     /// The call's arguments, so the person sees what would run.
     pub arguments: Value,
+    /// The sandbox mode an allowed answer runs the call under; `None` for a
+    /// hook's `ask`.
+    pub sandbox: Option<SandboxMode>,
+    /// The wider answers the request takes.
+    pub offers: ApprovalOffers,
 }
 
 /// A person's answer to the displayed request.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ApprovalAnswer {
     /// `allowed-once`: the one call runs with the access it asked for.
     AllowOnce,
+    /// `allowed-session`: this call, and later requests of the same tool
+    /// for the same mode in this session.
+    AllowSession,
+    /// `allowed-full-access`: this call, and the session switches to full
+    /// access.
+    AllowFullAccess,
     /// `rejected`.
     Reject,
+    /// `rejected`, with a note for the model; a blank note is none.
+    RejectWithNote(String),
     /// `cancelled`: the request is withdrawn without a decision.
     Cancel,
 }
 
 impl ApprovalAnswer {
-    fn outcome(self) -> EscalationOutcome {
-        match self {
+    fn decision(self) -> ApprovalDecision {
+        let outcome = match self {
             ApprovalAnswer::AllowOnce => EscalationOutcome::AllowedOnce,
+            ApprovalAnswer::AllowSession => EscalationOutcome::AllowedSession,
+            ApprovalAnswer::AllowFullAccess => EscalationOutcome::AllowedFullAccess,
             ApprovalAnswer::Reject => EscalationOutcome::Rejected,
+            ApprovalAnswer::RejectWithNote(note) => {
+                return ApprovalDecision {
+                    outcome: EscalationOutcome::Rejected,
+                    note: clean_note(&note),
+                };
+            }
             ApprovalAnswer::Cancel => EscalationOutcome::Cancelled,
-        }
+        };
+        outcome.into()
     }
 }
 
@@ -99,7 +127,7 @@ enum Phase {
 
 struct Waiting {
     prompt: ApprovalPrompt,
-    answer: oneshot::Sender<EscalationOutcome>,
+    answer: oneshot::Sender<ApprovalDecision>,
     cancel: Option<AbortSignal>,
 }
 
@@ -120,7 +148,7 @@ impl Inner {
     fn close(&mut self) {
         self.phase = Phase::Closed;
         for waiting in self.queue.drain(..) {
-            let _ = waiting.answer.send(EscalationOutcome::Cancelled);
+            let _ = waiting.answer.send(EscalationOutcome::Cancelled.into());
         }
     }
 }
@@ -182,27 +210,27 @@ impl ApprovalBroker {
     /// Settles the displayed request, the oldest, with `answer`, if it is
     /// the request `generation` names. Returns whether it did: an answer
     /// for a request already settled, withdrawn, or not yet displayed
-    /// settles nothing.
+    /// settles nothing, and neither does a wider answer the request does
+    /// not offer, which leaves it waiting.
     /// A request whose own cancellation has fired settles `cancelled`
     /// whatever the answer, and the answer reports `false`.
     pub fn answer(&self, generation: u64, answer: ApprovalAnswer) -> bool {
+        let decision = answer.decision();
         let settled = {
             let mut inner = self.lock();
-            if inner
-                .queue
-                .front()
-                .is_none_or(|front| front.prompt.generation != generation)
-            {
+            if inner.queue.front().is_none_or(|front| {
+                front.prompt.generation != generation || !front.prompt.offers.take(decision.outcome)
+            }) {
                 return false;
             }
             let Some(waiting) = inner.queue.pop_front() else {
                 return false;
             };
             if waiting.cancel.as_ref().is_some_and(AbortSignal::aborted) {
-                let _ = waiting.answer.send(EscalationOutcome::Cancelled);
+                let _ = waiting.answer.send(EscalationOutcome::Cancelled.into());
                 false
             } else {
-                waiting.answer.send(answer.outcome()).is_ok()
+                waiting.answer.send(decision).is_ok()
             }
         };
         announce(&self.inner);
@@ -230,7 +258,7 @@ impl ApprovalBroker {
         {
             let mut inner = self.lock();
             for waiting in inner.queue.drain(..) {
-                let _ = waiting.answer.send(EscalationOutcome::Cancelled);
+                let _ = waiting.answer.send(EscalationOutcome::Cancelled.into());
             }
         }
         // The frontend learns the queue is empty, so it forgets the
@@ -314,8 +342,16 @@ impl Drop for Withdraw {
 
 impl Approver for ApprovalBroker {
     fn request(&self, request: ApprovalRequest, cancel: Option<AbortSignal>) -> ApprovalFuture {
+        let decision = self.decide(request, cancel);
+        Box::pin(async move { decision.await.outcome })
+    }
+
+    fn decide(&self, request: ApprovalRequest, cancel: Option<AbortSignal>) -> DecisionFuture {
+        let ready = |outcome: EscalationOutcome| -> DecisionFuture {
+            Box::pin(std::future::ready(outcome.into()))
+        };
         if cancel.as_ref().is_some_and(AbortSignal::aborted) {
-            return Box::pin(std::future::ready(EscalationOutcome::Cancelled));
+            return ready(EscalationOutcome::Cancelled);
         }
         let (answer, answered) = oneshot::channel();
         let generation = {
@@ -323,7 +359,7 @@ impl Approver for ApprovalBroker {
             // Generations never repeat: once they run out, nobody can answer.
             let next = inner.last.checked_add(1);
             let (Phase::Open(_), Some(generation)) = (&inner.phase, next) else {
-                return Box::pin(std::future::ready(EscalationOutcome::Unavailable));
+                return ready(EscalationOutcome::Unavailable);
             };
             inner.last = generation;
             inner.queue.push_back(Waiting {
@@ -334,6 +370,8 @@ impl Approver for ApprovalBroker {
                     parent_tool_call_id: request.parent_tool_call_id,
                     reason: request.reason,
                     arguments: request.arguments,
+                    sandbox: request.sandbox,
+                    offers: request.offers,
                 },
                 answer,
                 cancel: cancel.clone(),
@@ -353,16 +391,17 @@ impl Approver for ApprovalBroker {
                     None => std::future::pending().await,
                 }
             };
+            let cancelled = || ApprovalDecision::from(EscalationOutcome::Cancelled);
             let answer = tokio::select! {
                 // Cancellation first: when both are ready, nothing is granted.
                 biased;
-                () = withdrawn => return EscalationOutcome::Cancelled,
+                () = withdrawn => return cancelled(),
                 // The answer channel closes unanswered only when the broker
                 // itself is gone.
-                answer = answered => answer.unwrap_or(EscalationOutcome::Cancelled),
+                answer = answered => answer.unwrap_or_else(|_| cancelled()),
             };
             if cancel.as_ref().is_some_and(AbortSignal::aborted) {
-                return EscalationOutcome::Cancelled;
+                return cancelled();
             }
             answer
         })

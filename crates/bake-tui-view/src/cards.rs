@@ -414,6 +414,7 @@ mod tests {
         tones: Tones::None,
         classic: false,
         lit: true,
+        mermaid: crate::mermaid::Mermaid::Streaming,
     };
 
     fn lead() -> Vec<Span<'static>> {

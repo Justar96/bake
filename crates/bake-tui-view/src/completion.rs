@@ -59,6 +59,11 @@ pub const LIVE_CATALOG: &[Command] = &[
     command("model", Some("[search]"), "Choose the model"),
     command("thinking", Some("[level]"), "Choose the thinking level"),
     command(
+        "permission",
+        Some("[preset]"),
+        "Switch the sandbox and approval preset",
+    ),
+    command(
         "settings",
         None,
         "Change compaction, queue, /tree, and status line settings",

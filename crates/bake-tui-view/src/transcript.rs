@@ -46,8 +46,10 @@ use crate::diff::{self, Change, DiffLine, DiffRow, SplitRow};
 use crate::editor;
 use crate::json;
 use crate::markdown;
+use crate::mermaid::Mermaid;
 use crate::shell_output::{self, Family, Styled};
 use crate::syntax::{self, Carry, Lang};
+use crate::visual::{self, Visual};
 
 /// Column a user's words, reasoning, answers, and call marks start at.
 pub const RAIL: usize = 2;
@@ -147,6 +149,9 @@ pub enum Row {
     /// A `codemode` call: its script, the calls the script made, and what
     /// went back to the model.
     Codemode(Codemode),
+    /// A `visualize` call: the chart or table its arguments describe, drawn
+    /// at each width ([`crate::visual`]).
+    Visual(Visual),
 }
 
 /// What the live terminal's [`Row::Banner`] shows.
@@ -772,6 +777,8 @@ pub struct Look {
     pub classic: bool,
     /// The blink's phase, from [`lit`]: shown, or a blank of the mark's width.
     pub lit: bool,
+    /// How answers draw Mermaid fences ([`crate::mermaid`]).
+    pub mermaid: Mermaid,
 }
 
 impl Default for Look {
@@ -780,6 +787,7 @@ impl Default for Look {
             tones: Tones::default(),
             classic: false,
             lit: true,
+            mermaid: Mermaid::Streaming,
         }
     }
 }
@@ -932,7 +940,7 @@ pub(crate) fn hang_runs(
 /// `line` cut to `width` cells. A wrapped row can run past its room when
 /// the spaces a wrap leaves at its end are followed by a character of no
 /// width, such as U+200B, which `trim_end` keeps.
-fn clip_line(line: Line<'static>, width: usize) -> Line<'static> {
+pub(crate) fn clip_line(line: Line<'static>, width: usize) -> Line<'static> {
     if line.width() <= width {
         return line;
     }
@@ -1131,6 +1139,14 @@ fn present_row(
             let mut block = codemode::present(script, inner, look, detail);
             counted = hint_count(&mut block, inner, look, hinted);
             if let Some(bg) = box_colour(script.state, look.tones) {
+                card(&mut block, width, bg);
+            }
+            lines.extend(block);
+        }
+        Row::Visual(shown) => {
+            let mut block = visual::present(shown, inner, look, detail);
+            counted = hint_count(&mut block, inner, look, hinted);
+            if let Some(bg) = box_colour(shown.state, look.tones) {
                 card(&mut block, width, bg);
             }
             lines.extend(block);
@@ -2504,7 +2520,7 @@ pub struct Transcript {
     /// after a change.
     counted: Vec<bool>,
     hint_row: Option<usize>,
-    measured: Option<(usize, Tones, bool, Detail)>,
+    measured: Option<(usize, Tones, bool, Mermaid, Detail)>,
     /// Rows there were when output was last followed; rows past it arrived
     /// while reading.
     seen: usize,
@@ -2642,7 +2658,13 @@ impl Transcript {
     /// Brings the row heights up to date: all of them after a width, look,
     /// or detail change, and otherwise only rows appended since.
     fn measure(&mut self) {
-        let key = (self.width, self.look.tones, self.look.classic, self.detail);
+        let key = (
+            self.width,
+            self.look.tones,
+            self.look.classic,
+            self.look.mermaid,
+            self.detail,
+        );
         if self.measured != Some(key) {
             self.heights.clear();
             self.counted.clear();
@@ -2776,6 +2798,7 @@ impl Transcript {
                         .iter()
                         .any(|call| call.status == NestedStatus::Running)
             }
+            Row::Visual(shown) => shown.state == CallState::Running,
             _ => false,
         })
     }
@@ -3016,6 +3039,7 @@ mod tests {
         tones: Tones::None,
         classic: false,
         lit: true,
+        mermaid: Mermaid::Streaming,
     };
 
     fn text(lines: &[Line]) -> Vec<String> {
@@ -4268,6 +4292,7 @@ mod tests {
                 classic: true,
                 tones: Tones::Ansi,
                 lit: true,
+                mermaid: Mermaid::Streaming,
             },
         ));
         assert!(classic[4].starts_with("  | 42 -"));
@@ -5059,7 +5084,7 @@ mod tests {
                     output,
                     full_output_path: Some("/tmp/out\u{1b}[2J.log".into()),
                 }];
-                let look = Look { tones, classic, lit: true };
+                let look = Look { tones, classic, lit: true, mermaid: Mermaid::Streaming };
                 for detail in [Detail::Preview, Detail::Full] {
                     let lines = present_detail(&rows, 0, width, look, detail);
                     prop_assert!(lines.len() <= 4 + EXPANDED_ROWS + 4, "{}", lines.len());

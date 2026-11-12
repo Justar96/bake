@@ -308,6 +308,7 @@ mod tests {
             tones: Tones::None,
             classic: false,
             lit: true,
+            mermaid: crate::mermaid::Mermaid::Streaming,
         };
         present(&[row], 0, 84, look)
             .iter()

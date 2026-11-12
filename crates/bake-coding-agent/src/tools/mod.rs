@@ -12,6 +12,7 @@
 //! | [`bash`] | `src/core/tools/bash.ts`, `src/utils/{shell,child-process}.ts`; owns each command's process tree |
 //! | [`truncate`], [`output_accumulator`], [`file_mutation_queue`] | `src/core/tools/{truncate,output-accumulator,file-mutation-queue}.ts` |
 //! | [`codemode`] | Pi v1.3.0 `src/extensions/codemode/{tool,execute,index}.ts`, over [`bake_codemode`] |
+//! | [`visualize`] | Bake's own: a render-only chart and table tool, opt-in |
 //!
 //! Every tool is a [`bake_agent::AgentTool`] whose names, descriptions,
 //! schemas, results, and errors are Pi's. Blocking file work runs on
@@ -43,6 +44,7 @@ pub mod path_utils;
 pub mod process;
 pub mod read;
 pub mod truncate;
+pub mod visualize;
 pub mod web_tools;
 pub mod write;
 

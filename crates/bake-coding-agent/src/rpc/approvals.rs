@@ -175,6 +175,8 @@ mod tests {
             parent_tool_call_id: None,
             reason: "escalate sandbox to danger-full-access: install".into(),
             arguments: json!({ "command": "ls" }),
+            sandbox: Some(bake_sandbox::SandboxMode::DangerFullAccess),
+            offers: crate::permissions::ApprovalOffers::default(),
         }
     }
 

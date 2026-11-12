@@ -1095,7 +1095,6 @@ fn each_deferred_command_refuses_with_a_deferral_sentence() {
         "clear",
         "goal",
         "feedback",
-        "permission",
     ];
     let expected: Vec<&str> = pi.iter().chain(&bake_03).copied().collect();
     assert_eq!(DEFERRED_COMMANDS, expected.as_slice());
@@ -1259,14 +1258,17 @@ fn an_approval_shows_the_call_and_allows_only_that_call_once() {
         first.reason,
         "escalate sandbox to workspace-write: create first.txt"
     );
-    // The arguments show what would run; the escalation pair is the reason.
+    // The path shows first, the access in words; the other arguments show
+    // what would run, and the escalation pair is the reason.
     assert_eq!(
-        first.arguments,
-        format!(
-            "path: {}\ncontent: first.txt body",
-            project.file("first.txt").display()
-        )
+        first.target,
+        Some(project.file("first.txt").display().to_string())
     );
+    assert_eq!(
+        first.access.as_deref(),
+        Some("change files in the workspace")
+    );
+    assert_eq!(first.arguments, "content: first.txt body");
     assert!(
         !project.file("first.txt").exists(),
         "the write ran before its answer"
@@ -1383,17 +1385,68 @@ fn stopping_with_a_prompt_waiting_cancels_it_and_shuts_down_without_its_effect()
 
 #[test]
 fn arguments_show_every_character_that_would_run() {
-    let text = super::approvals::arguments_text(&json!({
-        "command": "printf 'a\\tb'\u{1b}[2J\u{202e}txt",
-        "content": "one\r\ntwo",
-        "sandbox_permissions": "danger-full-access",
-        "justification": "why",
-        "limit": 3,
-    }));
+    let text = super::approvals::arguments_text(
+        &json!({
+            "command": "printf 'a\\tb'\u{1b}[2J\u{202e}txt",
+            "content": "one\r\ntwo",
+            "sandbox_permissions": "danger-full-access",
+            "justification": "why",
+            "limit": 3,
+        }),
+        None,
+    );
     assert_eq!(
         text,
         "command: printf 'a\\tb'\\u{1b}[2J\\u{202e}txt\ncontent:\n  one\\u{d}\n  two\nlimit: 3"
     );
+}
+
+// Bake: an escalated `bash` call shows its command first, the access it
+// wants in words, and the justification apart; the remaining arguments
+// leave out all three, and the offers pass through.
+#[test]
+fn an_escalated_bash_request_shows_its_command_access_and_justification_apart() {
+    use bake_coding_agent::permissions::{ApprovalOffers, ApprovalPrompt};
+    let shown = super::approvals::approval(ApprovalPrompt {
+        generation: 4,
+        tool_name: "bash".into(),
+        call_id: "call_1".into(),
+        parent_tool_call_id: None,
+        reason: "escalate sandbox to danger-full-access: write the cache".into(),
+        arguments: json!({
+            "command": "touch /tmp/x\u{1b}",
+            "timeout": 5,
+            "sandbox_permissions": "require_escalated",
+            "justification": "  write the cache  ",
+        }),
+        sandbox: Some(bake_sandbox::SandboxMode::DangerFullAccess),
+        offers: ApprovalOffers {
+            session: true,
+            full_access: false,
+        },
+    });
+    assert_eq!(shown.access.as_deref(), Some("run outside the sandbox"));
+    assert_eq!(shown.target.as_deref(), Some("touch /tmp/x\u{1b}"));
+    assert_eq!(shown.justification.as_deref(), Some("write the cache"));
+    assert_eq!(shown.arguments, "timeout: 5");
+    assert!(shown.session && !shown.full_access);
+
+    // A hook's `ask` has no access or justification; a `write` shows its
+    // path.
+    let asked = super::approvals::approval(ApprovalPrompt {
+        generation: 5,
+        tool_name: "write".into(),
+        call_id: "call_2".into(),
+        parent_tool_call_id: None,
+        reason: "the hook asks".into(),
+        arguments: json!({ "path": "a.txt", "content": "x", "justification": "j" }),
+        sandbox: None,
+        offers: ApprovalOffers::default(),
+    });
+    assert_eq!(asked.access, None);
+    assert_eq!(asked.target.as_deref(), Some("a.txt"));
+    assert_eq!(asked.justification, None);
+    assert_eq!(asked.arguments, "content: x");
 }
 
 // Bake: `/compact`'s bar result reads only its own cancellation as an

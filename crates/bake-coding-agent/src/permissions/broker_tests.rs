@@ -8,10 +8,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use bake_ai::AbortController;
-use bake_sandbox::EscalationOutcome;
+use bake_sandbox::{EscalationOutcome, SandboxMode};
 
 use super::*;
-use crate::permissions::{ApprovalPolicy, PolicyApprover, StandingPermissions};
+use crate::permissions::{
+    ApprovalDecision, ApprovalOffers, ApprovalPolicy, PolicyApprover, StandingPermissions,
+};
 
 /// A broker whose listener records the generations of every snapshot.
 fn connected() -> (ApprovalBroker, Arc<Mutex<Vec<Vec<u64>>>>) {
@@ -35,6 +37,8 @@ fn ask(tool: &str, call: &str) -> ApprovalRequest {
         parent_tool_call_id: None,
         reason: format!("escalate sandbox to workspace-write: {call}"),
         arguments: serde_json::json!({ "command": format!("touch {call}") }),
+        sandbox: Some(SandboxMode::WorkspaceWrite),
+        offers: ApprovalOffers::default(),
     }
 }
 
@@ -86,6 +90,67 @@ async fn requests_queue_in_order_and_a_stale_answer_settles_nothing() {
             vec![],
         ]
     );
+}
+
+// Bake: the prompt carries the mode and the wider answers it takes; an
+// answer it does not offer settles nothing and leaves it waiting, and a
+// rejection's note comes back cleaned.
+#[tokio::test]
+async fn only_an_offered_answer_settles_a_request_and_a_note_comes_back_cleaned() {
+    let (broker, _) = connected();
+    let offered = |session, full_access| ApprovalRequest {
+        offers: ApprovalOffers {
+            session,
+            full_access,
+        },
+        ..ask("bash", "call-1")
+    };
+    let first = tokio::spawn(broker.decide(offered(false, false), None));
+    let shown = broker.pending()[0].clone();
+    assert_eq!(shown.sandbox, Some(SandboxMode::WorkspaceWrite));
+    assert_eq!(shown.offers, ApprovalOffers::default());
+    for wider in [
+        ApprovalAnswer::AllowSession,
+        ApprovalAnswer::AllowFullAccess,
+    ] {
+        assert!(!broker.answer(shown.generation, wider));
+    }
+    assert_eq!(generations(&broker), [shown.generation]);
+    assert!(broker.answer(
+        shown.generation,
+        ApprovalAnswer::RejectWithNote("  use\u{7} the cache \n".into())
+    ));
+    assert_eq!(
+        first.await.unwrap(),
+        ApprovalDecision {
+            outcome: EscalationOutcome::Rejected,
+            note: Some("use the cache".into()),
+        }
+    );
+    // A blank note is a plain rejection.
+    let blank = tokio::spawn(broker.decide(offered(false, false), None));
+    let shown = broker.pending()[0].clone();
+    assert!(broker.answer(shown.generation, ApprovalAnswer::RejectWithNote(" ".into())));
+    assert_eq!(
+        blank.await.unwrap(),
+        ApprovalDecision::from(EscalationOutcome::Rejected)
+    );
+    // Offered, the wider answers settle.
+    for (answer, outcome) in [
+        (
+            ApprovalAnswer::AllowSession,
+            EscalationOutcome::AllowedSession,
+        ),
+        (
+            ApprovalAnswer::AllowFullAccess,
+            EscalationOutcome::AllowedFullAccess,
+        ),
+    ] {
+        let waiting = tokio::spawn(broker.decide(offered(true, true), None));
+        let shown = broker.pending()[0].clone();
+        assert!(broker.answer(shown.generation, answer));
+        assert_eq!(waiting.await.unwrap(), ApprovalDecision::from(outcome));
+    }
 }
 
 #[tokio::test]

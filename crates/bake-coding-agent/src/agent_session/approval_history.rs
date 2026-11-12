@@ -4,7 +4,8 @@
 //!
 //! Each entry is a durable group of one (`SessionManager::append_durable_group`),
 //! written and synced before the engine goes on, and kept in memory only
-//! once written. Cancellation is linearized at the write's admission, under
+//! once written; an `allowed-full-access` decision and its permission
+//! switch are one group of two. Cancellation is linearized at the write's admission, under
 //! the session lock, as [`ApprovalEntry::admitted`] states. A failed write
 //! records the session's gap and stops the session, as a failed plugin
 //! decision write does; the engine then refuses the call with the text
@@ -21,6 +22,7 @@ use bake_ai::AbortSignal;
 use super::recovery::Core;
 use super::{WriteRefused, write_session};
 use crate::permissions::history::{APPROVAL_CUSTOM_TYPE, ApprovalEntry, ApprovalRecorder};
+use crate::permissions::state::{PERMISSION_CUSTOM_TYPE, PermissionChange};
 use crate::session::GroupEntry;
 
 /// The refusal of a call whose session is shut down.
@@ -53,13 +55,30 @@ impl ApprovalRecorder for SessionRecorder {
             let Some(core) = core.upgrade() else {
                 return Err(SHUT_DOWN.to_owned());
             };
-            persist_entry(&core, &persist_error, entry, cancel).await
+            persist_entry(&core, &persist_error, entry, None, cancel).await
+        })
+    }
+
+    fn record_switch(
+        &self,
+        entry: ApprovalEntry,
+        switch: PermissionChange,
+        cancel: Option<AbortSignal>,
+    ) -> BoxFuture<'static, Result<Option<ApprovalEntry>, String>> {
+        let core = self.core.clone();
+        let persist_error = Arc::clone(&self.persist_error);
+        Box::pin(async move {
+            let Some(core) = core.upgrade() else {
+                return Err(SHUT_DOWN.to_owned());
+            };
+            persist_entry(&core, &persist_error, entry, Some(switch), cancel).await
         })
     }
 }
 
 /// Writes `entry` as [`ApprovalEntry::admitted`] turns it at admission and
-/// returns what was written. The write is blocking work of the session's
+/// returns what was written, followed in the same group by `switch` when
+/// the entry is still an allowed decision then. The write is blocking work of the session's
 /// gate, admitted under a permit taken before it starts, so shutdown waits
 /// for it even if the call is cancelled meanwhile. A failure records the
 /// gap, stops the run, and returns the call's refusal.
@@ -67,6 +86,7 @@ async fn persist_entry(
     core: &Core,
     persist_error: &Mutex<Option<String>>,
     entry: ApprovalEntry,
+    switch: Option<PermissionChange>,
     signal: Option<AbortSignal>,
 ) -> Result<Option<ApprovalEntry>, String> {
     let Some(permit) = core.work.enter() else {
@@ -98,11 +118,23 @@ async fn persist_entry(
             if let Some(hook) = &admitted {
                 hook(&entry, session);
             }
+            let mut group = vec![GroupEntry::Custom {
+                custom_type: APPROVAL_CUSTOM_TYPE.to_owned(),
+                data: Some(entry.to_data()),
+            }];
+            // An abort turned the decision `cancelled`: nothing switches.
+            if let Some(data) = switch
+                .as_ref()
+                .filter(|_| entry.outcome().is_some_and(|outcome| outcome.allows()))
+                .and_then(PermissionChange::to_data)
+            {
+                group.push(GroupEntry::Custom {
+                    custom_type: PERMISSION_CUSTOM_TYPE.to_owned(),
+                    data: Some(data),
+                });
+            }
             session
-                .append_durable_group([GroupEntry::Custom {
-                    custom_type: APPROVAL_CUSTOM_TYPE.to_owned(),
-                    data: Some(entry.to_data()),
-                }])
+                .append_durable_group(group)
                 .map(|_| Some(entry))
                 .map_err(|error| error.to_string())
         });

@@ -354,6 +354,7 @@ fn settings_are_grouped_and_stay_open_until_esc() {
             (commands::settings::TREE, "Branch summary"),
             (commands::settings::STATUS_LINE, "Token totals"),
             (commands::settings::STATUS_LINE, "Prompt cache"),
+            (commands::settings::ANSWERS, "Mermaid diagrams"),
         ]
     );
     let choose = |id, value: &str| {
@@ -421,11 +422,31 @@ fn settings_are_grouped_and_stay_open_until_esc() {
         Some(RuntimeUpdate::Dialog(Some(list))) => list.clone(),
         other => panic!("{other:?}"),
     };
+    // Answers draw again with the new Mermaid mode at once.
+    choose(list.id, "mermaid");
+    let values = h.dialog();
+    choose(values.id, "final");
+    let seen = h.until(|u| matches!(u, RuntimeUpdate::Dialog(Some(_))));
+    assert!(
+        seen.iter().any(|u| matches!(
+            u,
+            RuntimeUpdate::Mermaid(bake_tui_view::mermaid::Mermaid::Final)
+        )),
+        "{seen:?}"
+    );
+    let list = match seen.last() {
+        Some(RuntimeUpdate::Dialog(Some(list))) => list.clone(),
+        other => panic!("{other:?}"),
+    };
     h.reply(list.id, DialogAnswer::Cancel);
     let updates = h.command_end(1);
     assert!(matches!(updates.last(), Some(RuntimeUpdate::Admitted(1))));
     assert!(!session.settings().cached_compaction());
     assert!(session.settings().status_line.cache);
+    assert_eq!(
+        session.settings().mermaid,
+        bake_coding_agent::settings::MermaidRendering::Final
+    );
     let rows = committed(&h.until(|u| matches!(u, RuntimeUpdate::Commit(_))));
     let unsaved = "for this session; it could not be saved: no settings file to save to";
     assert_eq!(
@@ -434,6 +455,7 @@ fn settings_are_grouped_and_stay_open_until_esc() {
             Row::Info(format!("Compact at: 80% {unsaved}")),
             Row::Info(format!("Cached summary: off {unsaved}")),
             Row::Info(format!("Prompt cache: on {unsaved}")),
+            Row::Info(format!("Mermaid diagrams: final {unsaved}")),
         ]
     );
     // Without a change, Esc gives the draft back.
@@ -483,6 +505,110 @@ fn shift_tab_cycles_the_thinking_level_and_the_status_follows() {
     }
     // Around once: back where it started, and nothing is a transcript row.
     assert_eq!(session.thinking_level(), levels[start]);
+    h.stop();
+}
+
+// Bake: `/permission` keeps Bake 0.3's runtime command: a named preset
+// switches at once and answers `preset NAME`, an unknown one is refused
+// with the usage and the presets, and without a name the table opens with
+// each preset's sandbox and approval and the one in force marked.
+#[test]
+fn permission_switches_a_named_preset_or_opens_the_table() {
+    use bake_coding_agent::permissions::{
+        ApprovalPolicy, LivePermission, PresetTable, StandingPermissions,
+    };
+    use bake_sandbox::SandboxMode;
+    let (runtime, faux, mut live) = setup(Vec::new(), Vec::new(), Some("test-key"));
+    let standing = Arc::new(StandingPermissions::new(
+        SandboxMode::DangerFullAccess,
+        ApprovalPolicy::Never,
+        "danger-full-access",
+        "/tmp",
+        None,
+    ));
+    live.session.set_permission(LivePermission {
+        table: PresetTable::default(),
+        standing: Arc::clone(&standing),
+        can_ask: true,
+    });
+    let (sender, updates) = std_mpsc::channel();
+    let mut port = LivePort::start(live, move |update| sender.send(update).is_ok());
+    port.begin();
+    let h = Harness {
+        runtime,
+        faux,
+        port: Some(port),
+        updates,
+    };
+    h.submit_id(1, Submission::FollowUp("/permission yolo".into()));
+    let updates = h.command_end(1);
+    assert_eq!(
+        refusal(&updates).as_deref(),
+        Some(
+            "Unknown preset \"yolo\" (available: workspace-write, danger-full-access). Usage: /permission [preset]"
+        )
+    );
+    h.submit_id(
+        2,
+        Submission::FollowUp("/permission workspace-write".into()),
+    );
+    h.command_end(2);
+    let updates = h.until(|u| matches!(u, RuntimeUpdate::Status(_)));
+    assert!(committed(&updates).contains(&Row::Info("preset workspace-write".into())));
+    assert_eq!(
+        (standing.sandbox(), standing.approval(), standing.preset()),
+        (
+            SandboxMode::WorkspaceWrite,
+            ApprovalPolicy::Ask,
+            "workspace-write".to_owned()
+        )
+    );
+    h.submit_id(3, Submission::FollowUp("/permission".into()));
+    let dialog = h.dialog();
+    let DialogKind::List(list) = &dialog.kind else {
+        panic!("{dialog:?}");
+    };
+    let rows: Vec<(&str, &str, Vec<String>)> = list
+        .items
+        .iter()
+        .map(|item| (item.value.as_str(), item.label.as_str(), item.facts.clone()))
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            (
+                "workspace-write",
+                "Workspace, ask for more",
+                vec!["workspace-write".to_owned(), "ask".to_owned()]
+            ),
+            (
+                "danger-full-access",
+                "Full access",
+                vec!["danger-full-access".to_owned(), "never".to_owned()]
+            ),
+        ]
+    );
+    assert_eq!(list.current, Some(0));
+    assert!(list.saves_default);
+    assert!(list.items.iter().all(|item| item.about.is_some()));
+    h.reply(
+        dialog.id,
+        DialogAnswer::Chose {
+            value: "danger-full-access".into(),
+            save_default: false,
+        },
+    );
+    h.command_end(3);
+    let updates = h.until(|u| matches!(u, RuntimeUpdate::Status(_)));
+    assert!(committed(&updates).contains(&Row::Info("preset danger-full-access".into())));
+    assert_eq!(standing.sandbox(), SandboxMode::DangerFullAccess);
+    // Esc on the list changes nothing and gives the draft back.
+    h.submit_id(4, Submission::FollowUp("/permission".into()));
+    let dialog = h.dialog();
+    h.reply(dialog.id, DialogAnswer::Cancel);
+    let updates = h.command_end(4);
+    assert_eq!(refusal(&updates).as_deref(), Some(commands::CANCELLED));
+    assert_eq!(standing.preset(), "danger-full-access");
     h.stop();
 }
 

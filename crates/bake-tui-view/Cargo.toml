@@ -9,6 +9,7 @@ publish.workspace = true
 # Pure presentation: no terminal backend, threads, or clock. Keep Crossterm and
 # the `ratatui` umbrella crate out of this manifest.
 [dependencies]
+bake-mermaid.workspace = true
 ratatui-core.workspace = true
 unicode-segmentation.workspace = true
 unicode-width.workspace = true

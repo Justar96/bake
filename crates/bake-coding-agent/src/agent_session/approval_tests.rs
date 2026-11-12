@@ -28,12 +28,12 @@ use serde_json::{Value, json};
 
 use super::tests::{Harness, harness, options};
 use super::*;
-use crate::permissions::approval::ApprovalFuture;
+use crate::permissions::approval::{ApprovalFuture, DecisionFuture, offered};
 use crate::permissions::state::permission_state;
 use crate::permissions::{
-    APPROVAL_CUSTOM_TYPE, ApprovalEntry, ApprovalPolicy, ApprovalRequest, Approver,
-    BlankJustification, KnobState, NoApprover, StandingPermissions, ToolCall, ToolPermissions,
-    approval_history, sandbox_file_tools,
+    APPROVAL_CUSTOM_TYPE, ApprovalDecision, ApprovalEntry, ApprovalPolicy, ApprovalRequest,
+    Approver, BlankJustification, KnobState, NoApprover, PERMISSION_CUSTOM_TYPE, SessionGrant,
+    StandingPermissions, ToolCall, ToolPermissions, approval_history, sandbox_file_tools,
 };
 use crate::session::{
     AgentMessage, Fault, FaultKind, FileEntry, LeafSelector, NewSessionOptions, SessionEntry,
@@ -105,7 +105,23 @@ impl Approver for Answerer {
         self.log.asked.lock().unwrap().push((request, on_disk));
         Box::pin(std::future::ready(outcome))
     }
+
+    /// A rejection of a call whose id starts with `noted` comes with
+    /// [`NOTE`].
+    fn decide(&self, request: ApprovalRequest, cancel: Option<AbortSignal>) -> DecisionFuture {
+        let noted = request.call_id.starts_with("noted");
+        let offers = request.offers;
+        let answer = self.request(request, cancel);
+        Box::pin(async move {
+            let outcome = answer.await;
+            let note = (noted && outcome == EscalationOutcome::Rejected).then(|| NOTE.to_owned());
+            offered(offers, ApprovalDecision { outcome, note })
+        })
+    }
 }
+
+/// The note [`Answerer`] gives with a rejection it was asked to explain.
+const NOTE: &str = "use the cache instead";
 
 /// A tool whose effect is a marker file named after the call, run once the
 /// engine resolves the call; it reads the session file as it runs.
@@ -174,6 +190,7 @@ async fn effect_session(
         .is_persisted()
         .then(|| store.session_file().map(Path::to_path_buf))
         .flatten();
+    let can_answer = answers.is_some();
     let answerer: Arc<dyn Approver> = match answers {
         Some(answers) => Arc::new(Answerer {
             file: file.clone(),
@@ -188,7 +205,15 @@ async fn effect_session(
         "test",
         &ws,
         Some("approval-tests".into()),
-    );
+    )
+    .with_full_access_preset(Some("danger-full-access".into()));
+    // As `cli::build_session` does: the grants on file apply again only
+    // where someone can answer.
+    if can_answer {
+        for grant in approval_history(&store).session_grants() {
+            standing.grant(grant);
+        }
+    }
     let permissions = ToolPermissions::new(
         Arc::new(standing),
         answerer,
@@ -833,6 +858,247 @@ async fn a_reopened_session_asks_again() {
         result_text(&file_lines(&file), "c2"),
         Some((refusal(EscalationOutcome::Rejected), true))
     );
+}
+
+// Bake: an `allowed-session` answer runs its call and decides later
+// requests of the same tool for the same mode without asking, each recorded
+// with the request whose answer made the grant. A reopened session keeps
+// the grant where someone can answer, and not where no one can, as in
+// print mode.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn allowed_for_the_session_answers_later_calls_and_survives_a_reopen() {
+    let bench = Bench::new("approval-session");
+    bench.h.faux.set_responses(vec![
+        effect_calls(&["c1"]),
+        effect_calls(&["c2"]),
+        faux_assistant_message("done").into(),
+    ]);
+    let (session, _) = bench
+        .session(
+            bench.store("sessions"),
+            ApprovalPolicy::Ask,
+            Some(always(EscalationOutcome::AllowedSession)),
+            true,
+        )
+        .await;
+    session.prompt("go", Vec::new()).await.expect("prompt");
+    let file = session.session_file().expect("persisted");
+    let history = approval_history(&lock(&session.session));
+    session.shutdown().await;
+    drop(session);
+    let asked: Vec<String> = bench
+        .log
+        .asked()
+        .into_iter()
+        .map(|(request, _)| request.call_id)
+        .collect();
+    assert_eq!(asked, ["c1"], "the grant answers c2");
+    assert_eq!(bench.log.ran_ids(), ["c1", "c2"]);
+    let first = history.records[0].asked.id.clone();
+    let records: Vec<(Option<&str>, Option<EscalationOutcome>, Option<&str>)> = history
+        .records
+        .iter()
+        .map(|record| {
+            (
+                record.asked.call_id.as_deref(),
+                record.outcome,
+                record.granted_by.as_deref(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        records,
+        [
+            (Some("c1"), Some(EscalationOutcome::AllowedSession), None),
+            (
+                Some("c2"),
+                Some(EscalationOutcome::AllowedSession),
+                Some(first.as_str())
+            ),
+        ]
+    );
+    let grant = SessionGrant {
+        tool_name: "effect".into(),
+        sandbox: TARGET,
+        granted_by: first.clone(),
+    };
+    assert_eq!(history.session_grants(), [grant]);
+    let decided: Vec<Value> = approvals(&file_lines(&file))
+        .into_iter()
+        .filter(|data| data["kind"] == "decided")
+        .collect();
+    assert_eq!(decided[0].get("grantedBy"), None);
+    assert_eq!(decided[1]["grantedBy"], first.as_str());
+    // Each call ran with its decision on disk.
+    for (id, on_disk) in bench.log.ran() {
+        let last = on_disk.last().expect("entries");
+        assert_eq!(last["kind"], "decided", "{id}");
+    }
+
+    // Reopened with someone to answer: the grant decides c3 unasked.
+    bench.script(&["c3"]);
+    let store = SessionManager::open(&file, None, None).expect("reopen");
+    let (session, _) = bench
+        .session(
+            store,
+            ApprovalPolicy::Ask,
+            Some(always(EscalationOutcome::Rejected)),
+            true,
+        )
+        .await;
+    session.prompt("again", Vec::new()).await.expect("prompt");
+    session.shutdown().await;
+    drop(session);
+    assert_eq!(bench.log.asked().len(), 1, "c3 is not asked");
+    assert_eq!(bench.log.ran_ids(), ["c1", "c2", "c3"]);
+
+    // Reopened with no one to answer: no grant applies.
+    bench.script(&["c4"]);
+    let store = SessionManager::open(&file, None, None).expect("reopen");
+    let (session, _) = bench.session(store, ApprovalPolicy::Ask, None, true).await;
+    session
+        .prompt("once more", Vec::new())
+        .await
+        .expect("prompt");
+    session.shutdown().await;
+    assert_eq!(bench.log.ran_ids(), ["c1", "c2", "c3"]);
+    assert_eq!(
+        result_text(&file_lines(&file), "c4"),
+        Some((refusal(EscalationOutcome::Unavailable), true))
+    );
+}
+
+// Bake: a grant decides only its own tool and mode; `permissions::tests`
+// checks that it applies only under `ask`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_session_grant_is_for_its_tool_and_mode_only() {
+    let bench = Bench::new("approval-grant-scope");
+    bench.script(&["c1"]);
+    let (session, permissions) = bench
+        .session(
+            bench.store("sessions"),
+            ApprovalPolicy::Ask,
+            Some(always(EscalationOutcome::AllowedSession)),
+            true,
+        )
+        .await;
+    session.prompt("go", Vec::new()).await.expect("prompt");
+    // Asked directly while the session still records; a shut-down session
+    // refuses every request.
+    let call = |tool: &'static str, args: &'static Value| ToolCall {
+        tool_name: tool,
+        call_id: "direct",
+        parent_tool_call_id: None,
+        args,
+        subject: "operation",
+        blank_justification: BlankJustification::Checked,
+    };
+    static WIDER: std::sync::LazyLock<Value> = std::sync::LazyLock::new(
+        || json!({ "sandbox_permissions": "danger-full-access", "justification": "more" }),
+    );
+    static SAME: std::sync::LazyLock<Value> = std::sync::LazyLock::new(escalate);
+    // The same tool and mode: granted, unasked.
+    assert!(
+        permissions
+            .engine
+            .resolve(&call("effect", &SAME), None)
+            .await
+            .is_ok()
+    );
+    assert_eq!(bench.log.asked().len(), 1);
+    // Another mode, or another tool: asked.
+    for (tool, args) in [("effect", &*WIDER), ("other", &*SAME)] {
+        let before = bench.log.asked().len();
+        let _ = permissions.engine.resolve(&call(tool, args), None).await;
+        assert_eq!(bench.log.asked().len(), before + 1, "{tool} {args}");
+    }
+    session.shutdown().await;
+}
+
+// Bake: a full-access answer runs its call and switches the session to the
+// full-access preset, writing the switch with the answer before either
+// applies; later calls run unasked under the new mode.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_full_access_answer_switches_the_session_once_written() {
+    let bench = Bench::new("approval-full-access");
+    bench.h.faux.set_responses(vec![
+        effect_calls(&["c1"]),
+        effect_calls(&["c2"]),
+        faux_assistant_message("done").into(),
+    ]);
+    let (session, _) = bench
+        .session(
+            bench.store("sessions"),
+            ApprovalPolicy::Ask,
+            Some(always(EscalationOutcome::AllowedFullAccess)),
+            true,
+        )
+        .await;
+    session.prompt("go", Vec::new()).await.expect("prompt");
+    let file = session.session_file().expect("persisted");
+    let knobs = permission_state(&lock(&session.session))
+        .expect("permission state")
+        .knobs;
+    session.shutdown().await;
+    assert_eq!(bench.log.asked().len(), 1, "c2 needs no wider access");
+    assert_eq!(bench.log.ran_ids(), ["c1", "c2"]);
+    assert_eq!(
+        knobs,
+        KnobState {
+            preset: Some("danger-full-access".into()),
+            sandbox: Some(SandboxMode::DangerFullAccess),
+            approval: Some(ApprovalPolicy::Never),
+        }
+    );
+    // On disk: the answer, then the switch, then the call's result.
+    let lines = file_lines(&file);
+    let position = |found: &dyn Fn(&Value) -> bool| lines.iter().position(found).expect("present");
+    let decided = position(&|line| {
+        line["customType"] == APPROVAL_CUSTOM_TYPE && line["data"]["kind"] == "decided"
+    });
+    let switch = position(&|line| line["customType"] == PERMISSION_CUSTOM_TYPE);
+    let result = result_index(&lines, "c1").expect("result");
+    assert!(
+        decided < switch && switch < result,
+        "{decided} {switch} {result}"
+    );
+    assert_eq!(lines[decided]["data"]["outcome"], "allowed-full-access");
+}
+
+// Bake: a rejection's note reaches the model after the refusal and is
+// recorded with the answer.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_deny_note_follows_the_refusal_and_is_recorded() {
+    let bench = Bench::new("approval-note");
+    bench.script(&["noted-1"]);
+    let (session, _) = bench
+        .session(
+            bench.store("sessions"),
+            ApprovalPolicy::Ask,
+            Some(always(EscalationOutcome::Rejected)),
+            true,
+        )
+        .await;
+    session.prompt("go", Vec::new()).await.expect("prompt");
+    let entries = file_lines(&session.session_file().expect("persisted"));
+    session.shutdown().await;
+    assert_eq!(
+        result_text(&entries, "noted-1"),
+        Some((
+            format!(
+                "{}. The user's note: {NOTE}",
+                refusal(EscalationOutcome::Rejected)
+            ),
+            true
+        ))
+    );
+    let decided = approvals(&entries)
+        .into_iter()
+        .find(|data| data["kind"] == "decided")
+        .expect("decided");
+    assert_eq!(decided["outcome"], "rejected");
+    assert_eq!(decided["note"], NOTE);
+    assert!(!bench.marker("noted-1"));
 }
 
 // An abort that lands before the request's write is admitted asks no one

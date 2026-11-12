@@ -72,11 +72,18 @@ pub fn escalation_reason(mode: SandboxMode, justification: &str) -> String {
     format!("escalate sandbox to {mode}: {justification}")
 }
 
-/// The answer to an approval request (`EscalationOutcome`).
+/// The answer to an approval request (`EscalationOutcome`). The first
+/// four are the TypeScript vocabulary; Bake adds the two wider grants a
+/// person can give in its terminal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EscalationOutcome {
     /// Granted for this one call.
     AllowedOnce,
+    /// Granted for this call and, for the rest of the session, for later
+    /// requests of the same tool for the same mode.
+    AllowedSession,
+    /// Granted for this call, and the session switched to full access.
+    AllowedFullAccess,
     /// Refused by the user, or by the `never` policy.
     Rejected,
     /// The request was cancelled before an answer.
@@ -90,17 +97,31 @@ impl EscalationOutcome {
     pub fn as_str(self) -> &'static str {
         match self {
             EscalationOutcome::AllowedOnce => "allowed-once",
+            EscalationOutcome::AllowedSession => "allowed-session",
+            EscalationOutcome::AllowedFullAccess => "allowed-full-access",
             EscalationOutcome::Rejected => "rejected",
             EscalationOutcome::Cancelled => "cancelled",
             EscalationOutcome::Unavailable => "unavailable",
         }
     }
 
+    /// Whether the call runs: every `allowed-*` outcome.
+    pub fn allows(self) -> bool {
+        matches!(
+            self,
+            EscalationOutcome::AllowedOnce
+                | EscalationOutcome::AllowedSession
+                | EscalationOutcome::AllowedFullAccess
+        )
+    }
+
     /// The tool error for a refused escalation of a `subject` (`command` for
     /// bash, `operation` for the file tools) to `mode`; `None` when allowed.
     pub fn refusal(self, subject: &str, mode: SandboxMode) -> Option<String> {
         match self {
-            EscalationOutcome::AllowedOnce => None,
+            EscalationOutcome::AllowedOnce
+            | EscalationOutcome::AllowedSession
+            | EscalationOutcome::AllowedFullAccess => None,
             EscalationOutcome::Rejected => Some(format!(
                 "the user rejected escalating this {subject} to \"{mode}\""
             )),
@@ -193,10 +214,17 @@ mod tests {
                 .as_deref(),
             Some("the user rejected escalating this command to \"danger-full-access\"")
         );
-        assert_eq!(
-            EscalationOutcome::AllowedOnce.refusal("command", DangerFullAccess),
-            None
-        );
+        for allowed in [
+            EscalationOutcome::AllowedOnce,
+            EscalationOutcome::AllowedSession,
+            EscalationOutcome::AllowedFullAccess,
+        ] {
+            assert_eq!(allowed.refusal("command", DangerFullAccess), None);
+            assert!(allowed.allows());
+        }
+        assert!(!EscalationOutcome::Rejected.allows());
+        assert!(!EscalationOutcome::Cancelled.allows());
+        assert!(!EscalationOutcome::Unavailable.allows());
         assert_eq!(
             escalation_reason(WorkspaceWrite, "write the build dir"),
             "escalate sandbox to workspace-write: write the build dir"

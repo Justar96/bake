@@ -12,7 +12,10 @@
 //! the current branch.
 //!
 //! [`pin_initial_permission`] is `pinInitialPermission` and [`set_preset`]
-//! is the preset service's `apply`.
+//! is the preset service's `apply`, which `/permission` runs
+//! ([`preset_change`] is the entry it writes). An approval's full-access
+//! answer writes the same entry, in one group with its decision
+//! ([`super::history`]).
 
 use bake_sandbox::SandboxMode;
 use serde_json::{Map, Value};
@@ -106,6 +109,68 @@ pub fn permission_state(session: &SessionManager) -> Result<PermissionState, Str
     })
 }
 
+/// One permission change: the fields one entry records, each `None` when
+/// it does not change.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PermissionChange {
+    /// The preset selected.
+    pub preset: Option<String>,
+    /// The new sandbox mode.
+    pub sandbox: Option<SandboxMode>,
+    /// The new approval policy.
+    pub approval: Option<ApprovalPolicy>,
+}
+
+impl PermissionChange {
+    /// Whether nothing changes.
+    pub fn is_empty(&self) -> bool {
+        self.preset.is_none() && self.sandbox.is_none() && self.approval.is_none()
+    }
+
+    /// The entry's `data`: the changed fields, in the order `preset`,
+    /// `sandbox`, `approval`; `None` when nothing changes.
+    pub fn to_data(&self) -> Option<Value> {
+        let mut data = Map::new();
+        if let Some(preset) = &self.preset {
+            data.insert("preset".into(), preset.as_str().into());
+        }
+        if let Some(sandbox) = self.sandbox {
+            data.insert("sandbox".into(), sandbox.as_str().into());
+        }
+        if let Some(approval) = self.approval {
+            data.insert("approval".into(), approval.as_str().into());
+        }
+        (!data.is_empty()).then_some(Value::Object(data))
+    }
+
+    /// Writes the change as one entry; nothing when it is empty.
+    pub fn append(&self, session: &mut SessionManager) -> Result<(), crate::session::SessionError> {
+        match self.to_data() {
+            Some(data) => session
+                .append_custom_entry(PERMISSION_CUSTOM_TYPE, Some(data))
+                .map(|_| ()),
+            None => Ok(()),
+        }
+    }
+
+    /// The change switching knobs `from` (their preset, sandbox mode, and
+    /// approval policy) to preset `name` with `spec`'s knobs (the service's
+    /// `apply`): the preset unless it is already the derived current value,
+    /// then each knob that changes.
+    pub fn to_preset(
+        from: (&str, SandboxMode, ApprovalPolicy),
+        name: &str,
+        spec: &super::presets::PresetSpec,
+    ) -> Self {
+        let (current, sandbox, approval) = from;
+        Self {
+            preset: (current != name).then(|| name.to_owned()),
+            sandbox: (spec.sandbox != sandbox).then_some(spec.sandbox),
+            approval: (spec.approval != approval).then_some(spec.approval),
+        }
+    }
+}
+
 /// One change, written as one entry; nothing when every field is `None`.
 fn append_change(
     session: &mut SessionManager,
@@ -113,23 +178,13 @@ fn append_change(
     sandbox: Option<SandboxMode>,
     approval: Option<ApprovalPolicy>,
 ) -> Result<(), String> {
-    let mut data = Map::new();
-    if let Some(preset) = preset {
-        data.insert("preset".into(), preset.into());
+    PermissionChange {
+        preset: preset.map(str::to_owned),
+        sandbox,
+        approval,
     }
-    if let Some(sandbox) = sandbox {
-        data.insert("sandbox".into(), sandbox.as_str().into());
-    }
-    if let Some(approval) = approval {
-        data.insert("approval".into(), approval.as_str().into());
-    }
-    if data.is_empty() {
-        return Ok(());
-    }
-    session
-        .append_custom_entry(PERMISSION_CUSTOM_TYPE, Some(Value::Object(data)))
-        .map(|_| ())
-        .map_err(|error| error.to_string())
+    .append(session)
+    .map_err(|error| error.to_string())
 }
 
 /// Fills every missing permission fact (`pinInitialPermission`). A fresh
@@ -181,16 +236,28 @@ pub fn set_preset(
     defaults: KnobDefaults,
     name: &str,
 ) -> Result<(), String> {
+    preset_change(session, table, defaults, name)?
+        .append(session)
+        .map_err(|error| error.to_string())
+}
+
+/// The entry [`set_preset`] writes to switch the session to preset `name`;
+/// empty when it already holds it. An unknown name is an error.
+pub fn preset_change(
+    session: &SessionManager,
+    table: &PresetTable,
+    defaults: KnobDefaults,
+    name: &str,
+) -> Result<PermissionChange, String> {
     let spec = table.resolve(name)?;
     let knobs = permission_state(session)?.knobs;
     let current = table.derive(&knobs, defaults);
     let (sandbox, approval) = knobs.effective(defaults);
-    append_change(
-        session,
-        (current != name).then_some(name),
-        (spec.sandbox != sandbox).then_some(spec.sandbox),
-        (spec.approval != approval).then_some(spec.approval),
-    )
+    Ok(PermissionChange::to_preset(
+        (&current, sandbox, approval),
+        name,
+        spec,
+    ))
 }
 
 /// Switches one knob (`setSandboxMode`), writing nothing when it already

@@ -18,14 +18,30 @@
 //! request changes no request the model sees.
 //!
 //! The outcome is the TypeScript vocabulary, `allowed-once`, `rejected`,
-//! `cancelled`, or `unavailable`, and `allowed-once` is the only grant: it
-//! is for the one call its request names, so its scope is that call. The
-//! TypeScript runtime had no answer wider than one call, and the Rust agent
-//! has none either; a later call, a resumed session, or a replayed call
-//! asks again. Nothing reads this history to decide a call: the engine
-//! ([`super::engine::PermissionEngine`]) records into it and never consults
-//! it, and the permission fold ([`super::state`]) ignores these entries, so
-//! a recorded `allowed-once` grants nothing after a reopen.
+//! `cancelled`, or `unavailable`, or one of Bake's two wider grants:
+//!
+//! - `allowed-once` is for the one call its request names, so its scope is
+//!   that call; a later call, a resumed session, or a replayed call asks
+//!   again, and a recorded `allowed-once` grants nothing after a reopen.
+//! - `allowed-session` is a session grant: the call runs, and so, without
+//!   asking, does every later request in this session from the same tool
+//!   (`toolName`) for the same sandbox mode (`sandbox`) while the session's
+//!   policy is `ask` ([`ApprovalHistory::session_grants`]). A different
+//!   tool, or the same tool asking for another mode, still asks. A request
+//!   such a grant decides is still recorded, `asked` then `decided`, its
+//!   outcome `allowed-session` and its `grantedBy` the id of the request
+//!   whose answer made the grant. Reopening the session folds the grants
+//!   back, over its current branch.
+//! - `allowed-full-access` runs the call and switches the session to the
+//!   table's full-access preset: its `decided` entry and the
+//!   `bake.permission` entry of the switch ([`super::state`]) are written in
+//!   one durable group, so the switch is never recorded without the answer
+//!   that made it, nor the answer without its switch.
+//!
+//! A `rejected` answer can carry the person's `note`, which the model reads
+//! after the refusal ([`super::approval::with_note`]). The engine reads this
+//! history only for session grants; the permission fold ([`super::state`])
+//! ignores these entries.
 //!
 //! An engine records through its [`RecorderSlot`] once a session that
 //! persists binds one
@@ -54,6 +70,7 @@ use bake_ai::AbortSignal;
 use bake_sandbox::{EscalationOutcome, SandboxMode};
 use serde_json::{Map, Value};
 
+use super::state::PermissionChange;
 use crate::session::{SessionEntry, SessionManager};
 
 /// The `customType` of an approval entry.
@@ -62,12 +79,14 @@ pub const APPROVAL_CUSTOM_TYPE: &str = "bake.approval";
 /// The `version` of the approval entries this build writes and reads.
 pub const APPROVAL_ENTRY_VERSION: u64 = 1;
 
-/// Every outcome, in the TypeScript `ApprovalOutcome` order.
-const OUTCOMES: [EscalationOutcome; 4] = [
+/// Every outcome: the TypeScript `ApprovalOutcome` order, then Bake's.
+const OUTCOMES: [EscalationOutcome; 6] = [
     EscalationOutcome::AllowedOnce,
     EscalationOutcome::Rejected,
     EscalationOutcome::Cancelled,
     EscalationOutcome::Unavailable,
+    EscalationOutcome::AllowedSession,
+    EscalationOutcome::AllowedFullAccess,
 ];
 
 /// A request put to the approver (`approval/asked`).
@@ -92,13 +111,38 @@ pub struct ApprovalAsked {
 pub enum ApprovalEntry {
     /// A request, written before the approver is asked.
     Asked(ApprovalAsked),
-    /// Its answer, written before an `allowed-once` answer takes effect.
+    /// Its answer, written before an allowed answer takes effect.
     Decided {
         /// The request's id.
         id: String,
         /// The outcome.
         outcome: EscalationOutcome,
+        /// A rejection's note to the model (`note`).
+        note: Option<String>,
+        /// For a request an earlier session grant decided without asking,
+        /// the id of the request whose answer made the grant (`grantedBy`).
+        granted_by: Option<String>,
     },
+}
+
+impl ApprovalEntry {
+    /// The `decided` entry for request `id` with `outcome` alone.
+    pub fn decided(id: impl Into<String>, outcome: EscalationOutcome) -> Self {
+        Self::Decided {
+            id: id.into(),
+            outcome,
+            note: None,
+            granted_by: None,
+        }
+    }
+
+    /// The outcome of a `decided` entry.
+    pub fn outcome(&self) -> Option<EscalationOutcome> {
+        match self {
+            Self::Decided { outcome, .. } => Some(*outcome),
+            Self::Asked(_) => None,
+        }
+    }
 }
 
 impl ApprovalEntry {
@@ -128,10 +172,9 @@ impl ApprovalEntry {
     pub fn admitted(self, aborted: bool) -> Option<Self> {
         match self {
             Self::Asked(_) if aborted => None,
-            Self::Decided { id, .. } if aborted => Some(Self::Decided {
-                id,
-                outcome: EscalationOutcome::Cancelled,
-            }),
+            Self::Decided { id, .. } if aborted => {
+                Some(Self::decided(id, EscalationOutcome::Cancelled))
+            }
             entry => Some(entry),
         }
     }
@@ -156,8 +199,19 @@ impl ApprovalEntry {
                     data.insert("sandbox".into(), sandbox.as_str().into());
                 }
             }
-            Self::Decided { outcome, .. } => {
+            Self::Decided {
+                outcome,
+                note,
+                granted_by,
+                ..
+            } => {
                 data.insert("outcome".into(), outcome.as_str().into());
+                if let Some(note) = note {
+                    data.insert("note".into(), note.as_str().into());
+                }
+                if let Some(granted_by) = granted_by {
+                    data.insert("grantedBy".into(), granted_by.as_str().into());
+                }
             }
         }
         Value::Object(data)
@@ -216,11 +270,25 @@ impl ApprovalEntry {
                 Ok(Self::Decided {
                     id: id.to_owned(),
                     outcome,
+                    note: text("note")?.map(str::to_owned),
+                    granted_by: text("grantedBy")?.map(str::to_owned),
                 })
             }
             kind => Err(format!("has unknown kind \"{kind}\"")),
         }
     }
+}
+
+/// A session grant: later requests of `tool_name` for `sandbox` are allowed
+/// without asking while the session's policy is `ask`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionGrant {
+    /// The tool granted.
+    pub tool_name: String,
+    /// The mode granted, exactly; a request for another mode still asks.
+    pub sandbox: SandboxMode,
+    /// The id of the request whose `allowed-session` answer made the grant.
+    pub granted_by: String,
 }
 
 /// One request and its answer, folded from the session file.
@@ -235,6 +303,8 @@ pub struct ApprovalRecord {
     pub outcome: Option<EscalationOutcome>,
     /// The id of its `decided` entry.
     pub decided_entry_id: Option<String>,
+    /// For a request a session grant decided, the grant's request id.
+    pub granted_by: Option<String>,
 }
 
 /// An approval entry the fold could not use.
@@ -266,6 +336,38 @@ pub struct ApprovalHistory {
 }
 
 impl ApprovalHistory {
+    /// The session grants: for each `allowed-session` answer, the tool
+    /// and the sandbox mode its request asked for, each pair once, in the
+    /// order first granted, with the request whose answer made it. A
+    /// request that named no mode grants nothing.
+    pub fn session_grants(&self) -> Vec<SessionGrant> {
+        let mut grants: Vec<SessionGrant> = Vec::new();
+        for record in &self.records {
+            if record.outcome != Some(EscalationOutcome::AllowedSession) {
+                continue;
+            }
+            let Some(sandbox) = record.asked.sandbox else {
+                continue;
+            };
+            let tool_name = &record.asked.tool_name;
+            if grants
+                .iter()
+                .any(|grant| &grant.tool_name == tool_name && grant.sandbox == sandbox)
+            {
+                continue;
+            }
+            grants.push(SessionGrant {
+                tool_name: tool_name.clone(),
+                sandbox,
+                granted_by: record
+                    .granted_by
+                    .clone()
+                    .unwrap_or_else(|| record.asked.id.clone()),
+            });
+        }
+        grants
+    }
+
     /// The records of the requests about tool call `call_id`, oldest first.
     pub fn for_call<'a>(&'a self, call_id: &'a str) -> impl Iterator<Item = &'a ApprovalRecord> {
         self.records
@@ -308,9 +410,15 @@ pub fn fold_approval_history<'a>(
                     asked_entry_id: entry.id().to_owned(),
                     outcome: None,
                     decided_entry_id: None,
+                    granted_by: None,
                 });
             }
-            Ok(ApprovalEntry::Decided { id, outcome }) => {
+            Ok(ApprovalEntry::Decided {
+                id,
+                outcome,
+                granted_by,
+                ..
+            }) => {
                 let record = by_id
                     .get(&id)
                     .and_then(|&index| history.records.get_mut(index));
@@ -324,6 +432,7 @@ pub fn fold_approval_history<'a>(
                     Some(record) => {
                         record.outcome = Some(outcome);
                         record.decided_entry_id = Some(entry.id().to_owned());
+                        record.granted_by = granted_by;
                     }
                 }
             }
@@ -350,6 +459,21 @@ pub trait ApprovalRecorder: Send + Sync {
         entry: ApprovalEntry,
         cancel: Option<AbortSignal>,
     ) -> BoxFuture<'static, Result<Option<ApprovalEntry>, String>>;
+
+    /// [`Self::record`] for an `allowed-full-access` decision, with
+    /// `switch`, the session's permission change, written after it in the
+    /// same durable group. An abort that turns the decision `cancelled` at
+    /// admission drops the switch. The default writes the decision alone,
+    /// for recorders that keep no permission.
+    fn record_switch(
+        &self,
+        entry: ApprovalEntry,
+        switch: PermissionChange,
+        cancel: Option<AbortSignal>,
+    ) -> BoxFuture<'static, Result<Option<ApprovalEntry>, String>> {
+        let _ = switch;
+        self.record(entry, cancel)
+    }
 }
 
 /// Where an engine's approval entries go: empty until a session binds its

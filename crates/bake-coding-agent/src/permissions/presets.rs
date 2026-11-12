@@ -4,9 +4,15 @@
 //! derived `custom` value, and the default preset for new sessions.
 //!
 //! The table comes from `$BAKE_HOME/settings.json` `permission.presets`
-//! (Pi's settings shape) and defaults to the TypeScript table. The
-//! TypeScript Auto review integration (`registerAuto`) is not ported; its
-//! name stays reserved.
+//! (Pi's settings shape) and defaults to the TypeScript table, with
+//! friendlier labels. The TypeScript Auto review integration
+//! (`registerAuto`) is not ported; its name stays reserved.
+//!
+//! The composition's defaults are Pi's: full access with no approval
+//! prompts, since Pi v1.5.2 runs every tool unconfined and "does not ask
+//! for approval before every tool call" (its `docs/security.md`). The
+//! TypeScript composition's defaults, `workspace-write` and `ask`, are
+//! [`KnobDefaults::TYPESCRIPT`].
 
 use bake_sandbox::SandboxMode;
 use serde_json::{Map, Value};
@@ -47,8 +53,7 @@ pub struct PresetOption {
 }
 
 /// The composition's knob defaults, which apply where a session has no
-/// value of its own: `workspace-write` and `ask` in every shipped 0.3
-/// profile (`packages/bundle/base/cordis.patch.yml`).
+/// value of its own: Pi's full access, `danger-full-access` and `never`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct KnobDefaults {
     /// The default sandbox mode (`ctx.shell.sandboxMode`).
@@ -57,12 +62,26 @@ pub struct KnobDefaults {
     pub approval: ApprovalPolicy,
 }
 
+impl KnobDefaults {
+    /// Pi's: every tool unconfined, no approval prompts.
+    pub const PI: Self = Self {
+        sandbox: SandboxMode::DangerFullAccess,
+        approval: ApprovalPolicy::Never,
+    };
+
+    /// Every shipped 0.3 profile's (`packages/bundle/base/cordis.patch.yml`),
+    /// the default through Bake 0.4.5: `workspace-write` and `ask`. A table
+    /// without a full-access preset falls back to the preset matching these
+    /// ([`PresetTable::default_preset`]).
+    pub const TYPESCRIPT: Self = Self {
+        sandbox: SandboxMode::WorkspaceWrite,
+        approval: ApprovalPolicy::Ask,
+    };
+}
+
 impl Default for KnobDefaults {
     fn default() -> Self {
-        Self {
-            sandbox: SandboxMode::WorkspaceWrite,
-            approval: ApprovalPolicy::Ask,
-        }
+        Self::PI
     }
 }
 
@@ -95,7 +114,9 @@ pub struct PresetTable {
 }
 
 impl Default for PresetTable {
-    /// The TypeScript default table (`PermissionPresetService.Config`).
+    /// The TypeScript default table (`PermissionPresetService.Config`): its
+    /// keys, order, and descriptions, with labels that say what each
+    /// preset does rather than repeat its key.
     fn default() -> Self {
         Self {
             presets: vec![
@@ -104,7 +125,7 @@ impl Default for PresetTable {
                     PresetSpec {
                         sandbox: SandboxMode::WorkspaceWrite,
                         approval: ApprovalPolicy::Ask,
-                        name: Some("workspace-write".to_owned()),
+                        name: Some("Workspace, ask for more".to_owned()),
                         description: Some("Write inside the workspace and permitted temporary directories; wider retries require approval.".to_owned()),
                     },
                 ),
@@ -113,7 +134,7 @@ impl Default for PresetTable {
                     PresetSpec {
                         sandbox: SandboxMode::DangerFullAccess,
                         approval: ApprovalPolicy::Never,
-                        name: Some("danger-full-access".to_owned()),
+                        name: Some("Full access".to_owned()),
                         description: Some("Full file access without approval prompts.".to_owned()),
                     },
                 ),
@@ -223,22 +244,51 @@ impl PresetTable {
     }
 
     /// The default preset for new sessions: `configured` when given, else
-    /// the preset matching the composition's knob defaults, resolved as the
-    /// TypeScript constructor resolves `defaultPreset`.
+    /// the first preset matching `defaults`, the composition's knob
+    /// defaults (Pi's full access); for a table without one, the first
+    /// preset matching [`KnobDefaults::TYPESCRIPT`], the default through
+    /// Bake 0.4.5; else the table's first preset. `configured` resolves as
+    /// the TypeScript constructor resolves `defaultPreset`; only an empty
+    /// table has no default.
     pub fn default_preset(
         &self,
         configured: Option<&str>,
         defaults: KnobDefaults,
     ) -> Result<String, String> {
-        let name = match configured {
-            Some(name) => name.to_owned(),
-            None => self.derive(&KnobState::default(), defaults),
-        };
-        if name == CUSTOM_PRESET {
-            return Err("permission: composed sandbox and approval defaults match no preset; configure defaultPreset explicitly".into());
+        if let Some(name) = configured {
+            self.resolve(name)?;
+            return Ok(name.to_owned());
         }
-        self.resolve(&name)?;
-        Ok(name)
+        [defaults, KnobDefaults::TYPESCRIPT]
+            .into_iter()
+            .map(|defaults| self.derive(&KnobState::default(), defaults))
+            .find(|name| name != CUSTOM_PRESET)
+            .or_else(|| self.presets.first().map(|(name, _)| name.clone()))
+            .ok_or_else(|| {
+                "permission: settings.json permission.presets names no preset; configure at least one"
+                    .into()
+            })
+    }
+
+    /// The first preset pairing `danger-full-access` with `never`: the one
+    /// an approval's full-access answer switches the session to, as
+    /// `/permission` would. `None` when the table has none, so no answer
+    /// offers it.
+    pub fn full_access_preset(&self) -> Option<&str> {
+        self.presets
+            .iter()
+            .find(|(_, spec)| {
+                spec.sandbox == SandboxMode::DangerFullAccess
+                    && spec.approval == ApprovalPolicy::Never
+            })
+            .map(|(name, _)| name.as_str())
+    }
+
+    /// Every preset, in declaration order, with its spec.
+    pub fn presets(&self) -> impl Iterator<Item = (&str, &PresetSpec)> {
+        self.presets
+            .iter()
+            .map(|(name, spec)| (name.as_str(), spec))
     }
 }
 

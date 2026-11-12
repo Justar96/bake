@@ -19,7 +19,11 @@
 //! asks the [`Approver`] for that last one, so every approval goes through
 //! the session's `ask`/`never` policy, and records the request and its
 //! answer in the session file once a session binds its recorder
-//! ([`super::history`]). The wrapped tools only call
+//! ([`super::history`]). Under `ask`, a session grant of the same tool for
+//! the same mode decides the request without asking; an
+//! `allowed-full-access` answer switches the standing permission once it is
+//! written, so it applies from the next call to resolve. The wrapped tools
+//! only call
 //! [`PermissionEngine::resolve`], so new layers need no tool change:
 //!
 //! - command-prefix rules for bash, or path rules for the file tools: a
@@ -44,18 +48,25 @@ use bake_sandbox::escalation::{
 use bake_sandbox::{EscalationOutcome, SandboxMode, SandboxPolicy};
 use serde_json::Value;
 
-use super::approval::{ApprovalPolicy, ApprovalRequest, Approver};
-use super::history::{ApprovalAsked, ApprovalEntry, RecorderSlot};
+use super::approval::{
+    ApprovalDecision, ApprovalOffers, ApprovalPolicy, ApprovalRequest, Approver, with_note,
+};
+use super::history::{ApprovalAsked, ApprovalEntry, RecorderSlot, SessionGrant};
+use super::state::PermissionChange;
 
 /// The session's standing permission: the knobs in force, the preset they
-/// came from, the workspace root (the session's working directory), and
-/// the session id. Shared by the standing layer and the approval policy;
-/// a live switch (a future `/permission` command) updates it through
-/// [`StandingPermissions::set`].
+/// came from, the workspace root (the session's working directory), the
+/// session id, the session grants, and the preset a full-access answer
+/// switches to. Shared by the standing layer, the approval policy, and the
+/// engine; a live switch (`/permission`, or a full-access answer) updates
+/// it through [`StandingPermissions::set`], and the next call to resolve
+/// reads the change.
 pub struct StandingPermissions {
     state: RwLock<Standing>,
     workspace_root: PathBuf,
     session_id: Option<String>,
+    grants: RwLock<Vec<SessionGrant>>,
+    full_access: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -85,7 +96,57 @@ impl StandingPermissions {
             }),
             workspace_root: bake_sandbox::canonical_path(&workspace_root.into()),
             session_id,
+            grants: RwLock::new(Vec::new()),
+            full_access: None,
         }
+    }
+
+    /// These permissions with `preset`, a full-access preset of the
+    /// session's table ([`super::PresetTable::full_access_preset`]), as
+    /// what an `allowed-full-access` answer switches to; `None` offers no
+    /// such answer.
+    #[must_use]
+    pub fn with_full_access_preset(mut self, preset: Option<String>) -> Self {
+        self.full_access = preset;
+        self
+    }
+
+    /// The preset a full-access answer switches to, when one is offered.
+    pub fn full_access_preset(&self) -> Option<&str> {
+        self.full_access.as_deref()
+    }
+
+    /// Adds `grant` unless the same tool and mode are granted already.
+    pub fn grant(&self, grant: SessionGrant) {
+        let mut grants = self.grants.write().unwrap_or_else(PoisonError::into_inner);
+        if !grants
+            .iter()
+            .any(|held| held.tool_name == grant.tool_name && held.sandbox == grant.sandbox)
+        {
+            grants.push(grant);
+        }
+    }
+
+    /// The session grants, in the order given.
+    pub fn grants(&self) -> Vec<SessionGrant> {
+        self.grants
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    /// The grant that decides a request of `tool_name` for `mode`: one for
+    /// exactly that tool and mode, and only under the `ask` policy.
+    pub fn granted(&self, tool_name: &str, mode: SandboxMode) -> Option<SessionGrant> {
+        if self.approval() != ApprovalPolicy::Ask {
+            return None;
+        }
+        self.grants
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .find(|grant| grant.tool_name == tool_name && grant.sandbox == mode)
+            .cloned()
     }
 
     fn read(&self) -> Standing {
@@ -124,10 +185,11 @@ impl StandingPermissions {
         }
     }
 
-    /// Replaces the knobs; later calls resolve under them. The tools'
-    /// escalation offer was fixed when they were built
-    /// ([`super::ToolPermissions::new`]), so a switch that changes which
-    /// modes are reachable must rebuild them. A running MCP server keeps the
+    /// Replaces the knobs; later calls resolve under them, and a call
+    /// already resolved keeps its policy. The tools read their escalation
+    /// offer from these knobs ([`super::ToolPermissions::escalation_targets`]);
+    /// a session refreshes its tools' schemas at its next prompt
+    /// ([`super::refresh_escalation_offer`]). A running MCP server keeps the
     /// confinement it was started with (see `crate::mcp`'s lifetime
     /// boundaries).
     pub fn set(&self, sandbox: SandboxMode, approval: ApprovalPolicy, preset: impl Into<String>) {
@@ -356,6 +418,9 @@ pub struct PermissionEngine {
     layers: Vec<Arc<dyn PolicyLayer>>,
     approver: Arc<dyn Approver>,
     recorder: RecorderSlot,
+    /// The session's standing permission, which holds its grants and takes
+    /// a full-access answer's switch; `None` offers neither wider answer.
+    standing: Option<Arc<StandingPermissions>>,
 }
 
 impl fmt::Debug for PermissionEngine {
@@ -375,16 +440,20 @@ impl PermissionEngine {
             layers: Vec::new(),
             approver,
             recorder: RecorderSlot::default(),
+            standing: None,
         }
     }
 
-    /// The shipped engine: [`StandingModeLayer`], then [`EscalationLayer`].
+    /// The shipped engine: [`StandingModeLayer`], then [`EscalationLayer`],
+    /// with `standing`'s session grants and full-access switch.
     /// `approver` should apply the session's policy, as
     /// [`super::approval::PolicyApprover`] does.
     pub fn standard(standing: Arc<StandingPermissions>, approver: Arc<dyn Approver>) -> Self {
-        Self::new(approver)
-            .with_layer(Arc::new(StandingModeLayer::new(standing)))
-            .with_layer(Arc::new(EscalationLayer))
+        let mut engine = Self::new(approver)
+            .with_layer(Arc::new(StandingModeLayer::new(Arc::clone(&standing))))
+            .with_layer(Arc::new(EscalationLayer));
+        engine.standing = Some(standing);
+        engine
     }
 
     /// The engine with `layer` last.
@@ -430,8 +499,13 @@ impl PermissionEngine {
                         .approve(call, need.reason, need.grant.mode, signal)
                         .await
                     {
-                        Ok(EscalationOutcome::AllowedOnce) => policy = Some(need.grant),
-                        Ok(outcome) => return Err((need.refusal)(outcome)),
+                        Ok(decision) if decision.outcome.allows() => policy = Some(need.grant),
+                        Ok(decision) => {
+                            return Err(with_note(
+                                (need.refusal)(decision.outcome),
+                                decision.note.as_deref(),
+                            ));
+                        }
                         Err(text) => return Err(text),
                     }
                 }
@@ -449,43 +523,123 @@ impl PermissionEngine {
     /// request and its answer when a recorder is bound (`ApprovalService.request`
     /// in `user-approval/src/index.ts`, lines 208-227): the `asked` entry is
     /// written before the approver is asked, and the `decided` entry before
-    /// the answer is returned, so an `allowed-once` is on disk before the
+    /// the answer is returned, so an allowed answer is on disk before the
     /// call can run. The answer returned is the one written; a request whose
     /// `asked` entry an abort kept out is `cancelled` without asking. `Err`
     /// is the call's refusal when a write failed; the session has stopped.
+    ///
+    /// Under `ask`, a session grant for the call's tool and `mode` answers
+    /// `allowed-session` in the approver's place, recorded with the grant's
+    /// request id. Once an answer is written, an `allowed-session` adds its
+    /// grant and an `allowed-full-access` switches the standing permission,
+    /// its switch written in the decision's group.
     async fn approve(
         &self,
         call: &ToolCall<'_>,
         reason: String,
         mode: SandboxMode,
         signal: Option<&AbortSignal>,
-    ) -> Result<EscalationOutcome, String> {
+    ) -> Result<ApprovalDecision, String> {
+        let standing = self.standing.as_deref();
+        let offers = ApprovalOffers {
+            session: standing.is_some(),
+            full_access: standing
+                .and_then(StandingPermissions::full_access_preset)
+                .is_some(),
+        };
         let request = ApprovalRequest {
             tool_name: call.tool_name.to_owned(),
             call_id: call.call_id.to_owned(),
             parent_tool_call_id: call.parent_tool_call_id.map(str::to_owned),
             reason,
             arguments: call.args.clone(),
-        };
-        let Some(recorder) = self.recorder.get() else {
-            return Ok(self.approver.request(request, signal.cloned()).await);
-        };
-        let id = crate::session::id::uuid_v4();
-        let asked = ApprovalEntry::Asked(ApprovalAsked {
-            id: id.clone(),
-            tool_name: request.tool_name.clone(),
-            call_id: Some(request.call_id.clone()),
-            reason: Some(request.reason.clone()),
             sandbox: Some(mode),
-        });
-        if recorder.record(asked, signal.cloned()).await?.is_none() {
-            return Ok(EscalationOutcome::Cancelled);
+            offers,
+        };
+        let granted = standing.and_then(|standing| standing.granted(call.tool_name, mode));
+        let recorder = self.recorder.get();
+        let id = crate::session::id::uuid_v4();
+        if let Some(recorder) = recorder {
+            let asked = ApprovalEntry::Asked(ApprovalAsked {
+                id: id.clone(),
+                tool_name: request.tool_name.clone(),
+                call_id: Some(request.call_id.clone()),
+                reason: Some(request.reason.clone()),
+                sandbox: Some(mode),
+            });
+            if recorder.record(asked, signal.cloned()).await?.is_none() {
+                return Ok(EscalationOutcome::Cancelled.into());
+            }
         }
-        let outcome = self.approver.request(request, signal.cloned()).await;
-        let decided = ApprovalEntry::Decided { id, outcome };
-        Ok(match recorder.record(decided, signal.cloned()).await? {
-            Some(ApprovalEntry::Decided { outcome, .. }) => outcome,
-            _ => EscalationOutcome::Cancelled,
+        let decision = match &granted {
+            Some(_) if signal.is_some_and(AbortSignal::aborted) => {
+                EscalationOutcome::Cancelled.into()
+            }
+            Some(_) => EscalationOutcome::AllowedSession.into(),
+            None => self.approver.decide(request, signal.cloned()).await,
+        };
+        // What a full-access answer changes, from the knobs in force now.
+        let switch = standing
+            .filter(|_| decision.outcome == EscalationOutcome::AllowedFullAccess)
+            .and_then(|standing| {
+                let preset = standing.full_access_preset()?;
+                let spec = super::presets::PresetSpec {
+                    sandbox: SandboxMode::DangerFullAccess,
+                    approval: ApprovalPolicy::Never,
+                    name: None,
+                    description: None,
+                };
+                Some((
+                    preset.to_owned(),
+                    PermissionChange::to_preset(
+                        (&standing.preset(), standing.sandbox(), standing.approval()),
+                        preset,
+                        &spec,
+                    ),
+                ))
+            });
+        let outcome = match recorder {
+            None => decision.outcome,
+            Some(recorder) => {
+                let decided = ApprovalEntry::Decided {
+                    id: id.clone(),
+                    outcome: decision.outcome,
+                    note: decision.note.clone(),
+                    granted_by: granted.as_ref().map(|grant| grant.granted_by.clone()),
+                };
+                let written = match &switch {
+                    Some((_, change)) => {
+                        recorder
+                            .record_switch(decided, change.clone(), signal.cloned())
+                            .await?
+                    }
+                    None => recorder.record(decided, signal.cloned()).await?,
+                };
+                written
+                    .and_then(|entry| entry.outcome())
+                    .unwrap_or(EscalationOutcome::Cancelled)
+            }
+        };
+        match (outcome, standing) {
+            (EscalationOutcome::AllowedSession, Some(standing)) if granted.is_none() => {
+                standing.grant(SessionGrant {
+                    tool_name: call.tool_name.to_owned(),
+                    sandbox: mode,
+                    granted_by: id,
+                });
+            }
+            (EscalationOutcome::AllowedFullAccess, Some(standing)) => {
+                if let Some((preset, _)) = switch {
+                    standing.set(SandboxMode::DangerFullAccess, ApprovalPolicy::Never, preset);
+                }
+            }
+            _ => {}
+        }
+        Ok(ApprovalDecision {
+            outcome,
+            note: decision
+                .note
+                .filter(|_| outcome == EscalationOutcome::Rejected),
         })
     }
 }

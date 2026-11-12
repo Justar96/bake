@@ -849,6 +849,9 @@ pub struct AgentSession {
     /// The subagents this session starts, when `subagents` is on
     /// ([`Self::set_subagents`]).
     subagents: Option<crate::subagents::SubagentHost>,
+    /// The permission its tools resolve under, when the session was given
+    /// one to switch ([`Self::set_permission`]).
+    permission: Option<crate::permissions::LivePermission>,
     /// The reminder timer's handle, when `schedules` is on.
     #[cfg(test)]
     schedules: Option<Arc<schedules::Schedules>>,
@@ -1860,6 +1863,7 @@ impl AgentSession {
             hooks: shared_hooks,
             tool_hooks,
             subagents: None,
+            permission: None,
             #[cfg(test)]
             schedules,
         };
@@ -2281,6 +2285,81 @@ impl AgentSession {
         self.subagents = Some(host);
     }
 
+    /// Gives the session the permission its tools resolve under, so
+    /// [`Self::set_permission_preset`] can switch it and each prompt states
+    /// it as it is then: the `permissions` section and the tools'
+    /// escalation offer ([`crate::permissions::refresh_escalation_offer`]).
+    /// Without one, both stay as the session was created with.
+    pub fn set_permission(&mut self, permission: crate::permissions::LivePermission) {
+        self.permission = Some(permission);
+    }
+
+    /// The permission the session was given ([`Self::set_permission`]).
+    pub fn permission(&self) -> Option<&crate::permissions::LivePermission> {
+        self.permission.as_ref()
+    }
+
+    /// The TypeScript `/permission` command's `apply`: switches the session
+    /// to preset `name`, writing the `bake.permission` entry for what
+    /// changes ([`crate::permissions::state::preset_change`]) before the
+    /// standing permission changes, so a resumed session keeps the switch.
+    /// The next tool call to resolve its policy runs under it; a call
+    /// already resolved, running or waiting on an approval, keeps its own.
+    /// The next prompt restates the `permissions` section and the tools'
+    /// escalation offer. With `persist`, the preset is also saved as
+    /// `permission.defaultPreset` for new sessions.
+    ///
+    /// Serialized and owned as the other changes; an unknown preset changes
+    /// nothing, and a failed session write stops the session as
+    /// [`Self::set_thinking_level`]'s does.
+    pub async fn set_permission_preset(
+        &self,
+        name: &str,
+        persist: bool,
+    ) -> Result<DefaultSave, String> {
+        let Some(live) = self.permission.clone() else {
+            return Err("This session's permission cannot be switched.".into());
+        };
+        let name = name.to_owned();
+        self.run_change(move |control| async move {
+            let spec = live.table.resolve(&name)?.clone();
+            let change = crate::permissions::state::preset_change(
+                &lock(&control.session),
+                &live.table,
+                crate::permissions::KnobDefaults::default(),
+                &name,
+            )?;
+            if !change.is_empty() {
+                let written = control.append(move |session| change.append(session)).await;
+                if let Err(error) = written {
+                    return Err(control.stop_after_failed_write(&error, "The permission change"));
+                }
+            }
+            live.standing.set(spec.sandbox, spec.approval, name.clone());
+            if !persist {
+                return Ok(DefaultSave::NotRequested);
+            }
+            let preset = name.clone();
+            let saved = control
+                .save(move |store| store.set_default_permission_preset(&preset))
+                .await;
+            if saved.is_written() {
+                let mut settings = write_settings(&control.settings);
+                let section = settings
+                    .permission
+                    .get_or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+                if !section.is_object() {
+                    *section = serde_json::Value::Object(serde_json::Map::new());
+                }
+                if let Some(section) = section.as_object_mut() {
+                    section.insert("defaultPreset".into(), name.into());
+                }
+            }
+            Ok(saved)
+        })
+        .await
+    }
+
     /// The subagents this session starts; `None` when `subagents` is off,
     /// for a subagent itself, and for a session built without the parent
     /// tools.
@@ -2618,6 +2697,20 @@ impl AgentSession {
             Ok(control
                 .save(move |store| store.set_compaction_member(key, value))
                 .await)
+        })
+        .await
+    }
+
+    /// Pi v1.5.2's `setMermaidRenderingMode`: sets `markdown.mermaid`, how
+    /// the interactive terminal draws Mermaid fences in answers. Saved; the
+    /// terminal draws with it once it is told.
+    pub async fn set_mermaid_rendering(
+        &self,
+        mode: crate::settings::MermaidRendering,
+    ) -> Result<DefaultSave, String> {
+        self.run_change(move |control| async move {
+            write_settings(&control.settings).mermaid = mode;
+            Ok(control.save(move |store| store.set_mermaid(mode)).await)
         })
         .await
     }

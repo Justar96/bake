@@ -1,0 +1,4 @@
+Pflowchart TD
+    A[Read] -->|ok| B{Valid?}
+    B -->|yes| C[Save]
+    B -. no .-> A

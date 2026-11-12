@@ -103,7 +103,7 @@ Under `--approval ask`, a tool call that asks for wider access than the session'
 {"type":"extension_ui_response","id":"approval-1-6b1f2c54-9f3a-4d27-8f41-0c6d9a2b7e55","confirmed":true}
 ```
 
-- `confirmed: true` allows that one call, with the access it asked for. Nothing else is granted: no standing permission, preset, or later call changes, and a later call asks again.
+- `confirmed: true` allows that one call, with the access it asked for. Nothing else is granted: an RPC client cannot allow for the session or switch to full access as the terminal can, so no standing permission or preset changes, and a later call asks again unless the session file already holds a grant for it.
 - `confirmed: false`, or a response with neither member, rejects the call.
 - `cancelled: true` withdraws the question; the call is refused.
 

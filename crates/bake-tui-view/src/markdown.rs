@@ -1,6 +1,7 @@
 //! The model's answer drawn as Markdown: headings, emphasis, inline code,
 //! links, lists and task lists, block quotes, rules, fenced code coloured
-//! by [`crate::syntax`] where it knows the language, and tables.
+//! by [`crate::syntax`] where it knows the language, Mermaid fences drawn
+//! as diagrams by [`crate::mermaid`], and tables.
 //!
 //! The parser is small, line-based, and total: any text draws, markup it
 //! does not understand reads as the text it is, and an answer that is still
@@ -20,6 +21,7 @@ use ratatui_core::text::{Line, Span};
 use unicode_width::UnicodeWidthStr;
 
 use crate::editor;
+use crate::mermaid::{self, Drawing};
 use crate::syntax::{Carry, Lang};
 use crate::transcript::{self, Look, RAIL};
 
@@ -53,7 +55,13 @@ pub fn present(text: &str, width: usize, look: Look) -> Vec<Line<'static>> {
             while end < lines.len() && !fence_closes(&lines[end], &fence) {
                 end += 1;
             }
-            out.extend(code_block(&lines[start..end], info, width, look));
+            let body = &lines[start..end];
+            if mermaid::is_mermaid(info) {
+                let drawing = mermaid::draw(body, end < lines.len(), width, look);
+                out.extend(mermaid_fence(drawing, body, info, width, RAIL, look));
+            } else {
+                out.extend(code_block(body, info, width, RAIL, look));
+            }
             i = (end + 1).min(lines.len());
             continue;
         }
@@ -359,19 +367,57 @@ fn fence_lang(info: &str) -> Option<Lang> {
     }
 }
 
+/// A Mermaid fence's lines in `width` cells, each opening with `rail`
+/// cells, as [`mermaid::drawing`] drew it: its diagram, or its source as
+/// code with one dim line saying why when that is final.
+pub(crate) fn mermaid_fence(
+    drawing: Drawing,
+    body: &[String],
+    info: &str,
+    width: usize,
+    rail: usize,
+    look: Look,
+) -> Vec<Line<'static>> {
+    match drawing {
+        Drawing::Diagram(diagram) => diagram,
+        Drawing::Source(reason) => {
+            let mut out = code_block(body, info, width, rail, look);
+            if let Some(reason) = reason {
+                let lead = vec![transcript::pad(rail)];
+                out.extend(transcript::hang(
+                    &reason,
+                    width,
+                    rail,
+                    lead.clone(),
+                    lead,
+                    transcript::dim(),
+                ));
+            }
+            out
+        }
+    }
+}
+
 /// A fenced block: a top edge naming its language, the code under a bar,
-/// coloured where its language is known, and a bottom edge.
-fn code_block(code: &[String], info: &str, width: usize, look: Look) -> Vec<Line<'static>> {
+/// coloured where its language is known, and a bottom edge, each line
+/// opening with `rail` cells.
+fn code_block(
+    code: &[String],
+    info: &str,
+    width: usize,
+    rail: usize,
+    look: Look,
+) -> Vec<Line<'static>> {
     let colours = palette(look);
     let marks = glyphs(look);
     let label = info.split_whitespace().next().unwrap_or("");
     let mut top = vec![
-        transcript::pad(RAIL),
+        transcript::pad(rail),
         Span::styled(marks.code_top, colours.border),
     ];
     if !label.is_empty() {
         top.push(Span::styled(
-            format!(" {}", fit(label, width.saturating_sub(RAIL + 3))),
+            format!(" {}", fit(label, width.saturating_sub(rail + 3))),
             colours.border.add_modifier(Modifier::ITALIC),
         ));
     }
@@ -379,10 +425,10 @@ fn code_block(code: &[String], info: &str, width: usize, look: Look) -> Vec<Line
     let lang = fence_lang(info);
     let mut carry = Carry::default();
     let lead = vec![
-        transcript::pad(RAIL),
+        transcript::pad(rail),
         Span::styled(marks.bar, colours.border),
     ];
-    let indent = RAIL + marks.bar.width();
+    let indent = rail + marks.bar.width();
     for line in code {
         let runs = transcript::code_runs(line, lang, &mut carry, look.tones);
         lines.extend(transcript::hang_runs(
@@ -396,7 +442,7 @@ fn code_block(code: &[String], info: &str, width: usize, look: Look) -> Vec<Line
         ));
     }
     lines.push(Line::from(vec![
-        transcript::pad(RAIL),
+        transcript::pad(rail),
         Span::styled(marks.code_bottom, colours.border),
     ]));
     lines
@@ -928,17 +974,20 @@ fn matching(text: &str, at: usize, open: u8, close: u8) -> Option<usize> {
 mod tests {
     use super::*;
     use crate::activity::Tones;
+    use crate::mermaid::Mermaid;
     use proptest::prelude::*;
 
     const PLAIN: Look = Look {
         tones: Tones::None,
         classic: false,
         lit: true,
+        mermaid: Mermaid::Streaming,
     };
     const COLOUR: Look = Look {
         tones: Tones::TrueColor,
         classic: false,
         lit: true,
+        mermaid: Mermaid::Streaming,
     };
 
     fn text(lines: &[Line]) -> Vec<String> {
@@ -1173,6 +1222,423 @@ mod tests {
         assert_eq!(drawn("", 20), [""]);
     }
 
+    /// A flowchart in an answer, its labels on its edges.
+    const FLOWCHART: &str = "Plan:\n\n```mermaid\nflowchart TD\n    A[Read] -->|ok| B{Valid?}\n    B -->|yes| C[Save]\n    B -. no .-> A\n```\nDone.";
+    const SEQUENCE: &str = "```mermaid\nsequenceDiagram\n    participant U as User\n    U->>Bake: prompt\n    Bake-->>U: answer\n```";
+    /// Fits in 60 columns, not in 28.
+    const TOO_WIDE: &str = "```mermaid\nflowchart LR\n    A[Ask] --> B[Plan] --> C[Ship]\n```";
+    const UNSUPPORTED: &str = "```mermaid\npie title Pets\n    \"Dogs\" : 3\n```";
+    /// An answer still streaming: the fence is open, an `alt` block is not
+    /// yet ended, and its last line is half written.
+    const STREAMING: &str = "Here:\n\n```mermaid\nsequenceDiagram\n    A->>B: one\n    alt ok\n        B-->>A: two\n    B-";
+
+    /// Checks `source` at `width` against its drawing with the round frame
+    /// in each of the three tones, and with the classic frame.
+    fn diagram_draws(source: &str, width: usize, round: &[&str], classic: &[&str]) {
+        for tones in [Tones::TrueColor, Tones::Ansi, Tones::None] {
+            let look = Look { tones, ..PLAIN };
+            assert_eq!(
+                text(&present(source, width, look)),
+                round,
+                "{tones:?} at {width}"
+            );
+            let look = Look {
+                classic: true,
+                ..look
+            };
+            assert_eq!(
+                text(&present(source, width, look)),
+                classic,
+                "classic {tones:?} at {width}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_mermaid_flowchart_draws_as_a_diagram() {
+        diagram_draws(
+            FLOWCHART,
+            60,
+            &[
+                "  Plan:",
+                "",
+                "  ┌──────────┐",
+                "  │ Read     │",
+                "  │          ├──ok────┐",
+                "  │          ├◄┄┄┄┄┄┄┄╪┄┄┄┐",
+                "  └──────────┘        │   ┆",
+                "                      │   ┆",
+                "                      │   ┆",
+                "  ┌──────────┐        │   ┆",
+                "  │ ◇ Valid? │        │   ┆",
+                "  │          ├◄───────┘   ┆",
+                "  │          ├──yes─────┐ ┆",
+                "  │          ├─┄no┄┄┄┄┄┄╪┄┘",
+                "  └──────────┘          │",
+                "                        │",
+                "                        │",
+                "  ┌──────────┐          │",
+                "  │ Save     │          │",
+                "  │          ├◄─────────┘",
+                "  └──────────┘",
+                "  Done.",
+            ],
+            &[
+                "  Plan:",
+                "",
+                "  +----------+",
+                "  | Read     |",
+                "  |          +--ok----+",
+                "  |          +<.......+...+",
+                "  +----------+        |   :",
+                "                      |   :",
+                "                      |   :",
+                "  +----------+        |   :",
+                "  | o Valid? |        |   :",
+                "  |          +<-------+   :",
+                "  |          +--yes-----+ :",
+                "  |          +-.no......+.+",
+                "  +----------+          |",
+                "                        |",
+                "                        |",
+                "  +----------+          |",
+                "  | Save     |          |",
+                "  |          +<---------+",
+                "  +----------+",
+                "  Done.",
+            ],
+        );
+        diagram_draws(
+            FLOWCHART,
+            40,
+            &[
+                "  Plan:",
+                "",
+                "  ┌──────────┐",
+                "  │ Read     │",
+                "  │          ├──ok────┐",
+                "  │          ├◄┄┄┄┄┄┄┄╪┄┄┄┐",
+                "  └──────────┘        │   ┆",
+                "                      │   ┆",
+                "                      │   ┆",
+                "  ┌──────────┐        │   ┆",
+                "  │ ◇ Valid? │        │   ┆",
+                "  │          ├◄───────┘   ┆",
+                "  │          ├──yes─────┐ ┆",
+                "  │          ├─┄no┄┄┄┄┄┄╪┄┘",
+                "  └──────────┘          │",
+                "                        │",
+                "                        │",
+                "  ┌──────────┐          │",
+                "  │ Save     │          │",
+                "  │          ├◄─────────┘",
+                "  └──────────┘",
+                "  Done.",
+            ],
+            &[
+                "  Plan:",
+                "",
+                "  +----------+",
+                "  | Read     |",
+                "  |          +--ok----+",
+                "  |          +<.......+...+",
+                "  +----------+        |   :",
+                "                      |   :",
+                "                      |   :",
+                "  +----------+        |   :",
+                "  | o Valid? |        |   :",
+                "  |          +<-------+   :",
+                "  |          +--yes-----+ :",
+                "  |          +-.no......+.+",
+                "  +----------+          |",
+                "                        |",
+                "                        |",
+                "  +----------+          |",
+                "  | Save     |          |",
+                "  |          +<---------+",
+                "  +----------+",
+                "  Done.",
+            ],
+        );
+    }
+
+    #[test]
+    fn a_mermaid_sequence_draws_as_a_diagram() {
+        diagram_draws(
+            SEQUENCE,
+            60,
+            &[
+                "            ┌──────┐  ┌──────┐",
+                "            │ User │  │ Bake │",
+                "            └──────┘  └──────┘",
+                "                │ prompt  │",
+                "                ├─────────▶",
+                "                │         │",
+                "                │ answer  │",
+                "                ◀┄┄┄┄┄┄┄┄┄┤",
+                "                │         │",
+            ],
+            &[
+                "            +------+  +------+",
+                "            | User |  | Bake |",
+                "            +------+  +------+",
+                "                | prompt  |",
+                "                +--------->",
+                "                |         |",
+                "                | answer  |",
+                "                <.........+",
+                "                |         |",
+            ],
+        );
+        diagram_draws(
+            SEQUENCE,
+            40,
+            &[
+                "            ┌──────┐  ┌──────┐",
+                "            │ User │  │ Bake │",
+                "            └──────┘  └──────┘",
+                "                │ prompt  │",
+                "                ├─────────▶",
+                "                │         │",
+                "                │ answer  │",
+                "                ◀┄┄┄┄┄┄┄┄┄┤",
+                "                │         │",
+            ],
+            &[
+                "            +------+  +------+",
+                "            | User |  | Bake |",
+                "            +------+  +------+",
+                "                | prompt  |",
+                "                +--------->",
+                "                |         |",
+                "                | answer  |",
+                "                <.........+",
+                "                |         |",
+            ],
+        );
+    }
+
+    #[test]
+    fn a_diagram_too_wide_for_the_width_shows_its_source_and_why() {
+        diagram_draws(
+            TOO_WIDE,
+            60,
+            &[
+                "  ┌─────┐  ┌──────┐  ┌──────┐",
+                "  │ Ask │  │ Plan │  │ Ship │",
+                "  └┬────┘  └┬─┬───┘  └┬─────┘",
+                "   │        ▲ │       ▲",
+                "   │        │ │       │",
+                "   │        │ │       │",
+                "   │        │ │       │",
+                "   └────────┘ │       │",
+                "              │       │",
+                "              └───────┘",
+            ],
+            &[
+                "  +-----+  +------+  +------+",
+                "  | Ask |  | Plan |  | Ship |",
+                "  ++----+  ++-+---+  ++-----+",
+                "   |        ^ |       ^",
+                "   |        | |       |",
+                "   |        | |       |",
+                "   |        | |       |",
+                "   +--------+ |       |",
+                "              |       |",
+                "              +-------+",
+            ],
+        );
+        diagram_draws(
+            TOO_WIDE,
+            28,
+            &[
+                "  ╭─ mermaid",
+                "  │ flowchart LR",
+                "  │     A[Ask] --> B[Plan]",
+                "  │ --> C[Ship]",
+                "  ╰─",
+                "  diagram too wide for 26",
+                "  columns; showing source",
+            ],
+            &[
+                "  +- mermaid",
+                "  | flowchart LR",
+                "  |     A[Ask] --> B[Plan]",
+                "  | --> C[Ship]",
+                "  +-",
+                "  diagram too wide for 26",
+                "  columns; showing source",
+            ],
+        );
+    }
+
+    #[test]
+    fn an_unsupported_diagram_shows_its_source_and_why() {
+        diagram_draws(
+            UNSUPPORTED,
+            60,
+            &[
+                "  ╭─ mermaid",
+                "  │ pie title Pets",
+                "  │     \"Dogs\" : 3",
+                "  ╰─",
+                "  Mermaid syntax not supported here; showing source",
+            ],
+            &[
+                "  +- mermaid",
+                "  | pie title Pets",
+                "  |     \"Dogs\" : 3",
+                "  +-",
+                "  Mermaid syntax not supported here; showing source",
+            ],
+        );
+        diagram_draws(
+            UNSUPPORTED,
+            28,
+            &[
+                "  ╭─ mermaid",
+                "  │ pie title Pets",
+                "  │     \"Dogs\" : 3",
+                "  ╰─",
+                "  Mermaid syntax not",
+                "  supported here; showing",
+                "  source",
+            ],
+            &[
+                "  +- mermaid",
+                "  | pie title Pets",
+                "  |     \"Dogs\" : 3",
+                "  +-",
+                "  Mermaid syntax not",
+                "  supported here; showing",
+                "  source",
+            ],
+        );
+    }
+
+    #[test]
+    fn a_fence_being_written_draws_the_longest_run_of_lines_that_renders() {
+        diagram_draws(
+            STREAMING,
+            60,
+            &[
+                "  Here:",
+                "",
+                "            ┌───┐  ┌───┐",
+                "            │ A │  │ B │",
+                "            └───┘  └───┘",
+                "              │ one  │",
+                "              ├──────▶",
+                "              │      │",
+            ],
+            &[
+                "  Here:",
+                "",
+                "            +---+  +---+",
+                "            | A |  | B |",
+                "            +---+  +---+",
+                "              | one  |",
+                "              +------>",
+                "              |      |",
+            ],
+        );
+        diagram_draws(
+            STREAMING,
+            28,
+            &[
+                "  Here:",
+                "",
+                "            ┌───┐  ┌───┐",
+                "            │ A │  │ B │",
+                "            └───┘  └───┘",
+                "              │ one  │",
+                "              ├──────▶",
+                "              │      │",
+            ],
+            &[
+                "  Here:",
+                "",
+                "            +---+  +---+",
+                "            | A |  | B |",
+                "            +---+  +---+",
+                "              | one  |",
+                "              +------>",
+                "              |      |",
+            ],
+        );
+        // `final` and `off` draw a fence still being written as code.
+        for mermaid in [Mermaid::Final, Mermaid::Off] {
+            assert_eq!(
+                drawn_with(STREAMING, 28, mermaid)[2..],
+                [
+                    "  ╭─ mermaid",
+                    "  │ sequenceDiagram",
+                    "  │     A->>B: one",
+                    "  │     alt ok",
+                    "  │         B-->>A: two",
+                    "  │     B-",
+                    "  ╰─",
+                ],
+                "{mermaid:?}"
+            );
+        }
+    }
+
+    fn drawn_with(markdown: &str, width: usize, mermaid: Mermaid) -> Vec<String> {
+        text(&present(markdown, width, Look { mermaid, ..PLAIN }))
+    }
+
+    #[test]
+    fn a_streamed_diagram_never_turns_back_into_source_and_ends_as_drawn_whole() {
+        let answer = "Here:\n\n```mermaid\nsequenceDiagram\n    A->>B: one\n    alt ok\n        B-->>A: two\n    else no\n        B-xA: three\n    end\n    Note over A,B: done\n```\nAfter.";
+        let whole = drawn_with(answer, 60, Mermaid::Streaming);
+        assert!(
+            !whole.iter().any(|line| line.contains("mermaid")),
+            "{whole:#?}"
+        );
+        let mut drew = false;
+        for (at, _) in answer.char_indices().skip(1) {
+            let shown = drawn_with(&answer[..at], 60, Mermaid::Streaming);
+            let diagram = !shown.iter().any(|line| line.contains("╭─ mermaid"));
+            assert!(
+                diagram || !drew,
+                "turned back into source at {at}: {shown:#?}"
+            );
+            drew |= diagram && shown.iter().any(|line| line.contains('┌'));
+        }
+        assert!(drew);
+        // With `final`, the closed fence draws the same diagram.
+        assert_eq!(drawn_with(answer, 60, Mermaid::Final), whole);
+        assert!(drawn_with(answer, 60, Mermaid::Off).contains(&"  ╭─ mermaid".to_owned()));
+    }
+
+    #[test]
+    fn a_diagram_dims_its_boxes_colours_its_edges_and_keeps_its_labels_plain() {
+        let parts = |style: Style| (style.fg, style.bg, style.add_modifier);
+        for (tones, accent) in [
+            (Tones::TrueColor, Some(Color::Rgb(0x0e, 0xa5, 0xe9))),
+            (Tones::Ansi, Some(Color::Cyan)),
+            (Tones::None, None),
+        ] {
+            let lines = present(SEQUENCE, 60, Look { tones, ..PLAIN });
+            assert_eq!(
+                parts(style_of(&lines, "┌──────┐")),
+                (None, None, Modifier::DIM),
+                "{tones:?}"
+            );
+            assert_eq!(
+                parts(style_of(&lines, "▶")),
+                (accent, None, Modifier::empty()),
+                "{tones:?}"
+            );
+            assert_eq!(
+                parts(style_of(&lines, "prompt")),
+                (None, None, Modifier::empty()),
+                "{tones:?}"
+            );
+        }
+    }
+
     proptest! {
         #![proptest_config(ProptestConfig::with_cases(512))]
 
@@ -1189,6 +1655,36 @@ mod tests {
                     prop_assert!(line.width() <= width, "{line:?} > {width}");
                     for span in &line.spans {
                         prop_assert!(!span.content.contains(|c: char| c.is_control()), "{span:?}");
+                    }
+                }
+            }
+        }
+
+        // A Mermaid fence, closed or still being written, draws inside its
+        // width with no control character, in every look; under the classic
+        // frame an ASCII source draws in ASCII alone.
+        #[test]
+        fn mermaid_fences_draw_inside_their_width(
+            header in "flowchart (TD|LR|BT|RL)|graph|sequenceDiagram|stateDiagram-v2|classDiagram|erDiagram|pie",
+            body in prop::collection::vec(
+                "[A-E]( ?(-->|---|-\\.->|<-->|->>|-->>|-x) ?[A-E])?(\\[[a-z ]{1,8}\\]|: [a-z ]{1,8}|\\|[a-z]{1,5}\\|)?|end|alt ok|loop x|\\[\\*\\] --> [A-E]|%% c|",
+                0..14,
+            ),
+            closed in any::<bool>(),
+            width in 20usize..90,
+        ) {
+            let mut source = format!("Intro\n\n```mermaid\n{header}\n{}", body.join("\n"));
+            if closed {
+                source.push_str("\n```\nafter");
+            }
+            for look in [PLAIN, COLOUR, Look { classic: true, ..COLOUR }] {
+                for line in &present(&source, width, look) {
+                    prop_assert!(line.width() <= width, "{line:?} > {width}");
+                    for span in &line.spans {
+                        prop_assert!(!span.content.contains(|c: char| c.is_control()), "{span:?}");
+                        if look.classic {
+                            prop_assert!(span.content.is_ascii(), "{span:?}");
+                        }
                     }
                 }
             }

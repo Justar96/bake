@@ -1388,6 +1388,10 @@ struct ChildSetup {
     parent_id: String,
     parent_file: Option<PathBuf>,
     permission: crate::permissions::SessionPermission,
+    /// The parent's standing permission, which `/permission` may have
+    /// switched since `permission` was settled: a child takes it as it is
+    /// when the child is built.
+    standing: Arc<crate::permissions::StandingPermissions>,
 }
 
 /// The builder of a parent's subagents ([`crate::subagents::ChildBuilder`]).
@@ -1410,16 +1414,13 @@ fn build_child(
             link,
             route,
         } = spec;
-        // The parent's preset, or its knobs when they match none.
+        // The parent's preset now, or its knobs when they match none.
         let mut args = setup.factory.args.clone();
-        let custom = setup
-            .permission
-            .table
-            .spec(&setup.permission.preset)
-            .is_none();
-        args.permission = (!custom).then(|| setup.permission.preset.clone());
-        args.sandbox = custom.then_some(setup.permission.sandbox);
-        args.approval = custom.then_some(setup.permission.approval);
+        let preset = setup.standing.preset();
+        let custom = setup.permission.table.spec(&preset).is_none();
+        args.sandbox = custom.then(|| setup.standing.sandbox());
+        args.approval = custom.then(|| setup.standing.approval());
+        args.permission = (!custom).then_some(preset);
         let loaded = {
             let setup = Arc::clone(&setup);
             let args = args.clone();
@@ -1534,6 +1535,13 @@ async fn build_session(args: &Args, build: Build) -> Result<Built, String> {
     // One standing permission for the tools, the MCP servers' admission,
     // and the hooks' confinement.
     let standing = Arc::new(permission.standing(Path::new(&session_cwd), Some(session_id.clone())));
+    // The session grants its file records apply again, where someone can
+    // still answer; without an answerer, as in `-p`, no grant applies.
+    if can_ask {
+        for grant in crate::permissions::approval_history(&session).session_grants() {
+            standing.grant(grant);
+        }
+    }
     let tool_permissions = ToolPermissions::new(
         Arc::clone(&standing),
         Arc::clone(&approver),
@@ -1644,6 +1652,7 @@ async fn build_session(args: &Args, build: Build) -> Result<Built, String> {
                     parent_id: session.session_id().to_owned(),
                     parent_file,
                     permission: permission.clone(),
+                    standing: Arc::clone(&standing),
                 }),
                 recovered: crate::subagents::recover(&session),
             });
@@ -1813,6 +1822,11 @@ async fn build_session(args: &Args, build: Build) -> Result<Built, String> {
     if let Some(host) = subagent_host {
         session.set_subagents(host);
     }
+    session.set_permission(crate::permissions::LivePermission {
+        table: permission.table.clone(),
+        standing: Arc::clone(&standing),
+        can_ask,
+    });
     if let Err(message) = session.set_hooks(crate::hooks::HooksOptions {
         files: hooks,
         scope: hook_scope,

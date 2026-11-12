@@ -37,13 +37,32 @@
 //! session file before the call can run ([`history`]); a failed write
 //! refuses the call and stops the session.
 //!
+//! # Defaults and switching
+//!
+//! A session's permission defaults to Pi's full access, the
+//! `danger-full-access` mode with the `never` policy
+//! ([`presets::KnobDefaults`], [`presets::PresetTable::default_preset`]).
+//! A running session switches presets through its [`LivePermission`]: the
+//! TypeScript `/permission` command's `apply`, written as the
+//! `bake.permission` entry ([`state::preset_change`]) and applied to the
+//! [`StandingPermissions`] the engine reads, so the next call to resolve
+//! uses it and a call already resolved keeps its policy. At the next
+//! prompt the session restates the `permissions` system-prompt section and
+//! refreshes the tools' escalation offer ([`refresh_escalation_offer`]).
+//!
+//! Bake adds wider approval answers than the TypeScript one-call grant:
+//! a session grant of one tool for one mode, and a switch to full access
+//! ([`ApprovalOffers`], [`history`]); and a rejection can carry a note the
+//! model reads ([`approval::with_note`]).
+//!
 //! # Not ported
 //!
-//! The live `/permission` command and its "approval policy changed"
-//! notice; the Auto review integration (`registerAuto`); background bash
-//! jobs and their `runnerFailed` notice; the Cordis projection, catalog,
-//! and invariant companions. The `approval/asked` and `approval/decided`
-//! audit events are ported, as session entries ([`history`]).
+//! The "approval policy changed" notice `/permission` queued as a user
+//! message: the restated `permissions` section tells the model instead;
+//! the Auto review integration (`registerAuto`); background bash jobs and
+//! their `runnerFailed` notice; the Cordis projection, catalog, and
+//! invariant companions. The `approval/asked` and `approval/decided` audit
+//! events are ported, as session entries ([`history`]).
 
 pub mod approval;
 pub mod bash;
@@ -64,8 +83,8 @@ use bake_sandbox::{SandboxMode, SandboxPolicy, SandboxProvider};
 use serde_json::{Value, json};
 
 pub use approval::{
-    ASK_SENTENCE, ApprovalPolicy, ApprovalRequest, Approver, NEVER_SENTENCE, NeverApprover,
-    NoApprover, PolicyApprover,
+    ASK_SENTENCE, ApprovalDecision, ApprovalOffers, ApprovalPolicy, ApprovalRequest, Approver,
+    NEVER_SENTENCE, NeverApprover, NoApprover, PolicyApprover,
 };
 pub use broker::{ApprovalAnswer, ApprovalBroker, ApprovalListener, ApprovalPrompt};
 pub use engine::{
@@ -74,7 +93,7 @@ pub use engine::{
 };
 pub use history::{
     APPROVAL_CUSTOM_TYPE, ApprovalEntry, ApprovalHistory, ApprovalRecorder, RecorderSlot,
-    approval_history,
+    SessionGrant, approval_history,
 };
 pub use presets::{CUSTOM_PRESET, KnobDefaults, KnobState, PresetSpec, PresetTable};
 pub use state::PERMISSION_CUSTOM_TYPE;
@@ -91,11 +110,11 @@ pub struct ToolPermissions {
     pub engine: Arc<PermissionEngine>,
     /// Confines bash under that policy.
     pub provider: Arc<dyn SandboxProvider>,
-    /// The modes a call can escalate to, narrowest first; see
-    /// [`reachable_escalation_targets`]. The tools advertise the
-    /// escalation parameters and add the denial hint only for these, so
-    /// when the set is empty the model sees neither.
-    pub escalation_targets: &'static [SandboxMode],
+    /// The standing permission the offer follows.
+    standing: Arc<StandingPermissions>,
+    /// Whether anyone can answer an approval prompt, so escalation is
+    /// offered at all.
+    escalates: bool,
 }
 
 impl std::fmt::Debug for ToolPermissions {
@@ -103,7 +122,7 @@ impl std::fmt::Debug for ToolPermissions {
         f.debug_struct("ToolPermissions")
             .field("engine", &self.engine)
             .field("provider", &self.provider.name())
-            .field("escalation_targets", &self.escalation_targets)
+            .field("escalation_targets", &self.escalation_targets())
             .finish()
     }
 }
@@ -111,20 +130,18 @@ impl std::fmt::Debug for ToolPermissions {
 impl ToolPermissions {
     /// The shipped composition for `standing`: the standard engine whose
     /// approvals go through the session's policy to `answerer`, offering
-    /// the escalations `standing` can reach. The offer is fixed here, so a
-    /// tool built from these permissions keeps its schema for its session.
+    /// the escalations `standing` can reach as it changes.
     pub fn new(
         standing: Arc<StandingPermissions>,
         answerer: Arc<dyn Approver>,
         provider: Arc<dyn SandboxProvider>,
     ) -> Self {
-        let escalation_targets =
-            reachable_escalation_targets(standing.sandbox(), standing.approval());
         let approver = Arc::new(PolicyApprover::new(Arc::clone(&standing), answerer));
         Self {
-            engine: Arc::new(PermissionEngine::standard(standing, approver)),
+            engine: Arc::new(PermissionEngine::standard(Arc::clone(&standing), approver)),
             provider,
-            escalation_targets,
+            standing,
+            escalates: true,
         }
     }
 
@@ -132,16 +149,129 @@ impl ToolPermissions {
     /// one to answer an approval prompt, such as `-p`, where every request
     /// would fail.
     pub fn without_escalation(mut self) -> Self {
-        self.escalation_targets = &[];
+        self.escalates = false;
         self
+    }
+
+    /// The modes a call can escalate to now, narrowest first; see
+    /// [`reachable_escalation_targets`]. The tools advertise the
+    /// escalation parameters and add the denial hint only for these, so
+    /// when the set is empty the model sees neither. A tool's schema takes
+    /// them when it is built, and a session's at each prompt
+    /// ([`refresh_escalation_offer`]); the hint reads them at each call.
+    pub fn escalation_targets(&self) -> &'static [SandboxMode] {
+        if self.escalates {
+            reachable_escalation_targets(self.standing.sandbox(), self.standing.approval())
+        } else {
+            &[]
+        }
     }
 
     /// Whether a call denied under `mode` can still be retried wider, so its
     /// denial carries the escalation hint.
     pub fn offers_escalation_beyond(&self, mode: SandboxMode) -> bool {
-        self.escalation_targets
+        self.escalation_targets()
             .iter()
             .any(|&target| mode.is_widened_by(target))
+    }
+}
+
+/// `tool` with the escalation offer for `targets` when it is one of the
+/// sandboxed tools (`bash`, `write`, `edit`), so a permission switch reaches
+/// its schema; any other tool, or one already offering `targets`, is
+/// returned as it is. `bash`'s description and parameters, and the file
+/// tools' parameters, are rebuilt as [`sandboxed_bash_tool`] and
+/// [`sandbox_file_tools`] build them.
+pub fn refresh_escalation_offer(
+    tool: Arc<bake_agent::AgentTool>,
+    targets: &[SandboxMode],
+) -> Arc<bake_agent::AgentTool> {
+    let strip = |parameters: &Value| {
+        let mut parameters = parameters.clone();
+        if let Some(properties) = parameters
+            .get_mut("properties")
+            .and_then(Value::as_object_mut)
+        {
+            properties.remove("sandbox_permissions");
+            properties.remove("justification");
+        }
+        parameters
+    };
+    let (description, parameters) = match tool.name.as_str() {
+        "bash" => {
+            let background = tool
+                .parameters
+                .get("properties")
+                .and_then(|properties| properties.get("run_in_background"))
+                .is_some();
+            (
+                bash::sandboxed_bash_tool_description(targets, background),
+                bash::sandboxed_bash_tool_parameters(targets, background),
+            )
+        }
+        "write" | "edit" => (
+            tool.description.clone(),
+            with_escalation_parameters(
+                strip(&tool.parameters),
+                targets,
+                fs::FS_SANDBOX_PERMISSIONS_DESCRIPTION,
+                fs::FS_JUSTIFICATION_DESCRIPTION,
+            ),
+        ),
+        _ => return tool,
+    };
+    if description == tool.description && parameters == tool.parameters {
+        return tool;
+    }
+    let mut refreshed = (*tool).clone();
+    refreshed.description = description;
+    refreshed.parameters = parameters;
+    Arc::new(refreshed)
+}
+
+/// What a running session holds of its permission: the preset table, the
+/// standing permission its tools resolve under, and whether anyone can
+/// answer an approval prompt.
+#[derive(Clone)]
+pub struct LivePermission {
+    /// The preset table in force.
+    pub table: PresetTable,
+    /// The standing permission, shared with the session's engine.
+    pub standing: Arc<StandingPermissions>,
+    /// Whether an approval prompt can be answered, as in an interactive or
+    /// RPC session; `-p` cannot.
+    pub can_ask: bool,
+}
+
+impl std::fmt::Debug for LivePermission {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LivePermission")
+            .field("standing", &self.standing)
+            .field("can_ask", &self.can_ask)
+            .finish_non_exhaustive()
+    }
+}
+
+impl LivePermission {
+    /// The modes the tools offer to escalate to now.
+    pub fn escalation_targets(&self) -> &'static [SandboxMode] {
+        if self.can_ask {
+            reachable_escalation_targets(self.standing.sandbox(), self.standing.approval())
+        } else {
+            &[]
+        }
+    }
+
+    /// The `permissions` section as the standing permission states it now
+    /// ([`SessionPermission::prompt_text`]).
+    pub fn prompt_text(&self) -> String {
+        let policy = SandboxPolicy::new(self.standing.sandbox(), self.standing.workspace_root());
+        let approval = if self.can_ask {
+            self.standing.approval()
+        } else {
+            ApprovalPolicy::Never
+        };
+        context::permissions_section_text(&policy, approval)
     }
 }
 
@@ -258,7 +388,8 @@ pub struct SessionPermission {
 
 impl SessionPermission {
     /// The standing permission of the session `session_id` in
-    /// `workspace_root`.
+    /// `workspace_root`, offering the table's full-access preset to an
+    /// approval's full-access answer.
     pub fn standing(
         &self,
         workspace_root: &Path,
@@ -271,6 +402,7 @@ impl SessionPermission {
             workspace_root,
             session_id,
         )
+        .with_full_access_preset(self.table.full_access_preset().map(str::to_owned))
     }
 
     /// The text of the system prompt's `permissions` section for a session

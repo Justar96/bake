@@ -826,6 +826,7 @@ mod tests {
             tones,
             classic,
             lit,
+            mermaid: crate::mermaid::Mermaid::Streaming,
         }
     }
 

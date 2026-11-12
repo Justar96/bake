@@ -352,6 +352,7 @@ mod tests {
             parent_call_id: None,
             reason: "why".into(),
             arguments: "what".into(),
+            ..Default::default()
         }])
     }
 

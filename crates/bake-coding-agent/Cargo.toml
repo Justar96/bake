@@ -28,6 +28,12 @@ serde-saphyr.workspace = true
 reqwest.workspace = true
 # The web fetch's charset decoding (`web::fetch`).
 encoding_rs.workspace = true
+# The `visualize` tool reads a diagram's Mermaid source with the renderer the
+# terminal draws it with (`tools::visualize`); Bake's own crate.
+bake-mermaid.workspace = true
+# Terminal cell widths, for the `visualize` tool's label limit
+# (`tools::visualize`); MIT OR Apache-2.0, already shipped by `bake-tui-view`.
+unicode-width.workspace = true
 regex.workspace = true
 image.workspace = true
 icu_normalizer.workspace = true

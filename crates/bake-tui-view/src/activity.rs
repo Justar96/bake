@@ -57,7 +57,14 @@ const FALLOFF: usize = 2;
 /// Beats the word rests unlit between sweeps.
 const REST: usize = 12;
 
-type Rgb = (u8, u8, u8);
+/// A truecolor value.
+pub type Rgb = (u8, u8, u8);
+
+/// The running turn's resting orange, Bake's accent: the shimmer rests on
+/// it, and the status line's state dot takes it while a turn runs.
+pub const RUNNING: Rgb = (0xf9, 0x73, 0x16);
+/// [`RUNNING`]'s nearest ANSI colour, the shimmer's resting one.
+pub const RUNNING_ANSI: Color = Color::Yellow;
 
 /// What the activity line reports, which decides its colour.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -75,7 +82,7 @@ impl Hue {
     /// The resting colour and the glint the band brightens it toward.
     const fn blend(self) -> (Rgb, Rgb) {
         match self {
-            Self::Running => ((0xf9, 0x73, 0x16), (0xff, 0xf7, 0xed)),
+            Self::Running => (RUNNING, (0xff, 0xf7, 0xed)),
             Self::Compacting => ((0x3b, 0x82, 0xf6), (0xdb, 0xea, 0xfe)),
         }
     }
@@ -83,7 +90,7 @@ impl Hue {
     /// The resting and middle ANSI colours; the brightest step is white.
     const fn ansi(self) -> (Color, Color) {
         match self {
-            Self::Running => (Color::Yellow, Color::LightYellow),
+            Self::Running => (RUNNING_ANSI, Color::LightYellow),
             Self::Compacting => (Color::Blue, Color::LightBlue),
         }
     }
