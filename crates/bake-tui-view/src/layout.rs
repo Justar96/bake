@@ -20,7 +20,14 @@ pub const MIN_TRAY_ROWS: u16 = 3;
 pub struct Needs {
     /// Visual rows the draft wraps to; at least one is drawn.
     pub draft_rows: u16,
-    /// Whether a standing row (the sample agents) is present.
+    /// Whether the bar above the box has something to say: the tasks
+    /// list's or one task's title and keys. Bake: with nothing to say, its
+    /// row goes back to the transcript.
+    pub bar: bool,
+    /// Whether the status line is drawn under everything else.
+    pub status: bool,
+    /// Whether the tasks' standing row is present: while any subagent or
+    /// background shell is reported, or the tray is open.
     pub standing: bool,
     /// Rows a notice wants; zero without one.
     pub notice: u16,
@@ -32,15 +39,16 @@ pub struct Needs {
     pub menu: u16,
     /// Rows the approval panel wants; zero while no request waits.
     pub approval: u16,
-    /// Rows the tray under the controls wants: the agents' or background
-    /// shells' list, or one of them, while it holds the keyboard.
+    /// Rows the tray under the controls wants: the tasks list, or one agent
+    /// or shell, while it holds the keyboard.
     pub tray: u16,
 }
 
 /// Rows granted to each region, top to bottom as drawn: body, gap, the
 /// pending-input panel, the attachments panel, notice, the slash menu,
-/// the approval panel, the bar, which holds the activity and the status line, the box's top
-/// edge, the draft, its bottom edge, the standing row, and the tray.
+/// the approval panel, the bar, the box's top edge, the draft, its bottom
+/// edge, the standing row, the tray, and the status line, always last, so
+/// it holds still while the tasks appear and the tray opens.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Rows {
     pub body: u16,
@@ -56,6 +64,7 @@ pub struct Rows {
     pub bottom_edge: u16,
     pub standing: u16,
     pub tray: u16,
+    pub status: u16,
 }
 
 impl Rows {
@@ -73,23 +82,25 @@ impl Rows {
             + self.bottom_edge
             + self.standing
             + self.tray
+            + self.status
     }
 }
 
 /// Grants rows in claim order: the draft's first row, the approval panel,
 /// which a waiting request needs on screen before it can be answered, the
-/// bar, the box's top
-/// edge and then its bottom edge, the standing row, the tray, which may
-/// take what the body keeps above [`MIN_BODY_ROWS`] and always gets up to
-/// [`MIN_TRAY_ROWS`], the gap,
-/// further draft rows up to [`composer::window_rows`] while the body keeps
+/// bar while it has something to say, the box's top edge and then its
+/// bottom edge, the standing row, the tray, which may take what the body
+/// keeps above [`MIN_BODY_ROWS`] once the status line has its row and
+/// always gets up to [`MIN_TRAY_ROWS`], the status line, the gap, further
+/// draft rows up to [`composer::window_rows`] while the body keeps
 /// [`MIN_BODY_ROWS`], panels such as the notice, and the body last.
 ///
 /// This follows the TypeScript collapse: the gap, the bottom edge, the top
-/// edge, and then the bar give way before the input; the bar holds both the
-/// TypeScript header and status line, so they go together. Claiming the
-/// top edge first means a short terminal loses the open edge, and the box
-/// closes only when both edges have rows.
+/// edge, and then the bar give way before the input. Claiming the top edge
+/// first means a short terminal loses the open edge, and the box closes
+/// only when both edges have rows. Bake: the status line sits under the
+/// tray and gives up its row before the draft, the standing row, and the
+/// tray's minimum do.
 pub fn plan(height: u16, needs: Needs) -> Rows {
     let mut left = height;
     let mut take = |want: u16| {
@@ -99,25 +110,20 @@ pub fn plan(height: u16, needs: Needs) -> Rows {
     };
     let composer = take(1);
     let approval = take(needs.approval);
-    let bar = take(1);
+    let bar = take(u16::from(needs.bar));
     let top_edge = take(1);
     let bottom_edge = take(1);
     let standing = take(u16::from(needs.standing));
+    let chrome = composer + approval + bar + top_edge + bottom_edge + standing;
     let tray = take(
-        needs.tray.min(
-            left_after_body(
-                height,
-                composer + approval + bar + top_edge + bottom_edge + standing,
-            )
-            .max(MIN_TRAY_ROWS),
-        ),
+        needs
+            .tray
+            .min(left_after_body(height, chrome + u16::from(needs.status)).max(MIN_TRAY_ROWS)),
     );
+    let status = take(u16::from(needs.status));
     let gap = take(1);
     let extra = needs.draft_rows.clamp(1, composer::window_rows(height)) - 1;
-    let more = take(extra.min(left_after_body(
-        height,
-        composer + approval + bar + top_edge + bottom_edge + standing + tray + gap,
-    )));
+    let more = take(extra.min(left_after_body(height, chrome + tray + status + gap)));
     let notice = take(needs.notice);
     let menu = take(needs.menu);
     // Pending input claims before attachments, as the TypeScript panels do.
@@ -138,6 +144,7 @@ pub fn plan(height: u16, needs: Needs) -> Rows {
         bottom_edge,
         standing,
         tray,
+        status,
     }
 }
 
@@ -150,9 +157,12 @@ fn left_after_body(height: u16, claimed: u16) -> u16 {
 mod tests {
     use super::*;
 
+    /// The composer's scope: no bar, the status line, and a standing row.
     fn needs(draft_rows: u16) -> Needs {
         Needs {
             draft_rows,
+            bar: false,
+            status: true,
             standing: true,
             notice: 1,
             pending: 0,
@@ -167,37 +177,98 @@ mod tests {
     fn the_plan_fills_the_height_exactly_and_bounds_the_draft() {
         for height in 0..80 {
             for draft in 1..20 {
-                let rows = plan(height, needs(draft));
-                assert_eq!(rows.total(), height, "{height} rows, {draft} draft rows");
-                assert!(rows.composer <= composer::window_rows(height).max(1));
+                for bar in [false, true] {
+                    let rows = plan(
+                        height,
+                        Needs {
+                            bar,
+                            ..needs(draft)
+                        },
+                    );
+                    assert_eq!(rows.total(), height, "{height} rows, {draft} draft rows");
+                    assert!(rows.composer <= composer::window_rows(height).max(1));
+                }
             }
         }
     }
 
     #[test]
     fn short_terminals_give_up_chrome_in_the_typescript_order() {
-        // Each row of height adds the next claimant: composer, bar, top edge,
-        // bottom edge, standing row, gap, then the notice.
-        let shown = |height| {
-            let r = plan(height, needs(1));
+        // Each row of height adds the next claimant: composer, top edge,
+        // bottom edge, standing row, status line, gap, then the notice.
+        let shown = |height, bar| {
+            let r = plan(height, Needs { bar, ..needs(1) });
             [
                 r.composer,
                 r.bar,
                 r.top_edge,
                 r.bottom_edge,
                 r.standing,
+                r.status,
                 r.gap,
                 r.notice,
                 r.body,
             ]
         };
-        assert_eq!(shown(1), [1, 0, 0, 0, 0, 0, 0, 0]);
-        assert_eq!(shown(2), [1, 1, 0, 0, 0, 0, 0, 0]);
-        assert_eq!(shown(3), [1, 1, 1, 0, 0, 0, 0, 0]);
-        assert_eq!(shown(4), [1, 1, 1, 1, 0, 0, 0, 0]);
-        assert_eq!(shown(6), [1, 1, 1, 1, 1, 1, 0, 0]);
-        assert_eq!(shown(7), [1, 1, 1, 1, 1, 1, 1, 0]);
-        assert_eq!(shown(8), [1, 1, 1, 1, 1, 1, 1, 1]);
+        assert_eq!(shown(1, false), [1, 0, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(shown(2, false), [1, 0, 1, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(shown(3, false), [1, 0, 1, 1, 0, 0, 0, 0, 0]);
+        assert_eq!(shown(4, false), [1, 0, 1, 1, 1, 0, 0, 0, 0]);
+        assert_eq!(shown(5, false), [1, 0, 1, 1, 1, 1, 0, 0, 0]);
+        assert_eq!(shown(6, false), [1, 0, 1, 1, 1, 1, 1, 0, 0]);
+        assert_eq!(shown(7, false), [1, 0, 1, 1, 1, 1, 1, 1, 0]);
+        assert_eq!(shown(8, false), [1, 0, 1, 1, 1, 1, 1, 1, 1]);
+        // A bar with something to say claims right after the draft, as the
+        // TypeScript header does.
+        assert_eq!(shown(2, true), [1, 1, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(shown(6, true), [1, 1, 1, 1, 1, 1, 0, 0, 0]);
+    }
+
+    // Bake: the status line is the last row whenever it is drawn, and on a
+    // short terminal it gives up its row before the draft, the box, the
+    // standing row, and the tray's minimum do.
+    #[test]
+    fn the_status_line_yields_before_the_draft_the_standing_row_and_the_tray_minimum() {
+        for height in 0..60 {
+            for tray in [0, 1, 2, 3, 4, 10, 40] {
+                for bar in [false, true] {
+                    for standing in [false, true] {
+                        let rows = plan(
+                            height,
+                            Needs {
+                                tray,
+                                bar,
+                                standing,
+                                ..needs(3)
+                            },
+                        );
+                        let case = format!("{height} rows, tray {tray}, bar {bar}, {standing}");
+                        assert_eq!(rows.total(), height, "{case}");
+                        assert!(rows.status <= 1, "{case}");
+                        if rows.status > 0 {
+                            assert_eq!(
+                                (rows.composer.min(1), rows.top_edge, rows.bottom_edge),
+                                (1, 1, 1),
+                                "{case}"
+                            );
+                            assert_eq!(rows.standing, u16::from(standing), "{case}");
+                            assert!(rows.tray >= tray.min(MIN_TRAY_ROWS), "{case}");
+                        }
+                        let before =
+                            1 + u16::from(bar) + 2 + u16::from(standing) + tray.min(MIN_TRAY_ROWS);
+                        assert_eq!(rows.status, u16::from(height > before), "{case}");
+                    }
+                }
+            }
+        }
+        let rows = plan(
+            5,
+            Needs {
+                status: false,
+                ..needs(1)
+            },
+        );
+        assert_eq!((rows.status, rows.gap), (0, 1));
     }
 
     #[test]
@@ -220,9 +291,17 @@ mod tests {
                 ..needs(4)
             },
         );
-        assert_eq!((rows.composer, rows.approval, rows.bar), (1, 3, 1));
+        assert_eq!(
+            (
+                rows.composer,
+                rows.approval,
+                rows.top_edge,
+                rows.bottom_edge
+            ),
+            (1, 3, 1, 1)
+        );
         assert_eq!(rows.total(), 6);
-        assert_eq!(rows.body, 0);
+        assert_eq!((rows.status, rows.body), (0, 0));
         let rows = plan(
             30,
             Needs {
@@ -240,6 +319,8 @@ mod tests {
             6,
             Needs {
                 draft_rows: 1,
+                bar: false,
+                status: true,
                 standing: false,
                 notice: 0,
                 pending: 0,
@@ -249,7 +330,10 @@ mod tests {
                 tray: 0,
             },
         );
-        assert_eq!((rows.standing, rows.gap, rows.body), (0, 1, 1));
+        assert_eq!(
+            (rows.standing, rows.status, rows.gap, rows.body),
+            (0, 1, 1, 1)
+        );
     }
 
     // Bake: an open tray sits under the controls and leaves the transcript
@@ -259,13 +343,21 @@ mod tests {
     fn a_tray_takes_rows_under_the_controls_and_keeps_the_transcript() {
         for height in 0..80 {
             for tray in 0..40 {
-                let rows = plan(height, Needs { tray, ..needs(1) });
+                // The tray's scopes name themselves on the bar.
+                let rows = plan(
+                    height,
+                    Needs {
+                        tray,
+                        bar: true,
+                        ..needs(1)
+                    },
+                );
                 assert_eq!(rows.total(), height, "{height} rows, tray {tray}");
                 assert!(rows.tray <= tray);
                 // The draft's first row, the bar, both edges, and the
-                // standing row claim before the tray; the gap and the
-                // notice after it.
-                let (before, after) = (5, 2);
+                // standing row claim before the tray; the status line, the
+                // gap, and the notice after it.
+                let (before, after) = (5, 3);
                 if height >= before + MIN_TRAY_ROWS {
                     assert!(
                         rows.tray >= tray.min(MIN_TRAY_ROWS),
@@ -282,9 +374,10 @@ mod tests {
             40,
             Needs {
                 tray: 10,
+                bar: true,
                 ..needs(1)
             },
         );
-        assert_eq!((rows.tray, rows.body), (10, 23));
+        assert_eq!((rows.tray, rows.status, rows.body), (10, 1, 22));
     }
 }

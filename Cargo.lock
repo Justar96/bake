@@ -298,6 +298,7 @@ version = "0.4.4"
 dependencies = [
  "proptest",
  "ratatui-core",
+ "serde_json",
  "unicode-segmentation",
  "unicode-width",
 ]

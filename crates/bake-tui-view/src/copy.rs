@@ -2,9 +2,9 @@
 
 pub const TITLE: &str = "Bake";
 pub const INTRO: &[&str] = &[
-    "Try the native composer and sample-agent views. Models and tools are not connected yet.",
+    "Try the native composer and the sample tasks. Models and tools are not connected yet.",
     "",
-    "Press Ctrl+G to inspect a sample agent. Esc brings you back to your draft.",
+    "Press Ctrl+G to open the sample tasks under the composer. Esc brings you back to your draft.",
 ];
 /// The live banner's words beside the title and version.
 pub const BANNER_TAGLINE: &str = "code, freshly baked";
@@ -26,8 +26,8 @@ pub const TIPS: &[&str] = &[
     "/compact frees context when a long session fills it",
     "/session shows this session's file, tokens, and cost",
     "Ctrl+- undoes an edit to your draft",
+    "Ctrl+O shows every tool call's whole output",
 ];
-pub const HEADER_LIST_HINT: &str = "↑↓ select · Enter inspect · Esc back";
 /// The idle placeholder's parts. The preview has no commands or file
 /// mentions to name, so it names its editing keys instead.
 pub const PLACEHOLDER: &[&str] = &["Type a draft", "Alt+Enter newline", "Ctrl+- undo"];
@@ -38,7 +38,7 @@ pub const PLACEHOLDER_APPROVAL: &[&str] = &["Approval pending"];
 /// is refused with its draft kept or waits for the turn it interrupts.
 pub const PLACEHOLDER_COMPACTING: &[&str] = &["Compacting history… Esc cancels"];
 /// An inspection whose parent draft is empty.
-pub const PLACEHOLDER_INSPECTING: &[&str] = &["Read-only · Esc returns to parent"];
+pub const PLACEHOLDER_INSPECTING: &[&str] = &["Read-only · Esc returns to the tasks"];
 /// Between a placeholder's parts.
 pub const PLACEHOLDER_SEP: &str = " · ";
 pub const HINT_SEND: &str = "Enter sends";
@@ -112,7 +112,7 @@ pub const BRANCH_SUMMARY_CUSTOM: &str = "Summarize with custom prompt";
 pub const BRANCH_SUMMARY_INSTRUCTIONS: &str = "Custom summarization instructions";
 pub const BRANCH_SUMMARY_INSTRUCTIONS_PROMPT: &str =
     "What the summary should focus on; Esc goes back to the choices";
-/// The bar's phase while a branch is summarized, Pi's
+/// The activity's phase while a branch is summarized, Pi's
 /// `BranchSummaryStatusIndicator`; Esc cancels it.
 pub const SUMMARIZING_BRANCH: &str = "summarizing branch";
 /// The transcript row of a cancelled branch summary, Pi's status after
@@ -124,8 +124,14 @@ pub const TREE_BEING_NAVIGATED: &str = "The session tree is being navigated; you
 /// `BranchSummaryMessageComponent` without its expand key.
 pub const BRANCH_SUMMARY_ROW: &str = "[branch] Branch summary";
 /// Phases a sample turn steps through, one every [`PHASE_SECONDS`].
-pub const SAMPLE_PHASES: &[&str] = &["thinking", "writing", "running bash", "running subagent +2"];
-/// The header's word while history is compacted, and the phases it steps through.
+pub const SAMPLE_PHASES: &[&str] = &[
+    "thinking",
+    "writing",
+    "running cargo test",
+    "reading transcript.rs +2",
+];
+/// The activity's word while history is compacted, and the phases it steps
+/// through.
 pub const COMPACTING: &str = "Compacting history";
 /// The build a sample turn's script runs last.
 pub const SAMPLE_COMMAND: &str = "bun run build";
@@ -146,6 +152,9 @@ pub const TOOL_TITLES: &[(&str, &str)] = &[
 ];
 /// Between the parts of a call's status, such as `exit 1 · earlier process`.
 pub const STATUS_SEP: &str = " · ";
+/// After the newest card's count, such as `⋯ 26 more lines · Ctrl+O`, in
+/// the full-screen view until the key is first used: what shows the rest.
+pub const EXPAND_HINT: &str = "Ctrl+O";
 /// Call statuses: work handed to the background; an empty list; a message
 /// handed to an agent; output waited for; a subagent that ran out of
 /// tokens; a job whose end was not seen; a notice about a process before
@@ -161,14 +170,44 @@ pub const ALREADY_FINISHED: &str = "already finished";
 pub const COMPACTING_PHASES: &[&str] = &["preparing", "summarizing", "saving"];
 pub const PHASE_SECONDS: u64 = 4;
 pub const ABOVE: &str = "above";
-/// A result preview's count of the lines it leaves out: `⋯ 4 more lines`.
+/// A result preview's count of the lines it leaves out: `⋯ 4 more lines`,
+/// `⋯ 1 more line`.
 pub const MORE_LINES: &str = "more lines";
-/// A diff's count of the lines between its hunks: `⋯ 40 unmodified lines`.
+pub const MORE_LINE_NOUNS: (&str, &str) = ("more line", MORE_LINES);
+/// A diff's count of the lines between its hunks: `⋯ 40 unmodified lines`,
+/// `⋯ 1 unmodified line`.
 pub const UNMODIFIED: &str = "unmodified lines";
+pub const UNMODIFIED_NOUNS: (&str, &str) = ("unmodified line", UNMODIFIED);
 /// A call's line count when it has no summary of its own: `1 line`, `2 lines`;
 /// also after the count of a call argument's rows left out: `+37 lines`.
 pub const LINE: &str = "line";
 pub const LINES: &str = "lines";
+/// The nouns a card's status counts in, one and many: `5 matches · 2
+/// files`, `13 entries`, `5 results`. A listing's count of the entries it
+/// leaves out is `⋯ 21 more`, a search's `⋯ 3 more matches`.
+pub const LINE_NOUNS: (&str, &str) = (LINE, LINES);
+pub const MATCH_NOUNS: (&str, &str) = ("match", "matches");
+pub const FILE_NOUNS: (&str, &str) = ("file", "files");
+pub const DIRECTORY_NOUNS: (&str, &str) = ("directory", "directories");
+pub const ENTRY_NOUNS: (&str, &str) = ("entry", "entries");
+pub const RESULT_NOUNS: (&str, &str) = ("result", "results");
+pub const MORE: &str = "more";
+/// A card's status when its tool found nothing, read an empty file or
+/// directory, returned only part of what it found, or stopped at its count
+/// limit.
+pub const NO_MATCHES: &str = "no matches";
+pub const NO_PATHS_FOUND: &str = "no files";
+pub const NO_RESULTS: &str = "no results";
+pub const EMPTY: &str = "empty";
+pub const TRUNCATED: &str = "truncated";
+/// A read's status when the image it read never reached the model, and
+/// when its first line was too long to read.
+pub const OMITTED: &str = "omitted";
+pub const LINE_TOO_LONG: &str = "line too long";
+pub const LIMIT_REACHED: &str = "limit reached";
+/// Between an MCP tool's server and its own name on its card:
+/// `github · create_issue`.
+pub const MCP_TOOL_SEP: &str = " · ";
 /// Code mode: the label a `codemode` call draws under, the tool's name as
 /// every call's label is, such as `bash:`; the words of its
 /// head's status, `13 calls · 1 failed · 1 cancelled · took 0.4s` or
@@ -183,9 +222,12 @@ pub const CANCELLED: &str = "cancelled";
 pub const RUNNING: &str = "running";
 pub const TOOK: &str = "took";
 pub const EARLIER_CALLS: &str = "earlier calls";
+pub const EARLIER_CALL_NOUNS: (&str, &str) = ("earlier call", EARLIER_CALLS);
 pub const FULL_OUTPUT: &str = "Full output:";
-/// While reading history, how much lies below: `12 lines below`.
+/// While reading history, how much lies below: `12 lines below`,
+/// `1 line below`.
 pub const LINES_BELOW: &str = "lines below";
+pub const LINES_BELOW_NOUNS: (&str, &str) = ("line below", LINES_BELOW);
 /// The slash menu's words: its key on the box's edge, the count of matches
 /// it leaves out, and its empty state.
 pub const TAB_COMPLETES: &str = "Tab completes";
@@ -232,33 +274,53 @@ pub const IMAGES_WHILE_RUNNING: &str =
     "Wait for the turn to end before sending images. Your draft is kept.";
 /// Ctrl+T in a live session: it starts the preview's sample activity.
 pub const PREVIEW_ONLY: &str = "Sample activity is only in `bake preview`.";
-/// Ctrl+G in a live session that has started no subagents.
-pub const NO_AGENTS: &str =
-    "No subagents yet. With the `subagents` setting on, the model starts them.";
+/// Ctrl+G with no subagent or background shell to list.
+pub const NO_TASKS: &str = "No subagents or background shells yet. With the `subagents` setting on, the model can start subagents.";
 /// The runtime gave prompts back to the draft.
 pub const RETURNED: &str = "Unsent prompts are back in your draft.";
 /// `/tree` or `/fork` put the chosen message into the draft.
 pub const RESTORED: &str = "The chosen message is in your draft; edit it and press Enter to send.";
-/// The header's word for a live turn that ended with an error.
+/// The activity's word for a live turn that ended with an error.
 pub const FAILED_TURN: &str = "Failed";
 /// The phase a runtime turn shows until the runtime names one.
 pub const FIRST_PHASE: &str = "thinking";
+/// The phase while a call runs names what it does, lowercase like
+/// `thinking` after the activity word: `reading transcript.rs`,
+/// `running cargo test`, `searching ctx.effect`, `writing notes.md`,
+/// `editing lib.rs`, `finding *.toml`, `listing src`, `fetching docs.rs`,
+/// `searching the web for ratatui wrap`; an MCP call by its card's
+/// `server · tool`, and any other call by its title in lowercase. `+2`
+/// after it counts the other calls running.
+pub const PHASE_READING: &str = "reading";
+pub const PHASE_RUNNING: &str = "running";
+pub const PHASE_SEARCHING: &str = "searching";
+pub const PHASE_WRITING: &str = "writing";
+pub const PHASE_EDITING: &str = "editing";
+pub const PHASE_FINDING: &str = "finding";
+pub const PHASE_LISTING: &str = "listing";
+pub const PHASE_FETCHING: &str = "fetching";
+pub const PHASE_SEARCHING_WEB: &str = "searching the web";
+pub const PHASE_FOR: &str = "for";
 pub const READ_ONLY: &str =
     "Read-only inspection: input does not reach any agent or your draft. Esc returns.";
 pub const DRAFT_LIMIT: &str = "Draft limit reached; the rest of the input was not added.";
-/// The agents: the standing row's label, the list's subtitle, and what
-/// inspection says about input and the draft.
-pub const AGENTS: &str = "Agents";
-/// The key that opens the agent list, at the right of the agents row.
-pub const AGENTS_KEY: &str = "Ctrl+G";
-/// Background shells: the standing row's key and count word, the list's
-/// subtitle and keys, the shell view's keys, and each job's state words.
-pub const JOBS_KEY: &str = "↓ manage";
-pub const JOBS_RUNNING: &str = "shells running";
-pub const JOBS_TITLE: &str = "Background shells";
-pub const JOBS_SUBTITLE: &str = "They stop when Bake exits.";
-pub const JOBS_LIST_KEYS: &str = "↑↓ select · Enter open · x stop · Esc back";
-pub const JOBS_SHELL_KEYS: &str = "↑↓ PgUp/PgDn scroll · x stop · Esc list";
+/// The tasks beside the conversation, subagents and background shells
+/// ([`crate::tasks`]): the standing row's and the bar's label, live and in
+/// the preview; the key that opens the tray, at the standing row's right;
+/// the list's group labels and their notes; the bar's keys in the list, in
+/// a shell, and in an agent's ledger; and the running count's word.
+pub const TASKS: &str = "Tasks";
+pub const SAMPLE_TASKS: &str = "Sample tasks";
+pub const TASKS_KEY: &str = "Ctrl+G";
+pub const TASKS_AGENTS: &str = "Agents";
+pub const TASKS_SHELLS: &str = "Shells";
+pub const TASKS_SHELLS_NOTE: &str = "they stop when Bake exits";
+pub const TASKS_SAMPLES_NOTE: &str = "samples, nothing runs";
+pub const TASKS_LIST_KEYS: &str = "↑↓ select · Enter open · x stop · Esc back";
+pub const TASKS_SHELL_KEYS: &str = "↑↓ PgUp/PgDn scroll · x stop · Esc back";
+pub const TASKS_LEDGER_KEYS: &str = "Esc back";
+pub const TASK_RUNNING: &str = "running";
+/// Each background shell's state words.
 pub const JOB_RUNNING: &str = "running";
 pub const JOB_STOPPING: &str = "stopping";
 pub const JOB_EXIT: &str = "exit";
@@ -270,14 +332,8 @@ pub const JOB_EARLIER: &str = "earlier";
 pub const JOB_NO_OUTPUT: &str = "No output yet.";
 /// Shown while a first Ctrl+C is armed.
 pub const QUIT: &str = "Press Ctrl-C again to quit";
-pub const AGENTS_SUMMARY: &str = "samples · none running";
-pub const LIST_SUBTITLE: &str = "Fixed examples · nothing is running";
-/// A live session's agent list: its subtitle and the bar's keys, with the
-/// key that stops a working subagent's run.
-pub const LIVE_LIST_SUBTITLE: &str = "Subagents this session started, oldest first";
-pub const LIVE_LIST_HINT: &str = "↑↓ select · Enter inspect · x stop · Esc back";
-/// A subagent's state words and the counts of the agents row, after the
-/// 0.3 terminal's subagent sheet: how its last run ended, then whether it is
+/// A subagent's state words, which the tasks row counts by, after the 0.3
+/// terminal's subagent sheet: how its last run ended, then whether it is
 /// resident.
 pub const AGENT_STARTING: &str = "starting";
 pub const AGENT_WORKING: &str = "working";
@@ -287,28 +343,21 @@ pub const AGENT_UNREADABLE: &str = "unreadable";
 pub const AGENT_DONE: &str = "done";
 pub const AGENT_FAILED: &str = "failed";
 pub const AGENT_STOPPED: &str = "stopped";
-pub const INSPECT_READ_ONLY: &str = "Read only · typing never reaches an agent or your draft";
-pub const INSPECT_PARENT: &str = "Kept unchanged while you inspect";
-/// The inspection ledger's labels, and the sample agents' state.
+/// The inspection ledger's labels.
 pub const LEDGER_ID: &str = "Id";
-pub const LEDGER_ROLE: &str = "Role";
 pub const LEDGER_STATE: &str = "State";
-pub const LEDGER_INPUT: &str = "Input";
-pub const LEDGER_DRAFT: &str = "Draft";
 pub const LEDGER_MODEL: &str = "Model";
 pub const LEDGER_FILE: &str = "File";
 pub const LEDGER_LAST: &str = "Last";
-pub const LEDGER_STATE_VALUE: &str = "Sample · not running";
-pub const INSPECT_KEYS: &str = "Tab agents · Esc draft";
 /// The status line's model field while no model is selected, and the dim
 /// label before the context reading.
 pub const NO_MODEL_FIELD: &str = "no model";
 pub const CONTEXT: &str = "ctx";
 /// The dim label before the status line's prompt-cache reading.
 pub const CACHE: &str = "cache";
-/// The header's word for a sample turn that ran to its end, and for one Esc stopped.
+/// The activity's word for a turn that ran to its end, and for one Esc stopped.
 pub const COMPLETED: &str = "Completed";
-/// The bar's word after a compaction that was the work itself, as `/compact` is.
+/// The activity's word after a compaction that was the work itself, as `/compact` is.
 pub const COMPACTED: &str = "Compacted";
 pub const INTERRUPTED: &str = "Interrupted";
 /// The approval panel's words: its title, before the tool's name; the

@@ -337,7 +337,7 @@ fn the_status_line_reads_the_context_again_while_a_turn_runs() {
     let session = h.port().test_session.upgrade().expect("live session");
     // Once the tool runs, the gate holds the turn and its context stays
     // put; the refresh may come before or after the phase.
-    let mut seen = h.until(|update| update == &RuntimeUpdate::Phase("running gate".into()));
+    let mut seen = h.until(|update| update == &RuntimeUpdate::Phase("gate".into()));
     let usage = session.context_usage().expect("usage");
     assert!(usage.tokens.is_some_and(|tokens| tokens > 0), "{usage:?}");
     let measured = RuntimeUpdate::Status(SessionStatus {
@@ -400,10 +400,12 @@ fn an_idle_job_notice_opens_a_turn_that_shows_it() {
             Row::Call {
                 tool: "Bash".into(),
                 argument: "make".into(),
+                fields: Vec::new(),
                 id: Some("bash-1".into()),
                 state: CallState::Done,
                 summary: Some("exit 0".into()),
                 output: Vec::new(),
+                full_output_path: None,
             },
             Row::Answer("Noted.".into()),
         ]
@@ -438,7 +440,7 @@ fn a_tool_call_runs_and_settles_in_the_turn_it_belongs_to() {
         update,
         RuntimeUpdate::Live(rows) if rows.iter().any(|row| matches!(row, Row::Call { state: CallState::Running, .. }))
     )));
-    assert!(updates.contains(&RuntimeUpdate::Phase("running echo".into())));
+    assert!(updates.contains(&RuntimeUpdate::Phase("echo".into())));
     assert_eq!(
         committed(&updates),
         [
@@ -447,10 +449,12 @@ fn a_tool_call_runs_and_settles_in_the_turn_it_belongs_to() {
             Row::Call {
                 tool: "Echo".into(),
                 argument: String::new(),
+                fields: Vec::new(),
                 id: None,
                 state: CallState::Done,
                 summary: None,
                 output: vec!["echoed".into(), "line two".into()],
+                full_output_path: None,
             },
             Row::Answer("Done.".into()),
         ]
@@ -544,7 +548,7 @@ fn a_steer_joins_the_running_turn_at_its_next_step_and_leaves_the_panel() {
         faux_assistant_message("steered").into(),
     ]);
     h.submit(Submission::FollowUp("start".into()));
-    h.until(|update| update == &RuntimeUpdate::Phase("running gate".into()));
+    h.until(|update| update == &RuntimeUpdate::Phase("gate".into()));
     h.submit(Submission::Steer("turn left".into()));
     h.until(|update| {
         update
@@ -577,7 +581,7 @@ fn a_cancel_during_a_tool_returns_waiting_prompts_to_the_draft_and_interrupts_th
         .into(),
     ]);
     h.submit(Submission::FollowUp("long".into()));
-    h.until(|update| update == &RuntimeUpdate::Phase("running gate".into()));
+    h.until(|update| update == &RuntimeUpdate::Phase("gate".into()));
     h.submit(Submission::Steer("queued".into()));
     h.until(|update| matches!(update, RuntimeUpdate::Pending(items) if !items.is_empty()));
     h.port().request(Request::Cancel);
@@ -633,7 +637,7 @@ fn cancellation_after_a_tool_is_interrupted_without_an_aborted_assistant_message
         .into(),
     ]);
     h.submit(Submission::FollowUp("run the tool".into()));
-    h.until(|update| update == &RuntimeUpdate::Phase("running gate".into()));
+    h.until(|update| update == &RuntimeUpdate::Phase("gate".into()));
     gate.notify_one();
     let updates = h.until_turn_end();
     assert_eq!(

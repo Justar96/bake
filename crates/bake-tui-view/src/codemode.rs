@@ -15,12 +15,15 @@
 //!   result's `Wall time` line, so a resumed transcript reads the same.
 //! - The script, numbered and coloured as JavaScript, and the box, marks,
 //!   and gutter of any call.
-//! - No expand key, so every part stays as Pi's collapsed view draws it,
-//!   apart from a failed call's error, which Pi shows only expanded.
+//! - Pi's collapsed view, apart from a failed call's error, which Pi shows
+//!   only expanded. Expanded with the transcript ([`Detail::Full`]), every
+//!   part is drawn whole: the script, every call with its arguments uncut
+//!   and its whole error, and all of the output, each part within
+//!   [`EXPANDED_ROWS`] rows.
 //!
 //! Pi's model-call costs are left out: Bake's code mode has no `models`
 //! (D42). Nothing here keeps a clock, so a running block shows no `Elapsed`
-//! time; the bar's activity carries the seconds.
+//! time; the activity row carries the seconds.
 
 use std::time::Duration;
 
@@ -33,7 +36,7 @@ use crate::copy;
 use crate::editor;
 use crate::shell_output;
 use crate::syntax::{Carry, Lang};
-use crate::transcript::{self, BODY, CallState, Look, RAIL};
+use crate::transcript::{self, BODY, CallState, Detail, EXPANDED_ROWS, Look, RAIL};
 
 /// Script rows the block draws before it counts the rest; Pi's
 /// `CODE_PREVIEW_LINES`.
@@ -167,7 +170,16 @@ fn trimmed(lines: &[String]) -> &[String] {
 }
 
 /// The block's rows: its head, the script, the calls, and the output.
-pub(crate) fn present(script: &Codemode, width: usize, look: Look) -> Vec<Line<'static>> {
+pub(crate) fn present(
+    script: &Codemode,
+    width: usize,
+    look: Look,
+    detail: Detail,
+) -> Vec<Line<'static>> {
+    let limit = |preview: usize| match detail {
+        Detail::Preview => preview,
+        Detail::Full => EXPANDED_ROWS,
+    };
     let quiet = if script.state == CallState::Failed {
         transcript::red(look)
     } else {
@@ -181,15 +193,16 @@ pub(crate) fn present(script: &Codemode, width: usize, look: Look) -> Vec<Line<'
         ]
     };
     let mut lines = head(script, width, look);
-    lines.extend(source(&script.code, width, look, &gutter));
-    let calls = calls(&script.calls, width, look, &gutter);
+    let code_rows = limit(CODE_PREVIEW_LINES);
+    lines.extend(source(&script.code, code_rows, width, look, &gutter));
+    let calls = calls(&script.calls, detail, width, look, &gutter);
     if !calls.is_empty() {
         lines.push(Line::from(gutter()));
         lines.extend(calls);
     }
     // Pi draws no output while the result is partial.
     if script.state != CallState::Running {
-        let output = output(script, width, look, &gutter);
+        let output = output(script, limit(OUTPUT_PREVIEW_LINES), width, look, &gutter);
         if !output.is_empty() {
             lines.push(Line::from(gutter()));
             lines.extend(output);
@@ -308,10 +321,9 @@ fn keep(
         let mut spans = lead();
         spans.push(Span::styled(
             format!(
-                "{} {} {}",
+                "{} {}",
                 look.marks().more,
-                total - limit,
-                copy::MORE_LINES
+                crate::cards::count(total - limit, copy::MORE_LINE_NOUNS)
             ),
             transcript::dim(),
         ));
@@ -320,10 +332,10 @@ fn keep(
     rows
 }
 
-/// The script, numbered and coloured, its first [`CODE_PREVIEW_LINES`]
-/// rows.
+/// The script, numbered and coloured, its first `limit` rows.
 fn source(
     code: &str,
+    limit: usize,
     width: usize,
     look: Look,
     gutter: &dyn Fn() -> Vec<Span<'static>>,
@@ -338,25 +350,17 @@ fn source(
     // Lexed in order, every line drawn, so a comment opened on one line
     // still colours the lines after it.
     let mut carry = Carry::default();
-    keep(
-        &lines,
-        CODE_PREVIEW_LINES,
-        width,
-        column,
-        look,
-        gutter,
-        |i, line| {
-            let runs = transcript::code_runs(line, Some(Lang::TypeScript), &mut carry, look.tones);
-            let mut lead = gutter();
-            lead.push(Span::styled(
-                format!("{:>digits$}  ", i + 1),
-                transcript::dim(),
-            ));
-            let mut rest = gutter();
-            rest.push(transcript::pad(digits + 2));
-            transcript::hang_runs(line, &runs, Style::new(), width, column, lead, rest)
-        },
-    )
+    keep(&lines, limit, width, column, look, gutter, |i, line| {
+        let runs = transcript::code_runs(line, Some(Lang::TypeScript), &mut carry, look.tones);
+        let mut lead = gutter();
+        lead.push(Span::styled(
+            format!("{:>digits$}  ", i + 1),
+            transcript::dim(),
+        ));
+        let mut rest = gutter();
+        rest.push(transcript::pad(digits + 2));
+        transcript::hang_runs(line, &runs, Style::new(), width, column, lead, rest)
+    })
 }
 
 /// A call's mark: a running dot that blinks, a check, a cross, or the
@@ -423,30 +427,23 @@ fn hang_beside(
 
 /// The latest [`CALL_PREVIEW_COUNT`] calls, one row each: its mark, its
 /// name, its arguments, and its duration, and a failed or cancelled call's
-/// first [`ERROR_PREVIEW_ROWS`] rows of error under its name. Earlier calls
-/// are counted above them.
+/// first [`ERROR_PREVIEW_ROWS`] rows of error under its name. Expanded, the
+/// latest calls within [`EXPANDED_ROWS`] rows, each with its arguments
+/// uncut and its whole error. Earlier calls are counted above them.
 fn calls(
     calls: &[NestedCall],
+    detail: Detail,
     width: usize,
     look: Look,
     gutter: &dyn Fn() -> Vec<Span<'static>>,
 ) -> Vec<Line<'static>> {
+    let full = detail == Detail::Full;
     // A count that would stand for one call is that call.
-    let shown = if calls.len() > CALL_PREVIEW_COUNT + 1 {
+    let shown = if !full && calls.len() > CALL_PREVIEW_COUNT + 1 {
         &calls[calls.len() - CALL_PREVIEW_COUNT..]
     } else {
         calls
     };
-    let hidden = calls.len() - shown.len();
-    let mut rows = Vec::new();
-    if hidden > 0 {
-        let mut spans = gutter();
-        spans.push(Span::styled(
-            format!("{} {hidden} {}", look.marks().more, copy::EARLIER_CALLS),
-            transcript::dim(),
-        ));
-        rows.push(Line::from(spans));
-    }
     let names: Vec<String> = shown.iter().map(|call| clean(&call.name)).collect();
     // The arguments of every row start in one column, at most a third of
     // the width wide, so one long name such as an MCP tool's leaves the
@@ -454,7 +451,13 @@ fn calls(
     // `name args`.
     let longest = names.iter().map(|name| name.width()).max().unwrap_or(0);
     let column = (longest + 2).min(width / 3);
-    for (call, name) in shown.iter().zip(names) {
+    // Built from the latest back, so expanded only the calls drawn are.
+    let mut blocks: Vec<Vec<Line<'static>>> = Vec::new();
+    let mut built = 0;
+    for (call, name) in shown.iter().zip(names).rev() {
+        if full && built >= EXPANDED_ROWS {
+            break;
+        }
         let (mark, mark_style) = nested_mark(call.status, look);
         let mut first = gutter();
         first.extend([Span::styled(mark, mark_style), transcript::pad(1)]);
@@ -468,14 +471,12 @@ fn calls(
         first.push(transcript::pad(gap));
         let mut rest = gutter();
         rest.push(transcript::pad(indent - BODY));
-        let mut row = hang_beside(
-            &args_preview(&call.args),
-            width,
-            indent,
-            first,
-            rest.clone(),
-            transcript::dim(),
-        );
+        let args = if full {
+            clean(&call.args)
+        } else {
+            args_preview(&call.args)
+        };
+        let mut row = hang_beside(&args, width, indent, first, rest.clone(), transcript::dim());
         if let Some(duration) = call.duration {
             transcript::ride(
                 &mut row,
@@ -484,10 +485,8 @@ fn calls(
                 width,
             );
         }
-        rows.extend(row);
-        let Some(error) = &call.error else {
-            continue;
-        };
+        let mut rows = row;
+        let error = call.error.as_deref().unwrap_or_default();
         let style = if call.status == NestedStatus::Cancelled {
             transcript::yellow(look)
         } else {
@@ -496,24 +495,49 @@ fn calls(
         let mut under = gutter();
         under.push(transcript::pad(name_at - BODY));
         let lead = || under.clone();
+        let error_rows = if full {
+            EXPANDED_ROWS
+        } else {
+            ERROR_PREVIEW_ROWS
+        };
         rows.extend(keep(
             trimmed(&clean_lines(error)),
-            ERROR_PREVIEW_ROWS,
+            error_rows,
             width,
             name_at,
             look,
             &lead,
             |_, text| transcript::hang(text, width, name_at, lead(), lead(), style),
         ));
+        if full {
+            transcript::clip_rows(&mut rows, EXPANDED_ROWS);
+        }
+        built += rows.len();
+        blocks.push(rows);
     }
+    let hidden = calls.len() - blocks.len();
+    let mut rows = Vec::new();
+    if hidden > 0 {
+        let mut spans = gutter();
+        spans.push(Span::styled(
+            format!(
+                "{} {}",
+                look.marks().more,
+                crate::cards::count(hidden, copy::EARLIER_CALL_NOUNS)
+            ),
+            transcript::dim(),
+        ));
+        rows.push(Line::from(spans));
+    }
+    rows.extend(blocks.into_iter().rev().flatten());
     rows
 }
 
-/// What went back to the model: its first [`OUTPUT_PREVIEW_LINES`] rows, in
-/// red when the script failed, then the file holding all of it when it was
-/// cut.
+/// What went back to the model: its first `limit` rows, in red when the
+/// script failed, then the file holding all of it when it was cut.
 fn output(
     script: &Codemode,
+    limit: usize,
     width: usize,
     look: Look,
     gutter: &dyn Fn() -> Vec<Span<'static>>,
@@ -528,15 +552,9 @@ fn output(
     } else {
         transcript::output_tone(look.tones)
     };
-    let mut rows = keep(
-        lines,
-        OUTPUT_PREVIEW_LINES,
-        width,
-        BODY,
-        look,
-        gutter,
-        |_, line| transcript::hang(line, width, BODY, gutter(), gutter(), style),
-    );
+    let mut rows = keep(lines, limit, width, BODY, look, gutter, |_, line| {
+        transcript::hang(line, width, BODY, gutter(), gutter(), style)
+    });
     if let Some(path) = &script.full_output_path {
         rows.extend(transcript::hang(
             &format!("{} {}", copy::FULL_OUTPUT, clean(path)),

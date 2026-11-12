@@ -1,5 +1,6 @@
-//! Background shells: the row under the composer while any runs, the list
-//! it opens, and one shell's output.
+//! Background shells: the session's shells as the runtime reports them,
+//! and one shell's output. The row under the composer and the list that
+//! show them beside the subagents are [`crate::tasks`]'s.
 //!
 //! The runtime reports every job its session retains
 //! ([`crate::runtime::RuntimeUpdate::Jobs`]), in start order, each with its
@@ -8,15 +9,16 @@
 //! it. The view draws what was reported and asks the runtime to stop a job
 //! ([`crate::state::Effect::StopJob`]); the runtime reports the stop.
 
-use std::ops::Range;
 use std::time::Duration;
 
-use ratatui_core::style::{Color, Modifier, Style};
+use ratatui_core::style::{Modifier, Style};
 use ratatui_core::text::{Line, Span};
+use unicode_width::UnicodeWidthStr;
 
-use crate::activity::{self, Tones};
+use crate::activity;
 use crate::copy;
 use crate::shell_output;
+use crate::tasks;
 use crate::transcript::{self, Look};
 
 /// One background shell as the runtime reported it.
@@ -78,23 +80,6 @@ fn exit_code(detail: Option<&str>) -> Option<i64> {
     detail?.strip_prefix("exit code: ")?.trim().parse().ok()
 }
 
-/// The job's mark and the colour that says how it is doing: running,
-/// stopping, a clean exit, a failing exit or a failure, and a stop.
-fn mark(state: &JobState, classic: bool, tones: Tones) -> Span<'static> {
-    let (round, ascii, color) = match state {
-        JobState::Running => ("●", "*", Color::Cyan),
-        JobState::Stopping => ("◌", "~", Color::Yellow),
-        JobState::Completed(_) if !state.failed() => ("✓", "+", Color::Green),
-        JobState::Completed(_) | JobState::Failed(_) => ("✗", "x", Color::Red),
-        JobState::Killed(_) => ("■", "#", Color::Yellow),
-    };
-    let glyph = if classic { ascii } else { round };
-    match tones {
-        Tones::None => Span::raw(glyph),
-        _ => Span::styled(glyph, Style::new().fg(color)),
-    }
-}
-
 /// The word for how the job is doing: `running`, `stopping`, `exit 0`,
 /// `stopped`, or `failed`.
 pub fn word(state: &JobState) -> String {
@@ -114,169 +99,10 @@ fn dim() -> Style {
     Style::new().add_modifier(Modifier::DIM)
 }
 
-fn accent() -> Style {
-    Style::new().fg(Color::Cyan)
-}
-
-/// `text` cut to `width` cells, with `…` for what was cut.
-fn fit(text: &str, width: usize) -> String {
-    let one_line: String = text
-        .chars()
-        .map(|c| if c.is_control() { ' ' } else { c })
-        .collect();
-    crate::render::fit(&one_line, width)
-}
-
-/// The jobs in the order the list shows them: newest first.
-pub fn shown(jobs: &[BackgroundJob]) -> impl Iterator<Item = &BackgroundJob> {
-    jobs.iter().rev()
-}
-
-/// The selected job: `selected`, else the newest.
-pub fn selected<'a>(
-    jobs: &'a [BackgroundJob],
-    selected: Option<&str>,
-) -> Option<&'a BackgroundJob> {
-    selected
-        .and_then(|id| jobs.iter().find(|job| job.id == id))
-        .or_else(|| shown(jobs).next())
-}
-
-/// The row under the composer: the one running shell's id, command, and
-/// time, or how many run and the newest, with the key that opens the list
-/// on the right while the composer has focus.
-pub fn standing(
-    jobs: &[BackgroundJob],
-    at: Duration,
-    now: Duration,
-    width: usize,
-    look: Look,
-    with_key: bool,
-) -> (Line<'static>, Line<'static>) {
-    let live: Vec<&BackgroundJob> = shown(jobs).filter(|job| job.state.is_live()).collect();
-    let key = key(with_key);
-    let Some((mut spans, time)) = head(&live, at, now, look) else {
-        return (Line::default(), key);
-    };
-    let used = fixed(&spans, &time, &key);
-    spans.push(Span::raw("  "));
-    spans.push(Span::raw(fit(
-        &live[0].command,
-        width.saturating_sub(used).max(1),
-    )));
-    spans.push(Span::styled(time, dim()));
-    (Line::from(spans), key)
-}
-
-/// The cells [`standing`] takes besides the newest shell's command, which
-/// gives way to fit: its mark, the count running, its id and time, and the
-/// key with the gaps between them. None while no shell runs.
-pub fn standing_fixed(
-    jobs: &[BackgroundJob],
-    at: Duration,
-    now: Duration,
-    look: Look,
-    with_key: bool,
-) -> usize {
-    let live: Vec<&BackgroundJob> = shown(jobs).filter(|job| job.state.is_live()).collect();
-    head(&live, at, now, look).map_or(0, |(spans, time)| fixed(&spans, &time, &key(with_key)))
-}
-
-/// The key that opens the list, or nothing.
-fn key(with_key: bool) -> Line<'static> {
-    if with_key {
-        Line::styled(copy::JOBS_KEY, dim())
-    } else {
-        Line::default()
-    }
-}
-
-/// The standing row's spans before the command, and the newest running
-/// shell's time.
-fn head(
-    live: &[&BackgroundJob],
-    at: Duration,
-    now: Duration,
-    look: Look,
-) -> Option<(Vec<Span<'static>>, String)> {
-    let newest = live.first()?;
-    let mut spans = vec![
-        mark(&newest.state, look.classic, look.tones),
-        Span::raw(" "),
-    ];
-    if live.len() > 1 {
-        spans.push(Span::styled(
-            format!("{} {}", live.len(), copy::JOBS_RUNNING),
-            Style::new().add_modifier(Modifier::BOLD),
-        ));
-        spans.push(Span::styled(" · ", dim()));
-    }
-    let time = format!("  {}", activity::format_elapsed(elapsed(newest, at, now)));
-    spans.push(Span::styled(newest.id.clone(), accent()));
-    Some((spans, time))
-}
-
-fn fixed(spans: &[Span<'static>], time: &str, key: &Line<'_>) -> usize {
-    Line::from(spans.to_vec()).width() + time.len() + 2 + key.width() + 2
-}
-
-/// The list of background shells, newest first, the selected one marked,
-/// and the lines that hold the selected one.
-pub fn list(
-    jobs: &[BackgroundJob],
-    selected_id: Option<&str>,
-    at: Duration,
-    now: Duration,
-    width: usize,
-    look: Look,
-) -> (Vec<Line<'static>>, Option<Range<usize>>) {
-    let chosen = selected(jobs, selected_id).map(|job| job.id.clone());
-    let marker = if look.classic { ">" } else { "›" };
-    let mut picked_at = None;
-    let id_cells = shown(jobs).map(|job| job.id.len()).max().unwrap_or(0);
-    let mut lines = vec![Line::styled(format!("  {}", copy::JOBS_SUBTITLE), dim())];
-    for job in shown(jobs) {
-        let picked = chosen.as_deref() == Some(job.id.as_str());
-        if picked {
-            picked_at = Some(lines.len()..lines.len() + 1);
-        }
-        let status = format!(
-            "{:>9}  {:>7}",
-            word(&job.state),
-            activity::format_elapsed(elapsed(job, at, now))
-        );
-        let lead = 2 + 2 + id_cells + 2;
-        let room = width.saturating_sub(lead + status.len() + 2).max(1);
-        let command = fit(&job.command, room);
-        let pad = room.saturating_sub(unicode_width::UnicodeWidthStr::width(command.as_str()));
-        let text_style = if picked {
-            Style::new().add_modifier(Modifier::BOLD)
-        } else {
-            Style::new()
-        };
-        lines.push(Line::from(vec![
-            Span::styled(
-                format!("{} ", if picked { marker } else { " " }),
-                if picked { accent() } else { Style::new() },
-            ),
-            mark(&job.state, look.classic, look.tones),
-            Span::raw(" "),
-            Span::styled(
-                format!("{:<id_cells$}", job.id),
-                if picked { accent() } else { dim() },
-            ),
-            Span::raw("  "),
-            Span::styled(command, text_style),
-            Span::raw(" ".repeat(pad + 2)),
-            Span::styled(status, dim()),
-        ]));
-    }
-    (lines, picked_at)
-}
-
-/// One shell: its id and command, how it is doing, a rule, then its newest
-/// output in at most `height` rows, `scroll` rows up from its end. Returns
-/// the rows and the most `scroll` can be.
+/// One shell: its command, then its state as its row in the tasks list
+/// shows it (its mark and id, and, at the right, its state word and time),
+/// a rule, then its newest output in at most `height` rows, `scroll` rows
+/// up from its end. Returns the rows and the most `scroll` can be.
 pub fn shell(
     job: &BackgroundJob,
     at: Duration,
@@ -286,25 +112,17 @@ pub fn shell(
     scroll: usize,
     look: Look,
 ) -> (Vec<Line<'static>>, usize) {
-    let mut status = vec![
-        Span::raw("  "),
-        mark(&job.state, look.classic, look.tones),
-        Span::raw(" "),
-        Span::raw(word(&job.state)),
-        Span::styled(
-            format!(" · {}", activity::format_elapsed(elapsed(job, at, now))),
-            dim(),
-        ),
-    ];
-    if job.omitted_bytes > 0 {
-        status.push(Span::styled(
-            format!(" · {} {}", copy::JOB_EARLIER, bytes(job.omitted_bytes)),
-            dim(),
-        ));
-    }
     // A long command keeps its first rows, the rest counted at the right of
     // the last, so the output keeps the panel.
-    let mut command = transcript::wrap(job.command.trim_end(), width.saturating_sub(4));
+    // The model writes the command: its escape sequences and other control
+    // characters are taken out, line by line.
+    let command: Vec<String> = job
+        .command
+        .trim_end()
+        .split('\n')
+        .map(|line| shell_output::parse_sgr(line, activity::Tones::None).0)
+        .collect();
+    let mut command = transcript::wrap(&command.join("\n"), width.saturating_sub(4));
     let hidden = command.len().saturating_sub(COMMAND_ROWS);
     command.truncate(COMMAND_ROWS);
     let rows = command.len();
@@ -317,12 +135,13 @@ pub fn shell(
                 Span::styled(part, Style::new().add_modifier(Modifier::BOLD)),
             ];
             if hidden > 0 && i + 1 == rows {
-                spans.push(Span::styled(format!("  +{hidden} {}", copy::LINES), dim()));
+                let count = crate::cards::count(hidden, copy::LINE_NOUNS);
+                spans.push(Span::styled(format!("  +{count}"), dim()));
             }
             Line::from(spans)
         })
         .collect();
-    lines.push(Line::from(status));
+    lines.push(state_row(job, at, now, width, look));
     let family = shell_output::family(&job.command);
     let mut output: Vec<Line<'static>> = Vec::new();
     for line in job.output.trim_end_matches('\n').split('\n') {
@@ -341,13 +160,21 @@ pub fn shell(
         output = vec![Line::styled(format!("  {}", copy::JOB_NO_OUTPUT), dim())];
     }
     // The rule under the header counts the output rows out of view, above
-    // and below, as the composer's edges count its draft's.
+    // and below, as the composer's edges count its draft's, after the size
+    // of the output no longer kept.
     let room = height.saturating_sub(lines.len() + 1);
     let most = output.len().saturating_sub(room);
     let scroll = scroll.min(most);
     let end = output.len() - scroll;
     let start = end.saturating_sub(room);
     let mut counts = Vec::new();
+    if job.omitted_bytes > 0 {
+        counts.push(format!(
+            "{} {}",
+            copy::JOB_EARLIER,
+            bytes(job.omitted_bytes)
+        ));
+    }
     if start > 0 {
         counts.push(format!("+{start} {}", copy::ABOVE));
     }
@@ -357,6 +184,37 @@ pub fn shell(
     lines.push(counted_rule(width, &counts.join(copy::STATUS_SEP), look));
     lines.extend(output.drain(start..end));
     (lines, most)
+}
+
+/// The shell's state as its row in the tasks list draws it: its mark and
+/// id, and its state word and time at the right, ending where the list's
+/// rows do. Short of room, the time, then the word give way whole.
+fn state_row(
+    job: &BackgroundJob,
+    at: Duration,
+    now: Duration,
+    width: usize,
+    look: Look,
+) -> Line<'static> {
+    let end = width.saturating_sub(transcript::RAIL);
+    let lead = vec![
+        Span::raw("  "),
+        tasks::mark(tasks::shell_phase(&job.state), look),
+        Span::raw(" "),
+        Span::raw(tasks::one_line(&job.id)),
+    ];
+    let left = Line::from(lead.clone()).width();
+    let word = word(&job.state);
+    let time = activity::format_elapsed(elapsed(job, at, now));
+    for right in [format!("{word}  {time}"), word] {
+        if left + 2 + right.width() <= end {
+            let mut spans = lead;
+            spans.push(Span::raw(" ".repeat(end - left - right.width())));
+            spans.push(Span::styled(right, dim()));
+            return Line::from(spans);
+        }
+    }
+    Line::from(lead)
 }
 
 /// Command rows the shell view draws before it counts the rest.
@@ -394,6 +252,7 @@ fn bytes(count: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::activity::Tones;
 
     fn job(id: &str, state: JobState) -> BackgroundJob {
         BackgroundJob {
@@ -433,6 +292,13 @@ mod tests {
         let mut job = job("bash-1", JobState::Running);
         job.command = "printf 'a\rb'\r\x07 && echo\x1b".into();
         let at = Duration::ZERO;
+        for width in 0..=16 {
+            let (lines, _) = shell(&job, at, at, width, 8, 0, look());
+            for line in &lines {
+                let shown = text(line);
+                assert!(!shown.chars().any(char::is_control), "{shown:?}");
+            }
+        }
         let (lines, _) = shell(&job, at, at, 12, 8, 0, look());
         assert!(text(&lines[0]).contains("printf"));
     }
@@ -450,61 +316,6 @@ mod tests {
             "stopped"
         );
         assert_eq!(word(&JobState::Failed(Some("spawn".into()))), "failed");
-    }
-
-    #[test]
-    fn the_standing_row_shows_one_shell_or_counts_several() {
-        let at = Duration::ZERO;
-        let mut jobs = vec![job("bash-1", JobState::Running)];
-        let (left, right) = standing(&jobs, at, at, 80, look(), true);
-        assert_eq!(text(&left), "● bash-1  run bash-1  5s");
-        assert_eq!(text(&right), copy::JOBS_KEY);
-        jobs.push(job("bash-2", JobState::Running));
-        jobs.push(job("bash-3", JobState::Completed(None)));
-        let (left, _) = standing(&jobs, at, at, 80, look(), false);
-        assert_eq!(text(&left), "● 2 shells running · bash-2  run bash-2  5s");
-        let finished = vec![job("bash-1", JobState::Killed(None))];
-        assert_eq!(text(&standing(&finished, at, at, 80, look(), true).0), "");
-    }
-
-    #[test]
-    fn the_list_is_newest_first_with_the_selection_marked() {
-        let jobs = vec![
-            job("bash-1", JobState::Completed(Some("exit code: 0".into()))),
-            job("bash-2", JobState::Running),
-        ];
-        let (lines, at) = list(&jobs, None, Duration::ZERO, Duration::ZERO, 60, look());
-        assert_eq!(lines.len(), 3);
-        assert_eq!(at, Some(1..2));
-        assert!(
-            text(&lines[1]).starts_with("› ● bash-2  run bash-2"),
-            "{}",
-            text(&lines[1])
-        );
-        assert!(
-            text(&lines[1]).ends_with("running       5s"),
-            "{}",
-            text(&lines[1])
-        );
-        assert!(
-            text(&lines[2]).starts_with("  ✓ bash-1"),
-            "{}",
-            text(&lines[2])
-        );
-        assert!(text(&lines[2]).contains("exit 0"));
-        let (lines, at) = list(
-            &jobs,
-            Some("bash-1"),
-            Duration::ZERO,
-            Duration::ZERO,
-            60,
-            look(),
-        );
-        assert_eq!(at, Some(2..3));
-        assert!(text(&lines[2]).starts_with("› ✓ bash-1"));
-        for line in &lines {
-            assert!(line.width() <= 60, "{}", text(line));
-        }
     }
 
     // Bake: a long command keeps its first rows with a count of the rest,
@@ -536,6 +347,9 @@ mod tests {
         }
     }
 
+    // The state row reads as the shell's row in the tasks list: its mark
+    // and id, then its word and time at the right, which give way whole on
+    // a narrow tray; the rule says how much earlier output is not kept.
     #[test]
     fn a_shell_shows_its_newest_output_and_scrolls_back() {
         let mut shell_job = job("bash-1", JobState::Running);
@@ -543,10 +357,37 @@ mod tests {
         shell_job.omitted_bytes = 2048;
         let (lines, most) = shell(&shell_job, Duration::ZERO, Duration::ZERO, 40, 8, 0, look());
         assert_eq!(text(&lines[0]), "  $ run bash-1");
-        assert_eq!(text(&lines[1]), "  ● running · 5s · earlier 2.0 KB");
+        assert_eq!(
+            text(&lines[1]),
+            format!("  ● bash-1{}running  5s", " ".repeat(17))
+        );
+        assert!(
+            text(&lines[2]).ends_with(" earlier 2.0 KB · +15 above -"),
+            "{}",
+            text(&lines[2])
+        );
         assert_eq!(lines.len(), 8);
         assert_eq!(text(&lines[7]), "  line 20");
         assert_eq!(most, 15);
+        let row = |width| {
+            let (lines, _) = shell(
+                &shell_job,
+                Duration::ZERO,
+                Duration::ZERO,
+                width,
+                8,
+                0,
+                look(),
+            );
+            text(&lines[1])
+        };
+        assert_eq!(row(25), "  ● bash-1  running  5s");
+        assert_eq!(row(22), "  ● bash-1   running");
+        assert_eq!(row(15), "  ● bash-1");
+        // With no room at all the command wraps a cell to a row, and the
+        // state row still comes after it whole.
+        let (lines, _) = shell(&shell_job, Duration::ZERO, Duration::ZERO, 0, 8, 0, look());
+        assert!(lines.iter().any(|line| text(line) == "  ● bash-1"));
         let (lines, _) = shell(
             &shell_job,
             Duration::ZERO,

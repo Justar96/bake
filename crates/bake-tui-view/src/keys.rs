@@ -90,10 +90,10 @@ impl KeyInput {
 pub enum Scope {
     Anywhere,
     Composer,
-    AgentList,
+    /// The tasks list: subagents and background shells ([`crate::tasks`]).
+    Tasks,
+    /// One agent's read-only ledger.
     Inspect,
-    /// The background shells' list.
-    Jobs,
     /// One background shell's output.
     Shell,
 }
@@ -104,8 +104,9 @@ pub enum Action {
     /// Ctrl+C: the first press arms a quit, a second within
     /// [`crate::state::QUIT_WINDOW`] quits. It never interrupts a turn.
     Quit,
-    /// Ctrl+G: opens the agent list from the composer and closes it again.
-    ToggleAgentList,
+    /// Ctrl+G: opens the tasks list from the composer, its selection on the
+    /// agents, and closes it again.
+    ToggleTasks,
     /// Esc in the composer: stops the activity and dismisses the notice.
     Interrupt,
     ToggleSampleActivity,
@@ -152,18 +153,16 @@ pub enum Action {
     LineEnd,
     SelectPrevious,
     SelectNext,
-    InspectSelected,
+    /// Enter in the tasks list: the selected agent's ledger, or the
+    /// selected shell's output.
+    OpenTask,
+    /// `x` in the tasks list or a shell: ask the runtime to stop the
+    /// selected working agent's run, or the selected running shell.
+    StopTask,
     ReturnToComposer,
-    ReturnToAgentList,
-    /// `x` in the agent list: ask the runtime to stop the selected working
-    /// subagent's run.
-    StopAgent,
-    /// Enter in the background shells' list: that shell's output.
-    OpenJob,
-    /// `x` in the shells' list or a shell: ask the runtime to stop it.
-    StopJob,
-    /// Esc in a shell: back to the list.
-    ReturnToJobs,
+    /// Esc, or Tab, in an agent's ledger, and Esc in a shell: back to the
+    /// tasks list.
+    ReturnToTasks,
     /// Transcript navigation, from the composer.
     PageUp,
     PageDown,
@@ -171,6 +170,8 @@ pub enum Action {
     NextPrompt,
     ToStart,
     ToLatest,
+    /// Ctrl+O: every call card's whole output, or its preview again.
+    ToggleDetail,
 }
 
 /// One row of [`BINDINGS`]: `key` in `scope`, with every modifier in
@@ -208,7 +209,7 @@ pub const BINDINGS: &[Binding] = &[
         K::Char('g'),
         Mods::CTRL,
         Mods::ALT,
-        A::ToggleAgentList,
+        A::ToggleTasks,
     ),
     bind(S::Composer, K::Esc, ANY, ANY, A::Interrupt),
     bind(
@@ -313,6 +314,13 @@ pub const BINDINGS: &[Binding] = &[
     bind(S::Composer, K::Down, Mods::CTRL, ANY, A::NextPrompt),
     bind(S::Composer, K::Home, Mods::CTRL, ANY, A::ToStart),
     bind(S::Composer, K::End, Mods::CTRL, ANY, A::ToLatest),
+    bind(
+        S::Composer,
+        K::Char('o'),
+        Mods::CTRL,
+        Mods::ALT,
+        A::ToggleDetail,
+    ),
     // After Ctrl+↑ and Ctrl+↓, which move the transcript. Alt+↑ sends the
     // waiting prompts, as the oracle's does, so neither arrow moves with Alt.
     bind(S::Composer, K::Up, Mods::ALT, ANY, A::SendPending),
@@ -334,32 +342,43 @@ pub const BINDINGS: &[Binding] = &[
     ),
     bind(S::Composer, K::Home, ANY, ANY, A::LineStart),
     bind(S::Composer, K::End, ANY, ANY, A::LineEnd),
-    bind(S::AgentList, K::Up, ANY, ANY, A::SelectPrevious),
-    bind(S::AgentList, K::Down, ANY, ANY, A::SelectNext),
-    bind(S::AgentList, K::Enter, ANY, ANY, A::InspectSelected),
-    bind(S::AgentList, K::Esc, ANY, ANY, A::ReturnToComposer),
-    bind(S::AgentList, K::Char('x'), ANY, CTRL_ALT, A::StopAgent),
+    // One list holds agents and shells, so Ctrl+G and ↓, which opened
+    // them apart, open it alike, and Esc steps back one view at a time.
+    bind(S::Tasks, K::Up, ANY, ANY, A::SelectPrevious),
+    bind(S::Tasks, K::Down, ANY, ANY, A::SelectNext),
+    bind(S::Tasks, K::Enter, ANY, ANY, A::OpenTask),
+    bind(S::Tasks, K::Char('x'), ANY, CTRL_ALT, A::StopTask),
+    bind(S::Tasks, K::Esc, ANY, ANY, A::ReturnToComposer),
     bind(
-        S::AgentList,
+        S::Tasks,
         K::Char('g'),
         Mods::CTRL,
         Mods::ALT,
         A::ReturnToComposer,
     ),
-    bind(S::Inspect, K::Esc, ANY, ANY, A::ReturnToComposer),
-    bind(S::Inspect, K::Tab, ANY, ANY, A::ReturnToAgentList),
-    bind(S::Jobs, K::Up, ANY, ANY, A::SelectPrevious),
-    bind(S::Jobs, K::Down, ANY, ANY, A::SelectNext),
-    bind(S::Jobs, K::Enter, ANY, ANY, A::OpenJob),
-    bind(S::Jobs, K::Char('x'), ANY, CTRL_ALT, A::StopJob),
-    bind(S::Jobs, K::Esc, ANY, ANY, A::ReturnToComposer),
+    bind(S::Inspect, K::Esc, ANY, ANY, A::ReturnToTasks),
+    bind(S::Inspect, K::Tab, ANY, ANY, A::ReturnToTasks),
+    bind(
+        S::Inspect,
+        K::Char('g'),
+        Mods::CTRL,
+        Mods::ALT,
+        A::ReturnToComposer,
+    ),
     bind(S::Shell, K::Up, ANY, ANY, A::SelectPrevious),
     bind(S::Shell, K::Down, ANY, ANY, A::SelectNext),
     bind(S::Shell, K::PageUp, ANY, ANY, A::PageUp),
     bind(S::Shell, K::PageDown, ANY, ANY, A::PageDown),
     bind(S::Shell, K::End, ANY, ANY, A::ToLatest),
-    bind(S::Shell, K::Char('x'), ANY, CTRL_ALT, A::StopJob),
-    bind(S::Shell, K::Esc, ANY, ANY, A::ReturnToJobs),
+    bind(S::Shell, K::Char('x'), ANY, CTRL_ALT, A::StopTask),
+    bind(S::Shell, K::Esc, ANY, ANY, A::ReturnToTasks),
+    bind(
+        S::Shell,
+        K::Char('g'),
+        Mods::CTRL,
+        Mods::ALT,
+        A::ReturnToComposer,
+    ),
     // Shift+Tab arrives as BackTab, or as Tab with Shift under the keyboard
     // protocol; either cycles the thinking level ahead of completion.
     bind(S::Composer, K::BackTab, ANY, ANY, A::CycleThinking),
@@ -411,13 +430,7 @@ mod tests {
     #[test]
     fn ctrl_c_quits_in_every_scope() {
         let input = KeyInput::new(Key::Char('c'), Mods::CTRL);
-        for scope in [
-            Scope::Composer,
-            Scope::AgentList,
-            Scope::Inspect,
-            Scope::Jobs,
-            Scope::Shell,
-        ] {
+        for scope in [Scope::Composer, Scope::Tasks, Scope::Inspect, Scope::Shell] {
             assert_eq!(action(scope, input), Some(Action::Quit));
         }
     }
@@ -434,26 +447,29 @@ mod tests {
                 action(Scope::Composer, shift_tab),
                 Some(Action::CycleThinking)
             );
-            assert_eq!(action(Scope::AgentList, shift_tab), None);
+            assert_eq!(action(Scope::Tasks, shift_tab), None);
         }
-        assert_eq!(action(Scope::Inspect, tab), Some(Action::ReturnToAgentList));
-        // Ctrl+G opens the agent list and closes it again.
+        // Esc and Tab step back from a ledger to the list; Esc from a shell.
+        let esc = KeyInput::plain(Key::Esc);
+        assert_eq!(action(Scope::Inspect, tab), Some(Action::ReturnToTasks));
+        assert_eq!(action(Scope::Inspect, esc), Some(Action::ReturnToTasks));
+        assert_eq!(action(Scope::Shell, esc), Some(Action::ReturnToTasks));
+        assert_eq!(action(Scope::Tasks, esc), Some(Action::ReturnToComposer));
+        // Ctrl+G opens the tasks list and closes it again from any of its
+        // views.
         let ctrl_g = KeyInput::new(Key::Char('g'), Mods::CTRL);
-        assert_eq!(
-            action(Scope::Composer, ctrl_g),
-            Some(Action::ToggleAgentList)
-        );
-        assert_eq!(
-            action(Scope::AgentList, ctrl_g),
-            Some(Action::ReturnToComposer)
-        );
-        // `x` stops a subagent from the list alone: inspection is read only,
+        assert_eq!(action(Scope::Composer, ctrl_g), Some(Action::ToggleTasks));
+        for scope in [Scope::Tasks, Scope::Inspect, Scope::Shell] {
+            assert_eq!(action(scope, ctrl_g), Some(Action::ReturnToComposer));
+        }
+        // `x` stops a task from the list or a shell: a ledger is read only,
         // and a chorded `x` is not the bare key.
         let x = KeyInput::plain(Key::Char('x'));
-        assert_eq!(action(Scope::AgentList, x), Some(Action::StopAgent));
+        assert_eq!(action(Scope::Tasks, x), Some(Action::StopTask));
+        assert_eq!(action(Scope::Shell, x), Some(Action::StopTask));
         assert_eq!(action(Scope::Inspect, x), None);
         assert_eq!(
-            action(Scope::AgentList, KeyInput::new(Key::Char('x'), Mods::ALT)),
+            action(Scope::Tasks, KeyInput::new(Key::Char('x'), Mods::ALT)),
             None
         );
         // Undo is the unit separator however the terminal names it; Ctrl+Z

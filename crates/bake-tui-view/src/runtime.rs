@@ -124,12 +124,12 @@ pub enum ApprovalAnswer {
 /// One change the runtime reports.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RuntimeUpdate {
-    /// A turn started. The seed fixes the bar's word for the whole turn.
+    /// A turn started. The seed fixes the activity's word for the whole turn.
     TurnStarted { seed: String },
     /// What the running turn is doing now, such as `thinking` or
-    /// `running bash`, for the bar.
+    /// `running cargo test`, for the activity row.
     Phase(String),
-    /// History compaction started: the bar names it in the compaction blue,
+    /// History compaction started: the activity names it in the compaction blue,
     /// with its own clock, and the composer says Esc cancels it. With
     /// `interrupts`, it runs between the running turn's steps, and the
     /// turn shows again on [`RuntimeUpdate::CompactionEnded`]; without, it
@@ -202,7 +202,7 @@ pub enum RuntimeUpdate {
 pub const TREE_BEING_NAVIGATED: &str = crate::copy::TREE_BEING_NAVIGATED;
 
 impl RuntimeUpdate {
-    /// The bar's phase while `/tree` summarizes the branch it leaves, Pi's
+    /// The activity's phase while `/tree` summarizes the branch it leaves, Pi's
     /// `BranchSummaryStatusIndicator`.
     pub fn summarizing_branch() -> Self {
         Self::Phase(crate::copy::SUMMARIZING_BRANCH.to_owned())

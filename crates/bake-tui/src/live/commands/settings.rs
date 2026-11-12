@@ -731,9 +731,14 @@ mod tests {
                 "  │   Auto-compaction starts past 160k of 200k tokens.                       │",
                 "  │ ↑↓ choose · Enter select · Esc cancel                                2/9 │",
                 "  ╰──────────────────────────────────────────────────────────────────────────╯",
-                "                                                                      no model",
+                "╭──────────────────────────────────────────────────────────────────────────────╮",
             ],
             "{text}"
+        );
+        // The status line is the screen's last row, under the box.
+        assert_eq!(
+            screen.last().map(|line| line.trim_end()),
+            Some("  no model")
         );
     }
 

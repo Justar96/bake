@@ -15,3 +15,5 @@ unicode-width.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
+# Reads back the JSON `json::pretty` lays out, in its property tests.
+serde_json.workspace = true

@@ -408,6 +408,8 @@ impl Screen for TerminalSession {
                 let size = self.terminal.size()?;
                 self.terminal.resize(Rect::from(size))?;
             }
+            // Full screen redraws history expanded, so it can name Ctrl+O.
+            state.transcript.offer_expand_hint();
             self.terminal.draw(|frame| render(state, frame))?;
             Ok(())
         })();
