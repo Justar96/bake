@@ -13,6 +13,12 @@
 //! The diagram's boxes take the code block's dim border, its edges the
 //! accent, and its labels the text's own colour. The classic frame draws
 //! the diagram's glyphs in ASCII, cell for cell, so its layout holds.
+//!
+//! A `visualize` call's diagram ([`crate::visual`]) is drawn by the same
+//! path, through [`drawing`] and [`crate::markdown::mermaid_fence`], with
+//! the card's gutter in place of the rail. It ignores [`Mermaid`]: the
+//! model asked to show the diagram, so it always draws, and draws while
+//! its source streams.
 
 use bake_mermaid::{RenderError, Role, render_spans};
 use ratatui_core::style::Style;
@@ -59,7 +65,14 @@ impl Mermaid {
 /// Bytes of source a fence still being written may try, in all, while it
 /// looks for the longest run of lines that renders. Real diagrams are a few
 /// kilobytes at most, so the search reaches every run of them.
-const SEARCH_BYTES: usize = 128 * 1024;
+pub(crate) const SEARCH_BYTES: usize = 128 * 1024;
+
+/// The same budget for a `visualize` diagram, whose source the tool holds
+/// to [`bake_mermaid`]'s 16 KiB. It covers every run a diagram within the
+/// renderer's limits can try: up to about 72 lines of a sequence block
+/// still open, each a prefix of at most 16 KiB, so a diagram that rendered
+/// never draws as source again while it streams.
+pub(crate) const TOOL_SEARCH_BYTES: usize = 2 * 1024 * 1024;
 
 /// What a fence draws.
 pub(crate) enum Drawing {
@@ -81,25 +94,41 @@ pub(crate) fn is_mermaid(info: &str) -> bool {
 /// The fence holding `body` drawn in `width` cells; `closed` when its
 /// closing fence has arrived.
 pub(crate) fn draw(body: &[String], closed: bool, width: usize, look: Look) -> Drawing {
-    let room = width.saturating_sub(RAIL);
     match look.mermaid {
         Mermaid::Off => Drawing::Source(None),
-        _ if closed => match render_spans(&body.join("\n"), room) {
-            Ok(rows) => Drawing::Diagram(lines(rows, look)),
-            Err(error) => Drawing::Source(Some(reason(error, room))),
-        },
-        Mermaid::Final => Drawing::Source(None),
-        Mermaid::Streaming => longest(body, room).map_or(Drawing::Source(None), |rows| {
-            Drawing::Diagram(lines(rows, look))
-        }),
+        Mermaid::Final if !closed => Drawing::Source(None),
+        _ => drawing(body, closed, width, RAIL, SEARCH_BYTES, look),
     }
+}
+
+/// `body` drawn in `width` cells, each line opening with `rail` cells:
+/// when `closed`, the whole of it or why not; else the longest run of its
+/// complete lines that renders, trying at most `budget` bytes of source.
+pub(crate) fn drawing(
+    body: &[String],
+    closed: bool,
+    width: usize,
+    rail: usize,
+    budget: usize,
+    look: Look,
+) -> Drawing {
+    let room = width.saturating_sub(rail);
+    if closed {
+        return match render_spans(&body.join("\n"), room) {
+            Ok(rows) => Drawing::Diagram(lines(rows, rail, look)),
+            Err(error) => Drawing::Source(Some(reason(error, room))),
+        };
+    }
+    longest(body, room, budget).map_or(Drawing::Source(None), |rows| {
+        Drawing::Diagram(lines(rows, rail, look))
+    })
 }
 
 /// The longest run of `body`'s complete lines that renders in `room`
 /// cells. The last line is the one being written, so it is left out.
-fn longest(body: &[String], room: usize) -> Option<Vec<Vec<bake_mermaid::Span>>> {
+fn longest(body: &[String], room: usize, budget: usize) -> Option<Vec<Vec<bake_mermaid::Span>>> {
     let complete = &body[..body.len().saturating_sub(1)];
-    let mut budget = SEARCH_BYTES;
+    let mut budget = budget;
     for end in (1..=complete.len()).rev() {
         // A run that ends in a blank or comment line draws as the shorter
         // run before it does.
@@ -125,13 +154,13 @@ fn reason(error: RenderError, room: usize) -> String {
     }
 }
 
-/// The diagram's rows as lines after the rail, styled by role.
-fn lines(rows: Vec<Vec<bake_mermaid::Span>>, look: Look) -> Vec<Line<'static>> {
+/// The diagram's rows as lines after `rail` cells, styled by role.
+fn lines(rows: Vec<Vec<bake_mermaid::Span>>, rail: usize, look: Look) -> Vec<Line<'static>> {
     let node = transcript::dim();
     let edge = transcript::accent(look.tones);
     rows.into_iter()
         .map(|row| {
-            let mut spans = vec![transcript::pad(RAIL)];
+            let mut spans = vec![transcript::pad(rail)];
             for span in row {
                 let style = match span.role {
                     Role::Node => node,

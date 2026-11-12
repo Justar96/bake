@@ -101,7 +101,7 @@ For example, `bake -t +grep,+find -p "..."` adds `grep` and `find` to the defaul
 
 ## Charts and tables
 
-The `visualize` tool lets the model show you a bar chart, a line chart, or a table in the conversation. It is off by default while its effect on models is measured: turn it on for a run with `bake -t +visualize`, or for every session with `"defaultTools": ["+visualize"]` (`bake docs settings`). It has no side effects, so it needs no approval, and code mode's scripts cannot call it.
+The `visualize` tool lets the model show you a bar chart, a line chart, a table, or a Mermaid diagram in the conversation. It is off by default while its effect on models is measured: turn it on for a run with `bake -t +visualize`, or for every session with `"defaultTools": ["+visualize"]` (`bake docs settings`). It has no side effects, so it needs no approval, and code mode's scripts cannot call it.
 
 The model gives the kind, a title, the column names, the value axis's bounds and unit if the data should not set them, and up to 500 rows of up to 8 columns. The first column labels each row, its category or x; in a chart, the other columns are series of numbers, and `null` marks a missing value. The terminal draws the visual as text while the model is still writing it, and draws it again at the new width after a resize and when a session is resumed:
 
@@ -109,9 +109,11 @@ The model gives the kind, a title, the column names, the value axis's bounds and
 - A line chart is a braille plot ten rows high, with its value axis and the first, middle, and last x labels.
 - A table has box-drawing borders, with numbers aligned right.
 
+For a diagram, the model gives the kind, a title, and its Mermaid source, at most 16 KiB, in place of columns and rows: a flowchart, `sequenceDiagram`, `stateDiagram-v2`, `classDiagram`, or `erDiagram`, in the subset and limits an answer's diagrams have ([Mermaid diagrams](settings.md#mermaid-diagrams)). It is drawn as an answer's Mermaid code block is, with the same colours, the classic frame's ASCII, and, when it is too wide for the screen, its source with a dim line saying why. While the source arrives, the card draws the longest run of its finished lines that draws, so a line being written or a block not yet ended waits; once drawn, it does not turn back into source before the call ends unless the screen narrows. The `markdown.mermaid` setting governs answers only: the model asked to show this diagram, so the card draws it, while it streams too, whatever that setting says.
+
 A chart of several series colours each one and adds a legend. With `NO_COLOR` set, the series are told apart by glyph instead (`█▓▒░` bars, `•×+o` points), and the classic frame draws charts and tables in ASCII (`#` and `=` bars, `*o+x` points, `+-|` borders). A card shows up to 24 rows of its drawing and counts the rest; Ctrl+O shows up to 400. Arguments larger than about 32 KB are drawn once the model has finished them.
 
-The model gets one line back, such as `Shown to the user: bar chart "Build time by crate" (12 rows, 2 series)`, with any warnings, such as values shown as gaps, and never the drawing. A call that breaks a rule, such as a row with the wrong number of values, fails with a message that says what to fix, such as `rows[4] has 3 values; columns has 2`. Only the interactive terminal draws visuals: in print and RPC modes, and in an exported page, the call shows as its arguments.
+The model gets one line back, such as `Shown to the user: bar chart "Build time by crate" (12 rows, 2 series)` or `Shown to the user: diagram "Request flow" (flowchart, 5 nodes, 6 edges)`, with any warnings, such as values shown as gaps or a diagram over 100 columns wide that may show as source on narrow screens, and never the drawing. A call that breaks a rule, such as a row with the wrong number of values, fails with a message that says what to fix, such as `rows[4] has 3 values; columns has 2`; a diagram Bake cannot draw names the line and why, such as `Mermaid line 3 "subgraph api" cannot be drawn: subgraphs are not drawn`, or the limit it passes, such as 16 nodes. Only the interactive terminal draws visuals: in print and RPC modes, and in an exported page, the call shows as its arguments.
 
 ## Web tools
 

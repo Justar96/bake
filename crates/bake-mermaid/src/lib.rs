@@ -2,8 +2,8 @@
 // rust-v0.167.2 (ce21072c90d32c40af7a55b60b2fb35c84a43a6a), under the Apache
 // License, Version 2.0; see this crate's NOTICE.
 // Changed by Bake contributors: the crate documentation below gathers the
-// upstream README's grammar, layout, and limits, and the tests include
-// Bake's property tests.
+// upstream README's grammar, layout, and limits, the tests include Bake's
+// property tests, and `outline` is Bake's own.
 
 //! Bounded, terminal-native Mermaid diagrams as text: Bake's port of
 //! OpenAI Codex's `codex-mermaid`.
@@ -71,7 +71,8 @@
 //!
 //! [`render_spans`] returns lines of semantic [`Role::Node`], [`Role::Edge`],
 //! and [`Role::Text`] spans. Callers apply their own theme; the crate never
-//! emits ANSI escapes.
+//! emits ANSI escapes. [`outline`], Bake's own, says what a diagram holds
+//! and how large it draws when no width limits it.
 
 mod draw;
 mod output;
@@ -141,6 +142,95 @@ pub fn render_spans(source: &str, max_width: usize) -> Result<Vec<Vec<Span>>, Re
         }
         _ => draw::render(&parse::parse(header, body)?, max_width),
     }
+}
+
+/// The diagram families the renderer draws.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Family {
+    /// `flowchart` or `graph`.
+    Flowchart,
+    /// `sequenceDiagram`.
+    Sequence,
+    /// `stateDiagram-v2` or `stateDiagram`.
+    State,
+    /// `classDiagram`.
+    Class,
+    /// `erDiagram`.
+    Entity,
+}
+
+/// What a diagram holds and how large it draws, as [`outline`] reads it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Outline {
+    pub family: Family,
+    /// Its nodes: a flowchart's nodes, a sequence's participants, a state
+    /// diagram's states with its initial and final pseudostates, a class
+    /// diagram's classes, or an ER diagram's entities.
+    pub nodes: usize,
+    /// Its links: a flowchart's edges after expanding `&` groups, a
+    /// sequence's messages, a state diagram's transitions, or a class or ER
+    /// diagram's relationships.
+    pub links: usize,
+    /// The widest of its drawn lines, in display cells, when no width
+    /// limits it.
+    pub width: usize,
+    /// Its drawn lines.
+    pub height: usize,
+}
+
+/// What `source` holds and how large it draws when no width limits it:
+/// [`render_spans`] with no width check, so it fails only with
+/// [`RenderError::Unsupported`] or [`RenderError::Limit`].
+pub fn outline(source: &str) -> Result<Outline, RenderError> {
+    if source.len() > MAX_SOURCE {
+        return Err(RenderError::Limit);
+    }
+    let statements = syntax::statements(source)?;
+    let (header, body) = statements.split_first().ok_or(RenderError::Unsupported)?;
+    let (family, nodes, links, rows) = match *header {
+        "sequenceDiagram" => {
+            let timeline = sequence::parse(body)?;
+            let (nodes, links) = (timeline.participants(), timeline.messages());
+            let rows = sequence::draw(timeline, usize::MAX)?;
+            (Family::Sequence, nodes, links, rows)
+        }
+        "stateDiagram-v2" | "stateDiagram" | "classDiagram" | "erDiagram" => {
+            let family = match *header {
+                "classDiagram" => Family::Class,
+                "erDiagram" => Family::Entity,
+                _ => Family::State,
+            };
+            let graph = relations::parse(header, body)?;
+            let rows = draw::render(&graph, usize::MAX)?;
+            (family, graph.nodes.len(), graph.edges.len(), rows)
+        }
+        _ => {
+            let graph = parse::parse(header, body)?;
+            let rows = draw::render(&graph, usize::MAX)?;
+            (
+                Family::Flowchart,
+                graph.nodes.len(),
+                graph.edges.len(),
+                rows,
+            )
+        }
+    };
+    let width = rows
+        .iter()
+        .map(|row| {
+            row.iter()
+                .map(|span| unicode_width::UnicodeWidthStr::width(span.text.as_str()))
+                .sum::<usize>()
+        })
+        .max()
+        .unwrap_or(0);
+    Ok(Outline {
+        family,
+        nodes,
+        links,
+        width,
+        height: rows.len(),
+    })
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]

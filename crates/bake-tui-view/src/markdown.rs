@@ -57,25 +57,10 @@ pub fn present(text: &str, width: usize, look: Look) -> Vec<Line<'static>> {
             }
             let body = &lines[start..end];
             if mermaid::is_mermaid(info) {
-                match mermaid::draw(body, end < lines.len(), width, look) {
-                    Drawing::Diagram(diagram) => out.extend(diagram),
-                    Drawing::Source(reason) => {
-                        out.extend(code_block(body, info, width, look));
-                        if let Some(reason) = reason {
-                            let rail = vec![transcript::pad(RAIL)];
-                            out.extend(transcript::hang(
-                                &reason,
-                                width,
-                                RAIL,
-                                rail.clone(),
-                                rail,
-                                transcript::dim(),
-                            ));
-                        }
-                    }
-                }
+                let drawing = mermaid::draw(body, end < lines.len(), width, look);
+                out.extend(mermaid_fence(drawing, body, info, width, RAIL, look));
             } else {
-                out.extend(code_block(body, info, width, look));
+                out.extend(code_block(body, info, width, RAIL, look));
             }
             i = (end + 1).min(lines.len());
             continue;
@@ -382,19 +367,57 @@ fn fence_lang(info: &str) -> Option<Lang> {
     }
 }
 
+/// A Mermaid fence's lines in `width` cells, each opening with `rail`
+/// cells, as [`mermaid::drawing`] drew it: its diagram, or its source as
+/// code with one dim line saying why when that is final.
+pub(crate) fn mermaid_fence(
+    drawing: Drawing,
+    body: &[String],
+    info: &str,
+    width: usize,
+    rail: usize,
+    look: Look,
+) -> Vec<Line<'static>> {
+    match drawing {
+        Drawing::Diagram(diagram) => diagram,
+        Drawing::Source(reason) => {
+            let mut out = code_block(body, info, width, rail, look);
+            if let Some(reason) = reason {
+                let lead = vec![transcript::pad(rail)];
+                out.extend(transcript::hang(
+                    &reason,
+                    width,
+                    rail,
+                    lead.clone(),
+                    lead,
+                    transcript::dim(),
+                ));
+            }
+            out
+        }
+    }
+}
+
 /// A fenced block: a top edge naming its language, the code under a bar,
-/// coloured where its language is known, and a bottom edge.
-fn code_block(code: &[String], info: &str, width: usize, look: Look) -> Vec<Line<'static>> {
+/// coloured where its language is known, and a bottom edge, each line
+/// opening with `rail` cells.
+fn code_block(
+    code: &[String],
+    info: &str,
+    width: usize,
+    rail: usize,
+    look: Look,
+) -> Vec<Line<'static>> {
     let colours = palette(look);
     let marks = glyphs(look);
     let label = info.split_whitespace().next().unwrap_or("");
     let mut top = vec![
-        transcript::pad(RAIL),
+        transcript::pad(rail),
         Span::styled(marks.code_top, colours.border),
     ];
     if !label.is_empty() {
         top.push(Span::styled(
-            format!(" {}", fit(label, width.saturating_sub(RAIL + 3))),
+            format!(" {}", fit(label, width.saturating_sub(rail + 3))),
             colours.border.add_modifier(Modifier::ITALIC),
         ));
     }
@@ -402,10 +425,10 @@ fn code_block(code: &[String], info: &str, width: usize, look: Look) -> Vec<Line
     let lang = fence_lang(info);
     let mut carry = Carry::default();
     let lead = vec![
-        transcript::pad(RAIL),
+        transcript::pad(rail),
         Span::styled(marks.bar, colours.border),
     ];
-    let indent = RAIL + marks.bar.width();
+    let indent = rail + marks.bar.width();
     for line in code {
         let runs = transcript::code_runs(line, lang, &mut carry, look.tones);
         lines.extend(transcript::hang_runs(
@@ -419,7 +442,7 @@ fn code_block(code: &[String], info: &str, width: usize, look: Look) -> Vec<Line
         ));
     }
     lines.push(Line::from(vec![
-        transcript::pad(RAIL),
+        transcript::pad(rail),
         Span::styled(marks.code_bottom, colours.border),
     ]));
     lines

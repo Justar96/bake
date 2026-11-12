@@ -1,11 +1,13 @@
 //! Bake's property tests: any source and width is total, and a drawing
 //! fits its width and holds no control characters, so it can never become
-//! a terminal escape sequence.
+//! a terminal escape sequence. [`outline`] agrees with the drawing: it
+//! reads a source exactly when it draws at some width, and its width is the
+//! least that draws.
 
 use proptest::prelude::*;
 use unicode_width::UnicodeWidthStr;
 
-use crate::{RenderError, render_spans};
+use crate::{Family, Outline, RenderError, outline, render_spans};
 
 /// Pieces of Mermaid, valid and not, that random sources are built from.
 const PIECES: &[&str] = &[
@@ -134,6 +136,24 @@ proptest! {
     }
 
     #[test]
+    fn an_outline_reads_what_draws_and_its_width_is_the_least_that_draws(source in sources()) {
+        match (outline(&source), render_spans(&source, usize::MAX)) {
+            (Ok(read), Ok(lines)) => {
+                prop_assert_eq!(read.height, lines.len());
+                prop_assert!(render_spans(&source, read.width).is_ok());
+                if read.width > 0 {
+                    prop_assert_eq!(
+                        render_spans(&source, read.width - 1).err(),
+                        Some(RenderError::TooWide)
+                    );
+                }
+            }
+            (Err(read), Err(drawn)) => prop_assert_eq!(read, drawn),
+            (read, drawn) => prop_assert!(false, "{read:?} but {drawn:?}"),
+        }
+    }
+
+    #[test]
     fn every_prefix_of_a_diagram_is_total(cut in 0usize..2048, width in 0usize..200) {
         // A streamed fence is drawn from prefixes of its source.
         let source = "sequenceDiagram\n    participant A as API\n    loop retry\n        A->>B: ask 请求\n        B-->>A: answer\n    end\n    Note over A,B: done\nflowchart LR\n    A[Start] -->|go| B{ok?} & C([End])";
@@ -146,4 +166,47 @@ proptest! {
             }
         }
     }
+}
+
+#[test]
+fn an_outline_counts_each_familys_nodes_and_links() {
+    let read = |source: &str| outline(source).expect(source);
+    assert_eq!(
+        read("flowchart LR\n    A[Ask] --> B[Plan] & C[Ship]"),
+        Outline {
+            family: Family::Flowchart,
+            nodes: 3,
+            links: 2,
+            width: 27,
+            height: 10,
+        }
+    );
+    let sequence = read(
+        "sequenceDiagram\n    participant U as User\n    U->>Bake: prompt\n    Note over U: wait\n    Bake-->>U: answer",
+    );
+    assert_eq!(
+        (sequence.family, sequence.nodes, sequence.links),
+        (Family::Sequence, 2, 2)
+    );
+    let state = read("stateDiagram-v2\n    [*] --> Idle\n    Idle --> Busy: go\n    Busy --> [*]");
+    assert_eq!(
+        (state.family, state.nodes, state.links),
+        (Family::State, 4, 3)
+    );
+    let class =
+        read("classDiagram\n    class Order {\n        +int id\n    }\n    Order <|-- Rush");
+    assert_eq!(
+        (class.family, class.nodes, class.links),
+        (Family::Class, 2, 1)
+    );
+    let entity = read("erDiagram\n    USER ||--o{ ORDER : places");
+    assert_eq!(
+        (entity.family, entity.nodes, entity.links),
+        (Family::Entity, 2, 1)
+    );
+    assert_eq!(outline("pie title Pets"), Err(RenderError::Unsupported));
+    assert_eq!(
+        outline(&format!("flowchart TD\n{}", "A --> B\n".repeat(25))),
+        Err(RenderError::Limit)
+    );
 }

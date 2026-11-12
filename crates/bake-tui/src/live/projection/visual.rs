@@ -6,11 +6,14 @@
 //! written ([`Args::Streaming`]), or was cut off by an abort or an error
 //! ([`Args::Cut`]), the member being written is the arguments' last: its
 //! array loses its last element, which may itself be cut, such as `12` of
-//! `125`, and a `y` still being written gives no bounds. A visual whose
-//! arguments pass [`PREVIEW_BYTES`] while they stream is drawn only once
-//! they are complete, so the drawing never costs more than that per update.
+//! `125`, and a `y` still being written gives no bounds. A diagram's
+//! `source` still being written keeps only its complete lines, up to its
+//! last newline, and the view draws the longest run of them that renders.
+//! A visual whose arguments pass [`PREVIEW_BYTES`] while they stream is
+//! drawn only once they are complete, so the drawing never costs more than
+//! that per update.
 
-use bake_coding_agent::tools::visualize::{MAX_COLUMNS, MAX_ROWS, VisualKind};
+use bake_coding_agent::tools::visualize::{MAX_COLUMNS, MAX_ROWS, MAX_SOURCE_BYTES, VisualKind};
 use bake_tui_view::visual::{Cell, Kind, Number, Spec, Visual};
 
 use super::*;
@@ -40,6 +43,7 @@ pub(super) fn visual_row(args: &Value, outcome: Outcome, read: Args) -> Row {
     let mut spec = spec(args, read != Args::Complete);
     if too_large {
         spec.rows.clear();
+        spec.source.clear();
     }
     let failed = outcome.state == CallState::Failed;
     Row::Visual(Visual {
@@ -72,6 +76,7 @@ pub fn spec(args: &Value, provisional: bool) -> Spec {
             VisualKind::Bar => Kind::Bar,
             VisualKind::Line => Kind::Line,
             VisualKind::Table => Kind::Table,
+            VisualKind::Diagram => Kind::Diagram,
         });
     let mut columns: Vec<String> = map
         .get("columns")
@@ -110,6 +115,23 @@ pub fn spec(args: &Value, provisional: bool) -> Spec {
     if cut("rows") || rows.len() > MAX_ROWS {
         rows.pop();
     }
+    let partial = cut("source");
+    let mut source = map
+        .get("source")
+        .and_then(Value::as_str)
+        .map(|source| {
+            // Past the tool's limit the renderer draws nothing, so twice
+            // that is enough to show as code.
+            let mut end = source.len().min(2 * MAX_SOURCE_BYTES);
+            while !source.is_char_boundary(end) {
+                end -= 1;
+            }
+            source[..end].to_owned()
+        })
+        .unwrap_or_default();
+    if partial {
+        source.truncate(source.rfind('\n').map_or(0, |at| at + 1));
+    }
     Spec {
         kind,
         title: map.get("title").and_then(text).unwrap_or_default(),
@@ -121,6 +143,8 @@ pub fn spec(args: &Value, provisional: bool) -> Spec {
             .and_then(text)
             .unwrap_or_default(),
         rows,
+        source,
+        partial,
     }
 }
 
@@ -218,6 +242,36 @@ mod tests {
         let y = json!({ "kind": "bar", "columns": ["a", "b"], "y": { "max": 1 } });
         assert_eq!(spec(&y, true).max, None);
         assert_eq!(spec(&y, false).max, Number::new(1.0));
+    }
+
+    #[test]
+    fn a_source_being_written_keeps_its_complete_lines() {
+        let args = json!({
+            "kind": "diagram",
+            "title": "Flow",
+            "source": "flowchart LR\n    A --> B\n    B --",
+        });
+        let whole = spec(&args, false);
+        assert_eq!(whole.kind, Some(Kind::Diagram));
+        assert_eq!(whole.source, "flowchart LR\n    A --> B\n    B --");
+        assert!(!whole.partial);
+        let streamed = spec(&args, true);
+        assert_eq!(streamed.source, "flowchart LR\n    A --> B\n");
+        assert!(streamed.partial);
+        // No newline yet: nothing.
+        let first = json!({ "kind": "diagram", "source": "flowch" });
+        assert_eq!(spec(&first, true).source, "");
+        // A source followed by another member is complete.
+        let before = json!({ "kind": "diagram", "source": "flowchart LR\n    A", "title": "T" });
+        let read = spec(&before, true);
+        assert_eq!(
+            (read.source.as_str(), read.partial),
+            ("flowchart LR\n    A", false)
+        );
+        // A source far past the tool's limit is cut on a character.
+        let long =
+            json!({ "kind": "diagram", "source": format!("a{}", "é".repeat(MAX_SOURCE_BYTES)) });
+        assert_eq!(spec(&long, false).source.len(), MAX_SOURCE_BYTES * 2 - 1);
     }
 
     #[test]

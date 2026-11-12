@@ -1,5 +1,6 @@
 //! A `visualize` call as one transcript block: a bar chart, a line chart,
-//! or a table, drawn from the call's arguments at the width it is given.
+//! a table, or a Mermaid diagram, drawn from the call's arguments at the
+//! width it is given.
 //!
 //! The block reads as any call does: a state mark, the kind of visual as
 //! its title (`Bar chart: Build time by crate`), and a status that counts
@@ -14,6 +15,13 @@
 //! - **Lines** are a braille plot of [`PLOT_ROWS`] rows with a y axis at
 //!   its bounds and middle, and the first, middle, and last x labels.
 //! - **Tables** are drawn in box-drawing borders, numbers aligned right.
+//! - **Diagrams** are drawn as an answer's ```` ```mermaid ```` fence is
+//!   ([`crate::mermaid`]): the same role colours, ASCII under the classic
+//!   frame, and, when the diagram is too wide or cannot be drawn, its source
+//!   as code with a dim line saying why. A diagram whose source is still
+//!   arriving draws the longest run of its complete lines that renders, so
+//!   it never turns back into source. `markdown.mermaid` governs answers
+//!   only: the model asked to show this diagram, so it always draws.
 //!
 //! Series take their colours from [`palette::SERIES`]. Under `NO_COLOR`
 //! they are told apart by glyph instead (`█▓▒░` bars, `•×+o` points), and
@@ -38,6 +46,9 @@ use unicode_width::UnicodeWidthStr;
 use crate::activity::Tones;
 use crate::cards;
 use crate::copy;
+use crate::editor;
+use crate::markdown;
+use crate::mermaid;
 use crate::palette;
 use crate::shell_output;
 use crate::transcript::{
@@ -67,6 +78,7 @@ pub enum Kind {
     Bar,
     Line,
     Table,
+    Diagram,
 }
 
 /// A finite number. A value that is not finite reads as missing, so it
@@ -113,6 +125,12 @@ pub struct Spec {
     pub unit: String,
     /// One row per category or x, in column order.
     pub rows: Vec<Vec<Cell>>,
+    /// A diagram's Mermaid source.
+    pub source: String,
+    /// The arguments may go on: they are still arriving or were cut off,
+    /// so a diagram draws the longest run of its source's complete lines
+    /// that renders, its last line left out as the one being written.
+    pub partial: bool,
 }
 
 /// A `visualize` call and how it stands.
@@ -151,6 +169,7 @@ fn title_of(kind: Option<Kind>) -> &'static str {
         Some(Kind::Bar) => copy::VISUAL_BAR,
         Some(Kind::Line) => copy::VISUAL_LINE,
         Some(Kind::Table) => copy::VISUAL_TABLE,
+        Some(Kind::Diagram) => copy::VISUAL_DIAGRAM,
         None => copy::VISUALIZE,
     }
 }
@@ -279,16 +298,37 @@ fn head(visual: &Visual, width: usize, look: Look) -> Vec<Line<'static>> {
     lines
 }
 
-/// `12 rows · 2 series`, or a table's `4 rows · 3 columns`; nothing until
-/// the kind is known.
+/// `12 rows · 2 series`, a table's `4 rows · 3 columns`, or the family a
+/// diagram's first line names, such as `flowchart`; nothing until the kind
+/// is known.
 fn counts(spec: &Spec) -> Option<String> {
     let kind = spec.kind?;
     let rows = cards::count(spec.rows.len(), copy::ROW_NOUNS);
     let other = match kind {
         Kind::Table => cards::count(columns_of(spec), copy::COLUMN_NOUNS),
         Kind::Bar | Kind::Line => cards::count(series_of(spec), copy::SERIES_NOUNS),
+        Kind::Diagram => return family(&spec.source).map(str::to_owned),
     };
     Some(format!("{rows}{}{other}", copy::STATUS_SEP))
+}
+
+/// The family a diagram's first statement names, as the renderer reads
+/// it: blank lines and `%%` comments skipped, the statement ending at a
+/// `;` or the line's end.
+fn family(source: &str) -> Option<&'static str> {
+    let line = source
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty() && !line.starts_with("%%"))?;
+    let header = line.split(';').next().unwrap_or_default();
+    match header.split_whitespace().next()? {
+        "flowchart" | "graph" => Some(copy::DIAGRAM_FLOWCHART),
+        "sequenceDiagram" => Some(copy::DIAGRAM_SEQUENCE),
+        "stateDiagram-v2" | "stateDiagram" => Some(copy::DIAGRAM_STATE),
+        "classDiagram" => Some(copy::DIAGRAM_CLASS),
+        "erDiagram" => Some(copy::DIAGRAM_ENTITY),
+        _ => None,
+    }
 }
 
 /// The drawing of `spec` at `width`, each row at most `width` cells.
@@ -297,6 +337,7 @@ pub fn draw(spec: &Spec, width: usize, look: Look) -> Vec<Line<'static>> {
         Some(Kind::Bar) => bar_chart(spec, width, look),
         Some(Kind::Line) => line_chart(spec, width, look),
         Some(Kind::Table) => table(spec, width, look),
+        Some(Kind::Diagram) => diagram(spec, width, look),
         None => Vec::new(),
     };
     lines
@@ -1061,6 +1102,36 @@ fn table(spec: &Spec, width: usize, look: Look) -> Vec<Line<'static>> {
     lines
 }
 
+/// A diagram, drawn as an answer's Mermaid fence is but with no rail: the
+/// card's gutter takes its place. Nothing until the source has a line.
+fn diagram(spec: &Spec, width: usize, look: Look) -> Vec<Line<'static>> {
+    if spec.source.trim().is_empty() {
+        return Vec::new();
+    }
+    let clean = editor::sanitize(&spec.source);
+    let mut body: Vec<String> = clean.split('\n').map(transcript::expand_tabs).collect();
+    // A whole source's trailing blank lines draw nothing, so its code
+    // shows none; a partial one's last line is the one being written.
+    while !spec.partial && body.last().is_some_and(|line| line.trim().is_empty()) {
+        body.pop();
+    }
+    let drawing = mermaid::drawing(
+        &body,
+        !spec.partial,
+        width,
+        0,
+        mermaid::TOOL_SEARCH_BYTES,
+        look,
+    );
+    // The projector keeps a partial source to its last newline, so the line
+    // being written is empty: the code leaves it out.
+    let code = match body.split_last() {
+        Some((last, before)) if spec.partial && last.is_empty() => before,
+        _ => &body[..],
+    };
+    markdown::mermaid_fence(drawing, code, "mermaid", width, 0, look)
+}
+
 #[cfg(test)]
 mod tests {
     use proptest::prelude::*;
@@ -1442,6 +1513,264 @@ mod tests {
         assert!(draw(&bar(Vec::new()), 40, COLOUR).is_empty());
     }
 
+    /// A flowchart 26 columns wide: it fits a 60-column card and not a
+    /// 28-column one, whose drawing has 24.
+    const FLOW: &str =
+        "flowchart TD\n    A[Read] -->|ok| B{Valid?}\n    B -->|yes| C[Save]\n    B -. no .-> A";
+
+    fn flow() -> Spec {
+        Spec {
+            kind: Some(Kind::Diagram),
+            title: "Flow".into(),
+            source: FLOW.into(),
+            ..Spec::default()
+        }
+    }
+
+    fn done(spec: Spec) -> Visual {
+        Visual {
+            state: CallState::Done,
+            ..Visual::running(spec)
+        }
+    }
+
+    #[test]
+    fn a_diagram_draws_in_the_card_as_an_answer_draws_its_fence() {
+        let round = [
+            "┌──────────┐",
+            "│ Read     │",
+            "│          ├──ok────┐",
+            "│          ├◄┄┄┄┄┄┄┄╪┄┄┄┐",
+            "└──────────┘        │   ┆",
+            "                    │   ┆",
+            "                    │   ┆",
+            "┌──────────┐        │   ┆",
+            "│ ◇ Valid? │        │   ┆",
+            "│          ├◄───────┘   ┆",
+            "│          ├──yes─────┐ ┆",
+            "│          ├─┄no┄┄┄┄┄┄╪┄┘",
+            "└──────────┘          │",
+            "                      │",
+            "                      │",
+            "┌──────────┐          │",
+            "│ Save     │          │",
+            "│          ├◄─────────┘",
+            "└──────────┘",
+        ];
+        let classic = [
+            "+----------+",
+            "| Read     |",
+            "|          +--ok----+",
+            "|          +<.......+...+",
+            "+----------+        |   :",
+            "                    |   :",
+            "                    |   :",
+            "+----------+        |   :",
+            "| o Valid? |        |   :",
+            "|          +<-------+   :",
+            "|          +--yes-----+ :",
+            "|          +-.no......+.+",
+            "+----------+          |",
+            "                      |",
+            "                      |",
+            "+----------+          |",
+            "| Save     |          |",
+            "|          +<---------+",
+            "+----------+",
+        ];
+        // Too wide for 24 columns: its source, and why, as in an answer.
+        let narrow_round = [
+            "╭─ mermaid",
+            "│ flowchart TD",
+            "│     A[Read] -->|ok|",
+            "│ B{Valid?}",
+            "│     B -->|yes| C[Save]",
+            "│     B -. no .-> A",
+            "╰─",
+            "diagram too wide for 24",
+            "columns; showing source",
+        ];
+        let narrow_classic = [
+            "+- mermaid",
+            "| flowchart TD",
+            "|     A[Read] -->|ok|",
+            "| B{Valid?}",
+            "|     B -->|yes| C[Save]",
+            "|     B -. no .-> A",
+            "+-",
+            "diagram too wide for 24",
+            "columns; showing source",
+        ];
+        for look in [COLOUR, ANSI, PLAIN, CLASSIC] {
+            let (wide, narrow): (&[&str], &[&str]) = if look.classic {
+                (&classic, &narrow_classic)
+            } else {
+                (&round, &narrow_round)
+            };
+            let gutter = format!("  {} ", transcript::gutter(look));
+            let mark = if look.classic { "+" } else { "✓" };
+            for (width, drawing) in [(60, wide), (28, narrow)] {
+                let mut expected = vec![format!("  {mark} Diagram: Flow  flowchart")];
+                expected.extend(
+                    drawing
+                        .iter()
+                        .map(|row| format!("{gutter}{row}").trim_end().to_owned()),
+                );
+                let shown: Vec<String> = card(done(flow()), width, look)
+                    .into_iter()
+                    .map(|row| row.trim_end().to_owned())
+                    .collect();
+                assert_eq!(shown, expected, "{look:?} at {width}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_diagram_takes_the_answers_role_colours() {
+        let answer = crate::markdown::present(&format!("```mermaid\n{FLOW}\n```"), 60, COLOUR);
+        let shown = present(&done(flow()), 60, COLOUR, Detail::Preview);
+        let style = |lines: &[Line<'static>], needle: &str| {
+            let span = lines
+                .iter()
+                .flat_map(|line| &line.spans)
+                .find(|span| span.content.contains(needle))
+                .unwrap_or_else(|| panic!("{needle}"));
+            (span.style.fg, span.style.bg, span.style.add_modifier)
+        };
+        for needle in ["┌──────────┐", "◄───────┘", "Read"]
+        {
+            assert_eq!(style(&shown, needle), style(&answer, needle), "{needle}");
+        }
+        assert_eq!(
+            style(&shown, "◄───────┘").0,
+            Some(transcript::accent(COLOUR.tones).fg.expect("an accent"))
+        );
+        // `NO_COLOR` keeps the boxes dim and the edges uncoloured.
+        let plain = present(&done(flow()), 60, PLAIN, Detail::Preview);
+        assert!(
+            plain
+                .iter()
+                .flat_map(|line| &line.spans)
+                .all(|span| span.style.fg.is_none())
+        );
+        assert_eq!(style(&plain, "┌──────────┐").2, Modifier::DIM);
+    }
+
+    #[test]
+    fn a_diagram_draws_whatever_markdown_mermaid_says() {
+        let shown = card(done(flow()), 60, COLOUR);
+        for mermaid in [crate::mermaid::Mermaid::Off, crate::mermaid::Mermaid::Final] {
+            let look = Look { mermaid, ..COLOUR };
+            assert_eq!(card(done(flow()), 60, look), shown, "{mermaid:?}");
+            let streaming = Visual {
+                streaming: true,
+                ..Visual::running(Spec {
+                    source: format!("{FLOW}\n"),
+                    partial: true,
+                    ..flow()
+                })
+            };
+            assert_eq!(
+                card(streaming, 60, look)[1..],
+                shown[1..],
+                "{mermaid:?} while streaming"
+            );
+        }
+    }
+
+    #[test]
+    fn a_streaming_diagram_never_turns_back_into_source_and_settles_whole() {
+        let source = "sequenceDiagram\n    participant U as User\n    U->>Bake: prompt\n    loop each tool\n        Bake->>Tool: call\n        Tool-->>Bake: result\n    end\n    %% done\n    Bake-->>U: answer\n";
+        for look in [COLOUR, CLASSIC] {
+            for width in [24, 40, 80] {
+                let mut drew = false;
+                let ends = source.char_indices().map(|(at, _)| at).skip(1);
+                for end in ends.chain([source.len()]) {
+                    // The projector keeps a streaming source to its last
+                    // newline.
+                    let cut = &source[..source[..end].rfind('\n').map_or(0, |at| at + 1)];
+                    let spec = Spec {
+                        kind: Some(Kind::Diagram),
+                        source: cut.to_owned(),
+                        partial: true,
+                        ..Spec::default()
+                    };
+                    let drawn = drawn(&spec, width, look);
+                    let source_shown = drawn.first().is_some_and(|row| {
+                        row.starts_with(if look.classic { "+- " } else { "╭─ " })
+                    });
+                    if drew {
+                        assert!(!source_shown, "{width}: turned back at {cut:?}");
+                    }
+                    drew |= !drawn.is_empty() && !source_shown;
+                }
+                // Once the call ends the whole source draws, as its
+                // replay does: the diagram, or, too wide for 24 columns,
+                // its source and why.
+                let fits = bake_mermaid::outline(source).expect("reads").width <= width;
+                let whole = Spec {
+                    kind: Some(Kind::Diagram),
+                    source: source.to_owned(),
+                    ..Spec::default()
+                };
+                let streamed = Spec {
+                    partial: true,
+                    ..whole.clone()
+                };
+                let settled = drawn(&whole, width, look);
+                if fits {
+                    assert_eq!(drawn(&streamed, width, look), settled, "{width}");
+                } else {
+                    assert!(settled.last().is_some_and(|row| row.ends_with("source")));
+                }
+                assert_eq!(fits, width == 80);
+                assert!(drew, "{width}");
+            }
+        }
+        // Until a line renders, the streaming source shows as code; with no
+        // line yet, nothing.
+        let first = Spec {
+            kind: Some(Kind::Diagram),
+            source: "sequenceDiagram\n".into(),
+            partial: true,
+            ..Spec::default()
+        };
+        assert_eq!(
+            drawn(&first, 40, PLAIN),
+            ["╭─ mermaid", "│ sequenceDiagram", "╰─"]
+        );
+        let empty = Spec {
+            source: String::new(),
+            ..first
+        };
+        assert!(drawn(&empty, 40, PLAIN).is_empty());
+    }
+
+    #[test]
+    fn a_tall_diagram_previews_its_first_rows_and_ctrl_o_draws_them_all() {
+        let source = format!(
+            "flowchart TD\n{}",
+            (0..7)
+                .map(|i| format!("    N{i} --> N{}\n", i + 1))
+                .collect::<String>()
+        );
+        let tall = done(Spec {
+            kind: Some(Kind::Diagram),
+            source,
+            ..Spec::default()
+        });
+        let all = draw(&tall.spec, 56, PLAIN).len();
+        assert!(all > PREVIEW_ROWS + 1, "{all}");
+        let preview = card(tall.clone(), 60, PLAIN);
+        assert_eq!(preview.len(), 1 + PREVIEW_ROWS + 1);
+        assert_eq!(
+            preview[PREVIEW_ROWS + 1],
+            format!("  │ ⋯ {} more rows", all - PREVIEW_ROWS)
+        );
+        let full = text(&present(&tall, 60, PLAIN, Detail::Full));
+        assert_eq!(full.len(), 1 + all);
+    }
+
     #[test]
     fn numbers_read_short_on_charts_and_exactly_in_tables() {
         let cases = [
@@ -1598,6 +1927,52 @@ mod tests {
                 max: max.and_then(Number::new),
                 unit,
                 rows,
+                ..Spec::default()
+            })
+    }
+
+    /// Diagram specs: Mermaid sources, valid and not, whole or cut.
+    fn any_diagram() -> impl Strategy<Value = Spec> {
+        const PIECES: &[&str] = &[
+            "flowchart LR\n",
+            "flowchart TD\n",
+            "sequenceDiagram\n",
+            "stateDiagram-v2\n",
+            "classDiagram\n",
+            "erDiagram\n",
+            "A[Read] -->|ok| B{Valid?}\n",
+            "B --> C([Done])\n",
+            "A->>B: hi\n",
+            "B-->>A: 请求\n",
+            "loop retry\n",
+            "end\n",
+            "[*] --> S\n",
+            "class C {\n",
+            "+int id\n",
+            "}\n",
+            "USER ||--o{ ORDER : places\n",
+            "subgraph s\n",
+            "%% note\n",
+            "\t",
+            "\u{1b}[31m",
+            "\r\n",
+            "    ",
+        ];
+        (
+            "\\PC{0,40}",
+            prop_oneof![
+                prop::collection::vec(prop::sample::select(PIECES), 0..30)
+                    .prop_map(|pieces| pieces.concat()),
+                "\\PC{0,200}|[\\x00-\\x1f\\u{1b}\\n a-z>-]{0,80}",
+            ],
+            any::<bool>(),
+        )
+            .prop_map(|(title, source, partial)| Spec {
+                kind: Some(Kind::Diagram),
+                title,
+                source,
+                partial,
+                ..Spec::default()
             })
     }
 
@@ -1608,7 +1983,7 @@ mod tests {
         // control character, in every state.
         #[test]
         fn any_spec_draws_inside_its_width(
-            spec in any_spec(),
+            spec in prop_oneof![any_spec(), any_diagram()],
             width in 1usize..140,
             state in 0usize..3,
             streaming in any::<bool>(),

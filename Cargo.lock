@@ -166,6 +166,7 @@ dependencies = [
  "bake-ai",
  "bake-codemode",
  "bake-mcp",
+ "bake-mermaid",
  "bake-process",
  "bake-sandbox",
  "base64",

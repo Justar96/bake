@@ -1,7 +1,8 @@
 // Adapted from OpenAI Codex codex-rs/mermaid/src/sequence.rs, tag rust-v0.167.2
 // (ce21072c90d32c40af7a55b60b2fb35c84a43a6a), under the Apache License,
 // Version 2.0; see this crate's NOTICE.
-// Bake copies it unchanged but for this notice.
+// Changed by Bake contributors: parsing is split from drawing, so `outline`
+// can count a sequence's participants and messages without drawing it.
 //! Bounded sequence timelines with ordered messages and explicitly nested control fragments.
 
 use super::RenderError;
@@ -32,7 +33,31 @@ enum Event {
     },
 }
 
+/// A parsed sequence: its participants, as id, label, and whether declared,
+/// and its events in order.
+pub(super) struct Timeline {
+    people: Vec<(String, String, bool)>,
+    events: Vec<Event>,
+}
+
+impl Timeline {
+    pub(super) fn participants(&self) -> usize {
+        self.people.len()
+    }
+
+    pub(super) fn messages(&self) -> usize {
+        self.events
+            .iter()
+            .filter(|event| matches!(event, Event::Message { .. }))
+            .count()
+    }
+}
+
 pub(super) fn render(body: &[&str], max_width: usize) -> Result<Vec<Vec<Span>>, RenderError> {
+    draw(parse(body)?, max_width)
+}
+
+pub(super) fn parse(body: &[&str]) -> Result<Timeline, RenderError> {
     let mut people: Vec<(String, String, bool)> = Vec::new();
     let mut events = Vec::new();
     let mut blocks = Vec::new();
@@ -151,6 +176,11 @@ pub(super) fn render(body: &[&str], max_width: usize) -> Result<Vec<Vec<Span>>, 
     if !blocks.is_empty() || people.is_empty() {
         return Err(RenderError::Unsupported);
     }
+    Ok(Timeline { people, events })
+}
+
+pub(super) fn draw(timeline: Timeline, max_width: usize) -> Result<Vec<Vec<Span>>, RenderError> {
+    let Timeline { people, events } = timeline;
     let name_width = people
         .iter()
         .map(|(_, label, _)| label.width())

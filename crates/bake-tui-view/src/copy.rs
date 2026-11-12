@@ -202,7 +202,15 @@ pub const MORE_ROW_NOUNS: (&str, &str) = ("more row", "more rows");
 pub const VISUAL_BAR: &str = "Bar chart";
 pub const VISUAL_LINE: &str = "Line chart";
 pub const VISUAL_TABLE: &str = "Table";
+pub const VISUAL_DIAGRAM: &str = "Diagram";
 pub const VISUALIZE: &str = "Visualize";
+/// A `visualize` diagram's status: the family its source's first line
+/// names.
+pub const DIAGRAM_FLOWCHART: &str = "flowchart";
+pub const DIAGRAM_SEQUENCE: &str = "sequence diagram";
+pub const DIAGRAM_STATE: &str = "state diagram";
+pub const DIAGRAM_CLASS: &str = "class diagram";
+pub const DIAGRAM_ENTITY: &str = "ER diagram";
 /// A `visualize` card's status while the model is still writing its data.
 pub const STREAMING: &str = "streaming";
 /// What a `visualize` card draws while arguments too large to redraw on

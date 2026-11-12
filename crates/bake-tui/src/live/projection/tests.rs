@@ -2160,6 +2160,151 @@ fn a_visual_too_large_to_redraw_waits_for_its_arguments() {
     );
 }
 
+/// A `visualize` diagram: a sequence whose `loop` block stays open for
+/// three lines while it streams.
+const DIAGRAM_ARGS: &str = r#"{"kind":"diagram","title":"Turn","source":"sequenceDiagram\n    participant U as User\n    U->>Bake: prompt\n    loop each tool\n        Bake->>Tool: call\n        Tool-->>Bake: result\n    end\n    Bake-->>U: answer"}"#;
+
+/// Whether a diagram card's drawing is its source as code.
+fn shows_source(lines: &[String]) -> bool {
+    lines
+        .first()
+        .is_some_and(|line| line.starts_with("╭─ ") || line.starts_with("+- "))
+}
+
+fn drawn_text(
+    spec: &bake_tui_view::visual::Spec,
+    width: usize,
+    look: bake_tui_view::transcript::Look,
+) -> Vec<String> {
+    bake_tui_view::visual::draw(spec, width, look)
+        .iter()
+        .map(|line| {
+            line.spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect()
+        })
+        .collect()
+}
+
+#[test]
+fn a_diagram_draws_while_its_source_streams_then_settles_and_replays() {
+    let look = bake_tui_view::transcript::Look::default();
+    let mut projector = Projector::default();
+    projector.begin(None);
+    let mut drew = false;
+    let mut shown_lines = 0;
+    let ends: Vec<usize> = DIAGRAM_ARGS
+        .char_indices()
+        .map(|(at, c)| at + c.len_utf8())
+        .collect();
+    // Small chunks, as a provider streams them.
+    for &at in ends.iter().step_by(3) {
+        let rows = live_rows(run(&mut projector, visual_delta(&DIAGRAM_ARGS[..at])));
+        let shown = shown_visual(&rows[0]);
+        assert!(shown.streaming);
+        let lines = drawn_text(&shown.spec, 60, look);
+        if drew {
+            assert!(
+                !shows_source(&lines),
+                "turned back at {}",
+                &DIAGRAM_ARGS[..at]
+            );
+            assert!(
+                lines.len() >= shown_lines,
+                "shrank at {}",
+                &DIAGRAM_ARGS[..at]
+            );
+        }
+        if !lines.is_empty() && !shows_source(&lines) {
+            drew = true;
+            shown_lines = lines.len();
+        }
+    }
+    assert!(drew);
+    let rows = live_rows(run(&mut projector, visual_closed(DIAGRAM_ARGS)));
+    let closed = shown_visual(&rows[0]);
+    assert!(!closed.streaming && !closed.spec.partial);
+    let message = visual_message(DIAGRAM_ARGS, StopReason::ToolUse);
+    run(
+        &mut projector,
+        AgentEvent::MessageEnd {
+            message: Message::Assistant(message.clone()).into(),
+        },
+    );
+    let args = serde_json::from_str::<Value>(DIAGRAM_ARGS).expect("valid");
+    run(&mut projector, start("v", VISUALIZE_TOOL_NAME, args));
+    let text = "Shown to the user: diagram \"Turn\" (sequence diagram, 3 participants, 4 messages). The user can see it; do not repeat the data in prose.";
+    let done = live_rows(run(
+        &mut projector,
+        end("v", VISUALIZE_TOOL_NAME, text, None),
+    ));
+    let settled = shown_visual(&done[0]);
+    assert_eq!(settled.state, CallState::Done);
+    assert_eq!(settled.spec, closed.spec);
+    let logged = tool_result("v", VISUALIZE_TOOL_NAME, text, false, None);
+    let replayed = replay(&[Message::Assistant(message).into(), logged]);
+    assert_eq!(replayed, done);
+    for width in [40, 60, 100] {
+        assert_eq!(
+            bake_tui_view::transcript::present(&done, 0, width, look),
+            bake_tui_view::transcript::present(&replayed, 0, width, look)
+        );
+    }
+    // The tool's error replaces the drawing.
+    let refused = outcome(
+        VISUALIZE_TOOL_NAME,
+        true,
+        &[UserContentBlock::Text(TextContent::new(
+            "Mermaid line 3 \"subgraph api\" cannot be drawn: subgraphs are not drawn",
+        ))],
+        None,
+    );
+    let row = call_row(
+        VISUALIZE_TOOL_NAME,
+        &json!({ "kind": "diagram", "source": "flowchart TD\n    A --> B\n    subgraph api" }),
+        &Labels::new(),
+        refused,
+    );
+    let shown = shown_visual(&row);
+    assert_eq!(shown.state, CallState::Failed);
+    assert_eq!(
+        shown.error,
+        ["Mermaid line 3 \"subgraph api\" cannot be drawn: subgraphs are not drawn"]
+    );
+}
+
+#[test]
+fn an_aborted_diagram_keeps_the_longest_run_that_drew() {
+    let at = DIAGRAM_ARGS.find("Tool-->>").expect("a message");
+    let mut projector = Projector::default();
+    projector.begin(None);
+    let streamed = live_rows(run(&mut projector, visual_delta(&DIAGRAM_ARGS[..at])));
+    let aborted = visual_message(&DIAGRAM_ARGS[..at], StopReason::Aborted);
+    let rows = live_rows(run(
+        &mut projector,
+        AgentEvent::MessageEnd {
+            message: Message::Assistant(aborted.clone()).into(),
+        },
+    ));
+    let cut = shown_visual(&rows[0]);
+    assert_eq!(
+        (cut.state, cut.summary.as_deref(), cut.spec.partial),
+        (CallState::Failed, Some(INTERRUPTED), true)
+    );
+    let look = bake_tui_view::transcript::Look::default();
+    let lines = drawn_text(&cut.spec, 60, look);
+    assert!(!shows_source(&lines));
+    assert_eq!(
+        lines,
+        drawn_text(&shown_visual(&streamed[0]).spec, 60, look)
+    );
+    let Some(RuntimeUpdate::Commit(committed)) = projector.finish().pop() else {
+        panic!("the turn commits");
+    };
+    assert_eq!(replay(&[Message::Assistant(aborted).into()]), committed);
+}
+
 mod visual_properties {
     use bake_tui_view::activity::Tones;
     use bake_tui_view::transcript::{Look, present};
@@ -2202,7 +2347,16 @@ mod visual_properties {
                 .prop_map(|v| serde_json::Number::from_f64(v).map_or(Value::Null, Value::Number)),
             any::<i64>().prop_map(Value::from),
             "\\PC{0,30}|[\\x00-\\x1f\\u{1b}a\\[m]{0,10}".prop_map(Value::from),
-            prop_oneof![Just("bar"), Just("line"), Just("table")].prop_map(Value::from),
+            prop_oneof![Just("bar"), Just("line"), Just("table"), Just("diagram")]
+                .prop_map(Value::from),
+            prop_oneof![
+                Just("flowchart LR\n    A[Ask] --> B{ok?}\n    B --> C([Done])"),
+                Just("sequenceDiagram\n    A->>B: hi\n    loop x\n        B-->>A: 请求\n    end\n"),
+                Just("classDiagram\n    class C {\n        +int id\n    }\n    C <|-- D"),
+                Just("stateDiagram-v2\n    [*] --> S\n    subgraph x\n"),
+                Just("flowchart TD\n\t\u{1b}[31mA --> B\r\n"),
+            ]
+            .prop_map(Value::from),
         ];
         leaf.prop_recursive(4, 64, 8, |inner| {
             prop_oneof![
@@ -2218,6 +2372,7 @@ mod visual_properties {
                             Just("min".to_owned()),
                             Just("max".to_owned()),
                             Just("unit".to_owned()),
+                            Just("source".to_owned()),
                             "[a-z]{1,4}",
                         ],
                         inner,
@@ -2258,6 +2413,44 @@ mod visual_properties {
                 }))
                 .expect("JSON")
             })
+    }
+
+    /// Valid diagram arguments, as the model would write them: random
+    /// flowchart edges or sequence messages, some in a `loop` block.
+    fn diagram_args() -> impl Strategy<Value = String> {
+        let node = prop::sample::select(&["A", "B", "C", "D"][..]);
+        let label = "[a-z]{1,8}";
+        prop_oneof![
+            prop::collection::vec((node.clone(), label, node.clone()), 1..8).prop_map(|edges| {
+                let mut source = "flowchart LR\n".to_owned();
+                for (from, label, to) in edges {
+                    source.push_str(&format!("    {from} -->|{label}| {to}\n"));
+                }
+                source
+            }),
+            (
+                prop::collection::vec((node.clone(), label, node), 1..8),
+                0usize..8,
+            )
+                .prop_map(|(messages, block)| {
+                    let mut source = "sequenceDiagram\n".to_owned();
+                    let open = block.min(messages.len());
+                    for (i, (from, label, to)) in messages.iter().enumerate() {
+                        if i == open {
+                            source.push_str("    loop again\n");
+                        }
+                        source.push_str(&format!("    {from}->>{to}: {label}\n"));
+                    }
+                    if open < messages.len() {
+                        source.push_str("    end\n");
+                    }
+                    source
+                }),
+        ]
+        .prop_map(|source| {
+            serde_json::to_string(&json!({ "kind": "diagram", "source": source.trim_end() }))
+                .expect("JSON")
+        })
     }
 
     fn check_lines(row: &Row, width: usize) -> Result<(), TestCaseError> {
@@ -2313,6 +2506,56 @@ mod visual_properties {
                 let drawn = bake_tui_view::visual::draw(&shown.spec, width, LOOKS[0]).len();
                 prop_assert!(drawn >= lines, "{}", &text[..at]);
                 lines = drawn;
+                check_lines(&live[0], width)?;
+            }
+            run(&mut projector, visual_closed(&text));
+            let message = visual_message(&text, StopReason::ToolUse);
+            run(
+                &mut projector,
+                AgentEvent::MessageEnd {
+                    message: Message::Assistant(message.clone()).into(),
+                },
+            );
+            let args = serde_json::from_str::<Value>(&text).expect("valid");
+            run(&mut projector, start("v", VISUALIZE_TOOL_NAME, args));
+            let live = live_rows(run(&mut projector, end("v", VISUALIZE_TOOL_NAME, "Shown.", None)));
+            let replayed = replay(&[
+                Message::Assistant(message).into(),
+                tool_result("v", VISUALIZE_TOOL_NAME, "Shown.", false, None),
+            ]);
+            prop_assert_eq!(&live, &replayed);
+            for look in LOOKS {
+                prop_assert_eq!(
+                    present(&live, 0, width, look),
+                    present(&replayed, 0, width, look)
+                );
+            }
+        }
+
+        // Every prefix of a valid diagram's arguments draws without a
+        // panic, once drawn never turns back into its source, and once the
+        // call settles reads as the replay draws it.
+        #[test]
+        fn a_streamed_diagram_never_turns_back_and_settles_as_its_replay(
+            text in diagram_args(),
+            width in 16usize..100,
+        ) {
+            let mut projector = Projector::default();
+            projector.begin(None);
+            let mut drew = [false; 4];
+            let ends: Vec<usize> = text
+                .char_indices()
+                .map(|(at, c)| at + c.len_utf8())
+                .collect();
+            for &at in &ends {
+                let live = live_rows(run(&mut projector, visual_delta(&text[..at])));
+                let shown = shown_visual(&live[0]);
+                for (look, drew) in LOOKS.into_iter().zip(&mut drew) {
+                    let lines = super::drawn_text(&shown.spec, width, look);
+                    let source = super::shows_source(&lines);
+                    prop_assert!(!(*drew && source), "{width}: {}", &text[..at]);
+                    *drew |= !lines.is_empty() && !source;
+                }
                 check_lines(&live[0], width)?;
             }
             run(&mut projector, visual_closed(&text));
