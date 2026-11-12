@@ -2,7 +2,10 @@
 //! `packages/coding-agent/src/core/prompt-templates.ts` and
 //! `DefaultResourceLoader.dedupePrompts` in `src/core/resource-loader.ts`
 //! (v1.2.0, revision `06a466935536f8c9bcacb2d5efc0fc021be1bdff`, unchanged
-//! since v1.1.0).
+//! since v1.1.0), with `parseCommandArgs` from v1.5.2 (revision
+//! `b4afdddf44e059c67ccf5097e5317d913521b470`): empty quoted arguments
+//! (v1.3.0, #10867), and apostrophes inside words, backslash-escaped
+//! quotes, and unclosed quotes (#11861).
 //!
 //! # Where prompt templates come from
 //!
@@ -123,32 +126,64 @@ pub struct LoadPromptTemplatesResult {
     pub diagnostics: Vec<PromptTemplateDiagnostic>,
 }
 
-/// Pi's `parseCommandArgs`: parse command arguments respecting single- and
-/// double-quoted strings (bash-style).
+/// Pi's `parseCommandArgs` (v1.5.2): parse command arguments respecting
+/// single- and double-quoted strings (bash-style).
+///
+/// A quote opens only at the start of an argument, so apostrophes inside
+/// words stay text; `""` and `''` are empty arguments. Inside a quoted
+/// argument, a backslash before that argument's quote character gives the
+/// quote; other backslashes stay as typed. A quote with no closing match is
+/// text, and the rest of the input is read again after it. Linear: once a
+/// quote is unclosed, no later argument starts with that quote character,
+/// so the input is read again at most once per quote character.
 pub fn parse_command_args(args_string: &str) -> Vec<String> {
+    let chars: Vec<char> = args_string.chars().collect();
     let mut args = Vec::new();
     let mut current = String::new();
+    // Whether an argument has started, so `""` and `''` are kept.
+    let mut has_token = false;
     let mut in_quote: Option<char> = None;
+    // Where the open quote is, to read an unclosed one again as text.
+    let mut quote_start = 0;
 
-    for ch in args_string.chars() {
+    let mut i = 0;
+    while i < chars.len() {
+        let ch = chars[i];
         if let Some(quote) = in_quote {
-            if ch == quote {
+            if ch == '\\' && chars.get(i + 1) == Some(&quote) {
+                current.push(quote);
+                i += 1;
+            } else if ch == quote {
                 in_quote = None;
             } else {
                 current.push(ch);
             }
-        } else if ch == '"' || ch == '\'' {
+        } else if (ch == '"' || ch == '\'') && !has_token {
             in_quote = Some(ch);
+            quote_start = i;
+            has_token = true;
         } else if is_whitespace(ch) {
-            if !current.is_empty() {
+            if has_token {
                 args.push(std::mem::take(&mut current));
+                has_token = false;
             }
         } else {
             current.push(ch);
+            has_token = true;
         }
+
+        if in_quote.is_some() && i + 1 == chars.len() {
+            // Unclosed: the quote is text, and the rest is read again. The
+            // argument was empty when the quote opened it.
+            in_quote = None;
+            current.clear();
+            current.push(chars[quote_start]);
+            i = quote_start;
+        }
+        i += 1;
     }
 
-    if !current.is_empty() {
+    if has_token {
         args.push(current);
     }
 
@@ -820,7 +855,11 @@ mod tests {
         assert_eq!(parse_command_args(""), Vec::<String>::new());
         assert_eq!(parse_command_args("a  b   c"), args(&["a", "b", "c"]));
         assert_eq!(parse_command_args("a\tb\tc"), args(&["a", "b", "c"]));
-        assert_eq!(parse_command_args("\"\" \" \""), args(&[" "]));
+        // v1.3.0, #10867: "should handle quoted empty string". Empty quotes
+        // keep their position as an empty argument.
+        assert_eq!(parse_command_args("\"\" \" \""), args(&["", " "]));
+        assert_eq!(parse_command_args("a '' c"), args(&["a", "", "c"]));
+        assert_eq!(parse_command_args("a \"\""), args(&["a", ""]));
         assert_eq!(
             parse_command_args("$100 @user #tag"),
             args(&["$100", "@user", "#tag"])
@@ -838,10 +877,48 @@ mod tests {
             args(&["label-2", "Here", "is", "some", "description", "#2."])
         );
         assert_eq!(parse_command_args("a\n\n\tb  c"), args(&["a", "b", "c"]));
+        // v1.5.2, #11861: "should handle escaped quotes inside quoted
+        // strings". A backslash escapes the enclosing quote character inside
+        // a quoted argument; other backslashes stay, so paths keep them.
         assert_eq!(
             parse_command_args("\"quoted \\\"text\\\"\""),
-            args(&["quoted \\text\\"])
+            args(&["quoted \"text\""])
         );
+        assert_eq!(
+            parse_command_args("'it\\'s here' next"),
+            args(&["it's here", "next"])
+        );
+        assert_eq!(
+            parse_command_args("\"C:\\dir\\file\" '\\\\server\\share'"),
+            args(&["C:\\dir\\file", "\\\\server\\share"])
+        );
+        assert_eq!(
+            parse_command_args("\"it's\" 'a\\\"b'"),
+            args(&["it's", "a\\\"b"])
+        );
+        // Outside quotes a backslash is literal.
+        assert_eq!(parse_command_args("say \\\"hi"), args(&["say", "\\\"hi"]));
+        // "should keep apostrophes inside words"
+        assert_eq!(
+            parse_command_args("why doesn't the user's cache work"),
+            args(&["why", "doesn't", "the", "user's", "cache", "work"])
+        );
+        assert_eq!(
+            parse_command_args("why doesn't this work"),
+            args(&["why", "doesn't", "this", "work"])
+        );
+        // "should treat an unclosed quote as literal text"
+        assert_eq!(
+            parse_command_args("'tis the season"),
+            args(&["'tis", "the", "season"])
+        );
+        assert_eq!(
+            parse_command_args("say \"hello world"),
+            args(&["say", "\"hello", "world"])
+        );
+        assert_eq!(parse_command_args("a '"), args(&["a", "'"]));
+        assert_eq!(parse_command_args("\"abc\\\""), args(&["\"abc\\\""]));
+        assert_eq!(parse_command_args("\"it's\" 'x"), args(&["it's", "'x"]));
 
         let templates = vec![PromptTemplate {
             name: "arg-test".into(),
@@ -870,6 +947,100 @@ mod tests {
             expand_prompt_template("/arg-test\nlabel-2", &templates2),
             "arg1: label-2"
         );
+
+        // v1.3.0, #10867: "should use positional default for empty quoted
+        // argument without shifting later args".
+        let review = vec![PromptTemplate {
+            name: "review".into(),
+            description: "test".into(),
+            argument_hint: None,
+            content: "Review $2. Focus: ${1:-correctness}.".into(),
+            source: "path".into(),
+            file_path: "/tmp/review.md".into(),
+        }];
+        assert_eq!(
+            expand_prompt_template("/review \"\" src/index.ts", &review),
+            "Review src/index.ts. Focus: correctness."
+        );
+        assert_eq!(
+            expand_prompt_template("/review '' src/index.ts", &review),
+            "Review src/index.ts. Focus: correctness."
+        );
+        // #11861: apostrophes no longer shift `$1` and `$2`.
+        assert_eq!(
+            expand_prompt_template("/review it's src/user's.rs", &review),
+            "Review src/user's.rs. Focus: it's."
+        );
+    }
+
+    /// Bake's invariants for `parse_command_args` over untrusted input.
+    mod properties {
+        use proptest::prelude::*;
+
+        use super::super::parse_command_args;
+
+        /// A word that opens no quote: it does not start with one, and has
+        /// no whitespace, so apostrophes, quotes, and backslashes inside it
+        /// are text.
+        fn word() -> impl Strategy<Value = String> {
+            "[a-z0-9é🙂.$@#/-][a-z0-9é🙂'\".$@#/\\\\-]{0,8}"
+        }
+
+        /// Whitespace as Pi's `/\s/` reads it.
+        fn gap() -> impl Strategy<Value = String> {
+            "[ \\t\\n\\r\\u{a0}\\u{2028}\\u{3000}\\u{feff}]{1,3}"
+        }
+
+        /// Text dense in quotes, backslashes, and whitespace, or any text.
+        fn text() -> impl Strategy<Value = String> {
+            prop_oneof!["[\"'\\\\ \\ta-c\\u{a0}é🙂]{0,64}", "(?s).{0,64}"]
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(512))]
+
+            /// Every character of the result comes from a distinct input
+            /// character, so parsing never grows the text, and it ends.
+            #[test]
+            fn arguments_never_hold_more_than_the_input(input in text()) {
+                let parsed = parse_command_args(&input);
+                let output: usize = parsed.iter().map(|arg| arg.chars().count()).sum();
+                prop_assert!(output <= input.chars().count());
+            }
+
+            /// Words separated by any whitespace come back as they were,
+            /// apostrophes and quotes inside them included (#11861).
+            #[test]
+            fn words_round_trip(
+                parts in proptest::collection::vec((gap(), word()), 0..8),
+                lead in proptest::option::of(gap()),
+                tail in proptest::option::of(gap()),
+            ) {
+                let mut input = lead.unwrap_or_default();
+                let mut words = Vec::new();
+                for (index, (gap, word)) in parts.into_iter().enumerate() {
+                    if index > 0 {
+                        input.push_str(&gap);
+                    }
+                    input.push_str(&word);
+                    words.push(word);
+                }
+                input.push_str(&tail.unwrap_or_default());
+                prop_assert_eq!(parse_command_args(&input), words);
+            }
+
+            /// Any arguments without a backslash, each double-quoted with
+            /// its quotes escaped, come back as they were, empty ones and
+            /// whitespace included.
+            #[test]
+            fn quoted_arguments_round_trip(arguments in proptest::collection::vec("[^\\\\]{0,12}", 0..6)) {
+                let quoted: Vec<String> = arguments
+                    .iter()
+                    .map(|argument| format!("\"{}\"", argument.replace('"', "\\\"")))
+                    .collect();
+                prop_assert_eq!(parse_command_args(&quoted.join(" ")), arguments);
+            }
+        }
     }
 
     #[test]

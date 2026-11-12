@@ -1,7 +1,9 @@
 //! The script environment: Pi's codemode prelude, evaluated in each VM before
 //! the script. The JavaScript is `assets/prelude.js`, copied verbatim from Pi
-//! v1.3.0's `packages/codemode/src/runtime/prelude-source.ts` with its notice
-//! (MIT, see `NOTICE`).
+//! v1.5.2's `packages/codemode/src/runtime/prelude-source.ts` with its notice
+//! (MIT, see `NOTICE`); it differs from v1.3.0's only in printing numbers
+//! with `String()` in `console.*` and thrown values, so `NaN` and `Infinity`
+//! no longer print as `null`.
 //!
 //! The prelude keeps the host bridge in a closure and builds `tools`,
 //! `ALL_TOOLS`, `text`, `image`, `exit`, `console`, `store`, `load`, and the
@@ -52,11 +54,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn is_pi_v1_3_0s_prelude_byte_for_byte() {
-        // Pi v1.3.0's `fnv1a(PRELUDE_SOURCE)` and the source's length, computed
-        // from `prelude-source.ts` itself.
-        assert_eq!(hash(), "8c6c9242");
-        assert_eq!(source().len(), 17_233);
+    fn is_pi_v1_5_2s_prelude_byte_for_byte() {
+        // Pi v1.5.2's `fnv1a(PRELUDE_SOURCE)` and the source's length, computed
+        // from `prelude-source.ts` itself by evaluating its template literal
+        // (the same evaluation gives v1.3.0's `8c6c9242` and 17,233).
+        assert_eq!(hash(), "4dce1bde");
+        assert_eq!(source().len(), 17_344);
         assert!(source().starts_with("(function (bridge, toolsJson, globalsJson, storeJson) {"));
         assert!(source().ends_with("})"));
         assert!(source().contains(&format!("json.length > {MAX_STORE_VALUE_CHARS}")));

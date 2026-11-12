@@ -1,6 +1,8 @@
 //! Pi v1.1.0's output handling. Golden results execute its production helpers;
 //! explicit regressions below port the output cases of `test/tools.test.ts`
-//! and the multibyte case of `test/mcp-extension.test.ts`.
+//! and the multibyte case of `test/mcp-extension.test.ts`. The one line cut
+//! Pi v1.5.2 changed is compared with v1.5.2's result, beside the recorded
+//! one.
 
 use std::fs;
 use std::io::ErrorKind;
@@ -45,6 +47,23 @@ fn golden() -> Value {
     serde_json::from_str(include_str!("fixtures/pi-output/golden.json")).unwrap()
 }
 
+/// The recorded v1.1.0 `truncateLine` result Pi v1.5.2 changed, with the
+/// result its source at `b4afddd` gives. `9e870f6f0` (#11757) cuts with
+/// `sliceHead`, which keeps whole characters within the UTF-16 limit:
+/// v1.1.0 split the 🍞 surrogate pair at two units, recorded here as
+/// U+FFFD, where v1.5.2 stops before it.
+fn line_revised_in_v1_5_2(content: &str, max_chars: usize, recorded: &Value) -> Option<Value> {
+    if content != "€🍞é中\r\nlast" || max_chars != 2 {
+        return None;
+    }
+    assert_eq!(
+        recorded,
+        &json!({ "text": "€\u{FFFD}... [truncated]", "wasTruncated": true }),
+        "the recorded v1.1.0 result changed"
+    );
+    Some(json!({ "text": "€... [truncated]", "wasTruncated": true }))
+}
+
 fn snapshot(accumulator: &OutputAccumulator) -> Value {
     let snapshot = accumulator.snapshot().unwrap();
     json!({
@@ -83,12 +102,12 @@ fn truncation_matches_pi_golden_results() {
         );
     }
     for case in oracle["line"].as_array().unwrap() {
+        let content = case["content"].as_str().unwrap();
+        let max_chars = case["maxChars"].as_u64().unwrap() as usize;
         assert_eq!(
-            json!(truncate::truncate_line(
-                case["content"].as_str().unwrap(),
-                case["maxChars"].as_u64().unwrap() as usize
-            )),
-            case["result"],
+            json!(truncate::truncate_line(content, max_chars)),
+            line_revised_in_v1_5_2(content, max_chars, &case["result"])
+                .unwrap_or_else(|| case["result"].clone()),
             "{case}"
         );
     }

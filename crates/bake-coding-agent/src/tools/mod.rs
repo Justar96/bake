@@ -54,4 +54,4 @@ pub(crate) mod js;
 mod jsdiff;
 mod node_error;
 pub(crate) mod output_files;
-mod utf8;
+pub(crate) mod utf8;

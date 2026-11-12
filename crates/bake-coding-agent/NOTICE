@@ -186,6 +186,34 @@ in src/export_html/; with the cases of test/compaction-summary-reasoning.test.ts
 test/mcp-extension.test.ts, test/windows-shell-config.test.ts,
 test/codemode-worker-admission.test.ts, and test/export-html-cjk.test.ts that
 those files name.
+
+From release v1.5.2, revision b4afdddf44e059c67ccf5097e5317d913521b470:
+parseCommandArgs of src/core/prompt-templates.ts (with v1.3.0's empty quoted
+arguments), in src/prompt_templates.rs; the queue bookkeeping of image-only
+steering and follow-up messages and _recordThinkingLevel of
+src/core/agent-session.ts, in src/agent_session.rs and
+src/agent_session/prompt_execution.rs; the StringDecoder decoding of
+src/core/exec.ts, in src/exec/; template.js and template.css of
+src/core/export-html/, embedded verbatim in src/export_html/; and the refusal
+of a session whose stored working directory is gone outside interactive mode
+in src/main.ts, in src/cli/mod.rs; grep's glob relative to its path in
+src/core/tools/grep.ts, in src/tools/grep.rs; the find and ls limits of
+src/core/tools/find.ts and ls.ts, in src/tools/find.rs and ls.rs; the
+thinking level and context edits of src/core/compaction/branch-summarization.ts,
+in src/compaction/branch_summarization.rs; the choice between PNG and JPEG
+of src/utils/image-resize-core.ts, in src/tools/image/; sliceHead of
+src/core/tools/truncate.ts, in src/tools/truncate.rs and its use in
+truncateForSummary of src/core/compaction/utils.ts; and the local shell's
+timeout after the shell exited of src/core/tools/bash.ts, in
+src/child_process.rs and src/tools/bash/; with the cases of
+test/prompt-templates.test.ts, test/suite/agent-session-queue.test.ts,
+test/suite/regressions/11451-thinking-level-after-tree-navigation.test.ts,
+test/exec.test.ts, test/export-html-deep-tree.test.ts,
+test/export-html-system-messages.test.ts, test/export-html-cost.test.ts,
+test/tools.test.ts, test/branch-summarization.test.ts,
+test/image-processing.test.ts, test/truncate-surrogates.test.ts, and
+test/suite/regressions/11613-bash-timeout-after-shell-exit.test.ts that
+those files name.
 --------------------------------------------------------------------------------
 MIT License
 

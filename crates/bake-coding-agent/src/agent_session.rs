@@ -1895,8 +1895,10 @@ impl AgentSession {
                     core.state().overflow_recovery_attempted = false;
                     // Pi removes a delivered prompt from its queue before
                     // emitting the message, so listeners see the new queue.
+                    // A prompt of images alone is queued as empty text and
+                    // leaves the queue the same way (Pi v1.5.2, #8612).
                     let text = bake_ai::utils::text::user_content_text(&user.content, "");
-                    let delivered = !text.is_empty() && queue.lock().delivered(&text);
+                    let delivered = queue.lock().delivered(&text);
                     if delivered {
                         queue.announce(&core);
                     }

@@ -8,7 +8,8 @@
 //! summarization instructions", "should navigate between branches
 //! correctly"), with Bake's checks of the summary request, the label, the
 //! no-entries case, a failed summary, retry events, the caller's cancel,
-//! and a resumed file rebuilding context with the summary. Pi's live-model
+//! a resumed file rebuilding context with the summary, and v1.5.2's
+//! thinking level on the summary request (#11482). Pi's live-model
 //! assertions on the summary's wording become checks of the request the
 //! faux provider received. Each test owns its session, temporary directory,
 //! and faux provider; waits are on channels.
@@ -330,6 +331,36 @@ async fn custom_instructions_add_focus_or_replace_the_prompt() {
         !sent[1].contains("Create a structured summary"),
         "{}",
         sent[1]
+    );
+    session.shutdown().await;
+}
+
+// Pi v1.5.2 `navigateTree` (#11482): the summary request carries the
+// session's thinking level, which the harness sets to high on a reasoning
+// model.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_summary_asks_at_the_sessions_thinking_level() {
+    let dir = TempDir::new("tree-summary-thinking");
+    let (h, session) = two_turns(&dir, Settings::default()).await;
+    let users = ids(&session, "user");
+    let seen: Arc<Mutex<Vec<Option<bake_ai::ThinkingLevel>>>> = Arc::default();
+    {
+        let seen = Arc::clone(&seen);
+        h.faux
+            .set_responses(vec![FauxResponseStep::from_fn(move |_, options, _, _| {
+                seen.lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .push(options.reasoning);
+                Ok(faux_assistant_message("## Goal\nArithmetic"))
+            })]);
+    }
+    session
+        .navigate_tree(&users[0], summarize(), None)
+        .await
+        .expect("navigate");
+    assert_eq!(
+        *seen.lock().unwrap_or_else(PoisonError::into_inner),
+        [Some(bake_ai::ThinkingLevel::High)]
     );
     session.shutdown().await;
 }

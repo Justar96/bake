@@ -103,6 +103,8 @@ pub(super) struct PromptExecution {
     jobs: JobRegistry,
     pending_notices: Arc<Mutex<Vec<CustomMessage>>>,
     tool_hooks: run_journal::ToolHooks,
+    /// The session's change turn ([`AgentSession::run_change`]).
+    control: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl PromptExecution {
@@ -129,6 +131,7 @@ impl PromptExecution {
             jobs: session.jobs.clone(),
             pending_notices: Arc::clone(&session.pending_notices),
             tool_hooks: session.tool_hooks.clone(),
+            control: Arc::clone(&session.control),
         }
     }
 
@@ -488,6 +491,7 @@ impl PromptExecution {
                 .map(job_notices::live),
         );
         messages.extend(notices.into_iter().map(job_notices::live));
+        self.record_thinking_level().await?;
         self.run_agent_input(Some(messages), control)
             .await
             .map(|outcome| (outcome, true))
@@ -731,6 +735,69 @@ impl PromptExecution {
         Ok(())
     }
 
+    /// Pi v1.5.2's `_recordThinkingLevel` (#11451), before a prompt or a
+    /// notice turn starts a run: tree navigation can leave the branch's
+    /// latest `thinking_level_change` on the branch left behind, so a resume
+    /// would restore another level than the live one. When the branch's
+    /// level, clamped to the model, is not the live level, the live level is
+    /// recorded on the branch; a level that differs only by clamping is
+    /// kept, and a branch without a level gets none, as in Pi. A level that
+    /// does not parse, which a resume ignores, is replaced. Held under the
+    /// change turn, so no model or thinking-level change lands between the
+    /// read of the live level and the write. A failed write leaves the gap
+    /// every failed write leaves, and the prompt fails before a request.
+    async fn record_thinking_level(&self) -> Result<(), String> {
+        let _turn = self.control.lock().await;
+        let Some(permit) = self.core.work.enter() else {
+            return Err("The session is shut down.".to_owned());
+        };
+        let live = self.agent.thinking_level();
+        let model = self.model();
+        let session = Arc::clone(&self.core.session);
+        let gap = Arc::clone(&self.core.gap);
+        let write = permit.spawn_blocking(move || {
+            write_session(&session, &gap, |session| {
+                let recorded = session
+                    .branch_entries(None)
+                    .into_iter()
+                    .filter(|entry| entry.entry_type() == "thinking_level_change")
+                    .filter_map(|entry| {
+                        entry
+                            .as_json()
+                            .get("thinkingLevel")
+                            .and_then(serde_json::Value::as_str)
+                            .map(str::to_owned)
+                    })
+                    .next_back();
+                let Some(recorded) = recorded else {
+                    return Ok(());
+                };
+                let effective = crate::model_registry::resolver::parse_thinking_level(&recorded)
+                    .map(|level| match &model {
+                        Some(model) => bake_ai::models::clamp_thinking_level(model, level),
+                        None => level,
+                    });
+                if effective == Some(live) {
+                    return Ok(());
+                }
+                session
+                    .append_thinking_level_change(live.as_str())
+                    .map(|_| ())
+                    .map_err(|error| error.to_string())
+            })
+        });
+        drop(permit);
+        match write.map_err(|refused| refused.to_string())?.await {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(refused)) => Err(refused.message()),
+            Err(error) => {
+                let error = format!("Session I/O task failed: {error}");
+                lock_gap(&self.core.gap).get_or_insert_with(|| error.clone());
+                Err(error)
+            }
+        }
+    }
+
     /// The system message patching the sections the transcript replays,
     /// Pi's `_preparePromptAndToolLoadout`; it also activates the tools.
     fn prepare_prompt_and_tools(&self) -> Result<Option<SystemMessage>, String> {
@@ -899,6 +966,7 @@ impl PromptExecution {
             .into(),
         );
         messages.extend(after);
+        self.record_thinking_level().await?;
         self.run_agent_prompt(messages, control).await
     }
 

@@ -1,8 +1,10 @@
 //! The `grep` tool, ported from Pi `src/core/tools/grep.ts` (v1.1.0;
-//! `--no-config` from v1.4.0; see the crate's `NOTICE`): `rg --json` from
-//! `PATH`, its matches formatted as
+//! `--no-config` from v1.4.0; `glob` relative to `path` from v1.5.2; see
+//! the crate's `NOTICE`): `rg --json` from `PATH`, its matches formatted as
 //! `path:line: text` with `path-line- text` context lines, limited to
-//! `limit` matches and 50 KB, with lines cut to 500 characters.
+//! `limit` matches and 50 KB, with lines cut to 500 characters. A
+//! directory search runs `rg` inside the directory, so `glob` is matched
+//! from it; a leading `./` in `glob` is dropped.
 //!
 //! Context lines and lines `rg` reports as bytes come from the file, split
 //! on `\r\n`, `\r`, and `\n` as Pi splits them.
@@ -62,7 +64,7 @@ fn parameters() -> Value {
         "properties": {
             "pattern": { "type": "string", "description": "Search pattern (regex or literal string)" },
             "path": { "type": "string", "description": "Directory or file to search (default: current directory)" },
-            "glob": { "type": "string", "description": "Filter files by glob pattern, e.g. '*.ts' or '**/*.spec.ts'" },
+            "glob": { "type": "string", "description": "Filter files by glob pattern, relative to path, e.g. '*.ts', 'src/**/*.ts' or '**/*.spec.ts'. A pattern without '/' matches file names at any depth" },
             "ignoreCase": { "type": "boolean", "description": "Case-insensitive search (default: false)" },
             "literal": { "type": "boolean", "description": "Treat pattern as literal string instead of regex (default: false)" },
             "context": { "type": "number", "description": "Number of lines to show before and after each match (default: 0)" },
@@ -147,23 +149,65 @@ impl GrepRequest {
         }
         if let Some(glob) = &self.glob {
             args.push("--glob".into());
-            args.push(glob.into());
+            args.push(strip_leading_dot_slash(glob).into());
         }
         args.push("--".into());
         args.push((&self.pattern).into());
-        args.push(self.search_path.clone().into_os_string());
+        // rg roots `--glob` at its own working directory, so a directory
+        // search runs inside it (Pi v1.5.2, #11807), and searches `.`: rg
+        // canonicalizes its working directory, so a symlinked search path
+        // given whole would no longer lie under the glob's root.
+        if self.is_directory {
+            args.push(".".into());
+        } else {
+            args.push(self.search_path.clone().into_os_string());
+        }
         args
+    }
+
+    /// The directory `rg` runs in: the search directory, or this
+    /// process's own for a single file, which rg cannot start inside.
+    pub(crate) fn working_directory(&self) -> Option<&Path> {
+        self.is_directory.then_some(self.search_path.as_path())
+    }
+
+    /// A path `rg` reports, as a path from this process's working
+    /// directory: Node's `path.resolve(searchPath, filePath)` for a
+    /// directory search.
+    fn resolve(&self, file_path: &str) -> PathBuf {
+        if self.is_directory {
+            self.search_path.join(file_path)
+        } else {
+            PathBuf::from(file_path)
+        }
     }
 
     /// Pi's `formatPath`.
     fn format_path(&self, file_path: &str) -> String {
         if self.is_directory {
-            let relative = node_relative(&self.search_path, Path::new(file_path));
+            let relative = node_relative(&self.search_path, &self.resolve(file_path));
             if !relative.is_empty() && !relative.starts_with("..") {
                 return relative.replace('\\', "/");
             }
         }
         node_basename(file_path)
+    }
+}
+
+/// Pi v1.5.2's `glob.replace(/^(!?)(?:\.\/)+/, "$1")`: rg never matches a
+/// leading `./`, so it is dropped, after a negating `!`.
+fn strip_leading_dot_slash(glob: &str) -> String {
+    let (negation, body) = glob
+        .strip_prefix('!')
+        .map_or(("", glob), |body| ("!", body));
+    let mut rest = body;
+    while let Some(after) = rest.strip_prefix("./") {
+        rest = after;
+    }
+    if rest.len() == body.len() {
+        glob.to_owned()
+    } else {
+        format!("{negation}{rest}")
     }
 }
 
@@ -208,6 +252,7 @@ async fn execute(
     let ended = process::run_lines(
         &rg,
         &request.args(),
+        request.working_directory(),
         owner.as_ref(),
         signal.as_ref(),
         move |line| {
@@ -410,7 +455,7 @@ impl GrepFormatter {
         signal: Option<&AbortSignal>,
         visit: &mut dyn FnMut(&mut Self, usize, Line),
     ) -> Option<Option<usize>> {
-        let path = Path::new(file_path);
+        let path = &self.request.resolve(file_path);
         let small =
             std::fs::metadata(path).is_ok_and(|metadata| metadata.len() <= CACHED_FILE_BYTES);
         if !small {
@@ -608,6 +653,54 @@ mod tests {
         assert!(long[0].0.ends_with("... [truncated]"));
         assert_eq!(lines(&dir.join("missing"), 0, 0).1, None);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // Pi v1.5.2's glob argument (#11807): a leading `./`, repeated or after
+    // `!`, is dropped; anything else is kept.
+    #[test]
+    fn glob_drops_a_leading_dot_slash() {
+        for (glob, expected) in [
+            ("./src/*.ts", "src/*.ts"),
+            ("!./dist/**", "!dist/**"),
+            ("././a/*.js", "a/*.js"),
+            ("!././a", "!a"),
+            ("./", ""),
+            ("*.ts", "*.ts"),
+            ("!*.ts", "!*.ts"),
+            ("!!./a", "!!./a"),
+            (".hidden/*", ".hidden/*"),
+            ("../up/*", "../up/*"),
+            ("src/./a", "src/./a"),
+        ] {
+            assert_eq!(strip_leading_dot_slash(glob), expected, "{glob}");
+        }
+    }
+
+    mod properties {
+        use super::super::strip_leading_dot_slash;
+        use proptest::prelude::*;
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(512))]
+
+            // The JavaScript regex's invariants: only the leading run of
+            // `./` after an optional `!` goes, so the rest is a suffix of
+            // the glob after that `!` that does not start with `./`.
+            #[test]
+            fn only_the_leading_run_goes(glob in "!?(\\./){0,3}[!./a-z*]{0,6}") {
+                let stripped = strip_leading_dot_slash(&glob);
+                let (negation, body) = glob
+                    .strip_prefix('!')
+                    .map_or(("", glob.as_str()), |body| ("!", body));
+                prop_assert!(stripped.starts_with(negation));
+                let rest = &stripped[negation.len()..];
+                prop_assert!(body.ends_with(rest));
+                prop_assert!(!rest.starts_with("./"));
+                prop_assert!(body.as_bytes()[..body.len() - rest.len()]
+                    .chunks(2)
+                    .all(|pair| pair == b"./"));
+            }
+        }
     }
 
     // Pi v1.4.0 "should ignore RIPGREP_CONFIG_PATH" (#11203). The variable

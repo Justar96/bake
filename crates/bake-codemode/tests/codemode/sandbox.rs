@@ -267,6 +267,19 @@ async fn reports_non_error_throws() {
     assert_eq!(execution.exception().message, "{\"code\":7}");
 }
 
+// Pi v1.5.2 "prints non-finite numbers in console output and thrown values
+// like text()" (#11901).
+#[tokio::test]
+async fn prints_non_finite_numbers_in_console_output_and_thrown_values_like_text() {
+    let logged = run(r#"console.log("avg", 0 / 0, 1 / 0, -1 / 0, { a: 1 }); text(0 / 0);"#).await;
+    assert_eq!(
+        logged.output,
+        [console("avg NaN Infinity -Infinity {\"a\":1}"), text("NaN")]
+    );
+    let thrown = run("throw NaN").await;
+    assert_eq!(thrown.exception().message, "NaN");
+}
+
 #[tokio::test]
 async fn reports_a_non_serializable_return_value_as_a_script_error() {
     let execution = run("return 10n").await;

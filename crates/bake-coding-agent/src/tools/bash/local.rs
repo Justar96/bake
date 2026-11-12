@@ -351,7 +351,18 @@ impl LocalShellOperations {
             return Err(BashExecError::Aborted.into());
         }
         if exit.timed_out {
-            return Err(BashExecError::TimedOut(timeout.unwrap_or_default()).into());
+            let seconds = timeout.unwrap_or_default();
+            // Pi v1.5.2's `ShellTimeoutError`: a shell that exited before
+            // the deadline is reported with its code and when it exited.
+            return Err(match (exit.exited_before_deadline, exit.status) {
+                (Some(after), Some(status)) => BashExecError::TimedOutAfterShellExit {
+                    seconds,
+                    exit_code: exit_code(status),
+                    exited_after_seconds: (after.as_secs_f64() * 10.0).round() / 10.0,
+                },
+                _ => BashExecError::TimedOut(seconds),
+            }
+            .into());
         }
         Ok(exit.status.map(exit_code))
     }

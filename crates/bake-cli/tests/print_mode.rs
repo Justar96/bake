@@ -1093,6 +1093,60 @@ fn a_held_session_is_refused() {
     assert_eq!(workspace.session_files(), files);
 }
 
+/// Pi v1.5.2's `main`: print, JSON, and RPC mode refuse a session whose
+/// stored working directory is gone with Pi's bare message and exit code
+/// 1, before any request, and leave the file as it was, `--name` included.
+#[test]
+fn a_session_whose_working_directory_is_gone_is_refused() {
+    let server = Server::start(Reply::sse());
+    let workspace = Workspace::new("missing-cwd", server.port);
+    let first = workspace.run(&["-p", "Say hi"], None);
+    assert_eq!(first.status.code(), Some(0), "{}", text(&first.stderr));
+    let files = workspace.session_files();
+    assert_eq!(files.len(), 1);
+    // The project moved away: the header names a directory that is gone.
+    let gone = workspace.root.join("moved-away");
+    let mut entries = lines(&files[0]);
+    entries[0]["cwd"] = json!(gone.to_string_lossy());
+    let rewritten: String = entries.iter().map(|entry| format!("{entry}\n")).collect();
+    std::fs::write(&files[0], &rewritten).expect("rewrite the header");
+    let path = files[0].to_string_lossy().into_owned();
+    let message = format!(
+        "Stored session working directory does not exist: {}\nSession file: {path}\nCurrent working directory: ",
+        gone.display()
+    );
+    for args in [
+        ["-p", "--session", &path, "--name", "renamed", "Again"].as_slice(),
+        ["--mode", "rpc", "--session", &path].as_slice(),
+    ] {
+        let out = workspace.run(args, None);
+        assert_eq!(out.status.code(), Some(1), "{args:?}");
+        assert_eq!(text(&out.stdout), "", "{args:?}");
+        let stderr = text(&out.stderr);
+        assert!(
+            stderr.starts_with(&message)
+                && stderr.ends_with("project\n")
+                && stderr.lines().count() == 3,
+            "{stderr}"
+        );
+    }
+    let out = workspace.run(
+        &["--output-format", "json", "--session", &path, "Again"],
+        None,
+    );
+    assert_eq!(out.status.code(), Some(1));
+    let result: Value = serde_json::from_str(text(&out.stdout).trim()).expect("one result");
+    assert_eq!(result["subtype"], "error");
+    assert_eq!(result["error"], text(&out.stderr).trim_end());
+    assert_eq!(server.requests().len(), 1);
+    assert_eq!(std::fs::read_to_string(&files[0]).expect("read"), rewritten);
+    // `--fork` copies it into the working directory, which exists.
+    let forked = workspace.run(&["-p", "--fork", &path, "Again"], None);
+    assert_eq!(forked.status.code(), Some(0), "{}", text(&forked.stderr));
+    assert_eq!(server.requests().len(), 2);
+    assert_eq!(std::fs::read_to_string(&files[0]).expect("read"), rewritten);
+}
+
 /// D25: with no `models.json` and no Pi settings, the 0.3 home's CLIProxyAPI
 /// route, key, and default model run the turn, and neither 0.3 file changes.
 #[test]

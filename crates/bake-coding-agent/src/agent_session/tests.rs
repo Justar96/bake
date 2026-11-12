@@ -400,6 +400,91 @@ async fn steering_is_delivered_at_the_next_step_and_clear_queue_returns_the_rest
     session.shutdown().await;
 }
 
+// Pi v1.5.2 `test/suite/agent-session-queue.test.ts`, "removes an
+// image-only steering message after delivery" (#8612), with its follow-up
+// counterpart: a queued prompt with images and no text reaches the model and
+// then leaves the queue, as one with text does.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn image_only_queued_prompts_leave_the_queue_once_delivered() {
+    const TINY_PNG: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==";
+    let h = harness();
+    let release = Arc::new(Notify::new());
+    let gate = Arc::clone(&release);
+    let images_seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let saw_image = |seen: &Arc<std::sync::Mutex<Vec<bool>>>, reply: &'static str| {
+        let seen = Arc::clone(seen);
+        FauxResponseStep::from_fn(move |context, _, _, _| {
+            let last_user = context
+                .messages()
+                .iter()
+                .rev()
+                .find_map(|message| match message {
+                    bake_ai::Message::User(user) => Some(user.clone()),
+                    _ => None,
+                })
+                .expect("a user message");
+            seen.lock().unwrap().push(matches!(
+                &last_user.content,
+                bake_ai::UserContent::Blocks(blocks)
+                    if blocks.iter().any(|block| matches!(block, bake_ai::UserContentBlock::Image(_)))
+            ));
+            Ok(faux_assistant_message(reply))
+        })
+    };
+    h.faux.set_responses(vec![
+        FauxResponseStep::Factory(Arc::new(move |_, _, _, _| {
+            let gate = Arc::clone(&gate);
+            Box::pin(async move {
+                gate.notified().await;
+                Ok(faux_assistant_message("first"))
+            })
+        })),
+        saw_image(&images_seen, "after steer"),
+        saw_image(&images_seen, "after follow-up"),
+    ]);
+    let manager = SessionManager::in_memory(Some("/tmp"), NewSessionOptions::default(), Vec::new())
+        .expect("session");
+    let session = Arc::new(
+        AgentSession::create(options(&h, manager, "/tmp"))
+            .await
+            .expect("session"),
+    );
+    let run = {
+        let session = Arc::clone(&session);
+        tokio::spawn(async move { session.prompt("start", Vec::new()).await })
+    };
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+    while h.faux.call_count() < 1 {
+        assert!(tokio::time::Instant::now() < deadline, "never requested");
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    let image = || ImageContent {
+        data: TINY_PNG.into(),
+        mime_type: "image/png".into(),
+    };
+    session.steer("", vec![image()]).await.expect("steer");
+    session
+        .follow_up("", vec![image()])
+        .await
+        .expect("follow up");
+    let queued = session.queued_messages();
+    assert_eq!(
+        (queued.steering.len(), queued.follow_up.len()),
+        (1, 1),
+        "{queued:?}"
+    );
+    release.notify_one();
+    assert_eq!(run.await.expect("joined"), Ok(()));
+    assert_eq!(*images_seen.lock().unwrap(), [true, true]);
+    assert!(!session.agent().has_queued_messages());
+    assert!(
+        session.queued_messages().is_empty(),
+        "{:?}",
+        session.queued_messages()
+    );
+    session.shutdown().await;
+}
+
 // Bake: queue updates reach listeners with no lock held, so a listener may
 // read and clear the queue; after shutdown nothing more is queued.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

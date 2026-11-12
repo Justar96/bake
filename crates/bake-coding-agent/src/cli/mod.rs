@@ -12,8 +12,11 @@
 //! and `.agents/skills` from the session's working directory and its
 //! parents ([`crate::skills`]).
 //! Diagnostics go to standard error as `Error: ` and `Warning: ` lines
-//! without Pi's colors, except Pi's bare `No session found matching`
-//! line, and every failure exits with code 1, as in Pi.
+//! without Pi's colors, except Pi's bare lines (`No session found
+//! matching`, and Pi v1.5.2's `Stored session working directory does not
+//! exist`, which print and RPC mode give for a session whose stored
+//! working directory is gone), and every failure exits with code 1, as in
+//! Pi.
 //!
 //! Bake composes its permission layer (D24, [`crate::permissions`]) here:
 //! the session's permission is settled and stored in its session file
@@ -79,7 +82,8 @@
 //! object too ([`run`]).
 //!
 //! Not ported (deferred): theme and extension flags, extension tools, and
-//! the missing-session-cwd prompt.
+//! interactive mode's missing-session-cwd prompt (continue, fork, or
+//! cancel), so interactive mode opens such a session as before.
 
 pub mod args;
 pub mod auth_command;
@@ -114,6 +118,7 @@ use crate::print_mode::{
     PrintModeOptions, PrintOutput, PrintRunRecovery, SharedWriter, run_print_mode, write_out,
 };
 use crate::prompt_templates::{LoadPromptTemplatesOptions, load_prompt_templates};
+use crate::session::cwd::{format_missing_session_cwd_error, get_missing_session_cwd_issue};
 use crate::session::file::default_session_dir_path;
 use crate::session::id::assert_valid_session_id;
 use crate::session::paths::{lexical_normalize, normalize_path};
@@ -2208,6 +2213,16 @@ async fn start_with(
             let session =
                 create_session_manager(&args, &cwd, session_dir.as_deref(), &home, &mut warnings);
             let session = session.and_then(|mut session| {
+                // Pi v1.5.2's `main`: outside interactive mode, a session
+                // whose stored working directory is gone is refused before
+                // anything is written to it. Interactive mode still opens it.
+                if kind != StartKind::Interactive
+                    && let Some(issue) = get_missing_session_cwd_issue(&session, &cwd)
+                {
+                    return Err(SessionStartError::Plain(format_missing_session_cwd_error(
+                        &issue,
+                    )));
+                }
                 if let Some(name) = args.name.as_deref().and_then(normalize_session_name) {
                     session
                         .append_session_info(&name)
@@ -3075,6 +3090,52 @@ mod tests {
         assert!(is_session_path("a\\b"));
         assert!(is_session_path("x.jsonl"));
         assert!(!is_session_path("0193abc"));
+    }
+
+    // Pi v1.5.2's `main`: print and RPC mode refuse a session whose stored
+    // working directory is gone with Pi's bare message, before anything is
+    // written to it, `--name` included. Interactive mode, whose continue,
+    // fork, or cancel prompt is not ported, still opens it.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_session_whose_working_directory_is_gone_is_refused_outside_interactive_mode() {
+        let dir = setup_dirs("cli-missing-cwd");
+        let gone = dir.join("gone").to_string_lossy().into_owned();
+        let file = write_session(
+            &dir.join("saved"),
+            "0193cccc-0000-7000-8000-000000000000",
+            &gone,
+        );
+        let written = std::fs::read(&file).expect("read");
+        let path = file.to_string_lossy().into_owned();
+        let args = || {
+            parse_args(&strings(&[
+                "--session",
+                &path,
+                "--name",
+                "renamed",
+                "--permission",
+                "danger-full-access",
+                "--no-mcp",
+            ]))
+        };
+        let expected = format!(
+            "Stored session working directory does not exist: {gone}\nSession file: {path}\nCurrent working directory: {}\n",
+            dir.join("work").display()
+        );
+        for kind in [StartKind::Print, StartKind::Rpc] {
+            let (environment, stderr) = setup_environment(dir.path());
+            let refused = start_with(environment, args(), kind).await.err();
+            assert_eq!(refused, Some(1), "{kind:?}");
+            assert_eq!(text(&stderr), expected, "{kind:?}");
+            assert_eq!(std::fs::read(&file).expect("read"), written, "{kind:?}");
+        }
+        let (environment, stderr) = setup_environment(dir.path());
+        let Ok(started) = start_interactive(environment, args()).await else {
+            panic!("setup failed: {}", text(&stderr));
+        };
+        assert_eq!(started.session.session_file(), Some(file.clone()));
+        assert_eq!(started.session.cwd(), gone);
+        started.session.shutdown().await;
     }
 
     #[test]

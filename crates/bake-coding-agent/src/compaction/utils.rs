@@ -3,7 +3,9 @@
 //! Ported from Pi `packages/coding-agent/src/core/compaction/utils.ts`
 //! (v1.4.0): file-operation tracking, conversation serialization, and the
 //! summarization system prompt. Lengths count UTF-16 code units, as
-//! JavaScript's `String.length` does.
+//! JavaScript's `String.length` does; a tool result cut for the summary
+//! leaves out a character whose surrogate pair the cut would split, as in
+//! v1.5.2.
 
 use bake_ai::{AssistantContentBlock, Message, UserContent, UserContentBlock};
 use indexmap::IndexSet;
@@ -11,6 +13,7 @@ use serde_json::Value;
 
 use crate::session::AgentMessage;
 use crate::session::json::{JsonObject, js_stringify};
+use crate::tools::truncate::slice_head;
 
 /// The files a conversation read, wrote, and edited, Pi's `FileOperations`.
 /// Each set keeps first-seen order.
@@ -183,17 +186,17 @@ pub(crate) fn js_len(text: &str) -> usize {
     text.encode_utf16().count()
 }
 
-/// Pi's `truncateForSummary`. A surrogate pair split at the cut becomes
-/// U+FFFD, where JavaScript keeps a lone surrogate.
+/// Pi's `truncateForSummary`, which counts UTF-16 code units and leaves out
+/// a character whose surrogate pair the cut would split (v1.5.2).
 fn truncate_for_summary(text: &str, max_chars: usize) -> String {
-    let units: Vec<u16> = text.encode_utf16().collect();
-    if units.len() <= max_chars {
+    let length = js_len(text);
+    if length <= max_chars {
         return text.to_owned();
     }
-    let kept = String::from_utf16_lossy(units.get(..max_chars).unwrap_or(&units));
     format!(
-        "{kept}\n\n[... {} more characters truncated]",
-        units.len() - max_chars
+        "{}\n\n[... {} more characters truncated]",
+        slice_head(text, max_chars),
+        length - max_chars
     )
 }
 
@@ -417,8 +420,14 @@ mod tests {
         js_sort(&mut values);
         // U+1F35E is D83C DF5E in UTF-16, before U+FF61.
         assert_eq!(values, ["\u{1f35e}", "\u{ff61}"]);
+        // Pi v1.5.2 (#11757): a pair split at the cut is left out whole;
+        // the count is still of the units past the limit.
         let cut = truncate_for_summary(&format!("{}\u{1f35e}", "x".repeat(1999)), 2000);
-        assert!(cut.starts_with(&format!("{}\u{fffd}", "x".repeat(1999))));
-        assert!(cut.ends_with("[... 1 more characters truncated]"));
+        assert_eq!(
+            cut,
+            format!("{}\n\n[... 1 more characters truncated]", "x".repeat(1999))
+        );
+        let kept = truncate_for_summary(&format!("{}\u{1f35e}yz", "x".repeat(1998)), 2000);
+        assert!(kept.starts_with(&format!("{}\u{1f35e}\n\n", "x".repeat(1998))));
     }
 }

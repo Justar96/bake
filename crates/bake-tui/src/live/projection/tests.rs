@@ -1675,6 +1675,54 @@ fn a_listing_counts_what_it_found() {
     );
 }
 
+/// The card reads the ls tool's own results: since Pi v1.5.2 a listing
+/// of exactly its limit has nothing more to report.
+#[tokio::test]
+async fn a_listing_reads_the_ls_tools_own_limit() {
+    let dir = std::env::temp_dir().join(format!("bake-card-ls-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("b")).unwrap();
+    std::fs::write(dir.join("a"), "").unwrap();
+    let ls = bake_coding_agent::tools::ls::create_ls_tool(&dir);
+    let mut cards = Vec::new();
+    for limit in [2, 1] {
+        let result = (ls.execute)(
+            "call".into(),
+            json!({ "limit": limit }),
+            None,
+            bake_agent::AgentToolUpdateCallback::ignore(),
+            bake_agent::ToolContext::detached(),
+        )
+        .await
+        .unwrap();
+        let card = settled("ls", false, &result);
+        cards.push((card.summary, card.output));
+    }
+    std::fs::remove_dir_all(&dir).unwrap();
+    assert_eq!(
+        cards,
+        [
+            (status("2 entries"), lines(&["a", "b/"])),
+            (status("1 entry · limit reached"), lines(&["a"])),
+        ]
+    );
+}
+
+#[test]
+fn a_bash_timeout_after_the_shell_exits_shows_as_it_came() {
+    let error = "started\n\nCommand timed out after 1 seconds. The shell exited with code 0 after 0.1 seconds, but background processes it started kept writing output until the timeout.";
+    let content = [UserContentBlock::Text(TextContent::new(error))];
+    let failed = outcome("bash", true, &content, None);
+    assert_eq!(
+        (failed.state, failed.summary, failed.output),
+        (
+            CallState::Failed,
+            None,
+            lines(&["started", "", error.lines().last().unwrap()])
+        )
+    );
+}
+
 #[test]
 fn web_calls_say_what_came_back() {
     use bake_coding_agent::tools::web_tools::EXTERNAL_WEB_CONTENT_NOTICE as NOTICE;

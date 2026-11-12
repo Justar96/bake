@@ -326,7 +326,8 @@ async fn reports_the_fingerprint_before_any_call_and_the_calls_issued_after_each
     assert_eq!(parts[0], "quickjs-wasi 3.6.2");
     // QuickJS-NG's version, as `engine/PROVENANCE` records it.
     assert_eq!(parts[1], "quickjs 0.17.0");
-    assert_eq!(parts[2], "prelude 8c6c9242");
+    // Pi v1.5.2's prelude hash (`src/prelude.rs`).
+    assert_eq!(parts[2], "prelude 4dce1bde");
     assert_eq!(parts[3], "deterministic 1");
     assert_eq!(parts[4], "stack 524288");
     assert_eq!(parts[5], "heap 67108864");

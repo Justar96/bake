@@ -4,10 +4,11 @@
 //! `deriveExportColors`, and the session data of `exportSessionToHtml`).
 //!
 //! The page is Pi's: `template.html`, `template.css`, and `template.js` are
-//! Pi v1.4.0's files, and `vendor/marked.min.js`,
-//! `vendor/marked-cjk-friendly.min.js` (both MIT), and
-//! `vendor/highlight.min.js` (BSD-3-Clause) are the copies Pi vendors, all
-//! embedded verbatim; the crate's `NOTICE` reproduces their licenses. The
+//! Pi v1.5.2's files (system messages rendered where they occur, trees
+//! walked without recursion, and recorded cost totals), and
+//! `vendor/marked.min.js`, `vendor/marked-cjk-friendly.min.js` (both MIT),
+//! and `vendor/highlight.min.js` (BSD-3-Clause) are the copies Pi vendors,
+//! all embedded verbatim; the crate's `NOTICE` reproduces their licenses. The
 //! session travels base64-encoded as JSON, and the page's own script renders
 //! it in the browser, so nothing here interprets message content.
 //!
@@ -350,5 +351,286 @@ process.stdout.write(JSON.stringify(JSON.parse(process.argv[2]).map((text) => pa
         );
         let rendered: Vec<String> = serde_json::from_slice(&output.stdout).expect("rendered");
         assert_eq!(rendered, cases.map(|(_, html)| html));
+    }
+
+    /// Runs `script` with Node, `args` after it, and parses what it prints
+    /// as JSON; `None`, with a note, when `node` is not on the PATH.
+    fn node_json(script: &str, args: &[&std::ffi::OsStr]) -> Option<Value> {
+        let Some(node) = crate::tools::process::find_executable(&["node"]) else {
+            eprintln!("skipped: node is not on PATH");
+            return None;
+        };
+        let output = std::process::Command::new(node)
+            .arg("-e")
+            .arg(script)
+            .args(args)
+            .output()
+            .expect("node");
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        Some(serde_json::from_slice(&output.stdout).expect("JSON from node"))
+    }
+
+    /// The template file as embedded, for scripts that read it as Pi's
+    /// tests read `template.js`.
+    fn template_js_path() -> &'static std::ffi::OsStr {
+        std::ffi::OsStr::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/export_html/template.js"
+        ))
+    }
+
+    /// Pi v1.5.2's `test/export-html-deep-tree.test.ts` (#11225), "builds
+    /// and flattens a single-child chain deeper than the call stack": a
+    /// page of 20,000 chained entries, whose viewer Node runs as Pi's test
+    /// runs it, builds, flattens, and walks the tree without recursion.
+    /// Skipped without `node`.
+    #[test]
+    fn a_session_deeper_than_the_call_stack_renders() {
+        const DEPTH: usize = 20_000;
+        let iso = |seconds: usize| {
+            format!(
+                "1970-01-01T{:02}:{:02}:{:02}.000Z",
+                seconds / 3600,
+                seconds / 60 % 60,
+                seconds % 60
+            )
+        };
+        let entries = (0..DEPTH)
+            .map(|i| {
+                json!({
+                    "type": "message",
+                    "id": format!("e{i}"),
+                    "parentId": if i == 0 { Value::Null } else { json!(format!("e{}", i - 1)) },
+                    "timestamp": iso(i),
+                    "message": { "role": "user", "content": "x", "timestamp": i * 1000 },
+                })
+            })
+            .collect();
+        let data = SessionData {
+            header: Some(json!({
+                "type": "session", "version": 3, "id": "deep-test",
+                "timestamp": iso(0), "cwd": "/tmp",
+            })),
+            entries,
+            leaf_id: Some(format!("e{}", DEPTH - 1)),
+            system_prompt: None,
+            tools: None,
+        };
+        let dir = crate::test_support::TempDir::new("export-deep");
+        let page = dir.join("out.html");
+        std::fs::write(&page, generate_html(&data)).expect("write page");
+        let script = r#"
+const { readFileSync } = require("node:fs");
+const { createContext, runInContext } = require("node:vm");
+const html = readFileSync(process.argv[1], "utf8");
+const depth = Number(process.argv[2]);
+const sessionData = html.match(/<script id="session-data" type="application\/json">([^<]+)<\/script>/)?.[1];
+const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1]);
+const viewer = scripts.pop();
+if (!sessionData || !viewer) throw new Error("Missing exported session data or viewer script");
+const context = createContext({
+  atob,
+  TextDecoder,
+  URLSearchParams,
+  document: { getElementById: () => ({ textContent: sessionData }), querySelector: () => null },
+  window: { location: { search: "" } },
+});
+const api = runInContext(
+  viewer.replace(
+    "let treeNodeMap = null;",
+    "let treeNodeMap = null; return { buildTree, buildActivePathIds, flattenTree, findNewestLeaf, getPath };",
+  ),
+  context,
+);
+const tree = api.buildTree();
+const leafId = `e${depth - 1}`;
+const flat = api.flattenTree(tree, api.buildActivePathIds(leafId));
+const path = api.getPath(leafId);
+process.stdout.write(JSON.stringify({
+  roots: tree.length,
+  flat: flat.length,
+  flatLast: flat[depth - 1].node.entry.id,
+  newestLeaf: api.findNewestLeaf("e0"),
+  path: path.length,
+  pathFirst: path[0].id,
+  pathLast: path[depth - 1].id,
+}));
+"#;
+        let depth = DEPTH.to_string();
+        let Some(walked) = node_json(script, &[page.as_os_str(), depth.as_ref()]) else {
+            return;
+        };
+        let leaf = format!("e{}", DEPTH - 1);
+        assert_eq!(
+            walked,
+            json!({
+                "roots": 1, "flat": DEPTH, "flatLast": leaf, "newestLeaf": leaf,
+                "path": DEPTH, "pathFirst": "e0", "pathLast": leaf,
+            })
+        );
+    }
+
+    /// Pi v1.5.2's `test/export-html-system-messages.test.ts` (#11261): the
+    /// template's system-message helpers, run by Node on the slice of
+    /// `template.js` Pi's test runs, render a system message's text as
+    /// `bake-ai` sends it to the model, render the first system entry on a
+    /// branch as the prompt and later ones as updates, and count a
+    /// compaction's snapshot as earlier system state. Skipped without
+    /// `node`.
+    #[test]
+    fn system_messages_render_as_the_model_receives_them() {
+        let initial = json!({
+            "role": "system",
+            "content": "You are a helpful assistant.",
+            "sections": {
+                "rules": "<rules>\nbe concise\n</rules>",
+                "project_context": "<project_context>\nv1\n</project_context>",
+            },
+            "toolsAdded": [{ "name": "read", "description": "Read a file", "parameters": { "type": "object", "properties": {} } }],
+            "timestamp": 1,
+        });
+        let update = json!({
+            "role": "system",
+            "content": [{ "type": "text", "text": "Extra instructions" }],
+            "sections": { "project_context": "<project_context>\nv2\n</project_context>", "rules": null },
+            "toolsAdded": [{ "name": "bash", "description": "Run a command", "parameters": { "type": "object", "properties": {} } }],
+            "toolsRemoved": [{ "name": "read" }],
+            "timestamp": 2,
+        });
+        let input = json!({
+            "initial": initial,
+            "update": update,
+            "entries": [
+                { "type": "message", "id": "s1", "parentId": null, "message": initial },
+                { "type": "message", "id": "u1", "parentId": "s1", "message": { "role": "user", "content": "hi" } },
+                { "type": "message", "id": "s2", "parentId": "u1", "message": update },
+            ],
+            "snapshotEntries": [
+                { "type": "compaction", "id": "c1", "parentId": null, "systemMessage": initial },
+                { "type": "message", "id": "s2", "parentId": "c1", "message": update },
+            ],
+        });
+        let script = r#"
+const { readFileSync } = require("node:fs");
+const { runInNewContext } = require("node:vm");
+const templateJs = readFileSync(process.argv[1], "utf8");
+const input = JSON.parse(process.argv[2]);
+function loadSystemHelpers(entries) {
+  const start = templateJs.indexOf("function systemContentText(content)");
+  const end = templateJs.indexOf("const hasSystemEntries");
+  if (start < 0 || end <= start) throw new Error("the system-message helpers moved");
+  const context = { entries };
+  runInNewContext(
+    `const byId = new Map(entries.map(entry => [entry.id, entry]));
+    ${templateJs.slice(start, end)}
+    helpers = { getSystemMessageText, renderSystemMessageUpdate, isLeadingSystemEntry, describeSystemUpdate };`,
+    context,
+  );
+  return context.helpers;
+}
+const helpers = loadSystemHelpers(input.entries);
+const snapshot = loadSystemHelpers(input.snapshotEntries);
+process.stdout.write(JSON.stringify({
+  initialText: helpers.getSystemMessageText(input.initial),
+  updateText: helpers.renderSystemMessageUpdate(input.update),
+  leading: [helpers.isLeadingSystemEntry(input.entries[0]), helpers.isLeadingSystemEntry(input.entries[2])],
+  described: helpers.describeSystemUpdate(input.update),
+  afterSnapshot: snapshot.isLeadingSystemEntry({ id: "s2", parentId: "c1" }),
+}));
+"#;
+        let input_text = input.to_string();
+        let Some(rendered) = node_json(script, &[template_js_path(), input_text.as_ref()]) else {
+            return;
+        };
+        let message = |value: &Value| -> bake_ai::SystemMessage {
+            serde_json::from_value(value.clone()).expect("system message")
+        };
+        // "renders system message text the same way the model receives it"
+        assert_eq!(
+            rendered["initialText"],
+            bake_ai::utils::text::get_system_message_text(&message(&input["initial"]))
+        );
+        assert_eq!(
+            rendered["updateText"],
+            bake_ai::utils::text::render_system_message_update(&message(&input["update"]))
+        );
+        // "renders the first system entry on a branch as the prompt and
+        // later ones as updates"
+        assert_eq!(rendered["leading"], json!([true, false]));
+        assert_eq!(
+            rendered["described"],
+            "instructions, project_context, -rules, tools +bash -read"
+        );
+        // "treats a compaction snapshot as earlier system state"
+        assert_eq!(rendered["afterSnapshot"], false);
+    }
+
+    // The same file's "renders system entries in the transcript": the
+    // template renders system entries where they occur, and falls back to
+    // the header's prompt and tools only for sessions without them.
+    #[test]
+    fn the_template_renders_system_entries_in_the_transcript() {
+        let renders = TEMPLATE_JS
+            .match_indices("if (msg.role === 'system') {")
+            .any(|(at, opening)| {
+                TEMPLATE_JS[at + opening.len()..]
+                    .trim_start()
+                    .starts_with("let html = '';")
+            });
+        assert!(renders);
+        assert!(TEMPLATE_JS.contains("renderSystemPromptBlock('System Prompt', text)"));
+        assert!(TEMPLATE_JS.contains("renderToolsList('Available Tools', msg.toolsAdded)"));
+        assert!(TEMPLATE_JS.contains("if (!hasSystemEntries) {"));
+    }
+
+    /// Pi v1.5.2's `test/export-html-cost.test.ts` (#9980), "uses recorded
+    /// totals while falling back to component sums for old sessions": the
+    /// header's cost is each message's recorded total, or the sum of its
+    /// parts when it has none. Skipped without `node`.
+    #[test]
+    fn the_cost_uses_recorded_totals() {
+        let entries = json!([
+            {
+                "type": "message",
+                "message": {
+                    "role": "assistant", "content": [],
+                    "usage": { "cost": { "input": 0.1, "output": 0.2, "cacheRead": 0, "cacheWrite": 0, "total": 0.9 } },
+                },
+            },
+            {
+                "type": "message",
+                "message": {
+                    "role": "assistant", "content": [],
+                    "usage": { "cost": { "input": 0.4, "output": 0.1, "cacheRead": 0, "cacheWrite": 0 } },
+                },
+            },
+        ]);
+        let script = r#"
+const { readFileSync } = require("node:fs");
+const { runInNewContext } = require("node:vm");
+const templateJs = readFileSync(process.argv[1], "utf8");
+const start = templateJs.indexOf("function computeStats(entryList)");
+const end = templateJs.indexOf("const globalStats = computeStats(entries);");
+if (start < 0 || end <= start) throw new Error("computeStats moved");
+const context = {};
+runInNewContext(`${templateJs.slice(start, end)}
+result = computeStats(${process.argv[2]});`, context);
+process.stdout.write(JSON.stringify(context.result.cost));
+"#;
+        let entries_text = entries.to_string();
+        let Some(cost) = node_json(script, &[template_js_path(), entries_text.as_ref()]) else {
+            return;
+        };
+        let close = |member: &str, expected: f64| {
+            let actual = cost[member].as_f64().expect("number");
+            assert!((actual - expected).abs() < 1e-9, "{member}: {actual}");
+        };
+        close("input", 0.5);
+        close("output", 0.3);
+        close("total", 1.4);
     }
 }

@@ -365,6 +365,163 @@ async fn navigation_keeps_the_live_model_and_thinking_level() {
     assert_eq!(seen.lock().unwrap()[0].0, "faux-2");
 }
 
+fn branch_levels(session: &AgentSession) -> Vec<String> {
+    lock(&session.session)
+        .branch_entries(None)
+        .iter()
+        .filter(|entry| entry.entry_type() == "thinking_level_change")
+        .filter_map(|entry| entry.as_json()["thinkingLevel"].as_str().map(str::to_owned))
+        .collect()
+}
+
+// Pi v1.5.2 `test/suite/regressions/11451-thinking-level-after-tree-
+// navigation.test.ts`, "records the live thinking level on the new branch
+// before the next prompt", persisted: navigation can leave the latest
+// `thinking_level_change` on the branch left behind, so the live level is
+// recorded on the new branch with the next prompt, and a resume, which
+// reads the file's branch, restores it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_next_prompt_records_the_live_thinking_level_on_the_new_branch() {
+    let dir = TempDir::new("tree-thinking-level");
+    let h = harness();
+    let session = h
+        .session(file_session(&dir), Settings::default(), None, Vec::new())
+        .await;
+    h.faux.set_responses(vec![
+        faux_assistant_message("one").into(),
+        faux_assistant_message("two").into(),
+        faux_assistant_message("three").into(),
+    ]);
+    session
+        .set_thinking_level(ModelThinkingLevel::High, false)
+        .await
+        .expect("high");
+    session.prompt("one", Vec::new()).await.expect("one");
+    let first_answer = lock(&session.session).leaf_id().expect("leaf").to_owned();
+    session
+        .set_thinking_level(ModelThinkingLevel::Low, false)
+        .await
+        .expect("low");
+    session.prompt("two", Vec::new()).await.expect("two");
+    session
+        .navigate_tree(&first_answer, TreeNavigationOptions::default(), None)
+        .await
+        .expect("navigate");
+    assert_eq!(
+        lock(&session.session)
+            .build_session_context()
+            .thinking_level,
+        "high"
+    );
+    session.prompt("three", Vec::new()).await.expect("three");
+
+    assert_eq!(session.thinking_level(), ModelThinkingLevel::Low);
+    // Resume restores the thinking level from this context.
+    assert_eq!(
+        lock(&session.session)
+            .build_session_context()
+            .thinking_level,
+        "low"
+    );
+    let file = session.session_file().expect("file");
+    session.shutdown().await;
+    let reopened = SessionManager::open(&file, None, None).expect("reopen");
+    assert_eq!(reopened.build_session_context().thinking_level, "low");
+}
+
+// Bake: when that entry cannot be written, the prompt fails before any
+// request, and the session takes no more prompts, as after any failed write.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_failed_thinking_level_record_fails_the_prompt_before_a_request() {
+    let dir = TempDir::new("tree-thinking-level-fails");
+    let h = harness();
+    let session = h
+        .session(file_session(&dir), Settings::default(), None, Vec::new())
+        .await;
+    h.faux.set_responses(vec![
+        faux_assistant_message("one").into(),
+        faux_assistant_message("two").into(),
+        faux_assistant_message("never requested").into(),
+    ]);
+    session
+        .set_thinking_level(ModelThinkingLevel::High, false)
+        .await
+        .expect("high");
+    session.prompt("one", Vec::new()).await.expect("one");
+    let first_answer = lock(&session.session).leaf_id().expect("leaf").to_owned();
+    session
+        .set_thinking_level(ModelThinkingLevel::Low, false)
+        .await
+        .expect("low");
+    session.prompt("two", Vec::new()).await.expect("two");
+    session
+        .navigate_tree(&first_answer, TreeNavigationOptions::default(), None)
+        .await
+        .expect("navigate");
+    let file = session.session_file().expect("file");
+    let written = std::fs::read(&file).expect("read");
+    std::fs::remove_file(&file).expect("remove");
+    std::fs::create_dir_all(&file).expect("block");
+    let calls = h.faux.call_count();
+    let error = session
+        .prompt("three", Vec::new())
+        .await
+        .expect_err("the record fails");
+    // The run reports the write's own failure, which names the file.
+    assert!(error.contains(&*file.to_string_lossy()), "{error}");
+    assert_eq!(h.faux.call_count(), calls, "a request followed the failure");
+    std::fs::remove_dir(&file).expect("unblock");
+    std::fs::write(&file, &written).expect("restore");
+    let refused = session
+        .prompt("four", Vec::new())
+        .await
+        .expect_err("no more prompts");
+    assert!(refused.contains("takes no more prompts"), "{refused}");
+    assert_eq!(h.faux.call_count(), calls);
+    assert_eq!(std::fs::read(&file).expect("read"), written);
+    session.shutdown().await;
+}
+
+// The same file's second case, "does not record a level that only differs
+// from the branch by clamping": a branch that asked for `xhigh` on a model
+// without it runs at `high`, and the next prompt keeps the request.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_level_that_differs_only_by_clamping_is_not_recorded() {
+    let h = harness();
+    let session = h
+        .session(in_memory(), Settings::default(), None, Vec::new())
+        .await;
+    h.faux
+        .set_responses(vec![faux_assistant_message("one").into()]);
+    session
+        .set_thinking_level(ModelThinkingLevel::High, false)
+        .await
+        .expect("high");
+    // As after resuming a session that requested xhigh on a model without
+    // it: the session runs at high.
+    lock(&session.session)
+        .append_thinking_level_change("xhigh")
+        .expect("append");
+    session.prompt("one", Vec::new()).await.expect("one");
+    assert_eq!(session.thinking_level(), ModelThinkingLevel::High);
+    assert_eq!(
+        branch_levels(&session).last().map(String::as_str),
+        Some("xhigh")
+    );
+}
+
+// Bake: a branch that agrees with the live level gets no entry, so a
+// prompt without navigation writes no `thinking_level_change`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_prompt_on_an_agreeing_branch_records_no_level() {
+    let h = harness();
+    let session = h
+        .session(in_memory(), Settings::default(), None, Vec::new())
+        .await;
+    two_turns(&h, &session).await;
+    assert_eq!(branch_levels(&session), ["high"]);
+}
+
 // Pi "should allow forking from single message" and "should fork from
 // middle of conversation", persisted: the fork holds the path before the
 // chosen message in its own file, naming the source as its parent; the

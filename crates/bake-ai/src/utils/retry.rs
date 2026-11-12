@@ -1,9 +1,10 @@
 //! Agent-level retry of transient provider failures.
 //!
 //! Ported from Pi `packages/ai/src/utils/retry.ts` (v1.1.0; classifiers from
-//! v1.4.0): the retryable and non-retryable classifiers, the backoff, and
-//! `retryAssistantCall`. Pi's callbacks may be asynchronous; here one
-//! synchronous observer receives each [`RetryEvent`].
+//! v1.5.2, `b4afdddf44e059c67ccf5097e5317d913521b470`): the retryable and
+//! non-retryable classifiers, the backoff, and `retryAssistantCall`. Pi's
+//! callbacks may be asynchronous; here one synchronous observer receives
+//! each [`RetryEvent`].
 
 use std::future::Future;
 use std::sync::LazyLock;
@@ -25,6 +26,9 @@ const NON_RETRYABLE_PROVIDER_LIMIT_ERRORS: &[&str] = &[
     "billing",
     "subscription_sharing_usage_limit_exceeded",
     "subscription_sharing_workplace_individual_usage_limit_exceeded",
+    // Zhipu/Z.ai code 1308: the plan's usage cap, sent as HTTP 429; it
+    // resets after hours. Pi's `"?1308(?![0-9])` without lookahead.
+    r#""code"\s*:\s*"?1308(?:[^0-9]|$)"#,
 ];
 
 const RETRYABLE_PROVIDER_ERRORS: &[&str] = &[
@@ -73,6 +77,7 @@ const RETRYABLE_PROVIDER_ERRORS: &[&str] = &[
     "whitespace characters after the arguments of tool call",
     "http2 request did not get a response",
     "stream disconnected before completion",
+    "cut short after the reply had begun",
     "pending stream has been canceled",
     "retry delay",
     "you can retry your request",
@@ -347,6 +352,8 @@ mod tests {
             "Upstream HTTP/2 stream failed",
             // #11057
             "stream disconnected before completion: stream closed before response.completed",
+            // v1.5.2, #11879: "matches gateway wording for a stream cut short mid-reply"
+            "Claude Code's stream from Anthropic was cut short after the reply had begun",
             "503",
             "HTTP 503: unavailable",
         ] {
@@ -359,8 +366,22 @@ mod tests {
             // #11057: status codes inside ids or longer numbers.
             "401 {\"type\":\"error\",\"error\":{\"type\":\"authentication_error\",\"message\":\"invalid x-api-key\"},\"request_id\":\"req_011CU503xyz\"}",
             "400 image exceeds 5 MB maximum: 5316784 bytes > 5242880 bytes",
+            // v1.5.2, #11537: Zhipu/Z.ai's usage cap, code 1308 sent as HTTP
+            // 429. Pi's commit checks the reported message by hand; these
+            // are that message and the code without quotes.
+            "429 {\"code\":\"1308\",\"message\":\"已达到 5 小时的使用上限。\"}",
+            "429 {\"error\":{\"code\": 1308, \"message\":\"Usage limit reached\"}}",
         ] {
             assert!(!is_retryable_assistant_error(&error(text)), "{text}");
+        }
+        // The code field only: a longer code, or 1308 in an id or a byte
+        // count, leaves a 429 retryable.
+        for text in [
+            "429 {\"code\":\"13080\",\"message\":\"rate limited\"}",
+            "429 {\"code\":\"1302\",\"request_id\":\"req_1308\",\"message\":\"rate limited\"}",
+            "429 Too Many Requests: 1308 bytes",
+        ] {
+            assert!(is_retryable_assistant_error(&error(text)), "{text}");
         }
         assert!(!is_retryable_assistant_error(&faux_assistant_message(
             "not an error"

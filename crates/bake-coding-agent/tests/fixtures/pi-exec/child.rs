@@ -22,6 +22,23 @@ fn main() {
                 std::io::stderr().write_all(&[b'e'; 8192]).unwrap();
             }
         }
+        // "你好" on both streams, split inside its first character, with a
+        // pause between the writes so the reader sees two chunks.
+        "split" => {
+            let text = "你好".as_bytes();
+            for part in [&text[..1], &text[1..]] {
+                std::io::stdout().write_all(part).unwrap();
+                std::io::stdout().flush().unwrap();
+                std::io::stderr().write_all(part).unwrap();
+                std::io::stderr().flush().unwrap();
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+        }
+        // An unfinished character at the end of each stream.
+        "partial" => {
+            std::io::stdout().write_all(&[0xe2]).unwrap();
+            std::io::stderr().write_all(&[0xf0]).unwrap();
+        }
         "cwd" => print!("{}", std::fs::read_to_string("marker").unwrap()),
         "create" => std::fs::write(&args[1], "ran").unwrap(),
         "env" => print!("{}", std::env::var(&args[1]).unwrap_or_default()),
