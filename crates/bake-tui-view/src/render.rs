@@ -30,6 +30,7 @@ use crate::jobs;
 use crate::layout::{self, Needs};
 use crate::mention::PathKind;
 use crate::mode::{self, HINT_MIN_COLUMNS};
+use crate::palette::Token;
 use crate::runtime::Target;
 use crate::selection::line_columns;
 use crate::state::{
@@ -594,7 +595,7 @@ fn render_dialog(app: &mut State, area: Rect, buf: &mut Buffer) {
     let w = usize::from(inner.width);
     let body_rows = usize::from(inner.height).saturating_sub(chrome);
     let whole = usize::from(inner.height) >= least && usize::from(inner.width) >= SHEET_MIN_INNER;
-    let title_style = tone_style(Tone::Waiting, tones).add_modifier(Modifier::BOLD);
+    let title_style = Token::Notice.style(tones).add_modifier(Modifier::BOLD);
     let mut head: Vec<Line> = Vec::new();
     let mut body: Vec<Line> = Vec::new();
     let mut tail: Vec<Line> = Vec::new();
@@ -1088,7 +1089,7 @@ fn render_approval(app: &mut State, area: Rect, buf: &mut Buffer) {
         return;
     }
     let clean = |text: &str| editor::sanitize(text).replace(['\n', '\t'], " ");
-    let waiting = tone_style(Tone::Waiting, app.tones).add_modifier(Modifier::BOLD);
+    let waiting = Token::Notice.style(app.tones).add_modifier(Modifier::BOLD);
     let mut head = vec![
         Span::styled(
             format!("{}: {}", copy::APPROVAL_TITLE, clean(&approval.tool)),
@@ -1256,7 +1257,7 @@ fn render_region(
         line(
             buf,
             inset(notice),
-            Line::styled(copy::QUIT, tone_style(Tone::Waiting, app.tones)),
+            Line::styled(copy::QUIT, Token::Notice.style(app.tones)),
         );
     } else if let Some(kind) = app.notice {
         let text: &str = match kind {
@@ -1446,34 +1447,22 @@ fn render_bar(app: &State, area: Rect, buf: &mut Buffer) {
     line(buf, area, Line::from(head));
 }
 
-/// The status line, the screen's last row: the model, its thinking level,
-/// the context, the readings the user turned on, and the location, in the
-/// order and with the give-way [`status::fit`] defines, left-aligned with
-/// the rows above it. Bake: it is quiet, dim but for the tones that warn,
-/// such as a missing model or a nearly full context; a field the row cannot
-/// hold whole at its narrowest goes whole, from the end, rather than be cut.
+/// The status line, the screen's last row: the session's state dot, the
+/// model, its thinking level, the context's gauge and count, the readings
+/// the user turned on, and the location, as [`status::line`] lays them out,
+/// left-aligned with the rows above it. Bake: it is quiet. The model is in
+/// the terminal's foreground and the rest is dim, but for the palette's
+/// colours where they mean something: the dot's state, a filling context,
+/// the cache's share, a detached branch, and the thinking level.
 fn render_status(app: &State, area: Rect, buf: &mut Buffer) {
     if area.is_empty() {
         return;
     }
-    let width = usize::from(area.width);
-    let mut fitted = status::fit(&status::fields(&app.status), width);
-    while !fitted.is_empty() && status::fitted_width(&fitted) > width {
-        fitted.pop();
-    }
-    let mut spans = Vec::new();
-    for (i, field) in fitted.iter().enumerate() {
-        if i > 0 {
-            spans.push(Span::raw(" ".repeat(status::FIELD_GAP)));
-        }
-        for part in status::drawn(field) {
-            let style = match part.tone {
-                Tone::Plain => dim(),
-                tone => tone_style(tone, app.tones),
-            };
-            spans.push(Span::styled(part.text, style));
-        }
-    }
+    let parts = status::line(&app.status, app.session_state(), usize::from(area.width));
+    let spans: Vec<Span> = parts
+        .into_iter()
+        .map(|part| Span::styled(part.text, tone_style(part.tone, app.tones)))
+        .collect();
     line(buf, area, Line::from(spans));
 }
 
@@ -1720,7 +1709,7 @@ fn fit_start(text: &str, width: usize) -> String {
 /// from its start; each row's kind after it only when the rows shown mix
 /// files and directories. Its status rows follow.
 fn render_file_menu(app: &State, menu: &FileMenu, area: Rect, buf: &mut Buffer) {
-    let asking = tone_style(Tone::Asking, app.tones);
+    let asking = Token::High.style(app.tones);
     let status = file_status(menu);
     let rows = usize::from(area.height).saturating_sub(status.len());
     let count = menu.entries.len();
@@ -1805,7 +1794,7 @@ fn render_menu(app: &State, area: Rect, buf: &mut Buffer) {
     if area.is_empty() {
         return;
     }
-    let asking = tone_style(Tone::Asking, app.tones);
+    let asking = Token::High.style(app.tones);
     if let Some(menu) = app.file_menu() {
         render_file_menu(app, &menu, area, buf);
         return;
@@ -1921,7 +1910,7 @@ fn render_attachments(app: &State, area: Rect, buf: &mut Buffer) {
         .map(|(index, (_, image))| format!("{}. {}", index + 1, image.summary()))
         .collect();
     let title = format!("{}: {}", copy::ATTACHMENTS_TITLE, items.len());
-    let style = tone_style(Tone::Asking, app.tones);
+    let style = Token::High.style(app.tones);
     render_panel(&title, style, &items, copy::ATTACHMENTS_HELP, area, buf);
 }
 
@@ -1948,7 +1937,7 @@ fn render_pending(app: &State, area: Rect, buf: &mut Buffer) {
             fit(&format!("{target}: {text}"), width)
         })
         .collect();
-    let style = tone_style(Tone::Waiting, app.tones);
+    let style = Token::Notice.style(app.tones);
     render_panel(copy::PENDING, style, &items, copy::PENDING_HELP, area, buf);
 }
 
@@ -2071,24 +2060,13 @@ fn render_standing(
     }
 }
 
-/// A status tone in the palette's colour on a truecolor terminal, the nearest
-/// ANSI colour otherwise, and without colour under `NO_COLOR`.
+/// A status-line run's style: the model in the terminal's foreground,
+/// values and labels dim, and colours from [`crate::palette`].
 fn tone_style(tone: Tone, tones: Tones) -> Style {
-    let (rgb, ansi) = match tone {
-        Tone::Plain => return Style::new(),
-        Tone::Dim => return dim(),
-        Tone::Waiting => ((0xea, 0xb3, 0x08), Color::Yellow),
-        Tone::Asking => ((0x0e, 0xa5, 0xe9), Color::LightBlue),
-        Tone::Hot | Tone::Ramp(2) => ((0xfb, 0x92, 0x3c), Color::LightRed),
-        Tone::Max => ((0xf4, 0x72, 0xb6), Color::LightMagenta),
-        Tone::Ramp(0) => ((0xfd, 0xe6, 0x8a), Color::LightYellow),
-        Tone::Ramp(1) => ((0xfa, 0xcc, 0x15), Color::Yellow),
-        Tone::Ramp(_) => ((0xf8, 0x71, 0x71), Color::Red),
-    };
-    match tones {
-        Tones::TrueColor => Style::new().fg(Color::Rgb(rgb.0, rgb.1, rgb.2)),
-        Tones::Ansi => Style::new().fg(ansi),
-        Tones::None => Style::new(),
+    match tone {
+        Tone::Anchor => Style::new(),
+        Tone::Plain | Tone::Dim => Token::Muted.style(tones),
+        Tone::Ink(token) => token.style(tones),
     }
 }
 
@@ -3146,7 +3124,7 @@ mod tests {
             // status line is right under it.
             let (rows, _) = draw(&mut State::default(), w, h);
             assert!(rows[last - 1].starts_with('╰'), "{rows:#?}");
-            assert_eq!(rows[last].trim_end(), "  no model", "{rows:#?}");
+            assert_eq!(rows[last].trim_end(), "  ◆ no model", "{rows:#?}");
             let (rows, cursor) = draw(&mut tasked(State::default()), w, h);
             // The transcript follows the sample session's newest line.
             assert!(
@@ -3162,7 +3140,7 @@ mod tests {
                 rows[last - 1].starts_with("  Sample tasks  2 running · 1 failed"),
                 "{rows:#?}"
             );
-            assert_eq!(rows[last].trim_end(), "  no model", "{rows:#?}");
+            assert_eq!(rows[last].trim_end(), "  ◆ no model", "{rows:#?}");
         }
     }
 
@@ -3177,7 +3155,7 @@ mod tests {
         assert_eq!(rows[prompt + 1], format!("╰{}╯", "─".repeat(38)));
         // The tasks row and the status line under it align with the box's
         // contents.
-        assert_eq!(rows[prompt + 3], format!("  no model{}", " ".repeat(30)));
+        assert_eq!(rows[prompt + 3], format!("  ◆ no model{}", " ".repeat(28)));
         // Narrow, the row's label gives way before its counts and newest
         // task.
         assert_eq!(
@@ -3450,7 +3428,7 @@ mod tests {
         let (rows, _) = draw(&mut app, 80, 24);
         let edge = rows.iter().rposition(|r| r.starts_with('╰')).unwrap();
         // The status line stays the screen's last row under the open tray.
-        assert_eq!(rows[23].trim_end(), "  no model");
+        assert_eq!(rows[23].trim_end(), "  ◆ no model");
         let tray: Vec<&str> = rows[edge + 1..23].iter().map(|r| r.trim_end()).collect();
         assert_eq!(
             tray,
@@ -4237,44 +4215,236 @@ mod tests {
         assert_eq!(
             seen,
             [
-                "  deepseek-v4-flash high  ctx ~11%",
-                "  deepseek-v4-flash high  ctx ~11%  ~/projects/bake ⎇ main",
-                "  deepseek-v4-flash high  ctx ~11% (15.2k/128k)  ~/projects/bake ⎇ main",
-                "  deepseek-v4-flash high  ctx ~11% (15.2k/128k)  ~/projects/bake ⎇ main",
+                "  ○ deepseek-v4-flash high  ctx ~11%",
+                "  ○ deepseek-v4-flash high  ctx ~11%  …rojects/bake ⎇ main",
+                "  ○ deepseek-v4-flash high  ctx ▰▱▱▱▱ ~11% (15.2k/128k)  …projects/bake ⎇ main",
+                "  ○ deepseek-v4-flash high  ctx ▰▱▱▱▱ ~11% (15.2k/128k)  ~/projects/bake ⎇ main",
             ]
         );
         let (idle, _) = draw(&mut app, 80, 24);
-        // A running turn leaves it as it was; the activity is in the
+        // A running turn changes only the dot; the activity is in the
         // transcript.
         app.now = Duration::from_secs(2);
         ctrl_t(&mut app);
         let (rows, _) = draw(&mut app, 80, 24);
-        assert_eq!(last(&rows), last(&idle));
+        let working = last(&idle).replacen('○', "●", 1);
+        assert_eq!(last(&rows), working);
         assert!(!rows[row_index(&rows, "❯") - 2].contains("deepseek"));
         // An open tray sits above it.
         ctrl_g(&mut app);
         let (rows, _) = draw(&mut app, 80, 24);
-        assert_eq!(last(&rows), last(&idle));
+        assert_eq!(last(&rows), working);
         assert!(rows[21].contains("bash-1"), "{rows:#?}");
-        // Dim, but the level keeps its tone; the context's label is dim.
+        // The model is the row's anchor, in the terminal's foreground; the
+        // level keeps its tone; labels, values, and the directory are dim.
         app.tones = Tones::TrueColor;
-        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
-        terminal.draw(|f| render(&mut app, f)).unwrap();
-        let row = last(&idle);
-        let x_of = |needle: &str| row.find(needle).unwrap() as u16;
-        let buffer = terminal.backend().buffer();
+        let cells = status_cells(&mut app, 80);
         assert_eq!(
-            buffer[(x_of(" high") + 1, 23)].style().fg,
-            Some(Color::Rgb(0x0e, 0xa5, 0xe9))
+            style_at(&cells, " high", 1).fg,
+            Some(Color::Rgb(0x38, 0xbd, 0xf8))
         );
-        for needle in ["deepseek", "ctx", "~/projects"] {
+        // Field by field: a workspace build unifies ratatui's
+        // `underline-color` feature, which gives every cell an underline
+        // colour.
+        let anchor = style_at(&cells, "deepseek", 0);
+        assert_eq!(
+            (anchor.fg, anchor.bg, anchor.add_modifier),
+            (None, None, Modifier::empty())
+        );
+        for needle in ["ctx", "~11%", "projects", "main"] {
             assert!(
-                buffer[(x_of(needle), 23)]
-                    .style()
+                style_at(&cells, needle, 0)
                     .add_modifier
                     .contains(Modifier::DIM),
                 "{needle}"
             );
+        }
+    }
+
+    /// The status line's cells as drawn `width` wide: each cell's symbol and
+    /// style, wide symbols' fillers left out and the reset colour as none.
+    fn status_cells(app: &mut State, width: u16) -> Vec<(String, Style)> {
+        let mut terminal = Terminal::new(TestBackend::new(width, 24)).unwrap();
+        terminal.draw(|f| render(app, f)).unwrap();
+        let buffer = terminal.backend().buffer();
+        (0..width)
+            .map(|x| &buffer[(x, 23)])
+            .filter(|cell| !cell.symbol().is_empty())
+            .map(|cell| {
+                // A cell drawn without a colour holds the reset colour.
+                let mut style = cell.style();
+                style.fg = style.fg.filter(|&fg| fg != Color::Reset);
+                style.bg = style.bg.filter(|&bg| bg != Color::Reset);
+                (cell.symbol().to_owned(), style)
+            })
+            .collect()
+    }
+
+    /// The style of the cell `offset` cells into the first `needle` on the
+    /// status line.
+    fn style_at(cells: &[(String, Style)], needle: &str, offset: usize) -> Style {
+        let symbols: Vec<&str> = cells.iter().map(|(s, _)| s.as_str()).collect();
+        let needle: Vec<String> = needle.graphemes(true).map(str::to_owned).collect();
+        let at = symbols
+            .windows(needle.len())
+            .position(|window| window == needle)
+            .unwrap_or_else(|| panic!("{needle:?} in {:?}", symbols.concat()));
+        cells[at + offset].1
+    }
+
+    // Bake: the status line's colours, one palette under every colour
+    // level. The dot follows the session, the gauge and the percentage warm
+    // as the context fills, the cache's share warms as it falls, a detached
+    // branch wants a look, and the thinking levels take the cool scale.
+    // Under NO_COLOR nothing is coloured and the dot's glyph tells the
+    // states apart.
+    #[test]
+    fn the_status_line_colours_its_indicators_from_one_palette() {
+        use crate::runtime::{Approval, RuntimeUpdate, SessionStatus};
+        let rgb = |r, g, b| Some(Color::Rgb(r, g, b));
+        let levels = [Tones::TrueColor, Tones::Ansi, Tones::None];
+        // Each case's expected colour as truecolor, ANSI, and NO_COLOR.
+        let check = |app: &mut State, needle: &str, offset: usize, want: [Option<Color>; 3]| {
+            for (tones, want) in levels.into_iter().zip(want) {
+                app.tones = tones;
+                let cells = status_cells(app, 120);
+                assert_eq!(
+                    style_at(&cells, needle, offset).fg,
+                    want,
+                    "{needle} under {tones:?}"
+                );
+            }
+        };
+        // The dot: no model waits on the user, then idle, working, waiting
+        // on an approval, and failed.
+        let mut app = State::live(FrameStyle::default(), Tones::None, Vec::new());
+        check(
+            &mut app,
+            "◆ no model",
+            0,
+            [rgb(0xfa, 0xcc, 0x15), Some(Color::Yellow), None],
+        );
+        let status = |percent: u64, cache: Option<u64>, level: &str| {
+            RuntimeUpdate::Status(SessionStatus {
+                model: Some("p/model".into()),
+                thinking: Some(level.into()),
+                context: Some(status::ContextUsage {
+                    used: Some(percent * 1_000),
+                    window: 100_000,
+                }),
+                tokens: None,
+                cache: cache.map(|hit| status::CacheReading {
+                    read: 1_000,
+                    write: 0,
+                    hit: Some(hit),
+                }),
+                name: None,
+            })
+        };
+        update(&mut app, Msg::Runtime(status(23, None, "high")));
+        app.status.branch = Some(status::Branch {
+            name: "1a2b3c4".into(),
+            detached: true,
+        });
+        check(&mut app, "○ model", 0, [None, None, None]);
+        assert!(
+            style_at(&status_cells(&mut app, 120), "○", 0)
+                .add_modifier
+                .contains(Modifier::DIM)
+        );
+        update(
+            &mut app,
+            Msg::Runtime(RuntimeUpdate::TurnStarted { seed: "s".into() }),
+        );
+        check(
+            &mut app,
+            "● model",
+            0,
+            [rgb(0xf9, 0x73, 0x16), Some(Color::Yellow), None],
+        );
+        update(
+            &mut app,
+            Msg::Runtime(RuntimeUpdate::Approvals(vec![Approval {
+                generation: 1,
+                tool: "bash".into(),
+                call_id: "c".into(),
+                parent_call_id: None,
+                reason: "r".into(),
+                arguments: "a".into(),
+            }])),
+        );
+        check(
+            &mut app,
+            "◆ model",
+            0,
+            [rgb(0xfa, 0xcc, 0x15), Some(Color::Yellow), None],
+        );
+        update(&mut app, Msg::Runtime(RuntimeUpdate::Approvals(Vec::new())));
+        update(
+            &mut app,
+            Msg::Runtime(RuntimeUpdate::TurnEnded(Outcome::Failed)),
+        );
+        check(
+            &mut app,
+            "! model",
+            0,
+            [rgb(0xf8, 0x71, 0x71), Some(Color::Red), None],
+        );
+        // A detached branch is a notice.
+        check(
+            &mut app,
+            "(1a2b3c4)",
+            0,
+            [rgb(0xfa, 0xcc, 0x15), Some(Color::Yellow), None],
+        );
+        // The gauge's fill and the percentage, through the thresholds.
+        let green = [rgb(0x4a, 0xde, 0x80), Some(Color::Green), None];
+        let yellow = [rgb(0xfa, 0xcc, 0x15), Some(Color::Yellow), None];
+        let orange = [rgb(0xfb, 0x92, 0x3c), Some(Color::LightRed), None];
+        let red = [rgb(0xf8, 0x71, 0x71), Some(Color::Red), None];
+        for (percent, fill, text) in [
+            (23, green, None),
+            (65, yellow, Some(yellow)),
+            (75, yellow, Some(yellow)),
+            (85, orange, Some(orange)),
+            (95, red, Some(red)),
+        ] {
+            update(&mut app, Msg::Runtime(status(percent, None, "high")));
+            check(&mut app, "ctx ▰", 4, fill);
+            let reading = format!("~{percent}%");
+            match text {
+                Some(want) => check(&mut app, &reading, 0, want),
+                None => assert!(
+                    style_at(&status_cells(&mut app, 120), &reading, 0)
+                        .add_modifier
+                        .contains(Modifier::DIM)
+                ),
+            }
+        }
+        // The empty cells are dim.
+        update(&mut app, Msg::Runtime(status(23, None, "high")));
+        let cells = status_cells(&mut app, 120);
+        let empty = style_at(&cells, "▱", 0);
+        assert_eq!((empty.fg, empty.add_modifier), (None, Modifier::DIM));
+        // The cache's share, turned on, warms as it falls.
+        for (hit, want) in [(99, green), (60, yellow), (12, orange)] {
+            update(&mut app, Msg::Runtime(status(23, Some(hit), "high")));
+            check(&mut app, &format!("cache {hit}%"), 6, want);
+        }
+        // The thinking levels take the cool scale.
+        for (level, want) in [
+            (
+                "high",
+                [rgb(0x38, 0xbd, 0xf8), Some(Color::LightBlue), None],
+            ),
+            ("xhigh", [rgb(0xa7, 0x8b, 0xfa), Some(Color::Magenta), None]),
+            (
+                "max",
+                [rgb(0xf4, 0x72, 0xb6), Some(Color::LightMagenta), None],
+            ),
+        ] {
+            update(&mut app, Msg::Runtime(status(23, None, level)));
+            check(&mut app, &format!(" {level}"), 1, want);
         }
     }
 
@@ -5267,7 +5437,7 @@ mod tests {
             rows[rows.len() - 3].contains('╰'),
             "the row is under the box: {rows:#?}"
         );
-        assert_eq!(rows[rows.len() - 1].trim_end(), "  no model", "{rows:#?}");
+        assert_eq!(rows[rows.len() - 1].trim_end(), "  ◆ no model", "{rows:#?}");
         update(&mut app, Msg::Key(KeyInput::plain(Key::Down)));
         let (rows, _) = draw(&mut app, 60, 12);
         assert!(
@@ -5310,7 +5480,7 @@ mod tests {
             "{rows:#?}"
         );
         // The status line stays last under the open shell.
-        assert_eq!(rows[13].trim_end(), "  no model", "{rows:#?}");
+        assert_eq!(rows[13].trim_end(), "  ◆ no model", "{rows:#?}");
     }
 
     // Bake: the tasks list opens under the input bar and leaves the

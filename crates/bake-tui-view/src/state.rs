@@ -19,7 +19,7 @@ use crate::mode::Mode;
 use crate::paste::{self, Image};
 use crate::runtime::{Approval, ApprovalAnswer, Pending, Prompt, RuntimeUpdate, Submission};
 use crate::selection::{self, Granularity, Point, Range};
-use crate::status::StatusInput;
+use crate::status::{SessionState, StatusInput};
 use crate::tasks::{self, Group, Phase, Task, TaskId};
 use crate::tips::{self, Tips};
 use crate::transcript::{self, Transcript};
@@ -857,6 +857,29 @@ impl State {
         self.approval_showings += 1;
         self.handoff = Some(self.approval_showings);
         self.handoff
+    }
+
+    /// What the status line's state dot shows. An approval wins, as one
+    /// comes while a turn runs; then a running turn or compaction; then a
+    /// failed last turn, until the next prompt clears its summary; then a
+    /// missing model, which also waits on the user. An open dialog does not
+    /// count: it is on screen already, and the person may have opened it,
+    /// as the terminal title and herdr also treat only approvals as blocked.
+    pub fn session_state(&self) -> SessionState {
+        if !self.approvals.is_empty() {
+            SessionState::Waiting
+        } else if self.activity.is_some() {
+            SessionState::Working
+        } else if self
+            .summary
+            .is_some_and(|summary| summary.outcome == Outcome::Failed)
+        {
+            SessionState::Failed
+        } else if self.status.model.is_none() {
+            SessionState::Waiting
+        } else {
+            SessionState::Idle
+        }
     }
 
     /// Whether the composer is waiting for the keyboard after a dialog
@@ -3410,6 +3433,51 @@ mod tests {
         runtime(&mut state, RuntimeUpdate::TurnEnded(Outcome::Failed));
         assert_eq!(state.summary.map(|s| s.outcome), Some(Outcome::Failed));
         assert_eq!(state.activity, None);
+    }
+
+    // Bake: the status line's dot. An approval wins over a running turn; a
+    // failed turn holds until the next starts; a dialog, asking or not,
+    // leaves the dot alone; and with no model the session waits on the user.
+    #[test]
+    fn the_session_state_puts_waiting_on_the_user_first() {
+        use crate::dialog::{DialogKind, DialogRequest, InfoDialog};
+        let mut state = live();
+        assert_eq!(state.session_state(), SessionState::Waiting, "no model");
+        state.status.model = Some("p/m".into());
+        assert_eq!(state.session_state(), SessionState::Idle);
+        let dialog = |kind| RuntimeUpdate::Dialog(Some(DialogRequest { id: 1, kind }));
+        runtime(
+            &mut state,
+            dialog(DialogKind::Info(InfoDialog {
+                title: "About".into(),
+                lines: Vec::new(),
+            })),
+        );
+        assert_eq!(state.session_state(), SessionState::Idle);
+        runtime(&mut state, dialog(DialogKind::Field(Box::default())));
+        assert_eq!(state.session_state(), SessionState::Idle, "a dialog");
+        runtime(&mut state, RuntimeUpdate::Dialog(None));
+        runtime(&mut state, RuntimeUpdate::TurnStarted { seed: "s".into() });
+        assert_eq!(state.session_state(), SessionState::Working);
+        runtime(
+            &mut state,
+            RuntimeUpdate::Approvals(vec![crate::runtime::Approval {
+                generation: 1,
+                tool: "bash".into(),
+                call_id: "c".into(),
+                parent_call_id: None,
+                reason: "r".into(),
+                arguments: "a".into(),
+            }]),
+        );
+        assert_eq!(state.session_state(), SessionState::Waiting);
+        runtime(&mut state, RuntimeUpdate::Approvals(Vec::new()));
+        runtime(&mut state, RuntimeUpdate::TurnEnded(Outcome::Failed));
+        assert_eq!(state.session_state(), SessionState::Failed);
+        runtime(&mut state, RuntimeUpdate::TurnStarted { seed: "t".into() });
+        assert_eq!(state.session_state(), SessionState::Working);
+        runtime(&mut state, RuntimeUpdate::TurnEnded(Outcome::Completed));
+        assert_eq!(state.session_state(), SessionState::Idle);
     }
 
     // Bake: a compaction between a turn's steps names itself with its own

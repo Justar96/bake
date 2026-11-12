@@ -25,6 +25,7 @@ pub mod live;
 pub mod markdown;
 pub mod mention;
 pub mod mode;
+pub mod palette;
 pub mod paste;
 pub mod render;
 pub mod runtime;

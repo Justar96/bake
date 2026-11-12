@@ -338,6 +338,15 @@ During coexistence, run the current Bake gates for affected TypeScript paths and
 
 ## Dev Note
 
+**Status line palette and indicators (2026-11-12).** Bake's own design; no Pi source applies. The status line takes its colours from one palette and gains indicators that follow the session:
+- `bake-tui-view`:
+  - The new `palette` module names the row's colours: `Token::Muted` (the dim modifier), the warm attention scale `Ok`, `Notice`, `Warn`, and `Danger`, `Accent` (`activity::RUNNING`, the shimmer's resting orange, now public with `RUNNING_ANSI` and `Rgb`), and the cool scale `High`, `XHigh`, and `Max` for the thinking levels. `Token::style` resolves one under `Tones`, without colour under `NO_COLOR`. The renderer's status tones and the dialogs' waiting and asking colours go through it.
+  - `status::Tone` is `Plain`, `Anchor` (the model, in the terminal's foreground), `Dim`, and `Ink(Token)`; `Waiting`, `Asking`, `Hot`, `Max`, and `Ramp` are gone. `context_tone` steps through `notice` (60%), `warn` (80%), and `danger` (90%), and `gauge_tone`, `gauge_filled`, `cache_tone`, and `thinking_tone` give the gauge, the cache's share, and the levels their tokens.
+  - `status::SessionState` (`Idle`, `Working`, `Waiting`, `Failed`), `dot`, and `line`, which lays out the dot, which never gives way, and the fitted fields; `State::session_state` derives the state from approvals, the activity, the last turn's summary, and the model. The context field's widest reading carries a five-cell gauge that gives way first, at `rank::CONTEXT_GAUGE`.
+- `bake-tui`: the `/settings` sheet's expected status line starts with the waiting dot.
+
+No prompt, tool, result, or request changes, so no model evaluation applies.
+
 **Pi v1.5.2, second wave (2026-11-12).** v1.5.2 was still Pi's latest official release on 2026-11-12. This wave took its fixes that change what the model reads, which the first wave had left for paired evaluation ([Pi-first plan](pi-first-plan.md#pinned-pi-revision)). Each item names its Pi commit, all in v1.5.2, and the Pi tests it ports; every fix has a test that failed without it.
 - `bake-ai`:
   - `api::anthropic_messages` keeps a schema's root `$defs` and `definitions` in a non-strict tool's `input_schema` (`4a6a58eb5`, `anthropic-strict-tool-schema.test.ts`). Before, an MCP tool whose schema used them reached Anthropic with a `$ref` to nothing.

@@ -738,7 +738,7 @@ mod tests {
         // The status line is the screen's last row, under the box.
         assert_eq!(
             screen.last().map(|line| line.trim_end()),
-            Some("  no model")
+            Some("  ◆ no model")
         );
     }
 
