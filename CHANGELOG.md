@@ -4,6 +4,10 @@ Notable changes to Bake. `bake` compiles this file in, and `/changelog` shows it
 
 ## [Unreleased]
 
+## [0.4.5] - 2026-11-12
+
+Bake 0.4.5 gives each tool its own card with previews that Ctrl+O expands, shows subagents and background shells as one tasks list, puts what a turn is doing under its latest output and the status line on the screen's last row, and takes Pi 1.5.2's fixes to the file tools, bash timeouts, images, branch summaries, and provider requests. Linux remains its only released platform.
+
 - **One place for work beside the conversation.** Subagents and background shells show together as tasks under the composer. One quiet row says how many run, how many failed or finished, and names the newest running one, a shell with its command and time; once everything has finished it stays, dim, while the session keeps them. Ctrl+G, or ↓ past the draft, opens one list of both, subagents then shells, with one selection across them and the selected task's last line of output or last words under it. Enter opens a shell's output or a subagent's details, `x` stops it, and Esc steps back one level. Marks match the conversation's: a running task shows a running call's mark, held steady, and done, failed, and stopped look alike in both places. `bake preview` shows sample tasks.
 - **Cards for more tools.** A write shows the first lines it writes, numbered and coloured, a search its matches under their files, a listing its first entries, and a web search its results by title and site. A read or a fetch says what came back, such as `40 lines` or `HTTP 200 · 12.4 KB`, without repeating it, and an MCP tool's card names its server and tool, `github · create_issue`, with its arguments as quiet `key value` pairs.
 - **Previews that keep what matters.** A failed call keeps the last lines of its output, where the error is. A run of blank lines reads as one, and a reply that is one JSON value, as many MCP tools send, is laid out a member a line and coloured. A card counts its lines only when its preview leaves some out, a long line in an edit's diff is cut to a few rows, and a call whose whole output was saved to a file names that file under its card.
