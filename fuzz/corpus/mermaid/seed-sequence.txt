@@ -1,0 +1,12 @@
+xsequenceDiagram
+    participant U as User
+    U->>B: prompt
+    loop each
+        B-->>U: delta
+    end
+    alt ok
+        B-->>U: answer
+    else no
+        B-xU: error
+    end
+    Note over U,B: done

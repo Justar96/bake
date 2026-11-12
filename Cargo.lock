@@ -209,6 +209,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "bake-mermaid"
+version = "0.4.5"
+dependencies = [
+ "proptest",
+ "unicode-width",
+]
+
+[[package]]
 name = "bake-plugin-fixture-hostile"
 version = "0.4.5"
 dependencies = [
@@ -296,6 +304,7 @@ dependencies = [
 name = "bake-tui-view"
 version = "0.4.5"
 dependencies = [
+ "bake-mermaid",
  "proptest",
  "ratatui-core",
  "serde_json",

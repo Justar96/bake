@@ -354,6 +354,7 @@ fn settings_are_grouped_and_stay_open_until_esc() {
             (commands::settings::TREE, "Branch summary"),
             (commands::settings::STATUS_LINE, "Token totals"),
             (commands::settings::STATUS_LINE, "Prompt cache"),
+            (commands::settings::ANSWERS, "Mermaid diagrams"),
         ]
     );
     let choose = |id, value: &str| {
@@ -421,11 +422,31 @@ fn settings_are_grouped_and_stay_open_until_esc() {
         Some(RuntimeUpdate::Dialog(Some(list))) => list.clone(),
         other => panic!("{other:?}"),
     };
+    // Answers draw again with the new Mermaid mode at once.
+    choose(list.id, "mermaid");
+    let values = h.dialog();
+    choose(values.id, "final");
+    let seen = h.until(|u| matches!(u, RuntimeUpdate::Dialog(Some(_))));
+    assert!(
+        seen.iter().any(|u| matches!(
+            u,
+            RuntimeUpdate::Mermaid(bake_tui_view::mermaid::Mermaid::Final)
+        )),
+        "{seen:?}"
+    );
+    let list = match seen.last() {
+        Some(RuntimeUpdate::Dialog(Some(list))) => list.clone(),
+        other => panic!("{other:?}"),
+    };
     h.reply(list.id, DialogAnswer::Cancel);
     let updates = h.command_end(1);
     assert!(matches!(updates.last(), Some(RuntimeUpdate::Admitted(1))));
     assert!(!session.settings().cached_compaction());
     assert!(session.settings().status_line.cache);
+    assert_eq!(
+        session.settings().mermaid,
+        bake_coding_agent::settings::MermaidRendering::Final
+    );
     let rows = committed(&h.until(|u| matches!(u, RuntimeUpdate::Commit(_))));
     let unsaved = "for this session; it could not be saved: no settings file to save to";
     assert_eq!(
@@ -434,6 +455,7 @@ fn settings_are_grouped_and_stay_open_until_esc() {
             Row::Info(format!("Compact at: 80% {unsaved}")),
             Row::Info(format!("Cached summary: off {unsaved}")),
             Row::Info(format!("Prompt cache: on {unsaved}")),
+            Row::Info(format!("Mermaid diagrams: final {unsaved}")),
         ]
     );
     // Without a change, Esc gives the draft back.

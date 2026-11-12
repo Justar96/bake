@@ -174,12 +174,14 @@ dependencies = [
  "bake-ai",
  "bake-coding-agent",
  "bake-mcp",
+ "bake-mermaid",
  "bake-tui-view",
  "bake-update",
  "libfuzzer-sys",
  "serde_json",
  "tokio",
  "unicode-segmentation",
+ "unicode-width",
 ]
 
 [[package]]
@@ -192,6 +194,13 @@ dependencies = [
  "serde_json",
  "tokio",
  "webpki-roots",
+]
+
+[[package]]
+name = "bake-mermaid"
+version = "0.4.5"
+dependencies = [
+ "unicode-width",
 ]
 
 [[package]]
@@ -219,6 +228,7 @@ dependencies = [
 name = "bake-tui-view"
 version = "0.4.5"
 dependencies = [
+ "bake-mermaid",
  "ratatui-core",
  "unicode-segmentation",
  "unicode-width",

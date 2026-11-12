@@ -173,6 +173,9 @@ pub enum RuntimeUpdate {
     Restored(String),
     /// The session's model, thinking level, and context use changed.
     Status(SessionStatus),
+    /// How answers draw Mermaid fences changed, as `/settings` changes
+    /// `markdown.mermaid`; every answer draws again with it.
+    Mermaid(crate::mermaid::Mermaid),
     /// Every approval request still waiting, oldest first; the first is
     /// the one displayed. Sent whenever the list changes; an empty list
     /// gives the keyboard back to the composer.

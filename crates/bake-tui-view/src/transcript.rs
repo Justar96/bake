@@ -46,6 +46,7 @@ use crate::diff::{self, Change, DiffLine, DiffRow, SplitRow};
 use crate::editor;
 use crate::json;
 use crate::markdown;
+use crate::mermaid::Mermaid;
 use crate::shell_output::{self, Family, Styled};
 use crate::syntax::{self, Carry, Lang};
 
@@ -772,6 +773,8 @@ pub struct Look {
     pub classic: bool,
     /// The blink's phase, from [`lit`]: shown, or a blank of the mark's width.
     pub lit: bool,
+    /// How answers draw Mermaid fences ([`crate::mermaid`]).
+    pub mermaid: Mermaid,
 }
 
 impl Default for Look {
@@ -780,6 +783,7 @@ impl Default for Look {
             tones: Tones::default(),
             classic: false,
             lit: true,
+            mermaid: Mermaid::Streaming,
         }
     }
 }
@@ -2504,7 +2508,7 @@ pub struct Transcript {
     /// after a change.
     counted: Vec<bool>,
     hint_row: Option<usize>,
-    measured: Option<(usize, Tones, bool, Detail)>,
+    measured: Option<(usize, Tones, bool, Mermaid, Detail)>,
     /// Rows there were when output was last followed; rows past it arrived
     /// while reading.
     seen: usize,
@@ -2642,7 +2646,13 @@ impl Transcript {
     /// Brings the row heights up to date: all of them after a width, look,
     /// or detail change, and otherwise only rows appended since.
     fn measure(&mut self) {
-        let key = (self.width, self.look.tones, self.look.classic, self.detail);
+        let key = (
+            self.width,
+            self.look.tones,
+            self.look.classic,
+            self.look.mermaid,
+            self.detail,
+        );
         if self.measured != Some(key) {
             self.heights.clear();
             self.counted.clear();
@@ -3016,6 +3026,7 @@ mod tests {
         tones: Tones::None,
         classic: false,
         lit: true,
+        mermaid: Mermaid::Streaming,
     };
 
     fn text(lines: &[Line]) -> Vec<String> {
@@ -4268,6 +4279,7 @@ mod tests {
                 classic: true,
                 tones: Tones::Ansi,
                 lit: true,
+                mermaid: Mermaid::Streaming,
             },
         ));
         assert!(classic[4].starts_with("  | 42 -"));
@@ -5059,7 +5071,7 @@ mod tests {
                     output,
                     full_output_path: Some("/tmp/out\u{1b}[2J.log".into()),
                 }];
-                let look = Look { tones, classic, lit: true };
+                let look = Look { tones, classic, lit: true, mermaid: Mermaid::Streaming };
                 for detail in [Detail::Preview, Detail::Full] {
                     let lines = present_detail(&rows, 0, width, look, detail);
                     prop_assert!(lines.len() <= 4 + EXPANDED_ROWS + 4, "{}", lines.len());

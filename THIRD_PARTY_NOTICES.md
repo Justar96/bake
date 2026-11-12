@@ -252,6 +252,14 @@ The Rust `bake-coding-agent` crate ports Pi's coding-agent package, the line dif
 | [jsdiff](https://github.com/kpdecker/jsdiff), Copyright (c) 2009-2015 Kevin Decker | 8.0.4 | BSD-3-Clause |
 | [pi-cached-compaction](https://github.com/nicobailon/pi-cached-compaction), Copyright (c) 2026 Nico Bailon | 0.2.0 (`e1e20de0a7e433070414602f1105cdcac258ef4f`) | MIT (declared in its `package.json`) |
 
+## Ported source (`crates/bake-mermaid`)
+
+The Rust `bake-mermaid` crate adapts the `codex-mermaid` crate of OpenAI Codex, which is licensed under the Apache License, Version 2.0, not MIT. The adapted files remain under that license; Bake's own changes and additions are under the repository's MIT license. Its [`NOTICE`](crates/bake-mermaid/NOTICE) file names each adapted file and reproduces the upstream NOTICE and the full Apache-2.0 license text, and each adapted source file states at its head that it was adapted and how Bake changed it. `bake` links the crate, so native archives carry that NOTICE.
+
+| Project | Ported revision | License |
+| --- | --- | --- |
+| [OpenAI Codex](https://github.com/openai/codex) `codex-rs/mermaid`, Copyright 2025 OpenAI | `rust-v0.167.2` (`ce21072c90d32c40af7a55b60b2fb35c84a43a6a`) | Apache-2.0 |
+
 ## Rust YAML reader (`crates/bake-coding-agent`)
 
 `bake-coding-agent` reads the 0.3 Bake home's `settings.yaml` and `.credentials.yaml` with serde-saphyr. These crates entered [`Cargo.lock`](Cargo.lock) with it and keep their own licenses.

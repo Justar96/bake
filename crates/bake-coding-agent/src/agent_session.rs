@@ -2622,6 +2622,20 @@ impl AgentSession {
         .await
     }
 
+    /// Pi v1.5.2's `setMermaidRenderingMode`: sets `markdown.mermaid`, how
+    /// the interactive terminal draws Mermaid fences in answers. Saved; the
+    /// terminal draws with it once it is told.
+    pub async fn set_mermaid_rendering(
+        &self,
+        mode: crate::settings::MermaidRendering,
+    ) -> Result<DefaultSave, String> {
+        self.run_change(move |control| async move {
+            write_settings(&control.settings).mermaid = mode;
+            Ok(control.save(move |store| store.set_mermaid(mode)).await)
+        })
+        .await
+    }
+
     /// Sets `branchSummary.skipPrompt`: whether `/tree` leaves a branch
     /// without asking to summarize it, from the next navigation.
     pub async fn set_branch_summary_skip_prompt(&self, skip: bool) -> Result<DefaultSave, String> {

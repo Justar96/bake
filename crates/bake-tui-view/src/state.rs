@@ -15,6 +15,7 @@ use crate::jobs::{self, BackgroundJob, JobState};
 use crate::keys::{self, Action, Key, KeyInput, Mods, Scope};
 use crate::live;
 use crate::mention::{self, Candidate, Choice};
+use crate::mermaid::Mermaid;
 use crate::mode::Mode;
 use crate::paste::{self, Image};
 use crate::runtime::{Approval, ApprovalAnswer, Pending, Prompt, RuntimeUpdate, Submission};
@@ -456,6 +457,8 @@ pub struct State {
     pub frame: FrameStyle,
     /// Colours the activity line may use; [`Tones::None`] also stops its shimmer.
     pub tones: Tones,
+    /// How answers draw Mermaid fences, from `markdown.mermaid`.
+    pub mermaid: Mermaid,
     /// The time of the last [`Msg::Tick`].
     pub now: Duration,
     /// The composer's first visible row. Only rendering moves it, because it
@@ -612,6 +615,7 @@ impl State {
             transcript: Transcript::new(transcript::sample_session()),
             frame,
             tones,
+            mermaid: Mermaid::default(),
             now: Duration::ZERO,
             window: ComposerWindow::default(),
             samples: 0,
@@ -1282,6 +1286,7 @@ fn runtime(state: &mut State, update: RuntimeUpdate) {
                 state.notice = Some(Notice::Restored);
             }
         }
+        RuntimeUpdate::Mermaid(mode) => state.mermaid = mode,
         RuntimeUpdate::Status(status) => {
             state.status.model = status.model;
             state.status.thinking = status.thinking;

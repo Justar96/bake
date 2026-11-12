@@ -139,6 +139,7 @@ fn task_look(app: &State) -> Look {
         tones: app.tones,
         classic: app.frame == FrameStyle::Classic,
         lit: true,
+        mermaid: app.mermaid,
     }
 }
 
@@ -2110,6 +2111,7 @@ fn render_transcript(
             tones: app.tones,
             classic,
             lit: transcript::lit(app.now),
+            mermaid: app.mermaid,
         },
     );
     // Bake: a finished turn's ending belongs to the newest line alone. Read

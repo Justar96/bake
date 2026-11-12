@@ -22,6 +22,7 @@ bake-agent = { path = "../crates/bake-agent" }
 bake-ai = { path = "../crates/bake-ai" }
 bake-coding-agent = { path = "../crates/bake-coding-agent" }
 bake-mcp = { path = "../crates/bake-mcp" }
+bake-mermaid = { path = "../crates/bake-mermaid" }
 bake-tui-view = { path = "../crates/bake-tui-view" }
 bake-update = { path = "../crates/bake-update" }
 # The same versions and features as `Cargo.toml`'s workspace
@@ -29,6 +30,7 @@ bake-update = { path = "../crates/bake-update" }
 # `test-util` pauses the clock for the scripted MCP server.
 serde_json = { version = "=1.0.154", features = ["float_roundtrip", "preserve_order"] }
 unicode-segmentation = "=1.13.3"
+unicode-width = "=0.2.2"
 tokio = { version = "=1.54.1", default-features = false, features = ["rt", "sync", "time", "macros", "io-util", "test-util"] }
 
 [[bin]]
@@ -69,6 +71,13 @@ bench = false
 [[bin]]
 name = "release_manifest"
 path = "fuzz_targets/release_manifest.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "mermaid"
+path = "fuzz_targets/mermaid.rs"
 test = false
 doc = false
 bench = false

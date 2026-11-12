@@ -24,6 +24,7 @@ pub mod layout;
 pub mod live;
 pub mod markdown;
 pub mod mention;
+pub mod mermaid;
 pub mod mode;
 pub mod palette;
 pub mod paste;

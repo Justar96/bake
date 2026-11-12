@@ -577,6 +577,7 @@ mod tests {
         tones: Tones::None,
         classic: false,
         lit: true,
+        mermaid: crate::mermaid::Mermaid::Streaming,
     };
 
     const HEADER: &str = "Script completed\nWall time 0.1 seconds\nOutput:\n";

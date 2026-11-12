@@ -8,8 +8,9 @@
 //! (with per-model overrides, and Bake's own `compaction.thresholdPercent`
 //! and `compaction.cachedSummary`), `branchSummary.reserveTokens` and
 //! `branchSummary.skipPrompt`, `retry`, Pi v1.3.0's `codemode.mode` and
-//! `codemode.inlineBudget` ([`crate::tools::codemode`]), and Pi v1.4.0's
-//! `terminal.showTerminalProgress`,
+//! `codemode.inlineBudget` ([`crate::tools::codemode`]), Pi v1.4.0's
+//! `terminal.showTerminalProgress`, Pi v1.5.2's `markdown.mermaid`
+//! ([`MermaidRendering`]),
 //! and Bake's own `permission` section ([`crate::permissions`]),
 //! `terminal.notifications`, `statusLine` (the status line's optional
 //! readings), `webSearch.model` ([`crate::web::search`]), and
@@ -21,8 +22,9 @@
 //!
 //! [`SettingsStore`] writes the file, porting the global-scope saves of
 //! `SettingsManager` (Pi v1.2.0, `06a466935536f8c9bcacb2d5efc0fc021be1bdff`)
-//! for the settings above that Pi has setters for, and for the compaction
-//! members and `branchSummary.skipPrompt` that `/settings` changes, through
+//! for the settings above that Pi has setters for (with Pi v1.5.2's
+//! `setMermaidRenderingMode`), and for the compaction members and
+//! `branchSummary.skipPrompt` that `/settings` changes, through
 //! the locked atomic backend of [`crate::json_store`].
 //!
 //! # Deviations from Pi
@@ -163,6 +165,9 @@ pub struct Settings {
     pub terminal_notifications: Option<bool>,
     /// `statusLine`, Bake's own: the status line's optional readings.
     pub status_line: StatusLineSettings,
+    /// `markdown.mermaid`, Pi v1.5.2's: how the interactive terminal draws
+    /// Mermaid fences in answers.
+    pub mermaid: MermaidRendering,
     /// Load errors, as Pi's settings diagnostics word them.
     pub warnings: Vec<String>,
 }
@@ -292,7 +297,43 @@ impl Default for Settings {
             show_terminal_progress: None,
             terminal_notifications: None,
             status_line: StatusLineSettings::default(),
+            mermaid: MermaidRendering::default(),
             warnings: Vec::new(),
+        }
+    }
+}
+
+/// `markdown.mermaid`, Pi v1.5.2's `MermaidRenderingMode`: whether the
+/// interactive terminal draws ```` ```mermaid ```` fences in answers as
+/// diagrams.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum MermaidRendering {
+    /// `off`: fences draw as code.
+    Off,
+    /// `final`: a fence draws as a diagram once it is complete.
+    Final,
+    /// `streaming`, the default: also while it is being written.
+    #[default]
+    Streaming,
+}
+
+impl MermaidRendering {
+    /// Pi's `getMermaidRenderingMode`: `off` and `final` as written, and
+    /// anything else, unset included, the default.
+    pub fn from_value(value: Option<&Value>) -> Self {
+        match value.and_then(Value::as_str) {
+            Some("off") => Self::Off,
+            Some("final") => Self::Final,
+            _ => Self::Streaming,
+        }
+    }
+
+    /// The value as `settings.json` holds it.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::Final => "final",
+            Self::Streaming => "streaming",
         }
     }
 }
@@ -625,6 +666,11 @@ impl Settings {
             show_terminal_progress: terminal_flag(object, "showTerminalProgress"),
             terminal_notifications: terminal_flag(object, "notifications"),
             status_line: StatusLineSettings::from_value(object.get("statusLine")),
+            mermaid: MermaidRendering::from_value(
+                object
+                    .get("markdown")
+                    .and_then(|markdown| markdown.get("mermaid")),
+            ),
             warnings: Vec::new(),
         }
     }
@@ -1017,6 +1063,24 @@ impl SettingsStore {
             }
             match section.as_object_mut() {
                 Some(section) => set_member(section, key, Value::Bool(on)),
+                None => false,
+            }
+        })
+    }
+
+    /// Pi v1.5.2's `setMermaidRenderingMode`: `markdown.mermaid`, keeping
+    /// the section's other members, such as `codeBlockIndent`. A `markdown`
+    /// that is not an object is replaced.
+    pub fn set_mermaid(&self, mode: MermaidRendering) -> Result<Settings, StoreError> {
+        self.update(|object| {
+            let section = object
+                .entry("markdown")
+                .or_insert_with(|| Value::Object(Map::new()));
+            if !section.is_object() {
+                *section = Value::Object(Map::new());
+            }
+            match section.as_object_mut() {
+                Some(section) => set_member(section, "mermaid", mode.name().into()),
                 None => false,
             }
         })
@@ -1582,6 +1646,46 @@ mod tests {
                     "packages": ["npm:pi-mcp-adapter"], "queueMode": "all",
                     "defaultThinkingLevel": "high",
                 })
+            );
+        }
+
+        // Pi v1.5.2's `getMermaidRenderingMode` and
+        // `setMermaidRenderingMode`.
+        #[test]
+        fn markdown_mermaid_reads_as_pi_reads_it_and_keeps_its_section() {
+            let dir = TempDir::new("settings-mermaid");
+            let store = SettingsStore::new(dir.path());
+            assert_eq!(
+                Settings::load(dir.path()).mermaid,
+                MermaidRendering::Streaming
+            );
+            for (value, mode) in [
+                (json!("off"), MermaidRendering::Off),
+                (json!("final"), MermaidRendering::Final),
+                (json!("streaming"), MermaidRendering::Streaming),
+                (json!("Final"), MermaidRendering::Streaming),
+                (json!(true), MermaidRendering::Streaming),
+            ] {
+                let text = json!({ "markdown": { "mermaid": value } }).to_string();
+                std::fs::write(store.path(), text).unwrap();
+                assert_eq!(Settings::load(dir.path()).mermaid, mode, "{value}");
+            }
+            std::fs::write(
+                store.path(),
+                r#"{"markdown":{"codeBlockIndent":"    ","mermaid":"streaming"},"x":1}"#,
+            )
+            .unwrap();
+            let settings = store.set_mermaid(MermaidRendering::Final).unwrap();
+            assert_eq!(settings.mermaid, MermaidRendering::Final);
+            assert_eq!(
+                read(store.path()),
+                json!({ "markdown": { "codeBlockIndent": "    ", "mermaid": "final" }, "x": 1 })
+            );
+            std::fs::write(store.path(), r#"{"markdown":"broken"}"#).unwrap();
+            store.set_mermaid(MermaidRendering::Off).unwrap();
+            assert_eq!(
+                read(store.path()),
+                json!({ "markdown": { "mermaid": "off" } })
             );
         }
 

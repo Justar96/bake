@@ -243,6 +243,7 @@ mod tests {
             tones,
             classic: false,
             lit: true,
+            mermaid: crate::mermaid::Mermaid::Streaming,
         }
     }
 

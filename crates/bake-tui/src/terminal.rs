@@ -617,7 +617,11 @@ fn run(mode: ScreenMode, runtime: Runtime) -> io::Result<PreviewExit> {
     // The session's rows are read before the terminal changes mode.
     let mut state = match &runtime {
         Runtime::Fixture => State::new(frame_style, tones),
-        Runtime::Live(live) => State::live(frame_style, tones, live.initial_rows()),
+        Runtime::Live(live) => {
+            let mut state = State::live(frame_style, tones, live.initial_rows());
+            state.mermaid = crate::live::mermaid_mode(&live.session);
+            state
+        }
     };
     // The banner's tips rotate in fullscreen only: inline, the banner is in
     // scrollback before a tip could change. The wall clock seeds where the
