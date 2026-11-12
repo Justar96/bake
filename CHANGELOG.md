@@ -5,6 +5,7 @@ Notable changes to Bake. `bake` compiles this file in, and `/changelog` shows it
 ## [Unreleased]
 
 - **A status line that shows the session's state at a glance.** A dot leads the screen's last row: `○` idle, an orange `●` while a turn or compaction runs, a yellow `◆` while Bake waits on you for an approval or a model, and a red `!` after a failed turn, until the next prompt. A five-cell gauge before the context's share fills green and turns yellow, orange, and red as the context nears its limit; the prompt cache's share, when shown, is green when most of the prompt came from the cache and warms as less did; and a detached branch is yellow. The model name is in the terminal's normal colour and the rest stays dim. The colours come from one small palette: warm colours mean attention, and the thinking levels moved to cool ones, so `xhigh` is now violet rather than orange. Under `NO_COLOR` each state keeps its own glyph.
+- Text copied from the transcript no longer carries an invisible byte-order mark (U+FEFF) from the output it was copied from, such as a CI log; it pasted as a stray character.
 
 ## [0.4.5] - 2026-11-12
 

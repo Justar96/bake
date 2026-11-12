@@ -1485,7 +1485,10 @@ fn copy_selection(state: &mut State) -> Option<String> {
             })
         })
         .collect::<Vec<_>>()
-        .join("\n");
+        .join("\n")
+        // A byte-order mark is invisible on screen and means nothing inside
+        // text, such as a log a tool printed; pasted, it is a stray U+FEFF.
+        .replace('\u{feff}', "");
     (!text.trim().is_empty()).then_some(text)
 }
 

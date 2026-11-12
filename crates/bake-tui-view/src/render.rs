@@ -5172,6 +5172,25 @@ mod tests {
         }
     }
 
+    // Bake: a byte-order mark inside text, as in a log a tool printed, is
+    // invisible on screen and means nothing mid-text, so a copy leaves it
+    // out rather than paste a stray U+FEFF.
+    #[test]
+    fn a_copy_leaves_out_byte_order_marks() {
+        let mut app = State::default();
+        app.transcript.set_live(vec![transcript::Row::Answer(
+            "\u{feff}copied \u{feff}words".into(),
+        )]);
+        let (rows, _) = draw(&mut app, 80, 24);
+        let (y, x) = find(&rows, "copied");
+        update(&mut app, mouse(MouseKind::Down, x, y, 0));
+        update(&mut app, mouse(MouseKind::Drag, x + 12, y, 10));
+        assert_eq!(
+            update(&mut app, mouse(MouseKind::Up, x + 12, y, 20)),
+            vec![Effect::Copy("copied words".into())]
+        );
+    }
+
     #[test]
     fn inline_selection_copies_the_displayed_live_row_after_padding() {
         use ratatui_core::terminal::{TerminalOptions, Viewport};
