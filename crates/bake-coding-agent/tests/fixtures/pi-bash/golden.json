@@ -1050,6 +1050,44 @@
 			"spillExists": null
 		},
 		{
+			"name": "timeout-after-shell-exit",
+			"pi": {
+				"version": "1.5.2",
+				"revision": "b4afdddf44e059c67ccf5097e5317d913521b470",
+				"change": "06aa6563e4d51d6df5de6c9664c3a868f3f5bb2a (#11813, issue #11613)",
+				"source": "Not recorded by running Pi: the local backend's ShellTimeoutError, its shellExit given here as the outcome, and the status createShellToolDefinition in src/core/tools/bash.ts builds from it, appended as for timeout-with-output. The output and code follow test/suite/regressions/11613-bash-timeout-after-shell-exit.test.ts."
+			},
+			"chunks": [
+				{
+					"text": "tick\nboom\n"
+				}
+			],
+			"outcome": {
+				"throw": "timeout:1",
+				"shellExit": {
+					"exitCode": 3,
+					"afterSeconds": 0.2
+				}
+			},
+			"error": "tick\nboom\n\n\nCommand timed out after 1 seconds. The shell exited with code 3 after 0.2 seconds, but background processes it started kept writing output until the timeout.",
+			"updates": [
+				{
+					"content": []
+				},
+				{
+					"content": [
+						{
+							"type": "text",
+							"text": "tick\nboom\n"
+						}
+					],
+					"details": {}
+				}
+			],
+			"spillBytes": null,
+			"spillExists": null
+		},
+		{
 			"name": "aborted-empty",
 			"chunks": [],
 			"outcome": {

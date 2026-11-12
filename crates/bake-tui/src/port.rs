@@ -61,6 +61,9 @@ impl FixturePort {
             .spawn(move || {
                 let mut fixture = Fixture::default();
                 let emit = |updates: Vec<RuntimeUpdate>| updates.into_iter().all(&send);
+                if !emit(fixture.open(clock.elapsed())) {
+                    return;
+                }
                 loop {
                     let request = match fixture.next_due() {
                         Some(due) => {
@@ -86,13 +89,15 @@ impl FixturePort {
                         }
                         Some(Request::Cancel) => updates.extend(fixture.cancel(now)),
                         Some(Request::SendPending) => updates.extend(fixture.send_pending(now)),
+                        // Its sample tasks stop as a runtime's would, though
+                        // none of them runs.
+                        Some(Request::StopJob(id)) => updates.extend(fixture.stop_job(&id, now)),
+                        Some(Request::StopAgent(id)) => updates.extend(fixture.stop_agent(&id)),
                         // The fixture asks for no approval, opens no dialog,
-                        // runs no shell or subagent, and has no model.
+                        // and has no model.
                         Some(
                             Request::Answer { .. }
                             | Request::Dialog { .. }
-                            | Request::StopJob(_)
-                            | Request::StopAgent(_)
                             | Request::CycleThinking,
                         )
                         | None => {}
@@ -140,6 +145,8 @@ impl Drop for FixturePort {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bake_tui_view::agents::{AgentState, Ended};
+    use bake_tui_view::jobs::JobState;
     use bake_tui_view::runtime::Submission;
     use bake_tui_view::state::Outcome;
     use std::time::Duration;
@@ -161,10 +168,39 @@ mod tests {
                 break;
             }
         }
-        assert!(matches!(seen[1], RuntimeUpdate::TurnStarted { .. }));
+        // The sample tasks come first, as a session's tasks do when it opens.
+        assert!(matches!(seen[0], RuntimeUpdate::Agents(_)));
+        assert!(matches!(seen[1], RuntimeUpdate::Jobs(_)));
+        assert!(matches!(seen[3], RuntimeUpdate::TurnStarted { .. }));
         port.stop().unwrap();
         // The thread has ended, so its sender is gone.
         assert!(updates.recv().is_err());
+    }
+
+    #[test]
+    fn a_stop_request_stops_a_sample_task() {
+        let (sender, updates) = mpsc::channel();
+        let port = FixturePort::start(Instant::now(), move |u| sender.send(u).is_ok()).unwrap();
+        port.request(Request::StopJob("bash-2".into()));
+        port.request(Request::StopAgent("sample-explorer".into()));
+        let mut stopped = (false, false);
+        while stopped != (true, true) {
+            match updates.recv_timeout(PATIENCE).expect("an update") {
+                RuntimeUpdate::Jobs(jobs) if jobs.iter().any(|job| job.id == "bash-2") => {
+                    stopped.0 |= jobs
+                        .iter()
+                        .any(|job| job.id == "bash-2" && matches!(job.state, JobState::Killed(_)));
+                }
+                RuntimeUpdate::Agents(agents) => {
+                    stopped.1 |= agents.iter().any(|agent| {
+                        agent.id == "sample-explorer"
+                            && agent.state == AgentState::Idle(Some(Ended::Stopped))
+                    });
+                }
+                _ => {}
+            }
+        }
+        port.stop().unwrap();
     }
 
     #[test]

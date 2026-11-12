@@ -35,6 +35,7 @@ use bake_coding_agent::agent_session::{
 };
 use bake_coding_agent::compaction::{CompactionResult, SummaryPath};
 use bake_coding_agent::hooks;
+use bake_coding_agent::mcp::MCP_TOOL_PREFIX;
 use bake_coding_agent::schedules;
 use bake_coding_agent::session::messages::CustomMessage;
 use bake_coding_agent::subagents::SUBAGENT_DETAIL;
@@ -42,6 +43,8 @@ use bake_coding_agent::subagents::messages as subagents;
 use bake_coding_agent::tools::bash::BACKGROUND_JOB_DETAIL;
 use bake_coding_agent::tools::codemode::CODEMODE_TOOL_NAME;
 use bake_coding_agent::tools::job_tools::STILL_RUNNING;
+use bake_coding_agent::tools::web_tools::EXTERNAL_WEB_CONTENT_NOTICE;
+use bake_tui_view::cards;
 use bake_tui_view::codemode::{self, Codemode, NestedCall, NestedStatus};
 use bake_tui_view::copy;
 use bake_tui_view::jobs::{self, JobState};
@@ -54,7 +57,7 @@ mod replay;
 #[cfg(test)]
 mod tests;
 
-use calls::{call_row, learn, partial, settled};
+use calls::{action, call_row, interrupted_drops_output, learn, partial, settled};
 use replay::notice_row;
 pub use replay::{replay, replay_compacted};
 
@@ -73,6 +76,9 @@ pub struct Projector {
     /// What each call's result said, kept across re-projections of the
     /// streaming message.
     settled: HashMap<String, Outcome>,
+    /// Each started call's tool and arguments, by call id, so its card is
+    /// drawn from them again as its results arrive, as a replay draws it.
+    args: HashMap<String, (String, Value)>,
     /// What each background job and subagent the session started is called.
     labels: Labels,
     /// The calls running now, as call id and tool name, in start order.
@@ -106,7 +112,7 @@ struct Outcome {
     output: Vec<String>,
     /// A `codemode` call's record of the calls its script made.
     calls: Vec<NestedCall>,
-    /// The file a `codemode` result's whole output went to, when cut.
+    /// The file the result's whole output went to, when the tool cut it.
     full_output_path: Option<String>,
     /// How long a `codemode` script ran, from its result's header.
     wall_time: Option<Duration>,
@@ -358,6 +364,8 @@ impl Projector {
                 if !self.running.iter().any(|(id, _)| id == tool_call_id) {
                     self.running.push((tool_call_id.clone(), tool_name.clone()));
                 }
+                self.args
+                    .insert(tool_call_id.clone(), (tool_name.clone(), args.clone()));
                 let mut updates = self.set_phase(&self.running_phase());
                 let row = call_row(tool_name, args, &self.labels, Outcome::running(Vec::new()));
                 match self.calls.get(tool_call_id) {
@@ -447,16 +455,27 @@ impl Projector {
         if !running {
             self.settled.insert(id.to_owned(), outcome.clone());
         }
+        // A card is drawn from its call's arguments and its outcome, as the
+        // replay draws it: a `write` shows its content, and a running
+        // `job_output` that waits keeps saying so.
+        if let Some((tool, args)) = self.args.get(id)
+            && matches!(self.rows[index], Row::Call { .. })
+        {
+            self.rows[index] = call_row(tool, args, &self.labels, outcome);
+            return;
+        }
         match &mut self.rows[index] {
             Row::Call {
                 state,
                 id,
                 summary,
                 output,
+                full_output_path,
                 ..
             } => {
                 *state = outcome.state;
                 *output = outcome.output;
+                *full_output_path = outcome.full_output_path;
                 if outcome.id.is_some() {
                     *id = outcome.id;
                 }
@@ -495,10 +514,27 @@ impl Projector {
         if self.rows.is_empty() {
             self.calls.clear();
             self.settled.clear();
+            self.args.clear();
             self.running.clear();
             return Vec::new();
         }
         self.running.clear();
+        // A card drawn from its arguments, a `write`'s, has no result to
+        // show, so it reads as the replay draws a call with none.
+        for (id, &index) in &self.calls {
+            if let (Some((tool, args)), Row::Call { state, .. }) =
+                (self.args.get(id), &self.rows[index])
+                && *state == CallState::Running
+                && interrupted_drops_output(tool)
+            {
+                let outcome = Outcome {
+                    summary: Some(INTERRUPTED.into()),
+                    ..Outcome::failed(Vec::new())
+                };
+                self.rows[index] = call_row(tool, args, &self.labels, outcome);
+            }
+        }
+        self.args.clear();
         let mut rows = std::mem::take(&mut self.rows);
         for row in &mut rows {
             match row {
@@ -534,13 +570,20 @@ impl Projector {
         }
     }
 
-    /// The phase while calls run: `running bash`, `running subagent +2`
-    /// with two more beside it, or `thinking` once none does.
+    /// The phase while calls run: what the latest call does, as its card
+    /// reads, such as `reading transcript.rs` or `running cargo test +2`
+    /// with two more running beside it, or `thinking` once none runs.
     fn running_phase(&self) -> String {
-        match self.running.as_slice() {
-            [] => copy::FIRST_PHASE.to_owned(),
-            [(_, tool)] => format!("running {tool}"),
-            [(_, tool), rest @ ..] => format!("running {tool} +{}", rest.len()),
+        let Some((id, tool)) = self.running.last() else {
+            return copy::FIRST_PHASE.to_owned();
+        };
+        let action = match self.args.get(id) {
+            Some((tool, args)) => action(tool, args, &self.labels),
+            None => action(tool, &Value::Null, &self.labels),
+        };
+        match self.running.len() - 1 {
+            0 => action,
+            others => format!("{action} +{others}"),
         }
     }
 

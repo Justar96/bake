@@ -1,6 +1,6 @@
 # MCP servers
 
-bake starts the Model Context Protocol servers listed in `mcp.json` in the Bake home for every session, and gives the model their tools as `mcp__<server>__<tool>`. A server is either a program bake starts and talks to over its standard input and output (`command`), or a Streamable HTTP endpoint it connects to (`url`). A server that offers resources also adds three tools that list and read them, and a server's own instructions reach the system prompt.
+bake starts the Model Context Protocol servers listed in `mcp.json` in the Bake home for every session, and gives the model their tools as `mcp__<server>__<tool>`. A server is either a program bake starts and talks to over its standard input and output (`command`), or a Streamable HTTP endpoint it connects to (`url`). A server that offers resources also adds three tools that list and read them, and a server's own instructions reach the system prompt. The transcript shows a call by its server and tool, with its arguments as `key value` pairs, each cut to one short line: `github · create_issue: repo acme/app · title Fix it`.
 
 ## mcp.json
 

@@ -18,6 +18,15 @@ openai-responses-shared.ts, and the ChatGPT workspace limit hint of
 src/api/openai-responses.ts, with the cases of test/retry.test.ts,
 test/overflow.test.ts, test/transcript-tool-changes.test.ts, and
 test/openai-responses-empty-tool-result.test.ts that the Rust tests name.
+From release v1.5.2, revision b4afdddf44e059c67ccf5097e5317d913521b470: the
+retry and overflow classifiers of src/utils/retry.ts and overflow.ts, the
+placement of held system updates and the root $defs and definitions kept in
+non-strict tool schemas in src/api/anthropic-messages.ts, and the output
+clamp of clampMaxTokensToContext in src/api/simple-options.ts, with the cases
+of test/retry.test.ts, test/overflow.test.ts,
+test/transcript-tool-changes.test.ts,
+test/anthropic-strict-tool-schema.test.ts, and test/clamp-max-tokens.test.ts
+that the Rust tests name.
 --------------------------------------------------------------------------------
 MIT License
 

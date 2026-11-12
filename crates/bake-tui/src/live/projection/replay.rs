@@ -205,10 +205,12 @@ fn job_notice(text: &str) -> Option<Row> {
     Some(Row::Call {
         tool: display_name(kind),
         argument: label.to_owned(),
+        fields: Vec::new(),
         id: Some(id.to_owned()),
         state,
         summary: Some(summary),
         output: Vec::new(),
+        full_output_path: None,
     })
 }
 
@@ -231,10 +233,12 @@ fn agent_notice(text: &str, details: Option<&Value>, labels: &Labels) -> Option<
     Some(Row::Call {
         tool: display_name("subagent"),
         argument: labels.get(id).cloned().unwrap_or_default(),
+        fields: Vec::new(),
         id: Some(id.to_owned()),
         state,
         summary: Some(word.to_owned()),
         output,
+        full_output_path: None,
     })
 }
 

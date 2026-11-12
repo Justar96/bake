@@ -1,8 +1,9 @@
 //! Context-overflow detection.
 //!
 //! Ported from Pi `packages/ai/src/utils/overflow.ts` (v1.1.0; the HTTP 413
-//! pattern from v1.4.0), patterns included. See that file for the provider
-//! each pattern comes from.
+//! pattern from v1.4.0; LiteLLM's pre-call check from v1.5.2,
+//! `b4afdddf44e059c67ccf5097e5317d913521b470`), patterns included. See that
+//! file for the provider each pattern comes from.
 
 use std::sync::LazyLock;
 
@@ -17,6 +18,7 @@ const OVERFLOW_PATTERN_SOURCES: &[&str] = &[
     r"input is too long for requested model",
     r"exceeds the context window",
     r"exceeds (?:the )?(?:model'?s )?maximum context length(?: of [\d,]+ tokens?|\s*\([\d,]+\))",
+    r"context window exceeded",
     r"input token count.*exceeds the maximum",
     r"maximum prompt length is \d+",
     r"reduce the length of the messages",
@@ -169,6 +171,12 @@ mod tests {
                 "Error: 503 litellm.ServiceUnavailableError: litellm.MidStreamFallbackError: litellm.APIConnectionError: APIConnectionError: OpenAIException - Requested token count exceeds the model's maximum context length of 131072 tokens.",
                 "ollama",
                 131072,
+            ),
+            // v1.5.2, #11492: "detects LiteLLM pre-call ContextWindowExceededError"
+            (
+                "400: {\"message\":\"litellm.ContextWindowExceededError: litellm.BadRequestError: litellm._pre_call_checks: Context Window exceeded for given call. No models have context window large enough for this call.\nModel=Qwen3.8-Flash-Next, Max Input Tokens=262144, Got=265262\nmodel=Qwen3.8-Flash-Next. context_window_fallbacks=None. fallbacks=[].\"}",
+                "ollama",
+                262144,
             ),
             (
                 "Error: 400 Input length (265330) exceeds model's maximum context length (262144).",

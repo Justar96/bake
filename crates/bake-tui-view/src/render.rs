@@ -1,9 +1,11 @@
 //! Draws [`State`] into a Ratatui frame. Rows from the top: body, gap, notice,
-//! the approval panel while a request waits, the bar (activity and status),
-//! the composer box (top edge, draft rows, bottom edge), the standing row
-//! (agents and background shells), and the tray, where their lists open
-//! while they hold the keyboard, in the heights [`crate::layout::plan`]
-//! grants them. The body always draws the transcript.
+//! the approval panel while a request waits, the bar while the tray's scope
+//! names itself there, the composer box (top edge, draft rows, bottom edge),
+//! the tasks' standing row (subagents and background shells,
+//! [`crate::tasks`]), the tray, where their list, one agent, or one shell
+//! opens while it holds the keyboard, and the status line, last, in the
+//! heights [`crate::layout::plan`] grants them. The body always draws the
+//! transcript, with the activity under its newest line.
 
 use std::borrow::Cow;
 
@@ -17,6 +19,7 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::activity::{self, Hue, Tones};
 use crate::agents;
+use crate::cards;
 use crate::completion;
 use crate::composer::{self, Edge};
 use crate::copy;
@@ -33,6 +36,7 @@ use crate::state::{
     ActivityKind, Area, DraftSpot, FileMenu, Focus, Notice, Outcome, ScrollTrack, Spot, State,
 };
 use crate::status::{self, Tone};
+use crate::tasks;
 use crate::transcript::{self, Look};
 
 /// Cells between the terminal's edges and rows drawn outside the box, so
@@ -66,15 +70,12 @@ fn needs(app: &State, width: u16, height: u16) -> Needs {
     let draft = editor::layout(app.draft.text(), app.draft.caret(), geometry.wrap_width);
     Needs {
         draft_rows: u16::try_from(draft.rows.len()).unwrap_or(u16::MAX),
-        // The row shows the agents once there are any, as the preview's
-        // samples always are, and a live session's background shells while
-        // any runs, or while their list or one of them is open.
-        standing: app.jobs_row()
-            || app.agents_row()
-            || matches!(
-                app.focus,
-                Focus::Jobs | Focus::Shell | Focus::AgentList | Focus::Inspect
-            ),
+        // Only the tray's scopes have something to say on the bar.
+        bar: app.focus.in_tray(),
+        status: true,
+        // The row shows the tasks while the runtime reports any, and stays
+        // over the tray while it is open.
+        standing: app.tasks_row() || app.focus.in_tray(),
         notice: u16::from(app.notice.is_some() || app.quitting()),
         pending: panel_rows(app.pending.len()),
         panel: panel_rows(app.attachments.len()),
@@ -90,63 +91,82 @@ fn needs(app: &State, width: u16, height: u16) -> Needs {
 
 /// The most rows the tray asks for at `height`: a list as many as a sheet
 /// does ([`sheet_body_cap`]), and one agent or shell, which is read rather
-/// than scanned, half the terminal.
+/// than scanned, half the terminal, each of the rows the status line under
+/// it leaves.
 fn tray_cap(focus: Focus, height: u16) -> u16 {
+    let height = height.saturating_sub(STATUS_ROWS);
     match focus {
         Focus::Composer => 0,
-        Focus::AgentList | Focus::Jobs => u16::try_from(sheet_body_cap(height)).unwrap_or(0),
+        Focus::Tasks => u16::try_from(sheet_body_cap(height)).unwrap_or(0),
         Focus::Inspect | Focus::Shell => (height / 2).max(3),
     }
 }
 
-/// Rows the tray wants: its contents, up to [`tray_cap`].
+/// Rows the status line takes under the tray.
+const STATUS_ROWS: u16 = 1;
+
+/// Rows the tray wants: its contents and the blank rows it keeps under
+/// them, up to [`tray_cap`].
 fn tray_rows(app: &State, width: u16, height: u16) -> u16 {
     let cap = tray_cap(app.focus, height);
     if cap == 0 {
         return 0;
     }
-    let lines = tray(app, usize::from(width), usize::from(cap)).lines.len();
-    u16::try_from(lines).unwrap_or(u16::MAX).min(cap)
+    let tray = tray(app, usize::from(width), usize::from(cap));
+    u16::try_from(tray.lines.len() + tray.reserve)
+        .unwrap_or(u16::MAX)
+        .min(cap)
 }
 
-/// What the tray draws: its lines, the lines to keep in view, and for one
-/// shell the most its output can scroll.
+/// What the tray draws: its lines, the lines to keep in view, the blank
+/// rows to keep under them, for one shell the most its output can scroll,
+/// and for the list the line of each task's row, so its counts of what is
+/// out of view count tasks rather than lines.
 struct Tray {
     lines: Vec<Line<'static>>,
     selected: Option<std::ops::Range<usize>>,
+    reserve: usize,
     most: Option<usize>,
+    counted: Option<Vec<usize>>,
+}
+
+/// How the tasks draw. Bake: a running task's mark is a running call's,
+/// held lit; only the transcript's running call pulses, so a row of tasks
+/// never shows a blank cell for a state or several marks blinking at once.
+fn task_look(app: &State) -> Look {
+    Look {
+        tones: app.tones,
+        classic: app.frame == FrameStyle::Classic,
+        lit: true,
+    }
 }
 
 /// The tray's contents for the focus, `rows` rows tall at most.
 fn tray(app: &State, width: usize, rows: usize) -> Tray {
-    let look = Look {
-        tones: app.tones,
-        classic: app.frame == FrameStyle::Classic,
-        lit: true,
-    };
-    let (lines, selected, most) = match app.focus {
-        Focus::Composer => (Vec::new(), None, None),
-        Focus::AgentList => {
-            let (lines, at) = agents::list(&app.agents, Some(&app.selected), width, look);
-            (lines, at, None)
+    let look = task_look(app);
+    let mut counted = None;
+    let (lines, selected, reserve, most) = match app.focus {
+        Focus::Composer => (Vec::new(), None, 0, None),
+        Focus::Tasks => {
+            let listed = tasks::list(
+                &app.tasks(),
+                app.selected.as_ref(),
+                app.jobs_at,
+                app.now,
+                width,
+                look,
+                app.live,
+            );
+            counted = Some(listed.rows);
+            (listed.lines, listed.selected, listed.reserve, None)
         }
         Focus::Inspect => (
             app.selected_agent()
                 .map_or_else(Vec::new, |agent| agents::ledger(agent, width, look)),
             None,
+            0,
             None,
         ),
-        Focus::Jobs => {
-            let (lines, at) = jobs::list(
-                &app.jobs,
-                app.job_selected.as_deref(),
-                app.jobs_at,
-                app.now,
-                width,
-                look,
-            );
-            (lines, at, None)
-        }
         Focus::Shell => match app.selected_job() {
             Some(job) => {
                 let (lines, most) = jobs::shell(
@@ -158,15 +178,17 @@ fn tray(app: &State, width: usize, rows: usize) -> Tray {
                     app.shell_scroll,
                     look,
                 );
-                (lines, None, Some(most))
+                (lines, None, 0, Some(most))
             }
-            None => (Vec::new(), None, None),
+            None => (Vec::new(), None, 0, None),
         },
     };
     Tray {
         lines,
         selected,
+        reserve,
         most,
+        counted,
     }
 }
 
@@ -346,7 +368,7 @@ fn pad(text: &str, width: usize) -> String {
 }
 
 /// `text` right-aligned in `width` cells.
-fn pad_start(text: &str, width: usize) -> String {
+pub(crate) fn pad_start(text: &str, width: usize) -> String {
     let cut = fit(text, width);
     format!("{}{cut}", " ".repeat(width.saturating_sub(cut.width())))
 }
@@ -1165,10 +1187,14 @@ pub fn inline_height(app: &State, width: u16, terminal_height: u16) -> u16 {
     // the held controls still grow with the draft and its panels. An open
     // tray takes the body's rows down to its minimum first, so opening it
     // scrolls the transcript as little as it can.
+    // The activity's rows come on top of the transcript's, so a running
+    // turn leaves its live rows as many as before.
+    let indicator = indicator_rows(app, rows.body);
     let body = rows.body.min(
         INLINE_BODY_ROWS
             .saturating_sub(rows.tray)
-            .max(layout::MIN_BODY_ROWS),
+            .max(layout::MIN_BODY_ROWS)
+            + indicator,
     );
     rows.total() - rows.body + body
 }
@@ -1210,6 +1236,7 @@ fn render_region(
     let base_rule = next(rows.bottom_edge);
     let agents = next(rows.standing);
     let tray_area = next(rows.tray);
+    let status_area = next(rows.status);
     // Rows outside the box start and end where its contents do.
     let inset = |r: Rect| {
         if geometry.boxed {
@@ -1244,7 +1271,7 @@ fn render_region(
             Notice::NoPending => copy::NO_PENDING,
             Notice::ImagesWhileRunning => copy::IMAGES_WHILE_RUNNING,
             Notice::PreviewOnly => copy::PREVIEW_ONLY,
-            Notice::NoAgents => copy::NO_AGENTS,
+            Notice::NoTasks => copy::NO_TASKS,
             Notice::Returned => copy::RETURNED,
             Notice::Restored => copy::RESTORED,
             Notice::ApprovalKeys => copy::APPROVAL_KEYS_ONLY,
@@ -1263,9 +1290,9 @@ fn render_region(
     render_dialog(app, inset(approval_area), buf);
     let columns = area.width;
     render_bar(app, inset(bar), buf);
-    render_standing(app, columns, inset(agents), buf);
     let hidden = render_tray(app, tray_area, buf);
-    counts_on_row(buf, inset(agents), hidden);
+    render_standing(app, columns, inset(agents), buf, hidden);
+    render_status(app, inset(status_area), buf);
 
     let visible = usize::from(band.height);
     let total = draft.rows.len();
@@ -1288,9 +1315,9 @@ fn render_region(
     let glyphs = app.frame.glyphs();
     let closed = geometry.boxed && rule.height > 0 && base_rule.height > 0;
     let above_label = (above > 0).then(|| format!("+{above} {}", copy::ABOVE));
-    // The sample-agent list holds focus outside the composer, so the
-    // composer names no key while it is open.
-    let listing = matches!(app.focus, Focus::AgentList | Focus::Jobs | Focus::Shell);
+    // The tasks list and a shell hold the keyboard outside the composer,
+    // so the composer names no key while either is open.
+    let listing = matches!(app.focus, Focus::Tasks | Focus::Shell);
     let approving = app.approval().is_some();
     let asking = approving || app.dialog.is_some();
     let mut mode = mode::view(app.mode(), !app.draft.is_empty(), area.width);
@@ -1402,176 +1429,211 @@ fn line(buf: &mut Buffer, area: Rect, content: Line) {
     }
 }
 
-/// Whether a row's key hint still draws at its right edge: never on a
-/// terminal narrower than [`HINT_MIN_COLUMNS`], as the composer's hint, and
-/// only whole, two cells clear of the row's own text. The key it names still
-/// works unnamed. Ports the TypeScript `tailFits`.
-pub fn tail_fits(columns: u16, row: usize, fixed: usize, tail: &str) -> bool {
-    columns >= HINT_MIN_COLUMNS && fixed + 2 + tail.width() <= row
-}
-
-/// Left text, then a key hint at the right edge where [`tail_fits`] allows.
-fn split_row(buf: &mut Buffer, columns: u16, area: Rect, left: Line, right: Line) {
-    if area.is_empty() {
-        return;
-    }
-    let width = usize::from(area.width);
-    let (lw, rw) = (left.width(), right.width());
-    line(buf, area, left);
-    if tail_fits(columns, width, lw, &right.to_string()) {
-        let x = area.x + (width - rw) as u16;
-        line(buf, Rect::new(x, area.y, rw as u16, 1), right);
-    }
-}
-
-/// The bar above the composer: what the session is doing on the left, and
-/// the status fields right-aligned beside it.
-///
-/// The left side is the sample's word with its phase and time, a finished
-/// turn's outcome with its time, or what the list or inspection shows. Its
-/// head is never cut; its tail gives way first, then status fields by rank,
-/// then the status line whole. Right-aligned, the status does not move when
-/// the left side appears or changes.
+/// The bar above the composer, while it has something to say: the tasks
+/// list's or one task's title, then its keys, which give way whole before
+/// the title is cut. Bake: the activity moved under the transcript's newest
+/// line and the status line to the screen's last row, so the bar is drawn
+/// only for the tray's scopes ([`layout::Needs::bar`]).
 fn render_bar(app: &State, area: Rect, buf: &mut Buffer) {
     if area.is_empty() {
         return;
     }
-    let (head, tail) = bar_left(app);
-    let fields = status::fields(&app.status);
+    let (mut head, tail) = bar_left(app);
     let width = usize::from(area.width);
-    let head_width = Line::from(head.clone()).width();
-    let tail_width = Line::from(tail.clone()).width();
-    let mut levels = vec![(head_width + tail_width, true)];
-    if tail_width > 0 {
-        levels.push((head_width, false));
+    if Line::from(head.clone()).width() + Line::from(tail.clone()).width() <= width {
+        head.extend(tail);
     }
-    for (left_width, with_tail) in levels {
-        let room = width.saturating_sub(left_width + if left_width > 0 { 2 } else { 0 });
-        let fitted = status::fit(&fields, room);
-        let status_width = status::fitted_width(&fitted);
-        if status_width > room || left_width > width {
-            continue;
-        }
-        let mut spans = head.clone();
-        if with_tail {
-            spans.extend(tail);
-        }
-        line(buf, area, Line::from(spans));
-        let mut right = Vec::new();
-        for (i, field) in fitted.iter().enumerate() {
-            if i > 0 {
-                right.push(Span::raw(" ".repeat(status::FIELD_GAP)));
-            }
-            for part in status::drawn(field) {
-                right.push(Span::styled(part.text, tone_style(part.tone, app.tones)));
-            }
-        }
-        let x = area.x + (width - status_width) as u16;
-        line(
-            buf,
-            Rect::new(x, area.y, status_width as u16, 1),
-            Line::from(right),
-        );
-        return;
-    }
-    // Not even the head beside the narrowest status: the head alone.
     line(buf, area, Line::from(head));
 }
 
-/// The bar's left side as a head that stays and a tail that gives way.
+/// The status line, the screen's last row: the model, its thinking level,
+/// the context, the readings the user turned on, and the location, in the
+/// order and with the give-way [`status::fit`] defines, left-aligned with
+/// the rows above it. Bake: it is quiet, dim but for the tones that warn,
+/// such as a missing model or a nearly full context; a field the row cannot
+/// hold whole at its narrowest goes whole, from the end, rather than be cut.
+fn render_status(app: &State, area: Rect, buf: &mut Buffer) {
+    if area.is_empty() {
+        return;
+    }
+    let width = usize::from(area.width);
+    let mut fitted = status::fit(&status::fields(&app.status), width);
+    while !fitted.is_empty() && status::fitted_width(&fitted) > width {
+        fitted.pop();
+    }
+    let mut spans = Vec::new();
+    for (i, field) in fitted.iter().enumerate() {
+        if i > 0 {
+            spans.push(Span::raw(" ".repeat(status::FIELD_GAP)));
+        }
+        for part in status::drawn(field) {
+            let style = match part.tone {
+                Tone::Plain => dim(),
+                tone => tone_style(tone, app.tones),
+            };
+            spans.push(Span::styled(part.text, style));
+        }
+    }
+    line(buf, area, Line::from(spans));
+}
+
+/// Rows the activity takes at the foot of a body `body` rows tall: a blank
+/// row and the activity, or the activity alone on a body of fewer than
+/// three rows, so a running turn is never out of sight; none while there
+/// is nothing to say.
+fn indicator_rows(app: &State, body: u16) -> u16 {
+    if app.activity.is_none() && app.summary.is_none() {
+        0
+    } else if body >= 3 {
+        2
+    } else {
+        body.min(1)
+    }
+}
+
+/// Fewest cells of a phase worth drawing cut; a shorter cut names nothing.
+const PHASE_MIN: usize = 8;
+
+/// The activity, `width` cells at most: while a turn or a compaction runs,
+/// its shimmering word, the phase, and the time, `Thinking…  Reading
+/// transcript.rs · 12s`; once it has ended, how, until the next prompt,
+/// `✓ Completed  1s`. The phase, which the runtime writes, is put on one
+/// line without escapes, and gives way first, cut and then whole, then the
+/// time; the word stays.
+fn activity_line(app: &State, width: usize) -> Option<Line<'static>> {
+    if let Some(sample) = app.activity {
+        let elapsed = app.now.saturating_sub(sample.started);
+        let (hue, phases) = match sample.kind {
+            ActivityKind::Turn => (Hue::Running, copy::SAMPLE_PHASES),
+            ActivityKind::Compaction => (Hue::Compacting, copy::COMPACTING_PHASES),
+        };
+        // A runtime turn shows the phase its runtime reported; a sample
+        // steps through its own.
+        let step = elapsed.as_secs() / copy::PHASE_SECONDS;
+        let phase = match (&app.phase, sample.runtime) {
+            (Some(phase), true) => tasks::one_line(phase),
+            (None, true) => copy::FIRST_PHASE.to_owned(),
+            (_, false) => phases[step as usize % phases.len()].to_owned(),
+        };
+        let word = format!("{}…", sample.word);
+        let time = activity::format_elapsed(elapsed);
+        let room = width.saturating_sub(word.width());
+        let phase_room = room.saturating_sub(2 + 3 + time.width());
+        let tail = if !phase.is_empty() && phase_room >= phase.width().min(PHASE_MIN) {
+            format!("  {} · {time}", fit_phase(&phase, phase_room))
+        } else if room >= 2 + time.width() {
+            format!("  {time}")
+        } else {
+            String::new()
+        };
+        let mut spans = activity::shimmer_spans(&word, elapsed, app.tones, hue, app.tones.moves());
+        spans.push(Span::styled(tail, dim()));
+        return Some(Line::from(spans));
+    }
+    let summary = app.summary?;
+    // The ending's mark is the transcript's for a call that ended alike, in
+    // its colour; the words are dim, as the row is a note, not an event.
+    let look = task_look(app);
+    let (mark, words) = match summary.outcome {
+        Outcome::Completed if summary.kind == ActivityKind::Compaction => (
+            transcript::mark_of(transcript::CallState::Done, look),
+            copy::COMPACTED,
+        ),
+        Outcome::Completed => (
+            transcript::mark_of(transcript::CallState::Done, look),
+            copy::COMPLETED,
+        ),
+        Outcome::Interrupted => (
+            (look.marks().cancelled, transcript::yellow(look)),
+            copy::INTERRUPTED,
+        ),
+        Outcome::Failed => (
+            transcript::mark_of(transcript::CallState::Failed, look),
+            copy::FAILED_TURN,
+        ),
+    };
+    let time = activity::format_elapsed(summary.elapsed);
+    let head = format!("{} {words}", mark.0);
+    let tail = if head.width() + 2 + time.width() <= width {
+        format!("  {time}")
+    } else {
+        String::new()
+    };
+    Some(Line::from(vec![
+        Span::styled(mark.0, mark.1),
+        Span::styled(format!(" {words}{tail}"), dim()),
+    ]))
+}
+
+/// `phase` cut to `room` cells.
+///
+/// Bake: the count of calls running beside the one a phase names, as in
+/// `reading transcript.rs +2`, stays whole when the name before it is cut:
+/// `reading trans… +2`.
+fn fit_phase(phase: &str, room: usize) -> String {
+    if phase.width() <= room {
+        return phase.to_owned();
+    }
+    let counted = phase.rsplit_once(" +").filter(|(name, count)| {
+        !name.trim().is_empty() && !count.is_empty() && count.bytes().all(|b| b.is_ascii_digit())
+    });
+    match counted {
+        Some((name, count)) if room > count.width() + 2 + PHASE_MIN / 2 => {
+            format!("{} +{count}", fit(name, room - count.width() - 2))
+        }
+        _ => fit(phase, room),
+    }
+}
+
+/// The bar's text while it has something to say, as a head that stays and
+/// a tail that gives way: the tasks list's or one task's title and keys.
 fn bar_left(app: &State) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
     match app.focus {
-        Focus::Composer => match (app.activity, app.summary) {
-            (Some(sample), _) => {
-                let elapsed = app.now.saturating_sub(sample.started);
-                let (hue, phases) = match sample.kind {
-                    ActivityKind::Turn => (Hue::Running, copy::SAMPLE_PHASES),
-                    ActivityKind::Compaction => (Hue::Compacting, copy::COMPACTING_PHASES),
-                };
-                // A runtime turn shows the phase its runtime reported; a
-                // sample steps through its own.
-                let step = elapsed.as_secs() / copy::PHASE_SECONDS;
-                let phase = match (&app.phase, sample.runtime) {
-                    (Some(phase), true) => phase.as_str(),
-                    (None, true) => copy::FIRST_PHASE,
-                    (_, false) => phases[step as usize % phases.len()],
-                };
-                let word = format!("{}…", sample.word);
-                let head =
-                    activity::shimmer_spans(&word, elapsed, app.tones, hue, app.tones.moves());
-                let details = format!("  {phase} · {}", activity::format_elapsed(elapsed));
-                (head, vec![Span::styled(details, dim())])
-            }
-            (None, Some(summary)) => {
-                let (head, color) = match summary.outcome {
-                    Outcome::Completed if summary.kind == ActivityKind::Compaction => {
-                        (format!("✓ {}", copy::COMPACTED), Color::Green)
-                    }
-                    Outcome::Completed => (format!("✓ {}", copy::COMPLETED), Color::Green),
-                    Outcome::Interrupted => (format!("■ {}", copy::INTERRUPTED), Color::Yellow),
-                    Outcome::Failed => (format!("✗ {}", copy::FAILED_TURN), Color::Red),
-                };
-                let details = format!("  {}", activity::format_elapsed(summary.elapsed));
-                (
-                    vec![Span::styled(head, Style::new().fg(color).bold())],
-                    vec![Span::styled(details, dim())],
-                )
-            }
-            (None, None) => (Vec::new(), Vec::new()),
-        },
-        Focus::AgentList => (
+        Focus::Composer => (Vec::new(), Vec::new()),
+        // Bake: the tray's scopes name themselves and their keys on the
+        // bar's left; nothing shares its row.
+        Focus::Tasks => (
             vec![Span::styled(
-                copy::AGENTS,
+                tasks::label(app.live),
                 Style::new().add_modifier(Modifier::BOLD),
             )],
-            vec![Span::styled(
-                format!(
-                    "  {}",
-                    if app.live {
-                        copy::LIVE_LIST_HINT
-                    } else {
-                        copy::HEADER_LIST_HINT
-                    }
-                ),
-                dim(),
-            )],
+            vec![Span::styled(format!("  {}", copy::TASKS_LIST_KEYS), dim())],
         ),
-        Focus::Jobs => (
-            vec![Span::styled(
-                copy::JOBS_TITLE,
-                Style::new().add_modifier(Modifier::BOLD),
-            )],
-            vec![Span::styled(format!("  {}", copy::JOBS_LIST_KEYS), dim())],
+        // A breadcrumb, as a catalogue's: where it came from, then where it
+        // is, by the name or id the list shows.
+        Focus::Shell => breadcrumb(
+            app,
+            app.selected_job().map(|job| job.id.as_str()),
+            copy::TASKS_SHELL_KEYS,
         ),
-        Focus::Shell => (
-            vec![
-                Span::styled(
-                    copy::JOBS_TITLE,
-                    accent().add_modifier(Modifier::UNDERLINED),
-                ),
-                Span::styled(" / ", dim()),
-                Span::styled(
-                    app.selected_job()
-                        .map_or_else(String::new, |job| job.id.clone()),
-                    Style::new().add_modifier(Modifier::BOLD),
-                ),
-            ],
-            vec![Span::styled(format!("  {}", copy::JOBS_SHELL_KEYS), dim())],
-        ),
-        // A breadcrumb, as a catalogue's: where it came from, then where it is.
-        Focus::Inspect => (
-            vec![
-                Span::styled(copy::AGENTS, accent().add_modifier(Modifier::UNDERLINED)),
-                Span::styled(" / ", dim()),
-                Span::styled(
-                    app.selected_agent()
-                        .map_or_else(String::new, |agent| agent.name.clone()),
-                    Style::new().add_modifier(Modifier::BOLD),
-                ),
-            ],
-            vec![Span::styled(format!("  {}", copy::INSPECT_KEYS), dim())],
+        Focus::Inspect => breadcrumb(
+            app,
+            app.selected_agent().map(|agent| agent.name.as_str()),
+            copy::TASKS_LEDGER_KEYS,
         ),
     }
+}
+
+/// The bar's head while one task is open, `Tasks / bash-2`, and its keys.
+fn breadcrumb(
+    app: &State,
+    name: Option<&str>,
+    keys: &str,
+) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
+    (
+        vec![
+            Span::styled(
+                tasks::label(app.live),
+                accent().add_modifier(Modifier::UNDERLINED),
+            ),
+            Span::styled(" / ", dim()),
+            Span::styled(
+                tasks::one_line(name.unwrap_or_default()),
+                Style::new().add_modifier(Modifier::BOLD),
+            ),
+        ],
+        vec![Span::styled(format!("  {keys}"), dim())],
+    )
 }
 
 /// Rows a menu of `count` entries lists: up to [`completion::MENU_ROWS`]
@@ -1735,7 +1797,7 @@ fn render_file_menu(app: &State, menu: &FileMenu, area: Rect, buf: &mut Buffer) 
     }
 }
 
-/// The slash menu above the bar, as the oracle's `Completion` draws it: a
+/// The slash menu above the box, as the oracle's `Completion` draws it: a
 /// `▸` on the selected row, the names in a column sized to the longest, and
 /// each command's hint and description after it, dim unless selected. More
 /// commands than rows keep the selected one in view and count the rest.
@@ -1834,10 +1896,10 @@ fn render_menu(app: &State, area: Rect, buf: &mut Buffer) {
     }
 }
 
-/// Items a panel above the bar lists before it counts the rest.
+/// Items a panel above the box lists before it counts the rest.
 const PANEL_ITEMS: usize = 3;
 
-/// Rows a panel above the bar wants for `count` items: its title, up to
+/// Rows a panel above the box wants for `count` items: its title, up to
 /// [`PANEL_ITEMS`] items and one more row, which holds the next item or a
 /// count of the rest, and its footer.
 fn panel_rows(count: usize) -> u16 {
@@ -1848,7 +1910,7 @@ fn panel_rows(count: usize) -> u16 {
     u16::try_from(items + 2).unwrap_or(u16::MAX)
 }
 
-/// The staged images above the bar, as the oracle's attachments panel:
+/// The staged images above the box, as the oracle's attachments panel:
 /// `Staged attachments: 2` in blue, a numbered line for each image, and a
 /// footer.
 fn render_attachments(app: &State, area: Rect, buf: &mut Buffer) {
@@ -1863,7 +1925,7 @@ fn render_attachments(app: &State, area: Rect, buf: &mut Buffer) {
     render_panel(&title, style, &items, copy::ATTACHMENTS_HELP, area, buf);
 }
 
-/// The prompts the runtime holds above the bar, as the oracle's pending
+/// The prompts the runtime holds above the box, as the oracle's pending
 /// panel: `Pending input` in amber, a line for each prompt with where it
 /// will be admitted, `Next step: …`, and the key that sends them now. A
 /// prompt of several lines reads as one, its breaks shown as spaces, and is
@@ -1912,7 +1974,7 @@ pub(crate) fn fit(text: &str, width: usize) -> String {
     out
 }
 
-/// One panel above the bar: a title in its tone, a dim line per item, and a
+/// One panel above the box: a title in its tone, a dim line per item, and a
 /// dim footer. Short of rows, the footer and then the items give way, a
 /// count standing for those left out, and the title stays to say why.
 fn render_panel(
@@ -1941,7 +2003,7 @@ fn render_panel(
     }
     if shown < count && slots > 0 {
         lines.push(Line::styled(
-            format!("+{} {}", count - shown, copy::MORE_LINES),
+            format!("+{}", cards::count(count - shown, copy::MORE_LINE_NOUNS)),
             dim(),
         ));
     }
@@ -1957,50 +2019,56 @@ fn render_panel(
     }
 }
 
-/// Fewest cells of the newest shell's command a shared standing row keeps;
-/// with less, the agents' summary gives way to it.
-const COMMAND_MIN: usize = 12;
-
-/// The row under the composer. Background shells take it while any runs or
-/// their list is open, with the key that opens that list while the
-/// composer has focus and the terminal is wide enough for keys; agents
-/// share it, their summary first, where the shells keep [`SHELLS_MIN`]
-/// cells. Otherwise it is the agents' row: the preview's samples, or a live
-/// session's subagents, with the key that opens their list.
-fn render_standing(app: &State, columns: u16, area: Rect, buf: &mut Buffer) {
-    let width = usize::from(area.width);
-    let look = Look {
-        tones: app.tones,
-        classic: app.frame == FrameStyle::Classic,
-        lit: true,
-    };
-    let with_key = app.focus == Focus::Composer && columns >= HINT_MIN_COLUMNS;
-    let shells = app.live && (app.jobs_row() || matches!(app.focus, Focus::Jobs | Focus::Shell));
-    if !shells {
-        let (left, right) = agents::standing(&app.agents, app.tones, with_key, width);
-        split_row(buf, columns, area, left, right);
+/// The tasks' standing row under the composer ([`tasks::standing`]). At
+/// its right end, the key that opens the tray while the composer has the
+/// keyboard and the terminal is wide enough for keys; while the tray is
+/// open, its rows out of view, `+N above · +M below`, at any width they
+/// fit, so the list never leaves a task out without a word. The row gives
+/// way to either as it gives way to its own parts.
+fn render_standing(
+    app: &State,
+    columns: u16,
+    area: Rect,
+    buf: &mut Buffer,
+    (above, below): (usize, usize),
+) {
+    if area.is_empty() {
         return;
     }
-    // The key draws where any row's key does, so the command takes its
-    // cells elsewhere. The agents' summary takes only what the shells
-    // leave with their mark, count, id, time, and key whole and some of the
-    // command, giving up its counts first and its place last.
-    let fixed = jobs::standing_fixed(&app.jobs, app.jobs_at, app.now, look, with_key);
-    let spare = width.saturating_sub(fixed + COMMAND_MIN + 2);
-    let lead = (!app.agents.is_empty())
-        .then(|| agents::summary(&app.agents, app.tones, spare))
-        .filter(|lead| lead.width() <= spare);
-    let room = lead.as_ref().map_or(width, |lead| width - lead.width() - 2);
-    let (shells, right) = jobs::standing(&app.jobs, app.jobs_at, app.now, room, look, with_key);
-    let left = match lead {
-        Some(mut lead) => {
-            lead.spans.push(Span::raw("  "));
-            lead.spans.extend(shells.spans);
-            lead
+    let tail = if app.focus == Focus::Composer {
+        (columns >= HINT_MIN_COLUMNS).then(|| copy::TASKS_KEY.to_owned())
+    } else {
+        let mut counts = Vec::new();
+        if above > 0 {
+            counts.push(format!("+{above} {}", copy::ABOVE));
         }
-        None => shells,
+        if below > 0 {
+            counts.push(format!("+{below} {}", copy::BELOW));
+        }
+        (!counts.is_empty()).then(|| counts.join(copy::STATUS_SEP))
     };
-    split_row(buf, columns, area, left, right);
+    // Bake: over one task's own view the counts are enough; naming the
+    // newest running task there would repeat or rival what the tray shows.
+    let newest = match app.focus {
+        Focus::Inspect | Focus::Shell => None,
+        Focus::Composer | Focus::Tasks => app.newest_running(),
+    };
+    let (left, right) = tasks::standing(
+        &app.tasks(),
+        newest,
+        app.jobs_at,
+        app.now,
+        usize::from(area.width),
+        task_look(app),
+        app.live,
+        tail.as_deref(),
+    );
+    line(buf, area, left);
+    let cells = right.width();
+    if cells > 0 && cells <= usize::from(area.width) {
+        let x = area.right() - cells as u16;
+        line(buf, Rect::new(x, area.y, cells as u16, 1), right);
+    }
 }
 
 /// A status tone in the palette's colour on a truecolor terminal, the nearest
@@ -2024,13 +2092,23 @@ fn tone_style(tone: Tone, tones: Tones) -> Style {
     }
 }
 
-/// The transcript viewport, with a hint row at its foot when there is room:
-/// right-aligned keys while following output, and the way back to the
-/// newest line, leading the row, while reading history.
-/// The transcript viewport and its scroll indicator. The indicator takes
-/// the gap row just above the controls, so it reads with the bar and the
-/// box rather than over the text. The planner grants the gap before any
-/// viewport row, so a viewport always has one under it.
+/// The transcript viewport, the activity under its newest line, and its
+/// scroll indicator.
+///
+/// Bake: the activity ([`activity_line`]) is drawn by the renderer, not the
+/// transcript: the viewport is [`indicator_rows`] shorter, and the
+/// indicator sits one blank row under the last line drawn, at the rail's
+/// column, so it moves down with the output and sits under a short
+/// transcript's content rather than at the controls. While the reader has
+/// scrolled up, a running turn's activity pins to the body's bottom row
+/// with the blank above it, and a finished turn's ending leaves with the
+/// newest line. It is never transcript text: selection and copy see only
+/// the viewport's lines, whose rows do not move when it changes.
+///
+/// The scroll indicator takes the gap row just under the body, so it reads
+/// with the box rather than over the text, and under a pinned activity
+/// rather than beside it. The planner grants the gap before any viewport
+/// row, so a viewport always has one under it.
 fn render_transcript(
     app: &mut State,
     area: Rect,
@@ -2038,7 +2116,8 @@ fn render_transcript(
     buf: &mut Buffer,
     published: Option<usize>,
 ) {
-    let rows = area.height;
+    let indicator = indicator_rows(app, area.height);
+    let rows = area.height - indicator;
     let hint = (gap.height > 0).then_some(gap);
     // The last column is the scrollbar's, whether or not it is drawn, so
     // the text never reflows when the history outgrows the viewport.
@@ -2055,18 +2134,34 @@ fn render_transcript(
             lit: transcript::lit(app.now),
         },
     );
+    // Bake: a finished turn's ending belongs to the newest line alone. Read
+    // back from there, it leaves with that line and the viewport draws on
+    // into its rows, growing at its foot so the rows above stay put; the
+    // transcript keeps the shorter height, so its scrolling counts the
+    // ending's rows and steps back down through them. A running turn or
+    // compaction stays pinned instead.
+    let given = if app.activity.is_none() && !view.following() {
+        indicator
+    } else {
+        0
+    };
+    let indicator = indicator - given;
+    let rows = rows + given;
     let range = app.selecting.range();
     let inline_follow = published.is_some() && view.following();
     let screen: Vec<_> = view
-        .screen()
+        .screen_rows(usize::from(rows))
         .into_iter()
         .filter(|(at, _)| !inline_follow || at.row >= published.unwrap_or(0))
         .collect();
-    let offset = if inline_follow {
+    // Inline, live rows sit against the controls; with none, the activity
+    // sits under the scrollback's last row at the region's top.
+    let offset = if inline_follow && !(screen.is_empty() && indicator > 0) {
         rows.saturating_sub(screen.len() as u16)
     } else {
         0
     };
+    let drawn = screen.len() as u16;
     for (i, (at, content)) in screen.into_iter().enumerate() {
         let y = area.y + offset + i as u16;
         // The cells a selection covers are drawn reversed, keeping their
@@ -2088,17 +2183,20 @@ fn render_transcript(
         rows: rows - offset,
     })
     .filter(|area| area.rows > 0);
+    // The track runs the body's whole height, beside the activity too, so
+    // it holds still as the activity comes and goes.
+    let track = area.height;
     let thumb = (bar && !inline_follow)
-        .then(|| view.thumb(usize::from(rows)))
+        .then(|| view.thumb(usize::from(track)))
         .flatten();
     app.track = thumb.map(|_| ScrollTrack {
         column: area.x + width,
         top: area.y,
-        rows,
+        rows: track,
     });
     if let Some(thumb) = thumb {
         let (glyphs, styles) = scrollbar_look(app.tones, classic, app.dragging);
-        for i in 0..usize::from(rows) {
+        for i in 0..usize::from(track) {
             let on = (thumb.start..thumb.start + thumb.len).contains(&i);
             let (glyph, style) = if on {
                 (glyphs.0, styles.0)
@@ -2110,9 +2208,19 @@ fn render_transcript(
                 .set_style(style);
         }
     }
+    if indicator > 0 {
+        // One blank row under the last line drawn, then the activity; a
+        // full viewport, followed or read, puts it on the body's last row.
+        let y = area.y + (offset + drawn).min(rows) + indicator - 1;
+        let x = area.x + (transcript::RAIL as u16).min(width);
+        let cells = width.saturating_sub(2 * transcript::RAIL as u16);
+        if let Some(content) = activity_line(app, usize::from(cells)) {
+            line(buf, Rect::new(x, y, cells, 1), content);
+        }
+    }
     if let Some(row) = hint {
-        // The hint ends where the status line and the agents row under it
-        // do, inset from the edge when the composer is boxed.
+        // The hint ends where the rows under the box do, inset from the
+        // edge when the composer is boxed.
         let right = if composer::geometry(area.width).boxed {
             INSET
         } else {
@@ -2193,7 +2301,7 @@ fn scroll_pill(below: usize, fresh: bool, tones: Tones, width: usize) -> Option<
         ),
         Tones::None => (Style::new().add_modifier(Modifier::BOLD), dim(), None),
     };
-    let count = format!("{below} {}", copy::LINES_BELOW);
+    let count = cards::count(below, copy::LINES_BELOW_NOUNS);
     let key_tail = Some(format!(" · {}", copy::LATEST_KEY));
     // Widest first: the key goes, then the count.
     let candidates: Vec<(String, Option<String>)> = if fresh {
@@ -2267,9 +2375,10 @@ fn render_body(app: &mut State, area: Rect, gap: Rect, buf: &mut Buffer, publish
     render_transcript(app, area, gap, buf, published);
 }
 
-/// The tray under the controls: the agents' or shells' list with the
-/// selected entry kept in view, one agent's ledger from its top, or one
-/// shell's newest output. Returns the rows out of view above and below.
+/// The tray under the controls: the tasks list with the selected task kept
+/// in view, one agent's ledger from its top, or one shell's newest output.
+/// Returns what is out of view above and below: tasks in the list, lines
+/// otherwise.
 fn render_tray(app: &mut State, area: Rect, buf: &mut Buffer) -> (usize, usize) {
     if area.is_empty() {
         return (0, 0);
@@ -2279,6 +2388,8 @@ fn render_tray(app: &mut State, area: Rect, buf: &mut Buffer) -> (usize, usize) 
         lines,
         selected,
         most,
+        counted,
+        ..
     } = tray(app, usize::from(area.width), rows);
     if let Some(most) = most {
         app.shell_most = most;
@@ -2288,7 +2399,13 @@ fn render_tray(app: &mut State, area: Rect, buf: &mut Buffer) -> (usize, usize) 
     // lies below them; then the window ends on it, or starts on it when it
     // is taller than the tray.
     let skip = selected.map_or(0, |at| at.end.saturating_sub(rows).min(at.start));
-    let below = lines.len().saturating_sub(skip + rows);
+    let hidden = match counted {
+        Some(at) => (
+            at.iter().filter(|&&row| row < skip).count(),
+            at.iter().filter(|&&row| row >= skip + rows).count(),
+        ),
+        None => (skip, lines.len().saturating_sub(skip + rows)),
+    };
     for (i, content) in lines.into_iter().skip(skip).take(rows).enumerate() {
         line(
             buf,
@@ -2296,33 +2413,7 @@ fn render_tray(app: &mut State, area: Rect, buf: &mut Buffer) -> (usize, usize) 
             content,
         );
     }
-    (skip, below)
-}
-
-/// The tray's rows out of view, `+N above · +M below`, at the right end of
-/// the standing row over it, where its key sits while the composer has the
-/// keyboard. Drawn only on blank cells, so it never covers the row.
-fn counts_on_row(buf: &mut Buffer, area: Rect, (above, below): (usize, usize)) {
-    if area.is_empty() || above + below == 0 {
-        return;
-    }
-    let mut counts = Vec::new();
-    if above > 0 {
-        counts.push(format!("+{above} {}", copy::ABOVE));
-    }
-    if below > 0 {
-        counts.push(format!("+{below} {}", copy::BELOW));
-    }
-    let label = counts.join(copy::STATUS_SEP);
-    let cells = u16::try_from(label.width()).unwrap_or(u16::MAX);
-    // One blank cell before the label keeps it apart from the row's text.
-    let Some(x) = area.right().checked_sub(cells) else {
-        return;
-    };
-    if x <= area.x || (x - 1..area.right()).any(|x| buf[(x, area.y)].symbol() != " ") {
-        return;
-    }
-    buf.set_string(x, area.y, label, dim());
+    hidden
 }
 
 #[cfg(test)]
@@ -2390,6 +2481,29 @@ mod tests {
                 row
             })
             .collect();
+        (rows, terminal.get_cursor_position().unwrap())
+    }
+
+    /// A transcript row's text without the scrollbar's column or trailing
+    /// blanks.
+    fn text(row: &str) -> &str {
+        row.trim_end_matches(['│', '┃', '|', '#', ' '])
+    }
+
+    /// Draws `app` as the inline writer does with `published` rows already
+    /// in scrollback.
+    fn draw_inline_published(
+        app: &mut State,
+        width: u16,
+        height: u16,
+        published: usize,
+    ) -> (Vec<String>, Position) {
+        let held = inline_height(app, width, height).min(height);
+        let mut terminal = Terminal::new(TestBackend::new(width, held)).unwrap();
+        terminal
+            .draw(|f| render_inline(app, f, published, height))
+            .unwrap();
+        let rows = screen(&terminal);
         (rows, terminal.get_cursor_position().unwrap())
     }
 
@@ -3004,37 +3118,73 @@ mod tests {
         }
     }
 
+    /// `app` with the view's sample tasks reported, as the preview's
+    /// fixture or a live runtime reports them: three agents, one at work,
+    /// one failed, one done, and two shells, one running.
+    fn tasked(mut app: State) -> State {
+        use crate::runtime::RuntimeUpdate;
+        update(
+            &mut app,
+            Msg::Runtime(RuntimeUpdate::Agents(crate::tasks::samples::mixed())),
+        );
+        update(
+            &mut app,
+            Msg::Runtime(RuntimeUpdate::Jobs(crate::tasks::samples::shells())),
+        );
+        app
+    }
+
+    fn ctrl_g(app: &mut State) {
+        update(app, Msg::Key(KeyInput::new(Key::Char('g'), Mods::CTRL)));
+    }
+
     #[test]
-    fn first_screen_names_the_preview_and_sample_agents() {
+    fn first_screen_names_the_preview_and_its_sample_tasks() {
         for (w, h) in [(80, 24), (120, 36)] {
-            let (rows, cursor) = draw(&mut State::default(), w, h);
+            let last = usize::from(h) - 1;
+            // With no tasks reported, no row stands under the box: the
+            // status line is right under it.
+            let (rows, _) = draw(&mut State::default(), w, h);
+            assert!(rows[last - 1].starts_with('╰'), "{rows:#?}");
+            assert_eq!(rows[last].trim_end(), "  no model", "{rows:#?}");
+            let (rows, cursor) = draw(&mut tasked(State::default()), w, h);
             // The transcript follows the sample session's newest line.
             assert!(
                 rows.iter()
                     .any(|r| r.contains("rejects it before splitting."))
             );
-            assert!(rows.iter().any(|r| r.contains("Agents  2 samples")));
             let prompt = row_index(&rows, "│ ❯ Type a draft");
             assert_eq!(cursor, Position::new(TEXT_X, prompt as u16));
-            // Idle, the bar above the box holds the status alone, right-aligned.
-            assert!(rows[prompt - 2].ends_with("no model  "));
-            assert!(rows[prompt - 2].starts_with("    "));
-            assert!(rows[usize::from(h) - 1].contains("Agents  2 samples"));
+            // Idle, with nothing to say, no bar stands over the box: the
+            // gap row under the transcript is right above it.
+            assert_eq!(rows[prompt - 2].trim(), "", "{rows:#?}");
+            assert!(
+                rows[last - 1].starts_with("  Sample tasks  2 running · 1 failed"),
+                "{rows:#?}"
+            );
+            assert_eq!(rows[last].trim_end(), "  no model", "{rows:#?}");
         }
     }
 
     #[test]
     fn the_composer_is_a_closed_box_aligned_with_the_rows_around_it() {
-        let mut app = State::default();
+        let mut app = tasked(State::default());
         app.draft.type_text("hello");
         let (rows, _) = draw(&mut app, 40, 12);
         let prompt = row_index(&rows, "❯ hello");
         assert_eq!(rows[prompt - 1], format!("╭{}╮", "─".repeat(38)));
         assert_eq!(rows[prompt], format!("│ ❯ hello{}│", " ".repeat(30)));
         assert_eq!(rows[prompt + 1], format!("╰{}╯", "─".repeat(38)));
-        // The bar and the agents row align with the box's contents.
-        assert_eq!(rows[prompt - 2], format!("{}no model  ", " ".repeat(30)));
-        assert!(rows[prompt + 2].starts_with("  Agents  2 samples · none running"));
+        // The tasks row and the status line under it align with the box's
+        // contents.
+        assert_eq!(rows[prompt + 3], format!("  no model{}", " ".repeat(30)));
+        // Narrow, the row's label gives way before its counts and newest
+        // task.
+        assert_eq!(
+            rows[prompt + 2].trim_end(),
+            "  2 running · 1 failed  ● bash-2",
+            "{rows:#?}"
+        );
         // Right-hand text ends where the box's contents do.
         let (rows, _) = draw(&mut app, 80, 24);
         let prompt = row_index(&rows, "❯ hello");
@@ -3060,10 +3210,19 @@ mod tests {
         key(&mut app, Key::Enter);
         let (rows, cursor) = draw(&mut app, 80, 24);
         let notice = row_index(&rows, "Commands are not available");
-        let bar = row_index(&rows, "no model");
         let prompt = row_index(&rows, "❯ /keep me");
-        assert!(notice < bar && bar + 2 == prompt);
+        // With nothing on the bar, the notice sits right over the box.
+        assert_eq!(notice + 2, prompt);
         assert_eq!(cursor, Position::new(TEXT_X + 8, prompt as u16));
+        // Over an open tray, the bar's title comes between them.
+        let mut app = tasked(State::default());
+        app.draft.type_text("/keep me");
+        ctrl_g(&mut app);
+        app.notice = Some(Notice::NoCommands);
+        let (rows, _) = draw(&mut app, 80, 24);
+        let notice = row_index(&rows, "Commands are not available");
+        let bar = row_index(&rows, "Sample tasks  ↑↓ select");
+        assert_eq!((notice + 1, bar + 2), (bar, row_index(&rows, "❯ /keep me")));
     }
 
     #[test]
@@ -3073,7 +3232,7 @@ mod tests {
         app.draft.newline();
         app.draft.type_text("end");
         let (rows, cursor) = draw(&mut app, 40, 12);
-        let base_rule = rows.len() - 2;
+        let base_rule = rows.iter().rposition(|r| r.starts_with('╰')).unwrap();
         assert_eq!(usize::from(cursor.y), base_rule - 1);
         assert!(rows[base_rule - 1].contains("end"));
         assert_eq!(cursor.x, TEXT_X + 3);
@@ -3155,12 +3314,10 @@ mod tests {
 
     #[test]
     fn inspector_says_read_only_and_hides_the_caret_from_the_draft() {
-        let mut app = State::default();
+        let mut app = tasked(State::default());
         app.draft.type_text("draft");
-        update(
-            &mut app,
-            Msg::Key(KeyInput::new(Key::Char('g'), Mods::CTRL)),
-        );
+        ctrl_g(&mut app);
+        key(&mut app, Key::Down);
         key(&mut app, Key::Enter);
         let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
         terminal.draw(|f| render(&mut app, f)).unwrap();
@@ -3169,26 +3326,23 @@ mod tests {
         // The bar is a breadcrumb back to the list.
         assert!(
             rows.iter()
-                .any(|r| r.starts_with("  Agents / Sample explorer  Tab agents · Esc draft"))
+                .any(|r| r.starts_with("  Sample tasks / Run the tests  Esc back")),
+            "{rows:#?}"
         );
-        // The body is a ledger under the agent's name and a dashed rule.
-        let name = rows
-            .iter()
-            .position(|r| r.trim_end() == "  Sample explorer")
-            .unwrap();
-        assert!(rows[name + 1].starts_with("  ---"));
-        let ledger: Vec<&str> = rows[name + 2..name + 7]
+        // The tray is a ledger under the agent's mark and name and a rule.
+        let name = row_index(&rows, "  ✗ Run the tests");
+        assert!(rows[name + 1].starts_with("  ---"), "{rows:#?}");
+        let ledger: Vec<&str> = rows[name + 2..name + 6]
             .iter()
             .map(|r| r.trim_end())
             .collect();
         assert_eq!(
             ledger,
             [
-                "  Id      sample-explorer",
-                "  Role    Example of a child that would read files for its parent.",
-                "  State   Sample · not running",
-                "  Input   Read only · typing never reaches an agent or your draft",
-                "  Draft   Kept unchanged while you inspect",
+                "  Id      tester",
+                "  Model   faux/faux-2",
+                "  State   failed · saved",
+                "  Last    The request failed.",
             ]
         );
         assert!(rows.iter().any(|r| r.contains("❯ draft")));
@@ -3209,7 +3363,7 @@ mod tests {
         app
     }
 
-    /// The header's cell styles at `now`.
+    /// The activity row's cell styles at `now`.
     fn header_styles(app: &mut State, tones: Tones, now: Duration) -> Vec<Style> {
         app.tones = tones;
         app.now = now;
@@ -3227,10 +3381,13 @@ mod tests {
         app.now = Duration::from_millis(6_500);
         let (rows, _) = draw(&mut app, 80, 24);
         let header = row_index(&rows, "Kneading…");
-        // The activity and the status share the bar above the box.
-        assert!(rows[header].starts_with("  Kneading…  writing · 5s"));
-        assert!(rows[header].ends_with("  no model  "));
-        assert_eq!(row_index(&rows, "❯") - 2, header);
+        // Bake: the activity sits at the rail's column one blank row under
+        // the transcript's newest line, alone on its row; the gap row under
+        // it is right above the box.
+        assert_eq!(text(&rows[header]), "  Kneading…  writing · 5s");
+        assert_eq!(text(&rows[header - 1]), "");
+        assert!(rows[header - 2].contains("rejects it before splitting."));
+        assert_eq!(row_index(&rows, "❯") - 3, header);
         assert!(
             rows.iter()
                 .any(|r| r.starts_with('╰') && r.contains(" Esc interrupts "))
@@ -3238,18 +3395,15 @@ mod tests {
         // No glyph stands for the activity: the words carry it.
         let braille = |c: char| ('\u{2800}'..='\u{28FF}').contains(&c);
         assert!(!rows.iter().any(|r| r.chars().any(braille)));
-        // Narrow, the phase and time give way before the status, which goes
-        // before the word.
-        let (rows, _) = draw(&mut app, 30, 12);
-        assert_eq!(
-            rows[row_index(&rows, "Kneading…")].trim_end(),
-            "  Kneading…         no model"
-        );
-        let (rows, _) = draw(&mut app, 20, 12);
-        assert_eq!(
-            rows[row_index(&rows, "Kneading…")].trim_end(),
-            "  Kneading…"
-        );
+        // Narrow, the phase gives way, then the time; the word stays.
+        for (width, shown) in [
+            (30, "  Kneading…  writing · 5s"),
+            (20, "  Kneading…  5s"),
+            (14, "  Kneading…"),
+        ] {
+            let (rows, _) = draw(&mut app, width, 12);
+            assert_eq!(text(&rows[row_index(&rows, "Kneading…")]), shown);
+        }
     }
 
     #[test]
@@ -3285,28 +3439,101 @@ mod tests {
         assert_eq!(still, still_later);
     }
 
+    // Bake: the tasks open as one list under the standing row, agents then
+    // shells, each group under its dim label, one pointer over both, and
+    // the selected task's detail under it.
     #[test]
-    fn agent_list_marks_the_selected_row() {
-        let mut app = State::default();
-        update(
-            &mut app,
-            Msg::Key(KeyInput::new(Key::Char('g'), Mods::CTRL)),
-        );
+    fn the_tasks_list_merges_agents_and_shells_under_the_standing_row() {
+        let mut app = tasked(State::live(FrameStyle::Round, Tones::None, Vec::new()));
+        ctrl_g(&mut app);
         key(&mut app, Key::Down);
-        let (rows, _) = draw(&mut app, 60, 24);
-        let at = |needle| row_index(&rows, needle);
+        let (rows, _) = draw(&mut app, 80, 24);
+        let edge = rows.iter().rposition(|r| r.starts_with('╰')).unwrap();
+        // The status line stays the screen's last row under the open tray.
+        assert_eq!(rows[23].trim_end(), "  no model");
+        let tray: Vec<&str> = rows[edge + 1..23].iter().map(|r| r.trim_end()).collect();
         assert_eq!(
-            rows[at("Sample reviewer")].trim_end(),
-            "  ▸ Sample reviewer   sample-reviewer"
+            tray,
+            [
+                "  Tasks  2 running · 1 failed · 2 done  ● bash-2  bun run dev  1m 12s",
+                "  Agents",
+                "  ● Explore auth     faux/faux-2                               working",
+                "▸ ✗ Run the tests    saved · faux/faux-2                        failed",
+                "    The request failed.",
+                "  ✓ Review the diff  idle · faux/faux-2                           done",
+                "  Shells · they stop when Bake exits",
+                "  ● bash-2           bun run dev                               running  1m 12s",
+                "  ✓ bash-1           cargo build                                exit 0     41s",
+            ],
+            "{rows:#?}"
         );
-        assert!(rows[at("Sample explorer")].starts_with("    Sample explorer"));
-        // Each card says what the agent does; a blank separates the cards.
         assert!(
-            rows[at("Sample reviewer") + 1].starts_with("    Example of a child that would review")
+            rows.iter()
+                .any(|r| r.starts_with("  Tasks  ↑↓ select · Enter open · x stop · Esc back")),
+            "{rows:#?}"
         );
-        assert_eq!(rows[at("Sample reviewer") - 1].trim(), "");
-        assert!(rows[at("Fixed examples")].starts_with("  Fixed examples · nothing is running"));
-        assert!(rows.iter().any(|r| r.starts_with("  Agents  ↑↓ select")));
+        for row in &rows {
+            assert_eq!(row.chars().count(), 80, "{row}");
+        }
+    }
+
+    // A tray too short for the whole list says how many tasks it leaves out
+    // at the standing row's right end, where the key sits while it is
+    // closed; the row gives way to the count as it does to the key. The
+    // count is of tasks, not of the group labels and detail rows.
+    #[test]
+    fn a_short_tray_counts_the_tasks_it_leaves_out() {
+        let mut app = tasked(State::live(FrameStyle::Round, Tones::None, Vec::new()));
+        ctrl_g(&mut app);
+        let mut seen = Vec::new();
+        for (width, height) in [(80, 12), (40, 12)] {
+            let (rows, _) = draw(&mut app, width, height);
+            let edge = rows.iter().rposition(|r| r.starts_with('╰')).unwrap();
+            seen.push(rows[edge + 1].trim_end().to_owned());
+        }
+        assert!(
+            seen[0].starts_with("  Tasks  2 running · 1 failed · 2 done  "),
+            "{seen:?}"
+        );
+        // Twelve rows leave the tray its three-row minimum: the agents'
+        // label and two of them.
+        assert!(seen[0].ends_with("  +3 below"), "{seen:?}");
+        assert_eq!(seen[1], "  2 running · 1 failed        +3 below");
+    }
+
+    // The list reads at every width from 40 to 160 columns: rows never run
+    // past the screen, the pointer and every task's mark and name stay,
+    // and the classic frame's ASCII stands in for the round marks.
+    #[test]
+    fn the_tasks_list_reads_at_every_width() {
+        for classic in [false, true] {
+            for width in [40, 48, 60, 80, 120, 160] {
+                let mut app = tasked(State::live(FrameStyle::Round, Tones::None, Vec::new()));
+                if classic {
+                    app.frame = FrameStyle::Classic;
+                }
+                ctrl_g(&mut app);
+                let (rows, _) = draw(&mut app, width, 30);
+                let size = format!("{width} classic={classic}");
+                for row in &rows {
+                    assert!(row.width() <= usize::from(width), "{size}: {row}");
+                }
+                let pointer = if classic { "> " } else { "▸ " };
+                assert!(
+                    rows.iter().any(|r| r.contains(pointer)),
+                    "{size}: {rows:#?}"
+                );
+                for name in ["Explore", "Run the", "Review", "bash-2", "bash-1"] {
+                    assert!(
+                        rows.iter().any(|r| r.contains(name)),
+                        "{size}: {name}: {rows:#?}"
+                    );
+                }
+                if classic {
+                    assert!(!rows.iter().any(|r| r.contains('✓') || r.contains('▸')));
+                }
+            }
+        }
     }
 
     /// The row holding the prompt and the box's bottom edge.
@@ -3323,7 +3550,7 @@ mod tests {
 
     #[test]
     fn each_mode_names_what_enter_does_and_its_key() {
-        let mut app = State::default();
+        let mut app = tasked(State::default());
         let (prompt, bottom) = composer_rows(&mut app, 80);
         assert!(prompt.starts_with("│ ❯ Type a draft · Alt+Enter newline · Ctrl+- undo"));
         assert_eq!(bottom, format!("╰{}╯", "─".repeat(78)));
@@ -3355,7 +3582,7 @@ mod tests {
         );
         key(&mut app, Key::Enter);
         let (prompt, bottom) = composer_rows(&mut app, 80);
-        assert!(prompt.starts_with("│ ❯ Read-only · Esc returns to parent"));
+        assert!(prompt.starts_with("│ ❯ Read-only · Esc returns to the tasks"));
         assert!(bottom.ends_with("─ draft kept · Esc returns ─╯"));
     }
 
@@ -3377,7 +3604,7 @@ mod tests {
         }
     }
 
-    // Bake: a live compaction names itself in the bar with the phase the
+    // Bake: a live compaction names itself on the activity row with the phase the
     // runtime reports, and `/compact` ends as `Compacted`.
     #[test]
     fn a_live_compaction_shows_its_phase_and_ends_as_compacted() {
@@ -3460,8 +3687,73 @@ mod tests {
         assert!(rows[0].contains("second"));
     }
 
+    // Bake: at every size from nothing to 160 columns, with the activity
+    // running or ended, reading or following, and the composer or any of
+    // the tray's scopes holding the keyboard, a frame draws without
+    // panicking, inline or not, keeps every row within the width, and, when
+    // the status line has its row, puts it last.
     #[test]
-    fn the_header_holds_how_the_last_turn_ended() {
+    fn every_size_draws_the_activity_the_status_and_the_tray() {
+        let scopes: [fn(&mut State); 4] = [
+            |_| {},
+            |app| ctrl_g(app),
+            |app| {
+                ctrl_g(app);
+                key(app, Key::Enter);
+            },
+            |app| {
+                ctrl_g(app);
+                for _ in 0..3 {
+                    key(app, Key::Down);
+                }
+                key(app, Key::Enter);
+            },
+        ];
+        for (scope, open) in scopes.iter().enumerate() {
+            for ended in [false, true] {
+                for reading in [false, true] {
+                    let mut app = tasked(statused(running(30, "Reading \u{1b}[2Jfile")));
+                    if ended {
+                        app.activity = None;
+                        app.summary = Some(crate::state::TurnSummary {
+                            outcome: Outcome::Interrupted,
+                            elapsed: Duration::from_secs(3),
+                            kind: ActivityKind::Turn,
+                        });
+                    }
+                    open(&mut app);
+                    for width in [0, 1, 2, 5, 12, 20, 21, 40, 59, 60, 80, 120, 160] {
+                        for height in [0, 1, 2, 3, 4, 6, 8, 12, 24, 40] {
+                            if reading {
+                                app.transcript.scroll_up(5);
+                            }
+                            let (rows, _) = draw(&mut app, width, height);
+                            let case = format!("scope {scope}, {width}x{height}");
+                            assert!(
+                                rows.iter().all(|r| r.width() <= usize::from(width)),
+                                "{case}"
+                            );
+                            assert!(!rows.iter().any(|r| r.contains('\u{1b}')), "{case}");
+                            let plan = layout::plan(height, needs(&app, width, height));
+                            if plan.status > 0 && width >= 40 {
+                                assert!(
+                                    rows.last().unwrap().contains("deepseek"),
+                                    "{case}: {rows:#?}"
+                                );
+                            }
+                            draw_inline(&mut app, width, height.max(1));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Bake: how the last turn ended stays one blank row under the
+    // transcript's newest line, dim behind the transcript's own mark for an
+    // ending alike, until the next turn replaces it.
+    #[test]
+    fn the_transcript_holds_how_the_last_turn_ended() {
         let mut app = State::default();
         update(&mut app, Msg::Tick(Duration::from_secs(1)));
         ctrl_t(&mut app);
@@ -3469,36 +3761,448 @@ mod tests {
         key(&mut app, Key::Esc);
         let (rows, _) = draw(&mut app, 80, 24);
         let header = row_index(&rows, "Interrupted");
-        assert!(rows[header].starts_with("  ■ Interrupted  3s"));
-        assert!(rows[header].ends_with("  no model  "));
+        assert_eq!(text(&rows[header]), "  ⊘ Interrupted  3s");
+        assert_eq!(text(&rows[header - 1]), "");
+        assert_eq!(row_index(&rows, "❯") - 3, header);
         // The next turn replaces it; a completed one reads as such.
         ctrl_t(&mut app);
         update(&mut app, Msg::Tick(Duration::from_secs(9)));
         ctrl_t(&mut app);
         ctrl_t(&mut app);
         let (rows, _) = draw(&mut app, 80, 24);
-        assert!(rows[row_index(&rows, "Completed")].starts_with("  ✓ Completed  5s"));
-        assert!(!rows.iter().any(|r| r.contains("Interrupted")));
-        // Narrow, the time and then the status give way before the outcome.
-        let (rows, _) = draw(&mut app, 18, 12);
         assert_eq!(
-            rows[row_index(&rows, "Completed")].trim_end(),
-            "  ✓ Completed"
+            text(&rows[row_index(&rows, "Completed")]),
+            "  ✓ Completed  5s"
         );
+        assert!(!rows.iter().any(|r| r.contains("Interrupted")));
+        // The mark keeps its colour, the words are dim, and under NO_COLOR
+        // the mark is plain.
+        for (tones, colour) in [
+            (Tones::TrueColor, Some(Color::Rgb(0x22, 0xc5, 0x5e))),
+            (Tones::None, Some(Color::Reset)),
+        ] {
+            app.tones = tones;
+            let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+            terminal.draw(|f| render(&mut app, f)).unwrap();
+            let y = row_index(&rows, "Completed") as u16;
+            let buffer = terminal.backend().buffer();
+            assert_eq!(buffer[(2, y)].style().fg, colour);
+            assert!(!buffer[(2, y)].style().add_modifier.contains(Modifier::DIM));
+            assert!(buffer[(4, y)].style().add_modifier.contains(Modifier::DIM));
+        }
+        // Narrow, the time gives way before the outcome.
+        let (rows, _) = draw(&mut app, 18, 12);
+        assert_eq!(text(&rows[row_index(&rows, "Completed")]), "  ✓ Completed");
+        // The classic frame draws the transcript's ASCII mark.
+        app.frame = FrameStyle::Classic;
+        let (rows, _) = draw(&mut app, 80, 24);
+        assert_eq!(
+            text(&rows[row_index(&rows, "Completed")]),
+            "  + Completed  5s"
+        );
+    }
+
+    /// A live session of `count` short answers, with a runtime turn running
+    /// since second 1 and reporting `phase`.
+    fn running(count: usize, phase: &str) -> State {
+        let rows = (1..=count)
+            .map(|n| transcript::Row::Answer(format!("answer line {n}")))
+            .collect();
+        let mut app = State::live(FrameStyle::Round, Tones::None, rows);
+        app.activity = Some(Activity {
+            kind: ActivityKind::Turn,
+            word: "Thinking",
+            started: Duration::from_secs(1),
+            runtime: true,
+        });
+        app.phase = Some(phase.into());
+        app.now = Duration::from_secs(13);
+        app
+    }
+
+    // Bake: while a turn runs, its activity sits one blank row under the
+    // transcript's newest line, at the rail's column: under a short
+    // transcript's content rather than down at the box, and moving down as
+    // output arrives until the viewport is full, where it holds the body's
+    // last row.
+    #[test]
+    fn the_activity_sits_under_the_newest_line_and_moves_down_with_it() {
+        let mut app = running(2, "Reading transcript.rs");
+        let (rows, _) = draw(&mut app, 80, 24);
+        let newest = row_index(&rows, "answer line 2");
+        assert_eq!(text(&rows[newest + 1]), "");
+        assert_eq!(
+            text(&rows[newest + 2]),
+            "  Thinking…  Reading transcript.rs · 12s"
+        );
+        // Nothing else down to the box.
+        let top = row_index(&rows, "❯") - 1;
+        assert!(rows[newest + 3..top].iter().all(|r| text(r).is_empty()));
+        // Output arrives: it moves down with the newest line.
+        app.transcript
+            .set_live(vec![transcript::Row::Answer("streaming words".into())]);
+        let (rows, _) = draw(&mut app, 80, 24);
+        let newest = row_index(&rows, "streaming words");
+        assert_eq!(row_index(&rows, "Thinking…"), newest + 2);
+        // A full viewport keeps it on the body's last row, the gap row and
+        // the box under it.
+        let mut app = running(40, "Running cargo test");
+        let (rows, _) = draw(&mut app, 80, 24);
+        let at = row_index(&rows, "Thinking…");
+        assert_eq!(at, row_index(&rows, "❯") - 3);
+        assert!(rows[at - 2].contains("answer line 40"), "{rows:#?}");
+        // The ending replaces it in its place, until the next prompt.
+        let mut app = running(2, "Reading transcript.rs");
+        app.activity = None;
+        app.summary = Some(crate::state::TurnSummary {
+            outcome: Outcome::Failed,
+            elapsed: Duration::from_secs(4),
+            kind: ActivityKind::Turn,
+        });
+        let (rows, _) = draw(&mut app, 80, 24);
+        let newest = row_index(&rows, "answer line 2");
+        assert_eq!(text(&rows[newest + 2]), "  ✗ Failed  4s");
+    }
+
+    // Bake: the runtime's phase is drawn on one row without its escapes and
+    // control characters, and gives way first, cut and then whole, before
+    // the time and the word do.
+    #[test]
+    fn the_activity_cleans_the_phase_and_gives_it_way_first() {
+        let mut app = running(
+            2,
+            "Reading \u{1b}[31mcrates/\u{7}bake-tui-view/src/transcript.rs\u{1b}[0m\nnow",
+        );
+        let mut seen = Vec::new();
+        for width in [120, 60, 40, 30, 22, 14] {
+            let (rows, _) = draw(&mut app, width, 16);
+            let row = &rows[row_index(&rows, "Thinking…")];
+            assert!(!row.contains('\u{1b}') && !row.contains('\u{7}'), "{row:?}");
+            assert!(row.width() <= usize::from(width));
+            seen.push(text(row).to_owned());
+        }
+        assert_eq!(
+            seen,
+            [
+                "  Thinking…  Reading crates/bake-tui-view/src/transcript.rs now · 12s",
+                "  Thinking…  Reading crates/bake-tui-view/src/tran… · 12s",
+                "  Thinking…  Reading crates/ba… · 12s",
+                "  Thinking…  Reading… · 12s",
+                "  Thinking…  12s",
+                "  Thinking…",
+            ]
+        );
+        // NO_COLOR keeps the words and the time; the colours go.
+        let mut terminal = Terminal::new(TestBackend::new(80, 16)).unwrap();
+        terminal.draw(|f| render(&mut app, f)).unwrap();
+        let buffer = terminal.backend().buffer();
+        let y = row_index(&screen(&terminal), "Thinking…") as u16;
+        assert!((0..80).all(|x| buffer[(x, y)].fg == Color::Reset));
+    }
+
+    // Bake: reading history while a turn runs, the activity pins to the
+    // body's last row, a blank row above it, so the turn is never out of
+    // sight; the scroll pill keeps the gap row under it, so the two never
+    // share a row. Once the turn ends, its ending stays with the newest
+    // line, out of sight, and the body draws on into its rows. The rows
+    // above, and a selection on them, do not move as either comes and goes.
+    #[test]
+    fn a_running_turn_stays_in_sight_while_reading_history() {
+        let mut app = running(40, "Running cargo test");
+        draw(&mut app, 80, 24);
+        key(&mut app, Key::PageUp);
+        let (rows, _) = draw(&mut app, 80, 24);
+        let prompt = row_index(&rows, "❯");
+        assert_eq!(
+            text(&rows[prompt - 3]),
+            "  Thinking…  Running cargo test · 12s"
+        );
+        assert_eq!(text(&rows[prompt - 4]), "");
+        assert!(
+            rows[prompt - 2].contains("lines below · Ctrl+End"),
+            "{rows:#?}"
+        );
+        assert!(!rows[prompt - 2].contains("Thinking"));
+        assert!(!rows.iter().any(|r| r.contains("answer line 40")));
+        // A selection held on the rows above while the turn ends.
+        let (y, x) = find(&rows, "answer line");
+        update(&mut app, mouse(MouseKind::Down, x, y, 0));
+        update(&mut app, mouse(MouseKind::Drag, x + 6, y + 2, 10));
+        let marked = reversed(&mut app, 80, 24);
+        assert!(marked.iter().any(|r| !r.is_empty()));
+        // The turn ends while reading: no ending is drawn over the history,
+        // the body takes the two rows back with the lines that follow, and
+        // the rows above and the selection on them stay where they were.
+        let above: Vec<String> = rows[..prompt - 4].to_vec();
+        app.activity = None;
+        app.summary = Some(crate::state::TurnSummary {
+            outcome: Outcome::Completed,
+            elapsed: Duration::from_secs(12),
+            kind: ActivityKind::Turn,
+        });
+        let (rows, _) = draw(&mut app, 80, 24);
+        assert!(!rows.iter().any(|r| r.contains("Completed")), "{rows:#?}");
+        assert_eq!(rows[..prompt - 4], above[..]);
+        assert!(
+            rows[prompt - 4..prompt - 2]
+                .iter()
+                .any(|r| r.contains("answer line")),
+            "{rows:#?}"
+        );
+        assert!(rows[prompt - 2].contains("lines below · Ctrl+End"));
+        assert_eq!(reversed(&mut app, 80, 24), marked);
+        // The rows given back select as any others.
+        update(&mut app, mouse(MouseKind::Up, x + 6, y + 2, 20));
+        let (y, x) = find(&rows[prompt - 4..], "answer line");
+        let y = y + prompt as u16 - 4;
+        update(&mut app, mouse(MouseKind::Down, x, y, 1000));
+        update(&mut app, mouse(MouseKind::Drag, x + 13, y, 1010));
+        let copied = update(&mut app, mouse(MouseKind::Up, x + 13, y, 1020));
+        assert!(
+            matches!(&copied[..], [Effect::Copy(text)] if text.starts_with("answer line")),
+            "{copied:?}"
+        );
+    }
+
+    // Bake: a finished turn's ending belongs to the newest line alone:
+    // scrolling up a line at a time, the ending leaves first, then the blank
+    // row, then the line, and scrolling down brings them back in the same
+    // steps, so the ending is never drawn over older history.
+    #[test]
+    fn a_finished_turn_leaves_with_the_newest_line() {
+        let mut app = running(40, "Running cargo test");
+        app.activity = None;
+        app.summary = Some(crate::state::TurnSummary {
+            outcome: Outcome::Completed,
+            elapsed: Duration::from_secs(12),
+            kind: ActivityKind::Turn,
+        });
+        let (rows, _) = draw(&mut app, 80, 24);
+        let prompt = row_index(&rows, "❯");
+        assert_eq!(text(&rows[prompt - 3]), "  ✓ Completed  12s");
+        assert_eq!(text(&rows[prompt - 4]), "");
+        assert!(rows[prompt - 5].contains("answer line 40"));
+        // Where the newest line is drawn after each step up, as a row above
+        // the box; `None` once it has left the view.
+        let mut steps = Vec::new();
+        let mut pills = Vec::new();
+        for _ in 0..3 {
+            app.transcript.scroll_up(1);
+            let (rows, _) = draw(&mut app, 80, 24);
+            assert!(!rows.iter().any(|r| r.contains("Completed")));
+            pills.push(rows[prompt - 2].trim().to_owned());
+            steps.push(
+                rows.iter()
+                    .position(|r| r.contains("answer line 40"))
+                    .map(|at| prompt - at),
+            );
+        }
+        assert_eq!(steps, [Some(4), Some(3), None]);
+        // The pill counts the ending's rows, one line at a time.
+        assert_eq!(
+            pills,
+            [
+                "↓ 1 line below · Ctrl+End",
+                "↓ 2 lines below · Ctrl+End",
+                "↓ 3 lines below · Ctrl+End",
+            ]
+        );
+        let mut back = Vec::new();
+        for _ in 0..3 {
+            app.transcript.scroll_down(1);
+            let (rows, _) = draw(&mut app, 80, 24);
+            back.push((
+                rows.iter()
+                    .position(|r| r.contains("answer line 40"))
+                    .map(|at| prompt - at),
+                rows.iter().any(|r| r.contains("Completed")),
+            ));
+        }
+        assert_eq!(back, [(Some(3), false), (Some(4), false), (Some(5), true)]);
+        assert!(app.transcript.following());
+    }
+
+    // Bake: the activity is not transcript text: a press on it selects
+    // nothing, and a drag over the lines above it copies only theirs.
+    #[test]
+    fn the_activity_is_never_selected_or_copied() {
+        let mut app = running(3, "Running cargo test");
+        let (rows, _) = draw(&mut app, 80, 24);
+        let (y, x) = find(&rows, "Thinking…");
+        update(&mut app, mouse(MouseKind::Down, x, y, 0));
+        update(&mut app, mouse(MouseKind::Drag, x + 8, y, 10));
+        assert!(update(&mut app, mouse(MouseKind::Up, x + 8, y, 20)).is_empty());
+        assert!(reversed(&mut app, 80, 24).iter().all(String::is_empty));
+        let (first, column) = find(&rows, "answer line 2");
+        update(&mut app, mouse(MouseKind::Down, column, first, 100));
+        update(&mut app, mouse(MouseKind::Drag, 60, y, 110));
+        let copied = update(&mut app, mouse(MouseKind::Up, 60, y, 120));
+        assert_eq!(
+            copied,
+            [Effect::Copy("answer line 2\n\n  answer line 3".into())]
+        );
+        let marked = reversed(&mut app, 80, 24);
+        assert!(marked[usize::from(y)].is_empty());
+    }
+
+    // Bake: inline, the activity is drawn in the held region: under the
+    // live rows, which sit against the controls, or, with none live, one
+    // blank row under the scrollback's last row at the region's top.
+    #[test]
+    fn inline_draws_the_activity_under_the_latest_output() {
+        let mut app = running(3, "Running cargo test");
+        let published = app.settled_rows();
+        let (rows, _) = draw_inline_published(&mut app, 80, 24, published);
+        assert_eq!(text(&rows[0]), "");
+        assert_eq!(text(&rows[1]), "  Thinking…  Running cargo test · 12s");
+        app.transcript
+            .set_live(vec![transcript::Row::Answer("live words".into())]);
+        let (rows, _) = draw_inline_published(&mut app, 80, 24, published);
+        let live = row_index(&rows, "live words");
+        assert_eq!(row_index(&rows, "Thinking…"), live + 2);
+        assert_eq!(live + 4, row_index(&rows, "❯") - 1);
+        // The region grows by the activity's rows, so the live rows keep
+        // theirs.
+        let idle = running(3, "");
+        let mut idle = idle;
+        idle.activity = None;
+        assert_eq!(
+            inline_height(&app, 80, 24),
+            inline_height(&idle, 80, 24) + 2
+        );
+    }
+
+    fn call_row(state: transcript::CallState, lines: usize) -> transcript::Row {
+        transcript::Row::Call {
+            tool: "Bash".into(),
+            argument: "cargo test".into(),
+            fields: Vec::new(),
+            id: None,
+            state,
+            summary: None,
+            output: (1..=lines).map(|n| format!("output {n}")).collect(),
+            full_output_path: None,
+        }
+    }
+
+    fn ctrl_o(app: &mut State) {
+        update(app, Msg::Key(KeyInput::new(Key::Char('o'), Mods::CTRL)));
+    }
+
+    // Bake: Ctrl+O works from the composer with the activity row in place.
+    // Following, the newest line and the activity stay at the foot; reading
+    // with the activity pinned, the row at the top stays and the activity
+    // keeps the body's last row. While the tasks list has the keyboard, it
+    // does nothing.
+    #[test]
+    fn ctrl_o_keeps_the_place_with_the_activity_row() {
+        use crate::transcript::Detail;
+        let mut app = tasked(running(30, "running cargo test"));
+        app.transcript.commit(vec![
+            call_row(transcript::CallState::Done, 30),
+            transcript::Row::Answer("after the call".into()),
+        ]);
+        let activity = "  Thinking…  running cargo test · 12s";
+        let (rows, _) = draw(&mut app, 80, 24);
+        let prompt = row_index(&rows, "❯");
+        let foot = |rows: &[String]| {
+            assert_eq!(text(&rows[prompt - 3]), activity, "{rows:#?}");
+            assert!(rows[prompt - 5].contains("after the call"), "{rows:#?}");
+        };
+        foot(&rows);
+        assert!(!rows.iter().any(|r| r.contains("output 27")));
+        ctrl_o(&mut app);
+        assert_eq!(app.transcript.detail(), Detail::Full);
+        let (rows, _) = draw(&mut app, 80, 24);
+        foot(&rows);
+        assert!(rows.iter().any(|r| r.contains("output 27")), "{rows:#?}");
+        assert!(app.transcript.following());
+        // Reading back, the activity pinned: the top row holds.
+        ctrl_o(&mut app);
+        draw(&mut app, 80, 24);
+        key(&mut app, Key::PageUp);
+        key(&mut app, Key::PageUp);
+        let (rows, _) = draw(&mut app, 80, 24);
+        assert_eq!(text(&rows[prompt - 3]), activity);
+        let top = rows[0].clone();
+        assert!(top.contains("answer line"), "{rows:#?}");
+        for detail in [Detail::Full, Detail::Preview] {
+            ctrl_o(&mut app);
+            assert_eq!(app.transcript.detail(), detail);
+            let (rows, _) = draw(&mut app, 80, 24);
+            assert_eq!(rows[0], top);
+            assert_eq!(text(&rows[prompt - 3]), activity);
+            assert!(!app.transcript.following());
+        }
+        // The tasks list holds the keyboard: Ctrl+O changes nothing.
+        ctrl_g(&mut app);
+        assert_eq!(app.focus, Focus::Tasks);
+        ctrl_o(&mut app);
+        assert_eq!(app.transcript.detail(), Detail::Preview);
+        key(&mut app, Key::Esc);
+        ctrl_o(&mut app);
+        assert_eq!(app.transcript.detail(), Detail::Full);
+    }
+
+    // Bake: the runtime's phase names the running call in lowercase, with
+    // `+N` for the calls running beside it. Cut, the name gives way and the
+    // count stays; with too little room for both, the phase goes whole.
+    #[test]
+    fn a_cut_phase_keeps_the_count_of_calls_beside_it() {
+        let mut app = running(2, "reading crates/bake-tui-view/src/transcript.rs +2");
+        let mut seen = Vec::new();
+        for width in [120, 60, 40, 30, 22] {
+            let (rows, _) = draw(&mut app, width, 16);
+            seen.push(text(&rows[row_index(&rows, "Thinking…")]).to_owned());
+        }
+        assert_eq!(
+            seen,
+            [
+                "  Thinking…  reading crates/bake-tui-view/src/transcript.rs +2 · 12s",
+                "  Thinking…  reading crates/bake-tui-view/src/t… +2 · 12s",
+                "  Thinking…  reading crates… +2 · 12s",
+                "  Thinking…  read… +2 · 12s",
+                "  Thinking…  12s",
+            ]
+        );
+        // A `+` that is not a count is cut as any other text.
+        assert_eq!(fit_phase("searching a +b", 12), fit("searching a +b", 12));
+    }
+
+    // Bake: with nothing to say, the bar's row goes back to the
+    // transcript; the tray's scopes bring it back with their titles.
+    #[test]
+    fn the_bar_takes_a_row_only_while_it_has_something_to_say() {
+        let mut app = tasked(running(40, "Running cargo test"));
+        app.activity = None;
+        let (idle, _) = draw(&mut app, 80, 24);
+        let prompt = row_index(&idle, "❯");
+        // Body, then the gap row, then the box.
+        assert_eq!(idle[prompt - 2].trim(), "");
+        assert!(idle[prompt - 3].contains("answer line 40"), "{idle:#?}");
+        ctrl_g(&mut app);
+        let (open, _) = draw(&mut app, 80, 24);
+        let prompt = row_index(&open, "❯");
+        assert!(
+            open[prompt - 2].starts_with("  Tasks  ↑↓ select · Enter open · x stop · Esc back")
+        );
+        key(&mut app, Key::Esc);
+        let (closed, _) = draw(&mut app, 80, 24);
+        assert_eq!(closed, idle);
     }
 
     #[test]
     fn row_keys_give_way_below_sixty_columns() {
-        let mut app = State::default();
+        let mut app = tasked(State::default());
         let (rows, _) = draw(&mut app, 60, 24);
-        assert!(rows[row_index(&rows, "Agents  2 samples")].ends_with("Ctrl+G  "));
+        assert!(rows[row_index(&rows, "Sample tasks  2 running")].ends_with("Ctrl+G  "));
         let (rows, _) = draw(&mut app, 59, 24);
-        assert!(!rows[row_index(&rows, "Agents  2 samples")].contains("Ctrl+G"));
+        assert!(!rows[row_index(&rows, "Sample tasks  2 running")].contains("Ctrl+G"));
     }
 
-    #[test]
-    fn the_bar_shares_the_activity_and_the_consolidated_status() {
-        let mut app = State::default();
+    /// A session's status: a model, its level, the context, and where it
+    /// works.
+    fn statused(mut app: State) -> State {
         app.status = status::StatusInput {
             model: Some("deepseek-official/deepseek-v4-flash".into()),
             thinking: Some("high".into()),
@@ -3514,44 +4218,64 @@ mod tests {
             ascii: false,
             ..status::StatusInput::default()
         };
-        let bar = |rows: &[String]| rows[row_index(rows, "❯") - 2].trim_end().to_owned();
-        let (rows, _) = draw(&mut app, 80, 24);
+        app
+    }
+
+    // Bake: the status line is the screen's last row, left-aligned with the
+    // rows above it, at every width, under an open tray, and while a turn
+    // runs; it gives way as `status::fit` ranks its fields and nothing in
+    // it is cut mid-word but the location, from its start.
+    #[test]
+    fn the_status_line_is_the_last_row_and_holds_the_consolidated_status() {
+        let mut app = tasked(statused(State::default()));
+        let last = |rows: &[String]| rows.last().unwrap().trim_end().to_owned();
+        let mut seen = Vec::new();
+        for width in [40, 60, 80, 120] {
+            let (rows, _) = draw(&mut app, width, 24);
+            seen.push(last(&rows));
+        }
         assert_eq!(
-            bar(&rows),
-            format!(
-                "{}deepseek-v4-flash high  ctx ~11% (15.2k/128k)  ~/projects/bake ⎇ main",
-                " ".repeat(9)
-            )
+            seen,
+            [
+                "  deepseek-v4-flash high  ctx ~11%",
+                "  deepseek-v4-flash high  ctx ~11%  ~/projects/bake ⎇ main",
+                "  deepseek-v4-flash high  ctx ~11% (15.2k/128k)  ~/projects/bake ⎇ main",
+                "  deepseek-v4-flash high  ctx ~11% (15.2k/128k)  ~/projects/bake ⎇ main",
+            ]
         );
-        // A running turn takes the left; the status keeps its right edge and
-        // gives way by rank to make room.
+        let (idle, _) = draw(&mut app, 80, 24);
+        // A running turn leaves it as it was; the activity is in the
+        // transcript.
         app.now = Duration::from_secs(2);
         ctrl_t(&mut app);
         let (rows, _) = draw(&mut app, 80, 24);
-        let row = bar(&rows);
-        assert!(row.starts_with("  "), "{row}");
-        assert!(
-            row.ends_with("deepseek-v4-flash high  ctx ~11%  …cts/bake ⎇ main"),
-            "{row}"
-        );
-        assert!(row.contains("…  thinking · 0s  "), "{row}");
-        // The level takes its tone; the context's label is dim.
+        assert_eq!(last(&rows), last(&idle));
+        assert!(!rows[row_index(&rows, "❯") - 2].contains("deepseek"));
+        // An open tray sits above it.
+        ctrl_g(&mut app);
+        let (rows, _) = draw(&mut app, 80, 24);
+        assert_eq!(last(&rows), last(&idle));
+        assert!(rows[21].contains("bash-1"), "{rows:#?}");
+        // Dim, but the level keeps its tone; the context's label is dim.
         app.tones = Tones::TrueColor;
         let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
         terminal.draw(|f| render(&mut app, f)).unwrap();
-        let y = (row_index(&rows, "❯") - 2) as u16;
+        let row = last(&idle);
         let x_of = |needle: &str| row.find(needle).unwrap() as u16;
         let buffer = terminal.backend().buffer();
         assert_eq!(
-            buffer[(x_of(" high") + 1, y)].style().fg,
+            buffer[(x_of(" high") + 1, 23)].style().fg,
             Some(Color::Rgb(0x0e, 0xa5, 0xe9))
         );
-        assert!(
-            buffer[(x_of("ctx"), y)]
-                .style()
-                .add_modifier
-                .contains(Modifier::DIM)
-        );
+        for needle in ["deepseek", "ctx", "~/projects"] {
+            assert!(
+                buffer[(x_of(needle), 23)]
+                    .style()
+                    .add_modifier
+                    .contains(Modifier::DIM),
+                "{needle}"
+            );
+        }
     }
 
     #[test]
@@ -3559,8 +4283,8 @@ mod tests {
         let mut app = State::default();
         app.draft.type_text("draft");
         let (rows, _) = draw(&mut app, 80, 16);
-        // Following, the row above the bar stays clear: no scroll keys.
-        let hint = row_index(&rows, "no model") - 1;
+        // Following, the gap row above the box stays clear: no scroll keys.
+        let hint = row_index(&rows, "❯") - 2;
         assert_eq!(rows[hint].trim(), "");
         assert!(rows[hint - 1].starts_with("  rejects it before splitting.     "));
         key(&mut app, Key::PageUp);
@@ -3590,7 +4314,7 @@ mod tests {
 
     #[test]
     fn a_press_on_the_draft_places_the_caret_at_its_cell() {
-        let mut app = State::default();
+        let mut app = tasked(State::default());
         for c in "hello world".chars() {
             key(&mut app, Key::Char(c));
         }
@@ -3610,11 +4334,8 @@ mod tests {
         assert_eq!(app.draft.caret(), app.draft.text().len());
         update(&mut app, mouse(MouseKind::Down, at(&rows, "❯"), y, 0));
         assert_eq!(app.draft.caret(), 0);
-        // With the agent list open the draft is not editable.
-        update(
-            &mut app,
-            Msg::Key(KeyInput::new(Key::Char('g'), Mods::CTRL)),
-        );
+        // With the tasks list open the draft is not editable.
+        ctrl_g(&mut app);
         draw(&mut app, 40, 12);
         update(&mut app, mouse(MouseKind::Down, world, y, 0));
         assert_eq!(app.draft.caret(), 0);
@@ -3687,20 +4408,17 @@ mod tests {
         // The indicator says it was copied, at the right, then goes back.
         update(&mut app, Msg::Copied(true));
         let (rows, _) = draw(&mut app, 80, 24);
-        let bar = row_index(&rows, "no model");
-        assert!(
-            rows[bar - 1].trim_end().ends_with("Copied"),
-            "{:?}",
-            rows[bar - 1]
-        );
+        // The gap row right above the box.
+        let gap = row_index(&rows, "❯") - 2;
+        assert!(rows[gap].trim_end().ends_with("Copied"), "{:?}", rows[gap]);
         assert_eq!(app.next_change(), Some(COPIED));
         update(&mut app, Msg::Tick(COPIED));
         update(&mut app, Msg::Copied(false));
         let (rows, _) = draw(&mut app, 80, 24);
-        assert!(rows[bar - 1].contains("Copy failed"));
+        assert!(rows[gap].contains("Copy failed"));
         update(&mut app, Msg::Tick(COPIED * 2));
         let (rows, _) = draw(&mut app, 80, 24);
-        assert_eq!(rows[bar - 1].trim(), "");
+        assert_eq!(rows[gap].trim(), "");
     }
 
     #[test]
@@ -3818,7 +4536,7 @@ mod tests {
 
     #[test]
     fn the_wheel_scrolls_the_transcript_and_steps_the_list() {
-        let mut app = State::default();
+        let mut app = tasked(State::default());
         draw(&mut app, 80, 24);
         update(&mut app, mouse(MouseKind::WheelUp, 10, 5, 1_000));
         assert!(!app.transcript.following());
@@ -3851,19 +4569,27 @@ mod tests {
             app.transcript.following(),
             "down to the bottom follows again"
         );
-        // In the agent list, the wheel over the tray steps the selection,
-        // and over the transcript above it still scrolls the transcript.
-        update(
-            &mut app,
-            Msg::Key(KeyInput::new(Key::Char('g'), Mods::CTRL)),
-        );
+        // In the tasks list, the wheel over the tray steps the selection
+        // across both groups, and over the transcript above it still
+        // scrolls the transcript.
+        use crate::tasks::TaskId;
+        let chosen = |app: &State| app.selected_task().map(crate::tasks::Task::id);
+        ctrl_g(&mut app);
         draw(&mut app, 80, 24);
         update(&mut app, mouse(MouseKind::WheelDown, 10, 22, 40_000));
-        assert_eq!(app.selected, "sample-reviewer");
+        assert_eq!(chosen(&app), Some(TaskId::Agent("tester".into())));
         update(&mut app, mouse(MouseKind::WheelUp, 10, 22, 41_000));
-        assert_eq!(app.selected, "sample-explorer");
-        update(&mut app, mouse(MouseKind::WheelUp, 10, 5, 42_000));
-        assert_eq!(app.selected, "sample-explorer");
+        assert_eq!(chosen(&app), Some(TaskId::Agent("explorer".into())));
+        for at in 0..3 {
+            update(
+                &mut app,
+                mouse(MouseKind::WheelDown, 10, 22, 42_000 + at * 1_000),
+            );
+            draw(&mut app, 80, 24);
+        }
+        assert_eq!(chosen(&app), Some(TaskId::Shell("bash-2".into())));
+        update(&mut app, mouse(MouseKind::WheelUp, 10, 5, 46_000));
+        assert_eq!(chosen(&app), Some(TaskId::Shell("bash-2".into())));
         assert!(!app.transcript.following());
     }
 
@@ -3919,19 +4645,19 @@ mod tests {
     }
 
     #[test]
-    fn reading_puts_a_centred_pill_just_above_the_bar() {
+    fn reading_puts_a_centred_pill_just_above_the_box() {
         let mut app = State::default();
         let (rows, _) = draw(&mut app, 80, 24);
-        let bar = row_index(&rows, "no model");
-        // Following: the row above the bar stays clear.
-        assert_eq!(rows[bar - 1].trim(), "");
+        // The gap row right above the box; following, it stays clear.
+        let gap = row_index(&rows, "❯") - 2;
+        assert_eq!(rows[gap].trim(), "");
         key(&mut app, Key::PageUp);
         let (rows, _) = draw(&mut app, 80, 24);
-        let pill = &rows[bar - 1];
+        let pill = &rows[gap];
         let below = app.transcript.total() - app.transcript.offset() - app.transcript.height;
         let text = format!(" ↓ {below} lines below · Ctrl+End ");
         let start = pill.find(&text).expect(pill);
-        // Centred on the row the status line spans.
+        // Centred on the row the box spans.
         let left = pill[..start].chars().count();
         let right = 78 - left - text.chars().count();
         assert!(left.abs_diff(right) <= 1, "{left} {right}");
@@ -3939,7 +4665,7 @@ mod tests {
         let spot = app.latest.unwrap();
         assert_eq!(
             (usize::from(spot.row), usize::from(spot.column)),
-            (bar - 1, left)
+            (gap, left)
         );
         update(
             &mut app,
@@ -3948,7 +4674,7 @@ mod tests {
         assert!(app.transcript.following());
         let (rows, _) = draw(&mut app, 80, 24);
         assert_eq!(app.latest, None);
-        assert_eq!(rows[bar - 1].trim(), "");
+        assert_eq!(rows[gap].trim(), "");
     }
 
     #[test]
@@ -4040,7 +4766,8 @@ mod tests {
         );
         assert_eq!(rows[title + 4].trim_end(), "  +2 more lines");
         assert!(rows[title + 5].contains("Erase a placeholder"));
-        assert_eq!(title + 6, row_index(&rows, "no model"));
+        // With nothing on the bar, the panel sits right over the box.
+        assert_eq!(title + 6, row_index(&rows, "❯") - 1);
         // Erasing every placeholder takes the panel away.
         update(
             &mut app,
@@ -4072,7 +4799,8 @@ mod tests {
         let mut app = State::default();
         key(&mut app, Key::Char('@'));
         let (rows, _) = draw(&mut app, 80, 30);
-        let bar = row_index(&rows, "no model");
+        // The box's top edge; with nothing on the bar, the menu is over it.
+        let bar = row_index(&rows, "❯") - 1;
         assert_eq!(rows[bar - 1].trim_end(), "    Finding paths…");
         // One kind: no kind column. The box's edge names Tab.
         let files = (0..10)
@@ -4120,7 +4848,8 @@ mod tests {
         let mut app = State::live(FrameStyle::default(), Tones::None, Vec::new());
         key(&mut app, Key::Char('/'));
         let (rows, _) = draw(&mut app, 80, 30);
-        let bar = row_index(&rows, "no model");
+        // The box's top edge; with nothing on the bar, the menu is over it.
+        let bar = row_index(&rows, "❯") - 1;
         // Eight of seventeen commands, the frequent ones first, then a count.
         let first = row_index(&rows, "/model");
         assert_eq!(first + 9, bar);
@@ -4165,7 +4894,7 @@ mod tests {
         update(&mut app, ctrl_c.clone());
         let (rows, _) = draw(&mut app, 80, 24);
         let prompt = row_index(&rows, "Press Ctrl-C again to quit");
-        assert_eq!(prompt + 1, row_index(&rows, "no model"));
+        assert_eq!(prompt + 2, row_index(&rows, "❯"));
         assert!(!rows.iter().any(|r| r.contains("not available")));
         // Once it lapses, the notice it covered is back.
         update(&mut app, Msg::Tick(QUIT_WINDOW));
@@ -4217,10 +4946,22 @@ mod tests {
     #[test]
     fn inline_keeps_fullscreen_composer_rows_and_absolute_mouse_geometry() {
         use ratatui_core::terminal::{TerminalOptions, Viewport};
-        for width in [1, 12, 40, 80] {
+        // Bake: with and without the activity's rows in the region.
+        for (width, active) in [1, 12, 40, 80]
+            .into_iter()
+            .flat_map(|w| [(w, false), (w, true)])
+        {
             for physical_height in [1, 4, 8, 24, 40] {
                 for draft_rows in [1, 2, 5, 12] {
                     let mut app = State::default();
+                    if active {
+                        app.activity = Some(Activity {
+                            kind: ActivityKind::Turn,
+                            word: "Thinking",
+                            started: Duration::ZERO,
+                            runtime: true,
+                        });
+                    }
                     app.draft.paste(&vec!["x"; draft_rows].join("\n"));
                     let height = inline_height(&app, width, physical_height);
                     let expected =
@@ -4265,6 +5006,13 @@ mod tests {
     fn inline_selection_copies_the_displayed_live_row_after_padding() {
         use ratatui_core::terminal::{TerminalOptions, Viewport};
         let mut app = State::default();
+        // Bake: the activity under the live row is not copied with it.
+        app.activity = Some(Activity {
+            kind: ActivityKind::Turn,
+            word: "Thinking",
+            started: Duration::ZERO,
+            runtime: true,
+        });
         let published = app.settled_rows();
         app.transcript
             .set_live(vec![transcript::Row::Answer("live words".into())]);
@@ -4293,10 +5041,11 @@ mod tests {
         let column =
             u16::try_from(displayed[row].1.to_string().find("live words").unwrap()).unwrap();
         let y = area.y + row as u16;
+        assert!(screen(&terminal)[usize::from(y) + 2].contains("Thinking…"));
         update(&mut app, mouse(MouseKind::Down, column, y, 0));
-        update(&mut app, mouse(MouseKind::Drag, column + 10, y, 10));
+        update(&mut app, mouse(MouseKind::Drag, column + 10, y + 2, 10));
         assert_eq!(
-            update(&mut app, mouse(MouseKind::Up, column + 10, y, 20)),
+            update(&mut app, mouse(MouseKind::Up, column + 10, y + 2, 20)),
             vec![Effect::Copy("live words".into())]
         );
     }
@@ -4312,15 +5061,15 @@ mod tests {
     }
 
     #[test]
-    fn a_notice_sits_between_the_pill_and_the_bar() {
+    fn a_notice_sits_between_the_pill_and_the_box() {
         let mut app = State::default();
         draw(&mut app, 80, 24);
         key(&mut app, Key::PageUp);
         app.notice = Some(Notice::NoCommands);
         let (rows, _) = draw(&mut app, 80, 24);
-        let bar = row_index(&rows, "no model");
-        assert!(rows[bar - 1].contains("Commands are not available"));
-        assert!(rows[bar - 2].contains("lines below · Ctrl+End"));
+        let top = row_index(&rows, "❯") - 1;
+        assert!(rows[top - 1].contains("Commands are not available"));
+        assert!(rows[top - 2].contains("lines below · Ctrl+End"));
     }
 
     // ---- Approvals ----
@@ -4484,52 +5233,61 @@ mod tests {
         assert_eq!(short.approval_drawn(), Some(1));
     }
 
-    // The shells' row sits under the composer box while one runs, and the
-    // list and a shell open in the tray under it with their keys on the bar.
+    fn running_shell(id: &str, command: &str, seconds: u64) -> crate::jobs::BackgroundJob {
+        crate::jobs::BackgroundJob {
+            id: id.into(),
+            command: command.into(),
+            state: crate::jobs::JobState::Running,
+            elapsed: Duration::from_secs(seconds),
+            output: String::new(),
+            omitted_bytes: 0,
+        }
+    }
+
+    // The tasks' row sits under the composer box while the runtime reports
+    // a shell, and the list and a shell open in the tray under it with
+    // their keys on the bar.
     #[test]
     fn background_shells_draw_under_the_box_and_in_the_body() {
-        use crate::jobs::{BackgroundJob, JobState};
         use crate::runtime::RuntimeUpdate;
         use crate::state::{Msg, update};
         let mut app = State::live(FrameStyle::Round, Tones::None, Vec::new());
         let (rows, _) = draw(&mut app, 60, 12);
-        assert!(!rows.iter().any(|row| row.contains("manage")), "{rows:#?}");
-        update(
-            &mut app,
-            Msg::Runtime(RuntimeUpdate::Jobs(vec![BackgroundJob {
-                id: "bash-1".into(),
-                command: "bun run build".into(),
-                state: JobState::Running,
-                elapsed: Duration::from_secs(72),
-                output: "compiling\nerror: boom\n".into(),
-                omitted_bytes: 0,
-            }])),
-        );
+        assert!(!rows.iter().any(|row| row.contains("Tasks")), "{rows:#?}");
+        let mut job = running_shell("bash-1", "bun run build", 72);
+        job.output = "compiling\nerror: boom\n".into();
+        update(&mut app, Msg::Runtime(RuntimeUpdate::Jobs(vec![job])));
         let (rows, _) = draw(&mut app, 60, 12);
-        let last = rows.last().unwrap();
-        assert!(
-            last.contains("● bash-1  bun run build  1m 12s"),
+        let standing = &rows[rows.len() - 2];
+        assert_eq!(
+            standing, "  Tasks  1 running  ● bash-1  bun run bui…  1m 12s  Ctrl+G  ",
             "{rows:#?}"
         );
-        assert!(last.trim_end().ends_with("↓ manage"), "{last}");
         assert!(
-            rows[rows.len() - 2].contains('╰'),
+            rows[rows.len() - 3].contains('╰'),
             "the row is under the box: {rows:#?}"
         );
+        assert_eq!(rows[rows.len() - 1].trim_end(), "  no model", "{rows:#?}");
         update(&mut app, Msg::Key(KeyInput::plain(Key::Down)));
         let (rows, _) = draw(&mut app, 60, 12);
         assert!(
             rows.iter()
-                .any(|row| row.contains("› ● bash-1  bun run build")),
+                .any(|row| row.contains("▸ ● bash-1  bun run build")),
             "{rows:#?}"
         );
         assert!(
-            rows.iter().any(|row| row.contains("Background shells")),
+            rows.iter()
+                .any(|row| row.starts_with("  Shells · they stop when Bake exits")),
             "{rows:#?}"
         );
-        assert!(!rows.last().unwrap().contains("manage"));
+        // The selected shell's newest line of output, dim, under it.
+        assert!(
+            rows.iter().any(|row| row.trim_end() == "    error: boom"),
+            "{rows:#?}"
+        );
+        assert!(!rows.iter().any(|row| row.contains("Ctrl+G")), "{rows:#?}");
         update(&mut app, Msg::Key(KeyInput::plain(Key::Enter)));
-        let (rows, _) = draw(&mut app, 60, 12);
+        let (rows, _) = draw(&mut app, 60, 14);
         assert!(
             rows.iter().any(|row| row.contains("$ bun run build")),
             "{rows:#?}"
@@ -4538,34 +5296,36 @@ mod tests {
             rows.iter().any(|row| row.contains("error: boom")),
             "{rows:#?}"
         );
+        // The bar names where the view is, with its keys, which no status
+        // crowds; they give way whole on a bar too narrow for them.
         assert!(
             rows.iter()
-                .any(|row| row.contains("Background shells / bash-1")),
+                .any(|row| row
+                    .starts_with("  Tasks / bash-1  ↑↓ PgUp/PgDn scroll · x stop · Esc back")),
             "{rows:#?}"
         );
+        let (rows, _) = draw(&mut app, 40, 14);
+        assert!(
+            rows.iter().any(|row| row.trim_end() == "  Tasks / bash-1"),
+            "{rows:#?}"
+        );
+        // The status line stays last under the open shell.
+        assert_eq!(rows[13].trim_end(), "  no model", "{rows:#?}");
     }
 
-    // Bake: the shells' list opens under the input bar and leaves the
+    // Bake: the tasks list opens under the input bar and leaves the
     // transcript where it was, at every size: no body row the transcript
     // drew goes blank, the list starts right under the standing row, and on
     // a short terminal the selected shell stays in view.
     #[test]
     fn the_shells_list_opens_under_the_input_and_keeps_the_transcript() {
-        use crate::jobs::{BackgroundJob, JobState};
         use crate::runtime::RuntimeUpdate;
         use crate::state::{Msg, update};
         let rows: Vec<transcript::Row> = (1..=40)
             .map(|n| transcript::Row::Answer(format!("answer line {n}")))
             .collect();
-        let jobs: Vec<BackgroundJob> = (1..=12)
-            .map(|n| BackgroundJob {
-                id: format!("bash-{n}"),
-                command: format!("sleep {n}"),
-                state: JobState::Running,
-                elapsed: Duration::from_secs(n),
-                output: String::new(),
-                omitted_bytes: 0,
-            })
+        let jobs: Vec<_> = (1..=12)
+            .map(|n| running_shell(&format!("bash-{n}"), &format!("sleep {n}"), n))
             .collect();
         for (width, height) in [(80, 40), (80, 24), (60, 16), (40, 12), (100, 30)] {
             let mut app = State::live(FrameStyle::Round, Tones::None, rows.clone());
@@ -4584,11 +5344,11 @@ mod tests {
                 .unwrap_or_else(|| panic!("{size}: no box: {open:#?}"));
             let list = open
                 .iter()
-                .position(|row| row.contains(copy::JOBS_SUBTITLE))
+                .position(|row| row.starts_with("  Shells"))
                 .unwrap_or_else(|| panic!("{size}: no list: {open:#?}"));
             assert_eq!(list, edge + 2, "{size}: under the standing row: {open:#?}");
             assert!(
-                open[list..].iter().any(|row| row.contains("› ● bash-12")),
+                open[list..].iter().any(|row| row.contains("▸ ● bash-12")),
                 "{size}: the selection is in the tray: {open:#?}"
             );
             // The rows above the transcript's last line hold transcript
@@ -4606,13 +5366,13 @@ mod tests {
                 "{size}: blank rows over the controls: {open:#?}"
             );
             assert!(before.iter().any(|row| row.contains("answer line 40")));
-            // The standing row counts what the tray leaves out where it has
-            // room; the 13 list rows fit only a tray of 13.
-            let room = width >= 60;
+            // The standing row counts what the tray leaves out, at every
+            // width, giving way to the count; the 13 list rows fit only a
+            // tray of 13.
             let short = sheet_body_cap(height) < 13;
             assert_eq!(
                 open[edge + 1].contains(copy::BELOW),
-                room && short,
+                short,
                 "{size}: {}",
                 open[edge + 1]
             );
@@ -4624,12 +5384,18 @@ mod tests {
             assert!(
                 open[edge + 1..]
                     .iter()
-                    .any(|row| row.contains("› ● bash-1 ")),
+                    .any(|row| row.contains("▸ ● bash-1 ")),
                 "{size}: the selection scrolled out: {open:#?}"
             );
+            // The count is of tasks: the group's label scrolling out of
+            // view leaves no task out.
+            let listed = open[edge + 2..]
+                .iter()
+                .filter(|row| row.trim_start_matches(['▸', '●', ' ']).starts_with("bash-"))
+                .count();
             assert_eq!(
-                open[edge + 1].contains(copy::ABOVE),
-                room && short,
+                open[edge + 1].contains(&format!("+{} {}", 12 - listed, copy::ABOVE)),
+                listed < 12,
                 "{size}: {}",
                 open[edge + 1]
             );
@@ -4640,26 +5406,23 @@ mod tests {
             update(&mut app, Msg::Key(KeyInput::plain(Key::Esc)));
             let (closed, _) = draw(&mut app, width, height);
             assert!(
-                !closed.iter().any(|row| row.contains(copy::JOBS_SUBTITLE)),
+                !closed.iter().any(|row| row.starts_with("  Shells")),
                 "{size}: {closed:#?}"
             );
             assert_eq!(closed.last(), before.last(), "{size}");
         }
     }
 
-    // A live session's subagents take the row under the box once it has
-    // any; running shells share it, the agents' summary first, and keep it
-    // whole on a row too narrow for both. Ctrl+G lists them, and Enter
-    // shows one's ledger.
+    // Bake: one standing row says what is in flight, across both kinds:
+    // how many run, how many failed or finished, and the newest running
+    // task with its command and time. Narrower, it gives up its parts one
+    // at a time, the least needed first, and never cuts a count.
     #[test]
-    fn live_subagents_share_the_row_under_the_box_and_open_as_a_ledger() {
+    fn the_standing_row_gives_way_part_by_part() {
         use crate::agents::{Agent, AgentState, Ended};
-        use crate::jobs::{BackgroundJob, JobState};
         use crate::runtime::RuntimeUpdate;
         use crate::state::{Msg, update};
         let mut app = State::live(FrameStyle::Round, Tones::None, Vec::new());
-        let (rows, _) = draw(&mut app, 80, 14);
-        assert!(!rows.iter().any(|row| row.contains("Agents")), "{rows:#?}");
         let child = |id: &str, state| Agent {
             id: id.into(),
             name: format!("Child {id}"),
@@ -4675,107 +5438,130 @@ mod tests {
                 child("c2", AgentState::Idle(Some(Ended::Completed))),
             ])),
         );
-        let (rows, _) = draw(&mut app, 80, 14);
-        let last = rows.last().unwrap();
-        assert!(last.contains("Agents  2 · 1 working · 1 done"), "{last}");
-        assert!(last.trim_end().ends_with("Ctrl+G"), "{last}");
-        update(
-            &mut app,
-            Msg::Runtime(RuntimeUpdate::Jobs(vec![BackgroundJob {
-                id: "bash-1".into(),
-                command: "bun run build".into(),
-                state: JobState::Running,
-                elapsed: Duration::from_secs(72),
-                output: String::new(),
-                omitted_bytes: 0,
-            }])),
-        );
-        let (rows, _) = draw(&mut app, 80, 14);
-        let last = rows.last().unwrap();
-        assert!(
-            last.contains("Agents  2 · 1 working · 1 done  ● bash-1  bun run build  1m 12s"),
-            "{last}"
-        );
-        assert!(last.trim_end().ends_with("↓ manage"), "{last}");
-        // A command too long for the shells' room is cut to it.
-        update(
-            &mut app,
-            Msg::Runtime(RuntimeUpdate::Jobs(vec![BackgroundJob {
-                id: "bash-1".into(),
-                command: "bun run build --release --workspace".into(),
-                state: JobState::Running,
-                elapsed: Duration::from_secs(72),
-                output: String::new(),
-                omitted_bytes: 0,
-            }])),
-        );
+        let key = |row: &str, columns: usize| {
+            let room = columns - 4 - row.chars().count() - "Ctrl+G".len();
+            format!("{row}{}Ctrl+G", " ".repeat(room + 2))
+        };
+        // A running agent is named, in the accent, without a time: the
+        // runtime reports none for agents.
+        // The standing row is the one above the status line.
         let (rows, _) = draw(&mut app, 80, 14);
         assert_eq!(
-            rows.last().unwrap(),
-            "  Agents  2 · 1 working · 1 done  ● bash-1  bun run build -…  1m 12s  ↓ manage  "
+            rows[rows.len() - 2].trim_end(),
+            key("  Tasks  1 running · 1 done  ● Child c1", 80),
         );
-        // Narrower, the summary gives up its counts before the shells
-        // lose their time, key, or the start of their command, then gives
-        // way to them.
+        update(
+            &mut app,
+            Msg::Runtime(RuntimeUpdate::Jobs(vec![running_shell(
+                "bash-1",
+                "bun run build --release --workspace",
+                72,
+            )])),
+        );
         let mut seen = Vec::new();
-        for columns in [64, 60, 59, 55, 47, 46] {
+        for columns in [160, 120, 80, 64, 60, 59, 48, 40, 30, 20] {
             let (rows, _) = draw(&mut app, columns, 14);
-            seen.push((columns, rows.last().unwrap().clone()));
-        }
-        let more = BackgroundJob {
-            id: "bash-2".into(),
-            command: "sleep 120".into(),
-            state: JobState::Running,
-            elapsed: Duration::from_secs(23),
-            output: String::new(),
-            omitted_bytes: 0,
-        };
-        let mut jobs = app.jobs.clone();
-        jobs.push(more);
-        update(&mut app, Msg::Runtime(RuntimeUpdate::Jobs(jobs)));
-        for columns in [80, 64] {
-            let (rows, _) = draw(&mut app, columns, 14);
-            seen.push((columns, rows.last().unwrap().clone()));
+            let row = rows[rows.len() - 2].clone();
+            assert_eq!(row.chars().count(), usize::from(columns), "{row}");
+            seen.push((columns, row.trim_end().to_owned()));
         }
         let expected = [
             (
+                160,
+                key(
+                    "  Tasks  2 running · 1 done  ● bash-1  bun run build --release --workspace  1m 12s",
+                    160,
+                ),
+            ),
+            (
+                120,
+                key(
+                    "  Tasks  2 running · 1 done  ● bash-1  bun run build --release --workspace  1m 12s",
+                    120,
+                ),
+            ),
+            // The command shrinks first...
+            (
+                80,
+                key(
+                    "  Tasks  2 running · 1 done  ● bash-1  bun run build --releas…  1m 12s",
+                    80,
+                ),
+            ),
+            // ...to a few cells, then the dim counts go...
+            (
                 64,
-                "  Agents  2  ● bash-1  bun run build --rele…  1m 12s  ↓ manage  ",
+                key("  Tasks  2 running  ● bash-1  bun run build -…  1m 12s", 64),
             ),
             (
                 60,
-                "  Agents  2  ● bash-1  bun run build --…  1m 12s  ↓ manage  ",
+                key("  Tasks  2 running  ● bash-1  bun run bui…  1m 12s", 60),
             ),
-            // Without the key, which needs 60 columns, a count fits again.
+            // ...and without the key, which needs 60 columns, one fits again.
             (
                 59,
-                "  Agents  2 · 1 working  ● bash-1  bun run bui…  1m 12s    ",
+                "  Tasks  2 running · 1 done  ● bash-1  bun run b…  1m 12s".into(),
             ),
-            (
-                55,
-                "  Agents  2  ● bash-1  bun run build --rel…  1m 12s    ",
-            ),
-            (47, "  Agents  2  ● bash-1  bun run bui…  1m 12s    "),
-            (46, "  ● bash-1  bun run build --relea…  1m 12s    "),
-            // Two shells' count takes more of the row.
-            (
-                80,
-                "  Agents  2  ● 2 shells running · bash-2  sleep 120  23s              ↓ manage  ",
-            ),
-            (
-                64,
-                "  ● 2 shells running · bash-2  sleep 120  23s         ↓ manage  ",
-            ),
-        ]
-        .map(|(columns, row)| (columns, row.to_owned()));
+            (48, "  Tasks  2 running  ● bash-1  bun run…  1m 12s".into()),
+            // Then the command, the time, the label, and the newest task.
+            (40, "  Tasks  2 running  ● bash-1  1m 12s".into()),
+            (30, "  Tasks  2 running  ● bash-1".into()),
+            (20, "  2 running".into()),
+        ];
         assert_eq!(seen, expected);
+    }
+
+    // A failed task's count stays longer than the dim ones, in red, as the
+    // one that asks for a look; under NO_COLOR it is plain, not dim.
+    #[test]
+    fn a_failed_count_outlasts_the_dim_counts_and_reads_without_colour() {
+        let mut app = tasked(State::live(FrameStyle::Round, Tones::None, Vec::new()));
+        let mut terminal = Terminal::new(TestBackend::new(48, 14)).unwrap();
+        terminal.draw(|f| render(&mut app, f)).unwrap();
+        let (rows, _) = draw(&mut app, 48, 14);
+        let row = &rows[rows.len() - 2];
+        assert!(row.contains("2 running · 1 failed"), "{row}");
+        assert!(!row.contains("done"), "{row}");
+        let y = (rows.len() - 2) as u16;
+        let x = row
+            .find("1 failed")
+            .map(|byte| row[..byte].chars().count())
+            .unwrap() as u16;
+        let cell = &terminal.backend().buffer()[(x, y)];
+        assert!(!cell.modifier.contains(Modifier::DIM));
+        assert_eq!(cell.fg, Color::Reset);
+        app.tones = Tones::Ansi;
+        terminal.draw(|f| render(&mut app, f)).unwrap();
+        assert_eq!(terminal.backend().buffer()[(x, y)].fg, Color::Red);
+    }
+
+    // A live session's subagents list under Ctrl+G with the shells, and
+    // Enter shows one's ledger with the list's keys on the bar.
+    #[test]
+    fn live_subagents_open_as_a_ledger_from_the_tasks_list() {
+        use crate::agents::{Agent, AgentState, Ended};
+        use crate::runtime::RuntimeUpdate;
+        use crate::state::{Msg, update};
+        let mut app = State::live(FrameStyle::Round, Tones::None, Vec::new());
+        let child = |id: &str, state| Agent {
+            id: id.into(),
+            name: format!("Child {id}"),
+            state,
+            route: Some("faux/faux-2".into()),
+            detail: Some("Counted 12 files.".into()),
+            file: Some(format!("/s/subagents/{id}.jsonl")),
+        };
         update(
             &mut app,
-            Msg::Key(KeyInput::new(Key::Char('g'), crate::keys::Mods::CTRL)),
+            Msg::Runtime(RuntimeUpdate::Agents(vec![
+                child("c1", AgentState::Working),
+                child("c2", AgentState::Idle(Some(Ended::Completed))),
+            ])),
         );
+        ctrl_g(&mut app);
         let (rows, _) = draw(&mut app, 80, 24);
         assert!(
-            rows.iter().any(|row| row.contains(copy::LIVE_LIST_HINT)),
+            rows.iter().any(|row| row.contains(copy::TASKS_LIST_KEYS)),
             "{rows:#?}"
         );
         assert!(
@@ -4784,14 +5570,15 @@ mod tests {
         );
         assert!(
             rows.iter()
-                .any(|row| row.contains("done · idle · faux/faux-2")),
+                .any(|row| row.contains("idle · faux/faux-2") && row.trim_end().ends_with("done")),
             "{rows:#?}"
         );
         update(&mut app, Msg::Key(KeyInput::plain(Key::Down)));
         update(&mut app, Msg::Key(KeyInput::plain(Key::Enter)));
         let (rows, _) = draw(&mut app, 80, 24);
         for expected in [
-            "Agents / Child c2",
+            "Tasks / Child c2  Esc back",
+            "  ✓ Child c2",
             "Model   faux/faux-2",
             "State   done · idle",
             "File    /s/subagents/c2.jsonl",
@@ -4802,6 +5589,54 @@ mod tests {
                 "{expected}: {rows:#?}"
             );
         }
+    }
+
+    // Untrusted names, commands, and output reach the screen with their
+    // escape sequences and control characters taken out, on the standing
+    // row, in the list, on the bar, and in a shell's view.
+    #[test]
+    fn untrusted_task_text_never_reaches_the_terminal_raw() {
+        use crate::agents::{Agent, AgentState};
+        use crate::runtime::RuntimeUpdate;
+        use crate::state::{Msg, update};
+        let mut app = State::live(FrameStyle::Round, Tones::None, Vec::new());
+        let mut job = running_shell("bash-1", "echo \x1b[31mred\x1b[0m\x07\r\nrm", 3);
+        job.output = "\x1b]0;title\x07ok\x1b[2J\r\n".into();
+        update(&mut app, Msg::Runtime(RuntimeUpdate::Jobs(vec![job])));
+        update(
+            &mut app,
+            Msg::Runtime(RuntimeUpdate::Agents(vec![Agent {
+                id: "a\x1b[2Jb".into(),
+                name: "Evil\x1b[31m\x08 name\x00".into(),
+                state: AgentState::Working,
+                route: Some("x\ty".into()),
+                detail: None,
+                file: None,
+            }])),
+        );
+        let clean = |rows: &[String]| {
+            for row in rows {
+                assert!(!row.chars().any(|c| c.is_control()), "{row:?}");
+            }
+        };
+        let (rows, _) = draw(&mut app, 80, 24);
+        clean(&rows);
+        ctrl_g(&mut app);
+        let (rows, _) = draw(&mut app, 80, 24);
+        clean(&rows);
+        assert!(
+            rows.iter().any(|row| row.contains("Evil name")),
+            "{rows:#?}"
+        );
+        update(&mut app, Msg::Key(KeyInput::plain(Key::Enter)));
+        let (rows, _) = draw(&mut app, 80, 24);
+        clean(&rows);
+        update(&mut app, Msg::Key(KeyInput::plain(Key::Esc)));
+        update(&mut app, Msg::Key(KeyInput::plain(Key::Down)));
+        update(&mut app, Msg::Key(KeyInput::plain(Key::Enter)));
+        let (rows, _) = draw(&mut app, 80, 24);
+        clean(&rows);
+        assert!(rows.iter().any(|row| row.contains("ok")), "{rows:#?}");
     }
 
     // Bake: the sign-in's fields put their step at the title's right, the

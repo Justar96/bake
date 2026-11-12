@@ -36,6 +36,10 @@ const READ_CHUNK: usize = 64 * 1024;
 pub(crate) struct ProcessExit {
     pub status: Option<ExitStatus>,
     pub timed_out: bool,
+    /// After a timeout, how long after the wait began the child exited by
+    /// itself, when it did before the deadline: only output from processes
+    /// it started kept the call waiting (Pi v1.5.2, #11613).
+    pub exited_before_deadline: Option<Duration>,
     pub killed: bool,
     /// What became of the tree: left running after a normal exit, or
     /// killed and gone.
@@ -134,7 +138,10 @@ pub(crate) async fn wait_for_process(
     let mut stderr = shell.take_stderr();
     let mut out_buffer = vec![0; READ_CHUNK];
     let mut err_buffer = vec![0; READ_CHUNK];
+    let started = Instant::now();
     let mut exited = false;
+    let mut exited_after: Option<Duration> = None;
+    let mut exited_before_deadline: Option<Duration> = None;
     let mut grace: Option<Instant> = None;
     let mut timeout_at = deadline;
     let mut abort_pending = signal.is_some();
@@ -150,6 +157,7 @@ pub(crate) async fn wait_for_process(
             result = wait_exit(&mut shell, exited) => {
                 result?;
                 exited = true;
+                exited_after = Some(started.elapsed());
                 grace = Some(Instant::now() + EXIT_STDIO_GRACE);
             }
             read = read_some(stdout.as_mut(), &mut out_buffer) => match read {
@@ -180,7 +188,10 @@ pub(crate) async fn wait_for_process(
             () = sleep_until(timeout_at) => {
                 timeout_at = None;
                 timed_out = true;
+                exited_before_deadline = exited_after;
                 killed = true;
+                // Also after the child exited: the tree kill still reaches
+                // the processes it started that hold the pipes.
                 shell.kill();
             }
         }
@@ -193,6 +204,7 @@ pub(crate) async fn wait_for_process(
     Ok(ProcessExit {
         status: Some(settled.status),
         timed_out,
+        exited_before_deadline,
         killed,
         tree: settled.tree,
     })

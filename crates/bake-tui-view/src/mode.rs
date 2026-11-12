@@ -115,7 +115,7 @@ mod tests {
                 false,
                 (
                     true,
-                    "Read-only · Esc returns to parent",
+                    "Read-only · Esc returns to the tasks",
                     Some("draft kept · Esc returns"),
                 ),
             ),

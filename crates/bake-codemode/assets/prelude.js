@@ -1,8 +1,10 @@
 // The script environment of Bake's code mode: Pi's codemode prelude, copied
 // verbatim (the evaluated text of PRELUDE_SOURCE, its limits substituted) from
-// packages/codemode/src/runtime/prelude-source.ts of Pi v1.3.0, revision
-// 71023aec1546d6d677a65669c5665c0927ce0dd0. `src/prelude.rs` evaluates the
-// text after the start marker below, and a test pins its FNV-1a hash to Pi's.
+// packages/codemode/src/runtime/prelude-source.ts of Pi v1.5.2, revision
+// b4afdddf44e059c67ccf5097e5317d913521b470; it differs from v1.3.0's, revision
+// 71023aec1546d6d677a65669c5665c0927ce0dd0, only in format()'s handling of
+// numbers (33cd7e507). `src/prelude.rs` evaluates the text after the start
+// marker below, and a test pins its FNV-1a hash to Pi's.
 //
 // MIT License
 //
@@ -154,6 +156,8 @@
 	function format(value) {
 		if (typeof value === "string") return value;
 		if (value instanceof ErrorCtor) return errorText(value);
+		// JSON.stringify turns NaN and Infinity into "null".
+		if (typeof value === "number") return String(value);
 		try {
 			const json = stringify(value);
 			return json === undefined ? String(value) : json;

@@ -125,7 +125,9 @@ impl Inline {
             &crate::terminal::HELD_ROWS,
             settled,
             |index| {
-                for line in transcript::present(&state.transcript.rows, index, columns, look) {
+                let detail = state.transcript.detail();
+                let rows = &state.transcript.rows;
+                for line in transcript::present_detail(rows, index, columns, look, detail) {
                     write_line(terminal.backend_mut(), &line, width)?;
                 }
                 Ok(())
@@ -186,7 +188,9 @@ impl Inline {
             if tail.len() >= room {
                 break;
             }
-            let mut lines = transcript::present(&state.transcript.rows, index, columns, look);
+            let detail = state.transcript.detail();
+            let mut lines =
+                transcript::present_detail(&state.transcript.rows, index, columns, look, detail);
             lines.extend(tail);
             tail = lines;
         }

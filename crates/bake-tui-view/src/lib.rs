@@ -8,6 +8,7 @@
 
 pub mod activity;
 pub mod agents;
+pub mod cards;
 pub mod codemode;
 pub mod completion;
 pub mod composer;
@@ -17,6 +18,7 @@ pub mod diff;
 pub mod editor;
 pub mod frame;
 pub mod jobs;
+pub mod json;
 pub mod keys;
 pub mod layout;
 pub mod live;
@@ -31,6 +33,7 @@ pub mod shell_output;
 pub mod state;
 pub mod status;
 pub mod syntax;
+pub mod tasks;
 pub mod tips;
 pub mod transcript;
 pub mod wheel;

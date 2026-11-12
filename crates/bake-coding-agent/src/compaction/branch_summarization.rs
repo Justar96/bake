@@ -3,23 +3,26 @@
 //! Ported from Pi
 //! `packages/coding-agent/src/core/compaction/branch-summarization.ts`
 //! (v1.1.0): when navigation leaves a branch, the entries it abandons are
-//! summarized so their context is not lost.
+//! summarized so their context is not lost. As in v1.5.2, the request
+//! carries the session's thinking level for a reasoning model, and the
+//! entries are read with their context edits applied.
 
 use bake_agent::StreamFn;
 use bake_ai::utils::retry::RetryPolicy;
 use bake_ai::utils::text::assistant_text;
 use bake_ai::{
-    AbortSignal, Context, Message, Model, ProviderHeaders, SimpleStreamOptions, StopReason,
-    TextContent, Usage, UserContent, UserContentBlock, UserMessage,
+    AbortSignal, Context, Message, Model, ModelThinkingLevel, ProviderHeaders, SimpleStreamOptions,
+    StopReason, TextContent, Usage, UserContent, UserContentBlock, UserMessage,
 };
 use serde_json::Value;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use super::utils::{
     FileOperations, SUMMARIZATION_SYSTEM_PROMPT, compute_file_lists, create_file_ops,
     extract_file_ops_from_message, format_file_operations, serialize_conversation,
 };
 use super::{RetryObserver, complete_summarization, estimate_tokens, get_summarization_failure};
+use crate::session::context::project_entry;
 use crate::session::json::{JsonObject, js_truthy};
 use crate::session::messages::convert_to_llm;
 use crate::session::time::js_date_ms;
@@ -77,6 +80,9 @@ pub struct GenerateBranchSummaryOptions {
     pub env: Option<BTreeMap<String, String>>,
     /// Cancels the request.
     pub signal: AbortSignal,
+    /// The reasoning level; reasoning models use it unless it is `off`
+    /// (Pi v1.5.2).
+    pub thinking_level: Option<ModelThinkingLevel>,
     /// Focus for the summary.
     pub custom_instructions: Option<String>,
     /// Whether `custom_instructions` replaces the prompt.
@@ -145,8 +151,9 @@ fn timestamp(entry: &SessionEntry) -> Value {
 }
 
 /// Pi's `getMessageFromEntry`: the message an entry contributes to a branch
-/// summary. Tool results are skipped; their calls carry the context.
-fn message_from_entry(entry: &SessionEntry) -> Option<AgentMessage> {
+/// summary, with its latest context edit applied (Pi v1.5.2, #11680). Tool
+/// results are skipped; their calls carry the context.
+fn message_from_entry(entry: &SessionEntry, edit: Option<&SessionEntry>) -> Option<AgentMessage> {
     let raw = entry.as_json();
     let mut message = JsonObject::new();
     match entry.entry_type() {
@@ -154,10 +161,16 @@ fn message_from_entry(entry: &SessionEntry) -> Option<AgentMessage> {
             if entry.message_role() == Some("toolResult") {
                 return None;
             }
+            if let Some(edit) = edit {
+                return project_entry(entry, Some(edit)).into_iter().next();
+            }
             return entry
                 .get("message")
                 .and_then(Value::as_object)
                 .map(|message| AgentMessage::from_json(message.clone()));
+        }
+        "custom_message" if edit.is_some() => {
+            return project_entry(entry, edit).into_iter().next();
         }
         "custom_message" => {
             message.insert("role".into(), "custom".into());
@@ -208,8 +221,18 @@ pub fn prepare_branch_entries(entries: &[SessionEntry], token_budget: u64) -> Br
             file_ops.edited.extend(strings("modifiedFiles"));
         }
     }
+    // Context edits hide or replace earlier entries in model context; the
+    // latest edit of each target applies.
+    let mut edits: HashMap<&str, &SessionEntry> = HashMap::new();
+    for entry in entries {
+        if entry.entry_type() == "context_edit"
+            && let Some(target) = entry.get("targetId").and_then(Value::as_str)
+        {
+            edits.insert(target, entry);
+        }
+    }
     for entry in entries.iter().rev() {
-        let Some(message) = message_from_entry(entry) else {
+        let Some(message) = message_from_entry(entry, edits.get(entry.id()).copied()) else {
             continue;
         };
         extract_file_ops_from_message(&message, &mut file_ops);
@@ -319,6 +342,10 @@ pub async fn generate_branch_summary(
     request.base.headers = options.headers.clone();
     request.base.env = options.env.clone();
     request.base.signal = Some(options.signal.clone());
+    // Compaction's rule, as Pi v1.5.2 (#11482).
+    if model.reasoning {
+        request.reasoning = options.thinking_level.and_then(ModelThinkingLevel::level);
+    }
     // No output cap: the model's own limit, as Pi v1.4.0 (#9512).
     let response = complete_summarization(
         model,

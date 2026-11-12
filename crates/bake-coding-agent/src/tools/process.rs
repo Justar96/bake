@@ -92,10 +92,12 @@ pub(crate) enum Ended {
 /// splits them (on `\r\n`, `\n`, and `\r`, a last unterminated line
 /// included) until the output closes, then reaps the child. An abort, or
 /// [`Flow::Stop`], kills the child and reaps it without reading further. `on_line` is async so it may do blocking
-/// work on Tokio's pool while the child waits.
+/// work on Tokio's pool while the child waits. The child runs in `cwd`, or
+/// in this process's working directory when it is `None`.
 pub(crate) async fn run_lines<F, Fut>(
     program: &Path,
     args: &[OsString],
+    cwd: Option<&Path>,
     owner: Option<&WorkGate>,
     signal: Option<&AbortSignal>,
     mut on_line: F,
@@ -107,7 +109,7 @@ where
     let spec = ProcessSpec {
         program: program.as_os_str().to_os_string(),
         args: args.to_vec(),
-        cwd: None,
+        cwd: cwd.map(Path::to_path_buf),
         env: None,
         stdin: false,
     };
@@ -304,10 +306,17 @@ mod tests {
             .map(OsString::from)
             .to_vec();
         let mut seen = Vec::new();
-        let ended = run_lines(Path::new("/bin/sh"), &args, None, Some(&signal), |line| {
-            seen.push(line);
-            std::future::ready(Flow::Continue)
-        })
+        let ended = run_lines(
+            Path::new("/bin/sh"),
+            &args,
+            None,
+            None,
+            Some(&signal),
+            |line| {
+                seen.push(line);
+                std::future::ready(Flow::Continue)
+            },
+        )
         .await
         .expect("spawn");
         abort.await.expect("abort task");
@@ -330,7 +339,7 @@ mod tests {
             .map(OsString::from)
             .to_vec();
         let mut seen = Vec::new();
-        let ended = run_lines(Path::new("/bin/sh"), &args, None, None, |line| {
+        let ended = run_lines(Path::new("/bin/sh"), &args, None, None, None, |line| {
             seen.push(String::from_utf8_lossy(&line).into_owned());
             std::future::ready(if seen.len() == 3 {
                 Flow::Stop

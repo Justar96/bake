@@ -2,7 +2,7 @@
 
 Follow the root [agent instructions](../AGENTS.md). CI uses Cargo directly, with commands run from the repository root so its pinned toolchain and lockfile apply. Fuzz commands run from `fuzz/` with its separate nightly pin and lockfile.
 
-- `workflows/ci.yml` checks formatting, Clippy, workspace tests, and builds on Linux x86_64/arm64, Windows, and macOS. It runs on release pull requests into `main` and manual dispatch; local checks cover direct `develop` pushes.
+- `workflows/ci.yml` checks formatting, Clippy, workspace tests, and builds. A release pull request into `main` runs it on Linux x86_64 and arm64; Windows and macOS run only when a manual dispatch names them, until Bake releases those platforms. Local checks cover direct `develop` pushes.
 - `workflows/rust-quality.yml` runs optional coverage, mutation testing, and fuzzing on manual dispatch. Keep tool pins, artifact paths, and invocation directories consistent with their Cargo configuration.
 - `workflows/main-source.yml` requires pull requests into `main` to come from this repository's `develop` branch.
 

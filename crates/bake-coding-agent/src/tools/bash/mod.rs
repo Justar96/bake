@@ -113,6 +113,18 @@ pub enum BashExecError {
     Aborted,
     /// Pi's `timeout:<seconds>`, with the seconds the call gave.
     TimedOut(f64),
+    /// Pi v1.5.2's `ShellTimeoutError` with `shellExit` (#11613): the
+    /// deadline passed after the shell itself had exited, while processes
+    /// it started kept writing to its output. The local backend reports it.
+    TimedOutAfterShellExit {
+        /// The seconds the call gave.
+        seconds: f64,
+        /// The shell's exit code, 128 plus the signal number after a
+        /// signal.
+        exit_code: i64,
+        /// When the shell exited, in seconds rounded to one decimal place.
+        exited_after_seconds: f64,
+    },
     /// Any other failure; the message reaches the model unchanged.
     Failed(String),
 }
@@ -684,6 +696,21 @@ impl Shared {
                             js_number_to_string(seconds)
                         ),
                     ),
+                    // Both facts matter: the command's own result, and that
+                    // processes it started were still writing at the
+                    // deadline (Pi v1.5.2, #11613).
+                    BashExecError::TimedOutAfterShellExit {
+                        seconds,
+                        exit_code,
+                        exited_after_seconds,
+                    } => append_status(
+                        &text,
+                        &format!(
+                            "Command timed out after {} seconds. The shell exited with code {exit_code} after {} seconds, but background processes it started kept writing output until the timeout.",
+                            js_number_to_string(seconds),
+                            js_number_to_string(exited_after_seconds)
+                        ),
+                    ),
                     BashExecError::Failed(message) => message,
                 });
             }
@@ -806,7 +833,12 @@ async fn run_job(
     );
     match exec.await {
         Ok(Some(code)) => JobOutcome::completed(format!("exit code: {code}")),
-        Ok(None) | Err(BashExecError::Aborted | BashExecError::TimedOut(_)) => killed(),
+        Ok(None)
+        | Err(
+            BashExecError::Aborted
+            | BashExecError::TimedOut(_)
+            | BashExecError::TimedOutAfterShellExit { .. },
+        ) => killed(),
         Err(BashExecError::Failed(message)) => JobOutcome::failed(message),
     }
 }

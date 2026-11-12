@@ -1,7 +1,7 @@
-//! The `ls` tool, ported from Pi `src/core/tools/ls.ts` (v1.1.0; see the
-//! crate's `NOTICE`): a directory's entries sorted case-insensitively,
-//! directories marked with `/`, dotfiles included, limited to `limit`
-//! entries and 50 KB.
+//! The `ls` tool, ported from Pi `src/core/tools/ls.ts` (v1.1.0; the limit
+//! floor from v1.5.2; see the crate's `NOTICE`): a directory's entries
+//! sorted case-insensitively, directories marked with `/`, dotfiles
+//! included, limited to `limit` entries (at least 1) and 50 KB.
 //!
 //! # Deviations from Pi
 //!
@@ -93,7 +93,12 @@ async fn execute(
     owner: Option<crate::owned_work::WorkGate>,
 ) -> Result<AgentToolResult, String> {
     let path = optional_string_arg(&args, "path").filter(|path| !path.is_empty());
-    let limit = number_arg(&args, "limit").unwrap_or(DEFAULT_LIMIT);
+    // Pi v1.5.2: a limit of 0 would list nothing and report an empty
+    // directory, so a limit below 1 means 1; a fractional one is floored.
+    let limit = number_arg(&args, "limit")
+        .unwrap_or(DEFAULT_LIMIT)
+        .floor()
+        .max(1.0);
     let work_signal = signal.clone();
     run_blocking_abortable(signal, owner, move || {
         let dir = resolve_to_cwd(path.as_deref().unwrap_or("."), &cwd)?;

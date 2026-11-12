@@ -1,13 +1,26 @@
-//! The streaming `TextDecoder` behavior Pi uses for process output.
+//! The streaming `TextDecoder` behavior Pi uses for process output, and
+//! Node's `StringDecoder("utf8")`, which `exec` uses.
 
+/// Decodes UTF-8 across chunk boundaries: a character split between two
+/// chunks is held back until the rest arrives, and invalid bytes become
+/// U+FFFD. The default is `TextDecoder`'s, which drops a leading byte-order
+/// mark; [`Decoder::keeping_bom`] is `StringDecoder`'s, which keeps it.
 #[derive(Debug, Default)]
-pub(super) struct Decoder {
+pub(crate) struct Decoder {
     pending: Vec<u8>,
     started: bool,
 }
 
 impl Decoder {
-    pub(super) fn decode(&mut self, bytes: &[u8]) -> String {
+    /// Node's `StringDecoder("utf8")`: a leading byte-order mark is text.
+    pub(crate) fn keeping_bom() -> Self {
+        Self {
+            pending: Vec::new(),
+            started: true,
+        }
+    }
+
+    pub(crate) fn decode(&mut self, bytes: &[u8]) -> String {
         let mut joined;
         let mut rest = if self.pending.is_empty() {
             bytes
@@ -49,7 +62,9 @@ impl Decoder {
         output
     }
 
-    pub(super) fn finish(&mut self) -> &'static str {
+    /// The end of the input: held bytes of an unfinished character become
+    /// one U+FFFD, as `TextDecoder` and `StringDecoder.end()` give.
+    pub(crate) fn finish(&mut self) -> &'static str {
         if self.pending.is_empty() {
             ""
         } else {

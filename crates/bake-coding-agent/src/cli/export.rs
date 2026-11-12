@@ -5,8 +5,10 @@
 //! `packages/coding-agent/src/core/export-html/index.ts` (`exportFromFile`)
 //! and the `parsed.export` branch of `packages/coding-agent/src/main.ts`.
 //! The page itself is [`crate::export_html`], the one `/share` uploads; as
-//! in Pi's `exportFromFile`, it carries no system prompt and no tool
-//! definitions, because no session is set up to supply them.
+//! in Pi's `exportFromFile` (unchanged in v1.5.2), it is given no system
+//! prompt and no tool definitions, because no session is set up to supply
+//! them. Since Pi v1.5.2's template, the page renders the system messages
+//! the file records, so only a file without them shows neither.
 //!
 //! The default output name is Pi's, with Bake's program name:
 //! `bake-session-<input file name without .jsonl>.html`, in the working

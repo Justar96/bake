@@ -4,7 +4,9 @@
 //! Each test names the Pi test it follows; the recorded cases cover the
 //! non-bash cases of Pi's `test/tools.test.ts`, `edit-tool-legacy-input`,
 //! `builtin-tool-strict-mode`, `tool-result-images`, `default-tools-setting`,
-//! and `path-utils` resolution through the tools.
+//! and `path-utils` resolution through the tools. Where Pi v1.5.2 changed a
+//! recorded definition or result, the test names the change and states
+//! the v1.5.2 expectation from Pi's source; the recording is unchanged.
 // The recorded cases use POSIX paths and modes, so most cases and their
 // helpers build on Unix only.
 #![cfg_attr(not(unix), allow(dead_code, unused_imports))]
@@ -55,6 +57,28 @@ fn constrained_sampling(sampling: &Option<ConstrainedSampling>) -> Value {
     }
 }
 
+/// The grep `glob` description of Pi v1.5.2 (`grepSchema` in
+/// `src/core/tools/grep.ts` at `b4afddd`, from `6bf2ab9bb`, #11895), which
+/// replaced the recorded v1.1.0 text.
+const GREP_GLOB_V1_5_2: &str = "Filter files by glob pattern, relative to path, e.g. '*.ts', 'src/**/*.ts' or '**/*.spec.ts'. A pattern without '/' matches file names at any depth";
+
+/// Recorded v1.1.0 cases whose result Pi v1.5.2 changed, with the result
+/// its source at `b4afddd` gives.
+fn revised_in_v1_5_2(tool: &str, name: &str) -> Option<Value> {
+    match (tool, name) {
+        // `676af1d77` (#11747): ls takes `Math.max(1, Math.floor(limit))`,
+        // so `limit: 0` lists the directory's one entry instead of
+        // "(empty directory)", as Pi's "should treat limits below 1 as 1
+        // and floor fractional limits" expects.
+        ("ls", "limit-zero") => Some(json!({
+            "content": [{ "type": "text", "text": "a" }],
+            "details": null,
+            "structuredContent": null,
+        })),
+        _ => None,
+    }
+}
+
 /// Pi: `builtin-tool-strict-mode.test.ts` and the definitions every tool
 /// test builds: names, labels, descriptions, schemas, output schemas,
 /// sampling, prompt text, legacy-input shims, and execution modes.
@@ -70,7 +94,11 @@ fn definitions_match_pi() {
     );
     for definition in &built {
         let tool = &definition.tool;
-        let pi = &recorded[&tool.name];
+        let mut pi = recorded[&tool.name].clone();
+        if tool.name == "grep" {
+            pi["parameters"]["properties"]["glob"]["description"] = json!(GREP_GLOB_V1_5_2);
+        }
+        let pi = &pi;
         let mine = json!({
             "name": tool.name,
             "label": tool.label,
@@ -520,6 +548,9 @@ async fn run_case(case: &Value) -> Result<(), String> {
             expected[key] = value.clone();
         }
     }
+    if let Some(revised) = revised_in_v1_5_2(tool_name, name) {
+        expected = json!({ "result": revised });
+    }
     if case.get("imageDataExact") == Some(&json!(false)) {
         mask_image_data(&mut mine);
         mask_image_data(&mut expected);
@@ -846,4 +877,111 @@ async fn live_grep_matches_pi() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn live_find_matches_pi() {
     run_external("find").await;
+}
+
+async fn call(kind: &str, dir: &Path, args: Value) -> Result<AgentToolResult, String> {
+    let tool = create_tool_definition(kind, dir, &ToolsOptions::default())
+        .expect("tool")
+        .tool;
+    (tool.execute)(
+        format!("call-{kind}"),
+        args,
+        None,
+        AgentToolUpdateCallback::ignore(),
+        bake_agent::ToolContext::detached(),
+    )
+    .await
+}
+
+fn output_text(result: &AgentToolResult) -> String {
+    result_json(result, false)["content"][0]["text"]
+        .as_str()
+        .expect("text")
+        .to_owned()
+}
+
+/// Pi v1.5.2 `tools.test.ts` "should treat limits below 1 as 1 and floor
+/// fractional limits" and "should report the entry limit only when more
+/// entries exist", for ls (#11747).
+#[tokio::test]
+async fn ls_limits_follow_pi_v1_5_2() {
+    let dir = support::TempDir::new("ls-limits");
+    for name in ["a.txt", "b.txt", "c.txt"] {
+        std::fs::write(dir.path().join(name), name).expect("write");
+    }
+    let path = dir.text();
+    for limit in [json!(0), json!(-5), json!(0.5), json!(1.9)] {
+        let result = call("ls", dir.path(), json!({ "path": path, "limit": limit }))
+            .await
+            .expect("ls");
+        assert_eq!(
+            output_text(&result),
+            "a.txt\n\n[1 entries limit reached. Use limit=2 for more]",
+            "{limit}"
+        );
+        assert_eq!(result.details, Some(json!({ "entryLimitReached": 1 })));
+    }
+    let exact = call("ls", dir.path(), json!({ "path": path, "limit": 3 }))
+        .await
+        .expect("ls");
+    assert_eq!(output_text(&exact), "a.txt\nb.txt\nc.txt");
+    assert_eq!(exact.details, None);
+}
+
+/// Pi v1.5.2 `tools.test.ts` "should resolve folder globs relative to
+/// path" (#11807, #11895), with a plain and a symlinked `path`; skipped
+/// with a note when `rg` is not on `PATH`.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn grep_globs_are_relative_to_path() {
+    if !on_path("rg") {
+        eprintln!("note: skipping the grep glob cases: `rg` is not on PATH");
+        return;
+    }
+    let dir = support::TempDir::new("grep-glob");
+    let repo = dir.path().join("repo");
+    for folder in ["migrations/main", "nested/migrations/main"] {
+        std::fs::create_dir_all(repo.join(folder)).expect("mkdir");
+    }
+    std::fs::write(repo.join("migrations/main/a.js"), "hello\n").expect("write");
+    std::fs::write(repo.join("nested/migrations/main/b.js"), "hello\n").expect("write");
+    // rg canonicalizes its working directory, so a symlinked path must
+    // still anchor the glob.
+    let link = dir.path().join("repo-link");
+    std::os::unix::fs::symlink(&repo, &link).expect("symlink");
+
+    for search in [&repo, &link] {
+        let search = search.to_string_lossy();
+        let grep = |glob: &str| {
+            call(
+                "grep",
+                dir.path(),
+                json!({ "pattern": "hello", "path": search, "glob": glob }),
+            )
+        };
+        // The lookalike under nested/ stays out: the glob is anchored at path.
+        let anchored = grep("migrations/main/*.js").await.expect("grep");
+        assert_eq!(output_text(&anchored), "migrations/main/a.js:1: hello");
+
+        let any_depth = grep("**/migrations/main/*.js").await.expect("grep");
+        let mut lines: Vec<String> = output_text(&any_depth).lines().map(str::to_owned).collect();
+        lines.sort_unstable();
+        assert_eq!(
+            lines,
+            [
+                "migrations/main/a.js:1: hello",
+                "nested/migrations/main/b.js:1: hello"
+            ]
+        );
+
+        // rg matches nothing for a leading "./", so the tool drops it.
+        let dot_slash = grep("./migrations/main/*.js").await.expect("grep");
+        assert_eq!(output_text(&dot_slash), "migrations/main/a.js:1: hello");
+
+        let negated = grep("!./migrations/**").await.expect("grep");
+        assert_eq!(
+            output_text(&negated),
+            "nested/migrations/main/b.js:1: hello"
+        );
+    }
 }

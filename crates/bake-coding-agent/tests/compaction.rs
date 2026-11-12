@@ -366,6 +366,7 @@ async fn summaries_send_pis_prompts_and_build_pis_results() {
                 headers: None,
                 env: None,
                 signal: AbortController::new().signal(),
+                thinking_level: None,
                 custom_instructions: options["customInstructions"].as_str().map(str::to_owned),
                 replace_instructions: options["replaceInstructions"] == json!(true),
                 reserve_tokens: options["reserveTokens"].as_u64(),
@@ -386,4 +387,110 @@ async fn summaries_send_pis_prompts_and_build_pis_results() {
         );
         assert_eq!(recorder.take(), case["requests"]);
     }
+}
+
+/// Pi v1.5.2 `branch-summarization.test.ts` "passes the thinking level only
+/// for reasoning-capable models" (#11482): a reasoning model at `xhigh`, a
+/// reasoning model at `off`, and a model without reasoning at `high`.
+#[tokio::test]
+async fn branch_summaries_send_the_thinking_level_only_to_reasoning_models() {
+    let oracle = golden();
+    let entries = entries(&oracle);
+    let recorder = Recorder::default();
+    let stream_fn = recorder.stream_fn();
+    let mut reasoning_model = model(&oracle);
+    reasoning_model.reasoning = true;
+    let mut plain_model = reasoning_model.clone();
+    plain_model.reasoning = false;
+    let mut seen = Vec::new();
+    for (model, level) in [
+        (&reasoning_model, ModelThinkingLevel::Xhigh),
+        (&reasoning_model, ModelThinkingLevel::Off),
+        (&plain_model, ModelThinkingLevel::High),
+    ] {
+        recorder.answer(&["## Goal\nbranch"]);
+        generate_branch_summary(
+            &entries,
+            &GenerateBranchSummaryOptions {
+                model: model.clone(),
+                stream_fn: Arc::clone(&stream_fn),
+                api_key: None,
+                headers: None,
+                env: None,
+                signal: AbortController::new().signal(),
+                thinking_level: Some(level),
+                custom_instructions: None,
+                replace_instructions: false,
+                reserve_tokens: None,
+                retry: None,
+                on_retry: None,
+            },
+        )
+        .await
+        .unwrap();
+        seen.push(recorder.take()[0]["reasoning"].clone());
+    }
+    assert_eq!(seen, [json!("xhigh"), Value::Null, Value::Null]);
+}
+
+/// Pi v1.5.2 `branch-summarization.test.ts` "applies context edits to
+/// branch entries" (#11680): an omitted failed attempt and a replaced
+/// reply.
+#[test]
+fn branch_preparation_applies_context_edits() {
+    let assistant = |text: &str, stop_reason: &str| {
+        json!({
+            "role": "assistant",
+            "content": [{ "type": "text", "text": text }],
+            "api": "faux",
+            "provider": "faux",
+            "model": "faux-1",
+            "usage": {
+                "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "totalTokens": 0,
+                "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 },
+            },
+            "stopReason": stop_reason,
+            "timestamp": 2,
+        })
+    };
+    let mut failed = assistant("FAILED_ATTEMPT", "error");
+    failed["errorMessage"] = json!("lost");
+    let ts = iso_timestamp;
+    let branch: Vec<SessionEntry> = [
+        json!({
+            "type": "message", "id": "u1", "parentId": null, "timestamp": ts(1),
+            "message": { "role": "user", "content": "Investigate login", "timestamp": 1 },
+        }),
+        json!({
+            "type": "message", "id": "failed", "parentId": "u1", "timestamp": ts(2),
+            "message": failed,
+        }),
+        json!({
+            "type": "context_edit", "id": "e1", "parentId": "failed", "timestamp": ts(3),
+            "targetId": "failed", "replacement": null,
+        }),
+        json!({
+            "type": "message", "id": "ok", "parentId": "e1", "timestamp": ts(4),
+            "message": assistant("ORIGINAL_TEXT", "stop"),
+        }),
+        json!({
+            "type": "context_edit", "id": "e2", "parentId": "ok", "timestamp": ts(5),
+            "targetId": "ok", "replacement": { "content": "REPLACED_TEXT" },
+        }),
+    ]
+    .into_iter()
+    .map(|entry| SessionEntry::from_json(entry.as_object().unwrap().clone()).unwrap())
+    .collect();
+
+    let serialized = js_stringify(&to_json(&prepare_branch_entries(&branch, 0).messages));
+
+    assert!(serialized.contains("Investigate login"), "{serialized}");
+    assert!(!serialized.contains("FAILED_ATTEMPT"), "{serialized}");
+    assert!(!serialized.contains("ORIGINAL_TEXT"), "{serialized}");
+    assert!(serialized.contains("REPLACED_TEXT"), "{serialized}");
+}
+
+/// `new Date(ms).toISOString()` for the first milliseconds of 1970.
+fn iso_timestamp(ms: i64) -> String {
+    format!("1970-01-01T00:00:00.{ms:03}Z")
 }

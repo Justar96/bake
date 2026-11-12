@@ -213,6 +213,7 @@ async fn summarize_branch(
         headers: None,
         env: None,
         signal: controller.signal(),
+        thinking_level: core.agent().map(|agent| agent.thinking_level()),
         custom_instructions: options.custom_instructions.clone(),
         replace_instructions: options.replace_instructions,
         reserve_tokens: Some(reserve_tokens),

@@ -193,7 +193,16 @@ impl Scripted {
         let outcome = match outcome.get("throw").and_then(Value::as_str) {
             Some("aborted") => Err(BashExecError::Aborted),
             Some(message) => match message.strip_prefix("timeout:") {
-                Some(seconds) => Err(BashExecError::TimedOut(seconds.parse().unwrap())),
+                // Pi v1.5.2's `ShellTimeoutError` carries how the shell
+                // exited before the deadline.
+                Some(seconds) => Err(match outcome.get("shellExit") {
+                    Some(exit) => BashExecError::TimedOutAfterShellExit {
+                        seconds: seconds.parse().unwrap(),
+                        exit_code: exit["exitCode"].as_i64().unwrap(),
+                        exited_after_seconds: exit["afterSeconds"].as_f64().unwrap(),
+                    },
+                    None => BashExecError::TimedOut(seconds.parse().unwrap()),
+                }),
                 None => Err(BashExecError::Failed(message.to_owned())),
             },
             None => Ok(outcome["exitCode"].as_i64()),
@@ -1080,6 +1089,55 @@ async fn timeout_kills_the_command() {
     .unwrap_err();
     assert_eq!(error, "started\n\n\nCommand timed out after 0.5 seconds");
     assert!(started.elapsed() < Duration::from_secs(10));
+}
+
+/// Pi v1.5.2 `test/suite/regressions/11613-bash-timeout-after-shell-exit`:
+/// a shell that exited while a process it started kept writing reports its
+/// code and when it exited; a shell still running at the deadline keeps the
+/// plain message. Unix only, as Pi's: the tree kill must reach the writer
+/// after the shell is gone.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_timeout_after_the_shell_exited_reports_its_exit_code() {
+    if !have_bash("a_timeout_after_the_shell_exited_reports_its_exit_code") {
+        return;
+    }
+    let dir = TempDir::new();
+    let tool = local_tool(&dir);
+    let started = Instant::now();
+    let error = run(
+        &tool,
+        json!({
+            "command": "(while true; do echo tick; sleep 0.02; done) & sleep 0.2; echo boom >&2; exit 3",
+            "timeout": 1,
+        }),
+    )
+    .await
+    .unwrap_err();
+    assert!(started.elapsed() < Duration::from_secs(10));
+    assert!(error.contains("boom"), "{error}");
+    let (_, status) = error
+        .rsplit_once("\n\n")
+        .unwrap_or_else(|| panic!("{error}"));
+    let after = status
+        .strip_prefix("Command timed out after 1 seconds. The shell exited with code 3 after ")
+        .and_then(|rest| rest.strip_suffix(" seconds, but background processes it started kept writing output until the timeout."))
+        .unwrap_or_else(|| panic!("{status}"));
+    // Pi's `0\.\d`.
+    assert!(
+        after.len() == 3
+            && after.starts_with("0.")
+            && after[2..].bytes().all(|b| b.is_ascii_digit()),
+        "{after}"
+    );
+
+    let error = run(
+        &tool,
+        json!({ "command": "echo started; sleep 30", "timeout": 0.3 }),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error, "started\n\n\nCommand timed out after 0.3 seconds");
 }
 
 /// A command that closes stdout and stderr but keeps running: the call

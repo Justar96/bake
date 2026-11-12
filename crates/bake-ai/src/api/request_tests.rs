@@ -826,6 +826,39 @@ fn anthropic_sends_the_full_schema_only_for_strict_tools() {
     assert_eq!(schema["title"], json!("StrictLookupInput"));
 }
 
+// anthropic-strict-tool-schema.test.ts (v1.5.2, #9557): "keeps root
+// definitions in non-strict schemas so property refs resolve"
+#[test]
+fn anthropic_keeps_root_definitions_in_non_strict_schemas() {
+    let settings = json!({ "type": "object", "properties": { "verbose": { "type": "boolean" } } });
+    for (reference, key) in [
+        ("#/$defs/Settings", "$defs"),
+        ("#/definitions/Settings", "definitions"),
+    ] {
+        let mut parameters = json!({
+            "type": "object",
+            "properties": { "settings": { "$ref": reference } },
+            "required": ["settings"],
+        });
+        parameters[key] = json!({ "Settings": settings });
+        let converted = first_tool(tool("configure", parameters.clone(), None));
+        assert!(converted.get("strict").is_none(), "{reference}");
+        assert_eq!(converted["input_schema"], parameters, "{reference}");
+    }
+    // Other root keywords stay out: Anthropic rejects a root `anyOf` with a
+    // 400.
+    let converted = first_tool(tool(
+        "configure",
+        json!({ "type": "object", "properties": {}, "anyOf": [{ "required": ["a"] }],
+                "$defs": { "A": { "type": "string" } } }),
+        None,
+    ));
+    assert_eq!(
+        converted["input_schema"],
+        json!({ "type": "object", "properties": {}, "required": [], "$defs": { "A": { "type": "string" } } })
+    );
+}
+
 // anthropic-strict-tool-schema.test.ts: "sends prefer tools non-strict when
 // they use keywords Anthropic strict mode rejects"
 #[test]
@@ -990,6 +1023,94 @@ fn anthropic_replays_empty_thinking_signatures_by_compat() {
             { "type": "text", "text": "answer" }
         ])
     );
+}
+
+/// The roles of an Anthropic body's messages, after the transcript is
+/// resolved for `model` as a request resolves it.
+fn anthropic_roles(model: &Model, values: Vec<Value>) -> (Vec<String>, Value) {
+    let resolved = crate::transcript::resolve_transcript(
+        &context(None, values, None),
+        anthropic_messages::get_compat(model).supports_mid_convo_system_messages,
+    );
+    let params = anthropic_params(
+        model,
+        &resolved,
+        anthropic_messages::AnthropicOptions::default(),
+    );
+    let roles = params["messages"]
+        .as_array()
+        .expect("messages")
+        .iter()
+        .map(|message| message["role"].as_str().unwrap_or_default().to_owned())
+        .collect();
+    (roles, params["system"].clone())
+}
+
+/// Pi v1.5.2's #11091 transcript: a later system update, then another
+/// model's empty reply, which converts to no Anthropic blocks.
+fn update_before_a_dropped_reply() -> Vec<Value> {
+    vec![
+        json!({ "role": "system", "content": "base prompt", "timestamp": 0 }),
+        user("hi"),
+        json!({ "role": "system", "content": "updated guidance", "timestamp": 2 }),
+        assistant(
+            json!([{ "type": "text", "text": "" }]),
+            "openai-codex-responses",
+            "openai-codex",
+            "gpt-x",
+            "stop",
+        ),
+        user("again"),
+    ]
+}
+
+// transcript-tool-changes.test.ts (v1.5.2, #11091): "holds an Anthropic
+// update past an assistant message that converts to no blocks", on a model
+// that accepts mid-conversation system messages.
+#[test]
+fn anthropic_holds_an_update_past_an_assistant_that_converts_to_no_blocks() {
+    let model = anthropic_model(
+        "claude-opus-5",
+        json!({ "supportsMidConvoSystemMessages": true, "supportsMidConvoToolChanges": true }),
+        Value::Null,
+    );
+    // No later assistant: the update goes at the end.
+    let (roles, _) = anthropic_roles(&model, update_before_a_dropped_reply());
+    assert_eq!(roles, ["user", "user", "system"]);
+    // A later assistant that is sent: the update goes directly before it.
+    let mut values = update_before_a_dropped_reply();
+    values.push(assistant(
+        json!([{ "type": "text", "text": "answer" }]),
+        "anthropic-messages",
+        "anthropic",
+        "claude-opus-5",
+        "stop",
+    ));
+    values.push(user("third"));
+    let (roles, _) = anthropic_roles(&model, values);
+    assert_eq!(roles, ["user", "user", "system", "assistant", "user"]);
+}
+
+// Bake: without the compat flag, the default, the same transcripts fold the
+// update into the system prompt, and no message carries the system role, so
+// the change above leaves default request bodies as they were.
+#[test]
+fn anthropic_without_mid_conversation_system_messages_folds_the_update() {
+    let model = anthropic_model("claude-opus-5", Value::Null, Value::Null);
+    let (roles, system) = anthropic_roles(&model, update_before_a_dropped_reply());
+    assert_eq!(roles, ["user", "user"]);
+    assert!(system.to_string().contains("updated guidance"), "{system}");
+    let mut values = update_before_a_dropped_reply();
+    values.push(assistant(
+        json!([{ "type": "text", "text": "answer" }]),
+        "anthropic-messages",
+        "anthropic",
+        "claude-opus-5",
+        "stop",
+    ));
+    values.push(user("third"));
+    let (roles, _) = anthropic_roles(&model, values);
+    assert_eq!(roles, ["user", "user", "assistant", "user"]);
 }
 
 // anthropic-tool-name-normalization.test.ts. Pi runs these cases live with an

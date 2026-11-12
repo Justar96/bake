@@ -1,7 +1,8 @@
 //! Pi's byte- and line-limited tool output, from `src/core/tools/truncate.ts`.
 //!
 //! Line counting ignores a final newline. Byte limits count UTF-8, while
-//! [`truncate_line`] counts UTF-16 code units as Pi's JavaScript does.
+//! [`truncate_line`] and [`slice_head`] count UTF-16 code units as Pi's
+//! JavaScript does, never splitting a surrogate pair (v1.5.2).
 
 use serde::{Deserialize, Serialize};
 
@@ -172,8 +173,22 @@ pub struct LineTruncationResult {
     pub was_truncated: bool,
 }
 
-/// Pi's grep-line shortening. If the UTF-16 cut splits a surrogate pair,
-/// Rust represents that lone surrogate as U+FFFD.
+/// Pi v1.5.2's `sliceHead`: at most the first `max_units` UTF-16 code
+/// units of `text`, one fewer when the cut would split a surrogate pair, so
+/// the character is left out whole.
+pub fn slice_head(text: &str, max_units: usize) -> &str {
+    let mut units = 0;
+    for (index, character) in text.char_indices() {
+        units += character.len_utf16();
+        if units > max_units {
+            return &text[..index];
+        }
+    }
+    text
+}
+
+/// Pi's grep-line shortening, which counts UTF-16 code units and leaves out
+/// a character whose surrogate pair the cut would split (v1.5.2).
 pub fn truncate_line(line: &str, max_chars: usize) -> LineTruncationResult {
     if line.encode_utf16().count() <= max_chars {
         return LineTruncationResult {
@@ -181,9 +196,8 @@ pub fn truncate_line(line: &str, max_chars: usize) -> LineTruncationResult {
             was_truncated: false,
         };
     }
-    let units: Vec<_> = line.encode_utf16().take(max_chars).collect();
     LineTruncationResult {
-        text: format!("{}... [truncated]", String::from_utf16_lossy(&units)),
+        text: format!("{}... [truncated]", slice_head(line, max_chars)),
         was_truncated: true,
     }
 }
@@ -287,8 +301,71 @@ mod tests {
         Ok(())
     }
 
+    const EMOJI: &str = "\u{1F600}";
+
+    // Pi v1.5.2 `truncate-surrogates.test.ts` (#7121, #11757).
+    #[test]
+    fn truncate_line_does_not_cut_an_emoji_in_half_at_the_limit() {
+        let line = format!("{}{EMOJI}tail", "a".repeat(499));
+        let cut = truncate_line(&line, 500);
+        assert!(cut.was_truncated);
+        assert_eq!(cut.text, format!("{}... [truncated]", "a".repeat(499)));
+    }
+
+    #[test]
+    fn truncate_line_keeps_an_emoji_that_ends_exactly_at_the_limit() {
+        let line = format!("{}{EMOJI}tail", "a".repeat(498));
+        assert_eq!(
+            truncate_line(&line, 500).text,
+            format!("{}{EMOJI}... [truncated]", "a".repeat(498))
+        );
+    }
+
+    #[test]
+    fn slice_head_never_splits_a_pair() {
+        let text = format!("{EMOJI}x{EMOJI}");
+        let length = text.encode_utf16().count();
+        for units in 0..=length + 1 {
+            let head = slice_head(&text, units);
+            assert!(text.starts_with(head));
+            assert!(
+                head.encode_utf16().count() + 1 >= units.min(length),
+                "{units}"
+            );
+        }
+    }
+
+    #[test]
+    fn slice_head_matches_slice_on_text_without_surrogates() {
+        assert_eq!(slice_head("abcdef", 3), "abc");
+        assert_eq!(slice_head("abc", 10), "abc");
+        assert_eq!(slice_head("abc", 0), "");
+    }
+
     proptest! {
         #![proptest_config(ProptestConfig::with_cases(512))]
+
+        // Pi's `sliceHead`: the longest prefix of at most `units` UTF-16
+        // code units that ends between characters, one unit short of
+        // `units` only where the cut would split a pair.
+        #[test]
+        fn slice_head_is_the_longest_whole_character_prefix(
+            text in "[a-z\u{e9}\u{4e2d}\u{1F600}\u{10FFFF}]{0,12}",
+            units in 0..30usize,
+        ) {
+            let head = slice_head(&text, units);
+            prop_assert!(text.starts_with(head));
+            let kept = head.encode_utf16().count();
+            prop_assert!(kept <= units);
+            let next = text[head.len()..].chars().next();
+            match next {
+                None => prop_assert_eq!(head, text.as_str()),
+                Some(next) => {
+                    prop_assert!(kept + next.len_utf16() > units);
+                    prop_assert!(kept + 1 >= units);
+                }
+            }
+        }
 
         #[test]
         fn head_truncation_keeps_the_most_whole_lines_that_fit_from_the_start(
@@ -405,7 +482,7 @@ mod tests {
         }
 
         #[test]
-        fn line_truncation_keeps_exactly_the_utf16_limit_and_marks_the_cut(
+        fn line_truncation_keeps_the_utf16_limit_in_whole_characters_and_marks_the_cut(
             line in "[a-z\u{e9}\u{4e2d}\u{1F600}]{0,20}",
             max_chars in 0..24usize,
         ) {
@@ -419,10 +496,12 @@ mod tests {
             let kept = result.text.strip_suffix("... [truncated]");
             prop_assert!(kept.is_some(), "{:?} has no marker", result.text);
             let kept = kept.unwrap_or_default();
-            // A cut through a surrogate pair leaves U+FFFD, one unit too.
-            prop_assert_eq!(kept.encode_utf16().count(), max_chars);
-            let whole = kept.strip_suffix('\u{FFFD}').unwrap_or(kept);
-            prop_assert!(line.starts_with(whole));
+            // A cut through a surrogate pair leaves the character out, one
+            // unit short of the limit.
+            prop_assert_eq!(kept, slice_head(&line, max_chars));
+            let kept_units = kept.encode_utf16().count();
+            prop_assert!(kept_units == max_chars || kept_units + 1 == max_chars);
+            prop_assert!(line.starts_with(kept));
         }
     }
 }

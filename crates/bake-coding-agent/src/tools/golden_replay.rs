@@ -12,8 +12,9 @@ use std::path::PathBuf;
 use serde_json::{Value, json};
 use support::{golden, scrub, setup, substitute};
 
-use crate::tools::find::{FindCollector, fd_args};
+use crate::tools::find::{FindCollector, effective_limit, fd_args};
 use crate::tools::grep::{GrepFormatter, GrepRequest};
+use crate::tools::js::number_to_string;
 use crate::tools::path_utils::resolve_to_cwd;
 use crate::tools::process::{Ended, Flow};
 
@@ -98,14 +99,29 @@ fn grep_formats_recorded_rg_output_as_pi() {
             limit: args["limit"].as_f64().unwrap_or(100.0).max(1.0),
         };
         // The recording is Pi v1.1.0's argv; v1.4.0 puts `--no-config`
-        // before it.
+        // before it, and v1.5.2 searches a directory as `.` from inside it
+        // (#11807). Its paths are the recorded absolute ones, which
+        // resolve against the directory to themselves.
         let args = request.args();
         assert_eq!(
             args.first().map(OsString::as_os_str),
             Some("--no-config".as_ref()),
             "{name} argv"
         );
-        assert_eq!(argv(&args[1..], &dir_text), case["argv"], "{name} argv");
+        let mut mine = argv(&args[1..], &dir_text);
+        if request.is_directory {
+            assert_eq!(
+                request.working_directory(),
+                Some(request.search_path.as_path())
+            );
+            let last = mine.as_array_mut().and_then(|args| args.last_mut());
+            let last = last.expect("search path");
+            assert_eq!(last, ".", "{name}");
+            *last = scrub(&json!(request.search_path), &dir_text);
+        } else {
+            assert_eq!(request.working_directory(), None);
+        }
+        assert_eq!(mine, case["argv"], "{name} argv");
         let stdout = substitute(&case["stdout"], &dir_text);
         let mut formatter = GrepFormatter::new(request);
         let mut stopped = false;
@@ -137,17 +153,37 @@ fn find_formats_recorded_fd_output_as_pi() {
         let args = substitute(&case["args"], &dir_text);
         let search_path =
             resolve_to_cwd(args["path"].as_str().unwrap_or("."), dir.path()).expect("path");
-        let limit = args["limit"].as_f64().unwrap_or(1000.0);
+        let limit = effective_limit(args["limit"].as_f64());
         let pattern = args["pattern"].as_str().expect("pattern");
-        assert_eq!(
-            argv(&fd_args(pattern, &search_path, limit), &dir_text),
-            case["argv"],
-            "{name} argv"
-        );
+        // The recording is Pi v1.1.0's argv, which asked fd for `limit`
+        // results; v1.5.2 asks for one more (#11747).
+        let mut mine = argv(&fd_args(pattern, &search_path, limit), &dir_text);
+        let at = mine
+            .as_array()
+            .and_then(|args| args.iter().position(|arg| arg == "--max-results"))
+            .expect("--max-results");
+        assert_eq!(mine[at + 1], json!(number_to_string(limit + 1.0)), "{name}");
+        mine[at + 1] = json!(number_to_string(limit));
+        assert_eq!(mine, case["argv"], "{name} argv");
         let stdout = substitute(&case["stdout"], &dir_text);
+        let stdout = stdout.as_str().expect("stdout");
         let mut collector = FindCollector::new(search_path, limit);
-        for line in lines(stdout.as_str().expect("stdout")) {
+        for line in lines(stdout) {
             collector.line(&line);
+        }
+        // A recording that stopped at the limit had more matching files,
+        // which Pi's notice reports; the extra result v1.5.2 asks for is
+        // the first of them.
+        if !case["result"]["details"]["resultLimitReached"].is_null() {
+            let extra = case["files"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|file| file["path"].as_str())
+                .map(|path| format!("{dir_text}/{path}"))
+                .find(|path| !stdout.lines().any(|line| line == path))
+                .expect("a file past the limit");
+            collector.line(extra.as_bytes());
         }
         let mine = result_json(collector.finish(ended(case, false)), &dir_text);
         if mine != expected(case) {

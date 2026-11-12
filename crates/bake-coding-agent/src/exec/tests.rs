@@ -135,6 +135,27 @@ async fn both_streams_are_drained_without_truncation_or_mixing() {
     assert!(!result.killed && !result.timed_out && !result.aborted);
 }
 
+// Pi v1.5.2 #11312 (`36be9c612`): its commit message's reproduction, a child
+// that splits "你好" across two writes on stdout and stderr; and the
+// `exec.test.ts` case "still flushes incomplete UTF-8 at normal EOF when
+// output was not truncated".
+#[tokio::test]
+async fn utf8_is_decoded_across_chunk_boundaries_and_flushed_at_the_end() {
+    let fixture = Fixture::get();
+    let result = fixture.run(&["split"], ExecOptions::default()).await;
+    assert_eq!(result.code, 0);
+    assert_eq!(result.stdout, "你好");
+    assert_eq!(result.stderr, "你好");
+    let result = fixture.run(&["partial"], ExecOptions::default()).await;
+    assert_eq!(result.code, 0);
+    assert_eq!(result.stdout, "\u{FFFD}");
+    assert_eq!(result.stderr, "\u{FFFD}");
+    let result = fixture
+        .run(&["capture", "\u{FEFF}bom", "", "0"], ExecOptions::default())
+        .await;
+    assert_eq!(result.stdout, "\u{FEFF}bom", "StringDecoder keeps the mark");
+}
+
 #[tokio::test]
 async fn pre_abort_and_invalid_timeout_do_not_spawn() {
     let fixture = Fixture::get();

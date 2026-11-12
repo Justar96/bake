@@ -1,5 +1,5 @@
-//! The header's activity line: a word for the turn, its phase, and elapsed
-//! time, drawn as text alone. A band of light sweeps across the word in place
+//! The activity line under the transcript's newest line: a word for the
+//! turn, its phase, and elapsed time, drawn as text alone. A band of light sweeps across the word in place
 //! of a spinner glyph, so the row says the session is working without a
 //! symbol whose width a terminal could measure differently.
 //!
@@ -98,7 +98,7 @@ pub fn pick(words: &[&'static str], seed: &str) -> &'static str {
     words[hash as usize % words.len()]
 }
 
-/// Elapsed time as the header shows it: `8s`, `1m 05s`.
+/// Elapsed time as the activity line shows it: `8s`, `1m 05s`.
 pub fn format_elapsed(elapsed: Duration) -> String {
     let seconds = elapsed.as_secs();
     if seconds < 60 {

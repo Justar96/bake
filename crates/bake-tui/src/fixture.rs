@@ -2,7 +2,10 @@
 //! bar, and composer modes can be driven before a native runtime exists. It
 //! answers every prompt with the same short turn, streamed on a fixed
 //! timeline: reasoning, one call, then an answer. No model or tool runs, and
-//! the answer says so. It is development tooling and proves no parity.
+//! the answer says so. It also reports sample tasks, subagents and
+//! background shells, for the tasks row under the composer; none of them
+//! runs either, and each says so. It is development tooling and proves no
+//! parity.
 //!
 //! [`Fixture`] is pure: it is told the time and returns the updates due by
 //! then. [`crate::port::FixturePort`] drives it from a thread.
@@ -10,6 +13,8 @@
 use std::collections::VecDeque;
 use std::time::Duration;
 
+use bake_tui_view::agents::{Agent, AgentState, Ended};
+use bake_tui_view::jobs::{BackgroundJob, JobState};
 use bake_tui_view::runtime::{Pending, RuntimeUpdate, Submission, Target};
 use bake_tui_view::state::Outcome;
 use bake_tui_view::transcript::{CallState, Row};
@@ -22,13 +27,94 @@ pub const CALL: Duration = Duration::from_millis(800);
 const ANSWER: &str = "This reply comes from the preview's fixture runtime. It streams in \
 pieces and is committed once; no model or tool ran.";
 
-/// The scripted runtime: the step running, if any, and the steers waiting
-/// for the next step boundary.
+/// What every sample shell's output starts with.
+const SAMPLE_OUTPUT: &str = "This is sample output; no command ran.";
+
+/// The scripted runtime: the step running, if any, the steers waiting for
+/// the next step boundary, and the sample tasks.
 #[derive(Debug, Default)]
 pub struct Fixture {
     step: Option<Step>,
     steers: VecDeque<String>,
     turns: u32,
+    tasks: Samples,
+}
+
+/// The sample tasks as last reported, and when: a "running" shell's time
+/// goes on from then, as the view's clock for it does.
+#[derive(Debug, Default)]
+struct Samples {
+    agents: Vec<Agent>,
+    jobs: Vec<BackgroundJob>,
+    at: Duration,
+}
+
+impl Samples {
+    fn new(at: Duration) -> Self {
+        let agent = |id: &str, name: &str, state, detail: Option<&str>| Agent {
+            id: id.into(),
+            name: name.into(),
+            state,
+            route: None,
+            detail: detail.map(str::to_owned),
+            file: None,
+        };
+        let shell = |id: &str, command: &str, state, seconds, more: &str| BackgroundJob {
+            id: id.into(),
+            command: command.into(),
+            state,
+            elapsed: Duration::from_secs(seconds),
+            output: format!("{SAMPLE_OUTPUT}\n{more}"),
+            omitted_bytes: 0,
+        };
+        Self {
+            // In start order, as a runtime reports them.
+            agents: vec![
+                agent(
+                    "sample-reviewer",
+                    "Sample reviewer",
+                    AgentState::Idle(Some(Ended::Completed)),
+                    Some("A sample that shows a finished agent; no model ran."),
+                ),
+                agent(
+                    "sample-tester",
+                    "Sample tester",
+                    AgentState::Saved(Some(Ended::Failed)),
+                    Some("A sample that shows a failed agent; no model ran."),
+                ),
+                agent(
+                    "sample-explorer",
+                    "Sample explorer",
+                    AgentState::Working,
+                    Some("A sample that shows an agent at work; no model runs."),
+                ),
+            ],
+            jobs: vec![
+                shell(
+                    "bash-1",
+                    "cargo build --release",
+                    JobState::Completed(Some("exit code: 0".into())),
+                    41,
+                    "",
+                ),
+                shell(
+                    "bash-2",
+                    "bun run dev",
+                    JobState::Running,
+                    72,
+                    "It shows as running until x stops it.\n",
+                ),
+            ],
+            at,
+        }
+    }
+
+    fn report(&self) -> Vec<RuntimeUpdate> {
+        vec![
+            RuntimeUpdate::Agents(self.agents.clone()),
+            RuntimeUpdate::Jobs(self.jobs.clone()),
+        ]
+    }
 }
 
 /// One answered prompt: its updates on a timeline from `start`, how far it
@@ -42,6 +128,53 @@ struct Step {
 }
 
 impl Fixture {
+    /// Reports the sample tasks, as a runtime reports a session's tasks
+    /// when it opens.
+    pub fn open(&mut self, now: Duration) -> Vec<RuntimeUpdate> {
+        self.tasks = Samples::new(now);
+        self.tasks.report()
+    }
+
+    /// Stops the sample shell `id` while it shows as running: its time
+    /// stops where the view's clock had it.
+    pub fn stop_job(&mut self, id: &str, now: Duration) -> Vec<RuntimeUpdate> {
+        let tasks = &mut self.tasks;
+        if !tasks
+            .jobs
+            .iter()
+            .any(|job| job.id == id && job.state == JobState::Running)
+        {
+            return Vec::new();
+        }
+        // Each report restarts the view's clocks from the times it holds.
+        let ran = now.saturating_sub(tasks.at);
+        for job in &mut tasks.jobs {
+            if job.state == JobState::Running {
+                job.elapsed += ran;
+            }
+            if job.id == id {
+                job.state = JobState::Killed(None);
+            }
+        }
+        tasks.at = now;
+        vec![RuntimeUpdate::Jobs(tasks.jobs.clone())]
+    }
+
+    /// Stops the sample agent `id` while it shows as working.
+    pub fn stop_agent(&mut self, id: &str) -> Vec<RuntimeUpdate> {
+        let Some(agent) = self
+            .tasks
+            .agents
+            .iter_mut()
+            .find(|agent| agent.id == id && agent.state == AgentState::Working)
+        else {
+            return Vec::new();
+        };
+        agent.state = AgentState::Idle(Some(Ended::Stopped));
+        agent.detail = Some("A sample stopped before it ended; no model ran.".into());
+        vec![RuntimeUpdate::Agents(self.tasks.agents.clone())]
+    }
+
     /// Takes a prompt. A follow-up starts a turn; a steer waits for the
     /// running turn's next step. Either arriving on the other side of a
     /// turn's end is taken the other way, as the turn now stands.
@@ -183,13 +316,15 @@ fn step_for(prompts: Vec<String>, start: Duration) -> Step {
     let call = |state, summary: Option<&str>| Row::Call {
         tool: "Bash".into(),
         argument: "true".into(),
+        fields: Vec::new(),
         id: None,
         state,
         summary: summary.map(str::to_owned),
         output: Vec::new(),
+        full_output_path: None,
     };
     updates.push((at, RuntimeUpdate::Commit(vec![Row::Reasoning(reasoning)])));
-    updates.push((at, RuntimeUpdate::Phase("running bash".into())));
+    updates.push((at, RuntimeUpdate::Phase("running true".into())));
     updates.push((
         at,
         RuntimeUpdate::Live(vec![call(CallState::Running, None)]),
@@ -247,17 +382,21 @@ fn interrupted(row: Row) -> Row {
         Row::Call {
             tool,
             argument,
+            fields,
             id,
             state: CallState::Running,
             output,
+            full_output_path,
             ..
         } => Row::Call {
             tool,
             argument,
+            fields,
             id,
             state: CallState::Failed,
             summary: Some("interrupted".into()),
             output,
+            full_output_path,
         },
         other => other,
     }
@@ -332,7 +471,7 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(phases, ["thinking", "running bash", "writing"]);
+        assert_eq!(phases, ["thinking", "running true", "writing"]);
     }
 
     #[test]
@@ -428,6 +567,41 @@ mod tests {
             .count();
         assert_eq!(users, 3);
         assert_eq!(f.next_due(), None);
+    }
+
+    // The preview's sample tasks say they are samples, stop as a runtime's
+    // would, and keep a stopped shell's time where the view's clock had it.
+    #[test]
+    fn the_sample_tasks_say_so_and_stop_like_real_ones() {
+        let mut f = Fixture::default();
+        let opened = f.open(Duration::from_secs(1));
+        let [RuntimeUpdate::Agents(agents), RuntimeUpdate::Jobs(jobs)] = &opened[..] else {
+            panic!("{opened:#?}");
+        };
+        assert_eq!(agents.len(), 3);
+        assert!(agents.iter().all(|agent| {
+            agent.route.is_none()
+                && agent
+                    .detail
+                    .as_deref()
+                    .is_some_and(|d| d.contains("no model"))
+        }));
+        assert!(jobs.iter().all(|job| job.output.starts_with(SAMPLE_OUTPUT)));
+        // Only what shows as running stops.
+        assert_eq!(f.stop_job("bash-1", LONG), []);
+        assert_eq!(f.stop_agent("sample-reviewer"), []);
+        let [RuntimeUpdate::Jobs(jobs)] = &f.stop_job("bash-2", Duration::from_secs(4))[..] else {
+            panic!("no report");
+        };
+        let dev = jobs.iter().find(|job| job.id == "bash-2").unwrap();
+        assert_eq!(dev.state, JobState::Killed(None));
+        assert_eq!(dev.elapsed, Duration::from_secs(75));
+        assert_eq!(f.stop_job("bash-2", LONG), [], "already stopped");
+        let [RuntimeUpdate::Agents(agents)] = &f.stop_agent("sample-explorer")[..] else {
+            panic!("no report");
+        };
+        assert!(agents.iter().any(|agent| agent.id == "sample-explorer"
+            && agent.state == AgentState::Idle(Some(Ended::Stopped))));
     }
 
     #[test]

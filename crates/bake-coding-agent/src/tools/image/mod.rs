@@ -1,7 +1,8 @@
 //! Image handling for tool results, ported from Pi `src/utils/mime.ts`,
 //! `exif-orientation.ts`, `image-convert.ts`, `image-resize-core.ts`,
 //! `image-resize.ts`, `image-process.ts`, and `tool-result-images.ts`
-//! (v1.1.0; see the crate's `NOTICE`).
+//! (v1.1.0; the choice between PNG and JPEG from v1.5.2; see the crate's
+//! `NOTICE`).
 //!
 //! Pi decodes, resizes, and encodes with Photon, a Rust library built on the
 //! `image` crate that Pi runs as WebAssembly in a worker thread. Bake calls
@@ -135,10 +136,11 @@ fn js_round(value: f64) -> u32 {
 }
 
 /// Pi's `resizeImageInProcess`: the original bytes when the oriented image
-/// fits the dimensions and its base64 the size limit; otherwise the first
-/// PNG or JPEG (qualities `jpeg_quality`, 85, 70, 55, 40) under the limit,
-/// shrinking by a quarter until 1x1; `None` when nothing fits or decoding
-/// fails.
+/// fits the dimensions and its base64 the size limit; otherwise, at each
+/// size, the first under the limit of the smaller of PNG and JPEG at
+/// `jpeg_quality`, the other of the two, and JPEG at 85, 70, 55, and 40
+/// (Pi v1.5.2), shrinking by a quarter until 1x1; `None` when nothing fits
+/// or decoding fails.
 pub fn resize_image(
     input: &[u8],
     mime_type: &str,
@@ -193,20 +195,36 @@ pub fn resize_image(
         let resized = image
             .resize_exact(width.max(1), height.max(1), FilterType::Lanczos3)
             .into_rgba8();
-        // Pi encodes every candidate, then takes the first under the limit;
-        // encoding them in order and stopping there gives the same result.
-        let candidates = std::iter::once((None, "image/png")).chain(
-            qualities
-                .iter()
-                .map(|quality| (Some(*quality), "image/jpeg")),
-        );
-        for (quality, mime) in candidates {
-            let encoded = match quality {
+        // Pi v1.5.2 (#11577) tries the smaller of PNG and JPEG at the
+        // configured quality first, then the other, then the lower JPEG
+        // qualities. Pi encodes every candidate before taking the first
+        // under the limit; encoding the lower qualities in order and
+        // stopping there gives the same result.
+        let encoded = |quality: Option<u8>| {
+            let bytes = match quality {
                 None => encode_png(&resized),
                 Some(quality) => encode_jpeg(&resized, quality),
+            }?;
+            let mime = if quality.is_some() {
+                "image/jpeg"
+            } else {
+                "image/png"
             };
-            let Some(bytes) = encoded else { continue };
-            let data = STANDARD.encode(&bytes);
+            Some((STANDARD.encode(&bytes), mime))
+        };
+        let png = encoded(None);
+        let jpeg = encoded(qualities.first().copied());
+        let jpeg_first = match (&png, &jpeg) {
+            (Some((png, _)), Some((jpeg, _))) => jpeg.len() < png.len(),
+            (None, _) => true,
+            (Some(_), None) => false,
+        };
+        let preferred = if jpeg_first { [jpeg, png] } else { [png, jpeg] };
+        let lower = qualities
+            .iter()
+            .skip(1)
+            .map(|quality| encoded(Some(*quality)));
+        for (data, mime) in preferred.into_iter().chain(lower).flatten() {
             if (data.len() as f64) < max_bytes {
                 return Some(ResizedImage {
                     data,
@@ -463,6 +481,60 @@ mod tests {
         assert!(result.was_resized);
         assert_eq!((result.original_width, result.original_height), (100, 100));
         assert!(result.width <= 50 && result.height <= 50);
+    }
+
+    /// Pi v1.5.2's `photoLikeJpeg`: smooth gradients with light
+    /// deterministic noise, which PNG compresses poorly, as a quality-85
+    /// JPEG. The noise is JavaScript's `(seed * 1103515245 + 12345) &
+    /// 0x7fffffff`, a double product taken to 32 bits.
+    fn photo_like_jpeg(width: u32, height: u32) -> Vec<u8> {
+        let mut seed: i64 = 1;
+        let image = RgbaImage::from_fn(width, height, |x, y| {
+            let product = seed as f64 * 1_103_515_245.0 + 12345.0;
+            seed = (product as i128).rem_euclid(1 << 32) as i64 & 0x7fff_ffff;
+            let noise = (seed % 6) as f64;
+            let (x, y) = (f64::from(x), f64::from(y));
+            image::Rgba([
+                (x / f64::from(width) * 200.0 + noise) as u8,
+                (y / f64::from(height) * 200.0 + noise) as u8,
+                (128.0 + (x / 30.0).sin() * 60.0 + noise) as u8,
+                255,
+            ])
+        });
+        encode_jpeg(&image, 85).expect("jpeg")
+    }
+
+    // Pi v1.5.2 "should pick JPEG over a larger PNG when resizing a photo"
+    // (#11551, #11577).
+    #[test]
+    fn a_resized_photo_is_the_smaller_jpeg() {
+        let input = photo_like_jpeg(1200, 800);
+        let result = resize_image(
+            &input,
+            "image/jpeg",
+            ImageResizeOptions {
+                max_width: Some(1000),
+                max_height: Some(1000),
+                ..ImageResizeOptions::default()
+            },
+        )
+        .expect("result");
+        assert!(result.was_resized);
+        assert_eq!(result.mime_type, "image/jpeg");
+        assert_eq!(result.width, 1000);
+        assert!(result.data.len() < input.len().div_ceil(3) * 4 * 2);
+    }
+
+    // Pi v1.5.2 keeps PNG where it is the smaller encoding, as for
+    // screenshots and other flat images.
+    #[test]
+    fn a_resized_flat_image_stays_png() {
+        let flat = RgbaImage::from_pixel(400, 300, image::Rgba([30, 30, 30, 255]));
+        let input = encode_png(&flat).expect("png");
+        let result =
+            resize_image(&input, "image/png", limits(200, 1024.0 * 1024.0)).expect("result");
+        assert!(result.was_resized);
+        assert_eq!(result.mime_type, "image/png");
     }
 
     #[test]

@@ -1,5 +1,6 @@
-//! Pi's `src/core/exec.ts` (v1.1.0; see `NOTICE`): direct command execution
-//! with separate stdout and stderr, timeout, and cancellation.
+//! Pi's `src/core/exec.ts` (v1.1.0, with v1.5.2's decoding across chunk
+//! boundaries; see `NOTICE`): direct command execution with separate stdout
+//! and stderr, timeout, and cancellation.
 //!
 //! This low-level utility performs no authorization or sandbox selection.
 //! A caller must authorize and, when required, confine its argv before
@@ -19,6 +20,7 @@ use tokio::time::Instant;
 
 use crate::child_process::{self, ProcessSpec, wait_for_process};
 use crate::owned_work::WorkGate;
+use crate::tools::utf8::Decoder;
 
 /// Pi's exec options. The working directory is the required `cwd`
 /// argument, as in Pi; its unused `options.cwd` member is omitted.
@@ -61,8 +63,10 @@ pub enum ExecEnv {
 /// Pi's exec result, with independent termination facts for Bake callers.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExecResult {
-    /// Unbounded captured output. Each OS read decodes UTF-8 lossily, as
-    /// Pi's `Buffer.toString()` does; a split code point can be replaced.
+    /// Unbounded captured output, decoded as Pi v1.5.2's `StringDecoder`
+    /// decodes it: a code point split between reads is kept whole, invalid
+    /// bytes and an unfinished code point at the end become U+FFFD, and a
+    /// byte-order mark is kept.
     pub stdout: String,
     /// Captured separately, with the same decoding as stdout.
     pub stderr: String,
@@ -90,9 +94,10 @@ pub struct ExecResult {
 /// `packages/subprocess/subprocess/src/index.ts`'s `SENSITIVE_ENV_PATTERN`.
 /// This heuristic cannot identify every secret.
 ///
-/// Like Pi, output has no memory limit. After exit, pipes close at EOF or
-/// after 100 ms without output; each chunk restarts that grace. Normally
-/// completed commands may leave descendants running. Cancellation uses
+/// Output has no memory limit: Pi v1.5.2's 256 MiB cap (`maxBuffer`) is
+/// not ported. After exit, pipes close at EOF or after 100 ms without
+/// output; each chunk restarts that grace. Normally completed commands may
+/// leave descendants running. Cancellation uses
 /// Bake's bash process-group/job termination, immediately killing the
 /// tree rather than Pi's SIGTERM of only the direct child. Descendants
 /// that escape that group/job are outside its ownership.
@@ -149,6 +154,11 @@ pub async fn exec_command(
         }),
         stdin: false,
     };
+    // One decoder per stream, so a character split between two reads is
+    // decoded whole (Pi v1.5.2, #11312). Both are flushed however the wait
+    // ends.
+    let mut stdout = Decoder::keeping_bom();
+    let mut stderr = Decoder::keeping_bom();
     let exit = match child_process::spawn(&spec, options.owner.as_ref()).await {
         Ok(child) => {
             wait_for_process(
@@ -156,13 +166,15 @@ pub async fn exec_command(
                 None,
                 options.signal.as_ref(),
                 deadline,
-                |bytes| result.stdout.push_str(&String::from_utf8_lossy(bytes)),
-                |bytes| result.stderr.push_str(&String::from_utf8_lossy(bytes)),
+                |bytes| result.stdout.push_str(&stdout.decode(bytes)),
+                |bytes| result.stderr.push_str(&stderr.decode(bytes)),
             )
             .await
         }
         Err(error) => Err(error),
     };
+    result.stdout.push_str(stdout.finish());
+    result.stderr.push_str(stderr.finish());
     result.aborted = options.signal.as_ref().is_some_and(AbortSignal::aborted);
     match exit {
         Ok(exit) => {

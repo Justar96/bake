@@ -3,8 +3,11 @@
 //! Ported from Pi `packages/ai/src/api/anthropic-messages.ts` (v1.1.0):
 //! request building, message and tool conversion, beta features, prompt
 //! caching, thinking, the raw SSE event decoder, event assembly, usage, stop
-//! reasons, and errors. The request goes to `{baseUrl}/v1/messages?beta=true`
-//! with the headers `@anthropic-ai/sdk`'s `beta.messages.create` sends.
+//! reasons, and errors. The placement of held system updates and the root
+//! definitions kept in non-strict tool schemas follow v1.5.2
+//! (`b4afdddf44e059c67ccf5097e5317d913521b470`). The request goes to
+//! `{baseUrl}/v1/messages?beta=true` with the headers `@anthropic-ai/sdk`'s
+//! `beta.messages.create` sends.
 //!
 //! Not ported: GitHub Copilot headers, workload identity federation, managed
 //! mid-conversation effort, server-side fallback models, native tool changes
@@ -307,7 +310,6 @@ pub fn convert_messages(
                 }
             },
             Message::Assistant(assistant) => {
-                params.append(&mut pending_system);
                 let mut blocks: Vec<Value> = Vec::new();
                 for block in &assistant.content {
                     match block {
@@ -351,7 +353,12 @@ pub fn convert_messages(
                         }
                     }
                 }
+                // Held updates go directly before an assistant message that
+                // is sent: one with no blocks is dropped, and an update ahead
+                // of the next user message is refused with a 400 (Pi v1.5.2,
+                // #11091).
                 if !blocks.is_empty() {
+                    params.append(&mut pending_system);
                     params.push(json!({ "role": "assistant", "content": blocks }));
                 }
             }
@@ -485,6 +492,15 @@ pub fn convert_tools(
                     .cloned()
                     .unwrap_or_else(|| json!([])),
             );
+            // Pi v1.5.2 (#9557): shared definitions stay, so property
+            // `$ref`s still resolve. Other root keywords stay out:
+            // Anthropic rejects a root `anyOf`, `oneOf`, or `allOf` with a
+            // 400.
+            for key in ["$defs", "definitions"] {
+                if let Some(definitions) = parameters.get(key) {
+                    input_schema.insert(key.into(), definitions.clone());
+                }
+            }
             let mut converted = Map::new();
             converted.insert(
                 "name".into(),

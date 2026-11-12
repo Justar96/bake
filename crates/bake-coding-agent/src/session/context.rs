@@ -333,7 +333,13 @@ pub(crate) fn context_entries(path: Vec<&SessionEntry>) -> Vec<&SessionEntry> {
     entries
 }
 
-fn project_entry(entry: &SessionEntry, edit: Option<&SessionEntry>) -> Vec<AgentMessage> {
+/// Pi's `projectContextEntry`: the messages one entry contributes to model
+/// context, with `edit`, its latest context edit, applied. Branch summaries
+/// share it (Pi v1.5.2).
+pub(crate) fn project_entry(
+    entry: &SessionEntry,
+    edit: Option<&SessionEntry>,
+) -> Vec<AgentMessage> {
     let messages = session_entry_to_context_messages(entry);
     let Some(edit) = edit else {
         return messages;
