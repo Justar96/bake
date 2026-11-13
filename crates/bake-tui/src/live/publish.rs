@@ -3,6 +3,37 @@
 //! status line.
 
 use super::*;
+use bake_coding_agent::spawned::{SpawnHost, SpawnedState};
+use bake_tui_view::crew::{CrewMember, CrewState};
+
+/// The host's agents as the crew panel draws them.
+pub(super) fn crew(host: &SpawnHost) -> Vec<CrewMember> {
+    let now = bake_ai::now_ms();
+    host.list()
+        .into_iter()
+        .map(|agent| CrewMember {
+            id: agent.id,
+            name: agent.name,
+            state: match agent.state {
+                SpawnedState::Starting => CrewState::Starting,
+                SpawnedState::Working => CrewState::Working,
+                SpawnedState::Asking => CrewState::Asking,
+                SpawnedState::Idle => CrewState::Idle,
+                SpawnedState::Failed(reason) => CrewState::Failed(reason),
+                // An agent that ended unsuccessfully shows as failed, with
+                // why; one that was stopped or finished shows as exited.
+                SpawnedState::Exited(Some(reason)) => CrewState::Failed(reason),
+                SpawnedState::Exited(None) => CrewState::Exited(None),
+            },
+            tool: agent.tool,
+            line: agent.last_line,
+            task: agent.task,
+            age: std::time::Duration::from_millis(
+                u64::try_from(now.saturating_sub(agent.since)).unwrap_or(0),
+            ),
+        })
+        .collect()
+}
 
 impl Driver {
     pub(super) fn publish_mcp(&mut self) {
@@ -27,6 +58,14 @@ impl Driver {
         if agents != self.agents {
             self.agents = agents.clone();
             self.send(RuntimeUpdate::Agents(agents));
+        }
+        // The spawned agents, when the host changed or a replaced session
+        // has none; the view ages them by its own clock.
+        let version = self.session.spawned().map(SpawnHost::version);
+        if version != self.crew_version {
+            self.crew_version = version;
+            let crew = self.session.spawned().map(crew).unwrap_or_default();
+            self.send(RuntimeUpdate::Crew(crew));
         }
     }
 

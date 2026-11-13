@@ -55,6 +55,7 @@
 
 pub mod approvals;
 pub mod jsonl;
+mod questions;
 pub mod types;
 
 use std::io::Read;
@@ -120,8 +121,31 @@ pub async fn run_rpc_mode(session: AgentSession, options: RpcModeOptions) -> i32
         handler,
         tasks: tokio::task::JoinSet::new(),
     };
+    let noticing = Arc::new(AtomicBool::new(false));
     let status = loop {
         rpc.reap();
+        // Subscribed before the check, so a notice posted after it still
+        // wakes the loop.
+        let mut jobs = rpc.handler.session().jobs().subscribe();
+        if rpc.handler.session().jobs().has_undelivered() && !noticing.swap(true, Ordering::SeqCst)
+        {
+            let handler = Arc::clone(&rpc.handler);
+            let noticing = Arc::clone(&noticing);
+            rpc.tasks.spawn(async move {
+                loop {
+                    handler.deliver_notices().await;
+                    noticing.store(false, Ordering::SeqCst);
+                    // A notice posted while the turn ran, after its last
+                    // step, woke a loop that found this task busy.
+                    let jobs = handler.session().jobs().clone();
+                    if !(jobs.has_undelivered() && jobs.notice_would_wake())
+                        || noticing.swap(true, Ordering::SeqCst)
+                    {
+                        break;
+                    }
+                }
+            });
+        }
         tokio::select! {
             line = lines.recv() => match line {
                 Some(line) => rpc.handle_line(&line),
@@ -129,6 +153,7 @@ pub async fn run_rpc_mode(session: AgentSession, options: RpcModeOptions) -> i32
                 None => break 0,
             },
             status = &mut interrupt => break status,
+            true = jobs.changed() => {}
         }
     };
     rpc.shutdown().await;
@@ -244,6 +269,9 @@ struct Handler {
     approvals: Option<ApprovalBroker>,
     bridge: Option<Arc<ApprovalBridge>>,
     subscription: Mutex<Option<SessionSubscription>>,
+    /// The client's connection to the session's `ask_user` questions,
+    /// renewed with each session ([`Self::subscribe`]).
+    questions: Mutex<Option<Arc<questions::QuestionBridge>>>,
     /// The one prompt waiting to learn that its run was admitted, under
     /// the key it claimed. The session's next `agent_start` is that
     /// prompt's: only an idle session with no claim admits one, so no
@@ -287,6 +315,7 @@ impl Handler {
             approvals,
             bridge,
             subscription: Mutex::new(None),
+            questions: Mutex::new(None),
             run_started: Arc::new(Mutex::new(None)),
             prompts: AtomicU64::new(0),
             prompting: tokio::sync::Mutex::new(()),
@@ -313,6 +342,13 @@ impl Handler {
     /// Subscribes to the session's events, replacing any earlier
     /// subscription, as Pi's `rebindSession` does.
     fn subscribe(&self) {
+        *self
+            .questions
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = self
+            .session()
+            .questions()
+            .and_then(|broker| questions::QuestionBridge::connect(broker, &self.out));
         let out = Arc::clone(&self.out);
         let started = Arc::clone(&self.run_started);
         let subscription = self.session().subscribe(move |event| {
@@ -351,8 +387,18 @@ impl Handler {
     /// Settles the approval request an answer names; an answer for no
     /// request is ignored, as in Pi.
     fn answer(&self, response: &ExtensionUiResponse) {
-        if let Some(bridge) = &self.bridge {
-            bridge.answer(response);
+        if let Some(bridge) = &self.bridge
+            && bridge.answer(response)
+        {
+            return;
+        }
+        let questions = self
+            .questions
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        if let Some(questions) = questions {
+            questions.answer(response);
         }
     }
 
@@ -622,6 +668,46 @@ impl Handler {
             self.release_run_start(key);
         }
         self.send(&response);
+        drop(deciding);
+        if running {
+            let _ = run.await;
+        }
+    }
+
+    /// Opens a turn for what was posted to the idle session, as the
+    /// terminal does: a settled background job, or a message from a
+    /// subagent or a telecom peer, while the wake budget lasts; past it the
+    /// notices wait for the next prompt. A running turn takes them at its
+    /// next step instead. The turn is decided under the same hold and
+    /// run-start claim as a `prompt`, so a client's prompt and a notice
+    /// turn never both start; its events stream as a prompt's do.
+    async fn deliver_notices(&self) {
+        let session = self.session();
+        let jobs = session.jobs();
+        if !jobs.has_undelivered() {
+            return;
+        }
+        let deciding = self.prompting.lock().await;
+        if session.is_streaming() || session.is_compacting() {
+            return;
+        }
+        if !jobs.notice_would_wake() {
+            // Kept for the next prompt; no turn opens.
+            let _ = session.deliver_job_notices().await;
+            return;
+        }
+        let (Some(key), started) = self.claim_run_start(&session) else {
+            return;
+        };
+        let run = session.deliver_job_notices();
+        tokio::pin!(run);
+        tokio::pin!(started);
+        let running = tokio::select! {
+            biased;
+            Ok(()) = &mut started => true,
+            _ = &mut run => false,
+        };
+        self.release_run_start(key);
         drop(deciding);
         if running {
             let _ = run.await;

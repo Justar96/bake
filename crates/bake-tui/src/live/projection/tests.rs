@@ -720,6 +720,83 @@ fn a_subagent_settlement_is_the_card_of_the_agent_it_reports() {
 }
 
 #[test]
+fn telecom_messages_and_spawn_notices_show_who_said_what() {
+    let row = |custom_type: &str, text: &str, details: Value| {
+        info(notice_row(
+            &custom(CustomMessage {
+                custom_type: custom_type.into(),
+                content: UserContent::Text(text.into()),
+                display: true,
+                details: Some(details),
+                timestamp: 0,
+            }),
+            &Labels::new(),
+        ))
+    };
+    let telecom = bake_coding_agent::telecom::MESSAGE_TYPE;
+    let spawned = bake_coding_agent::spawned::NOTICE_TYPE;
+    assert_eq!(
+        row(
+            telecom,
+            "[telecom] Message from bravo:\nadd.sh prints 5\nfor 2 and 3",
+            json!({ "kind": "message", "from": "bravo", "human": false })
+        )
+        .as_deref(),
+        Some("← bravo: add.sh prints 5 for 2 and 3")
+    );
+    assert_eq!(
+        row(
+            telecom,
+            "[telecom] Message from the person at bravo's terminal:\nhi",
+            json!({ "kind": "message", "from": "bravo", "human": true })
+        )
+        .as_deref(),
+        Some("← bravo's person: hi")
+    );
+    assert_eq!(
+        row(
+            telecom,
+            &format!(
+                "[telecom] alpha asks you (ask a1):\n{}\nAnswer with telecom action \"reply\", askId \"a1\".",
+                "y".repeat(200)
+            ),
+            json!({ "kind": "ask", "from": "alpha", "askId": "a1" })
+        )
+        .as_deref(),
+        Some(format!("← alpha asks (a1): {}…", "y".repeat(160)).as_str())
+    );
+    assert_eq!(
+        row(
+            spawned,
+            "[spawn] alpha-1, which you started on \"t\", finished a run and is idle. Its last answer:\ndone",
+            json!({ "agent": "alpha-1", "status": "idle" })
+        )
+        .as_deref(),
+        Some("← alpha-1 finished: done")
+    );
+    assert_eq!(
+        row(
+            spawned,
+            "[spawn] alpha-1, which you started on \"t\", failed its run: quota",
+            json!({ "agent": "alpha-1", "status": "failed" })
+        )
+        .as_deref(),
+        Some("← alpha-1 failed: quota")
+    );
+    assert_eq!(
+        row(
+            telecom,
+            "[telecom] alpha asks you (ask a2) and waits for your answer:\nwhich port?\nAnswer with telecom action \"reply\", askId \"a2\".",
+            json!({ "kind": "ask", "from": "alpha", "askId": "a2" })
+        )
+        .as_deref(),
+        Some("← alpha asks (a2): which port?")
+    );
+    // Without the details it names the sender by, nothing is drawn.
+    assert_eq!(row(telecom, "[telecom] x", json!({})), None);
+}
+
+#[test]
 fn a_stop_hook_cap_note_is_an_info_row_and_other_hook_context_is_not_shown() {
     let message = |details: Value| {
         custom(CustomMessage {

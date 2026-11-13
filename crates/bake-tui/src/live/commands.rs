@@ -103,6 +103,7 @@
 
 mod bug;
 pub mod changelog;
+mod crew;
 mod gh;
 pub mod settings;
 mod share;
@@ -158,6 +159,8 @@ pub const COMMANDS: &[&str] = &[
     "changelog",
     "share",
     "bug",
+    "telecom",
+    "spawn",
 ];
 
 /// The commands that replace the running session ([`Done::Replace`]), move
@@ -174,7 +177,7 @@ pub const IDLE: &[&str] = &["share", "bug"];
 /// The commands that open no dialog, so none is closed when they end:
 /// closing one hands the keyboard over afresh and drops the keys typed
 /// meanwhile.
-pub const NO_DIALOG: &[&str] = &[COMPACT, "changelog"];
+pub const NO_DIALOG: &[&str] = &[COMPACT, "changelog", "telecom", "spawn"];
 
 /// The command that runs as the session's work, as a turn does: the bar
 /// shows it, and Esc cancels it rather than a dialog.
@@ -511,6 +514,8 @@ pub async fn run(name: &str, argument: String, mut context: Context) -> Outcome 
         "changelog" => Ok(Done::Rows(changelog::rows(changelog::CHANGELOG))),
         "share" => share::share(&mut context).await,
         "bug" => bug::bug(&mut context, &argument).await,
+        "telecom" => crew::telecom(&context, &argument).await,
+        "spawn" => crew::spawn(&context, &argument).await,
         _ => Err(format!("/{name} is not a command.")),
     };
     context.shown.store(0, std::sync::atomic::Ordering::SeqCst);

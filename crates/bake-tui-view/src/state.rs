@@ -429,6 +429,12 @@ pub struct State {
     /// The subagents the runtime reported ([`RuntimeUpdate::Agents`]), in
     /// start order: a live session's, or the preview fixture's samples.
     pub agents: Vec<Agent>,
+    /// The spawned agents the runtime reported ([`RuntimeUpdate::Crew`]),
+    /// drawn above the composer.
+    pub crew: Vec<crate::crew::CrewMember>,
+    /// When `crew` was reported, on [`Self::now`]'s clock, so its ages
+    /// advance between reports.
+    pub crew_at: Duration,
     /// The task the tasks list selects; one no longer listed, or none,
     /// selects the first listed.
     pub selected: Option<TaskId>,
@@ -605,6 +611,8 @@ impl State {
             draft: Draft::default(),
             focus: Focus::Composer,
             agents: Vec::new(),
+            crew: Vec::new(),
+            crew_at: Duration::ZERO,
             selected: None,
             seen: Vec::new(),
             notice: None,
@@ -1066,6 +1074,7 @@ impl State {
             .chain(copied)
             .chain(tip)
             .chain(clock)
+            .chain(crate::crew::next_change(&self.crew, self.now, self.tones))
             .min()
     }
 
@@ -1257,6 +1266,10 @@ fn runtime(state: &mut State, update: RuntimeUpdate) {
         RuntimeUpdate::Agents(list) => {
             state.agents = list;
             tasks_changed(state);
+        }
+        RuntimeUpdate::Crew(list) => {
+            state.crew = list;
+            state.crew_at = state.now;
         }
         RuntimeUpdate::Jobs(list) => {
             state.jobs = list;

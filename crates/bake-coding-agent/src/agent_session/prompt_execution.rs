@@ -108,6 +108,8 @@ pub(super) struct PromptExecution {
     /// The session's live permission, which the prompt states as it is at
     /// admission.
     permission: Option<crate::permissions::LivePermission>,
+    /// The session's telecom station, which briefs each prompt.
+    telecom: Option<crate::telecom::Station>,
 }
 
 impl PromptExecution {
@@ -136,6 +138,10 @@ impl PromptExecution {
             tool_hooks: session.tool_hooks.clone(),
             control: Arc::clone(&session.control),
             permission: session.permission.clone(),
+            telecom: match session.telecom() {
+                Some(Ok(station)) => Some(station.clone()),
+                _ => None,
+            },
         }
     }
 
@@ -956,6 +962,11 @@ impl PromptExecution {
             }
             None => (Vec::new(), Vec::new()),
         };
+        // The team, when it changed since the last prompt.
+        let brief = self
+            .telecom
+            .as_ref()
+            .and_then(|station| station.brief(&text));
         let mut content = vec![UserContentBlock::Text(TextContent::new(text))];
         content.extend(images.into_iter().map(UserContentBlock::Image));
         let mut messages: Vec<LiveMessage> = Vec::with_capacity(2);
@@ -973,6 +984,9 @@ impl PromptExecution {
                 .into_iter()
                 .map(job_notices::live),
         );
+        if let Some(brief) = brief {
+            messages.push(job_notices::live(brief));
+        }
         messages.extend(before);
         messages.push(
             UserMessage {

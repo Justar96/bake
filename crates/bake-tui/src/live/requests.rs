@@ -169,6 +169,9 @@ impl Driver {
             // To the running command, which drops an answer for a dialog
             // it no longer shows.
             Request::Dialog { id, answer } => {
+                if let Some(desk) = &self.desk {
+                    desk.answer(id, &answer);
+                }
                 if let Some(command) = &self.command {
                     // Esc on the dialog shown now also aborts the work on
                     // its answer, such as a held check of the proxy; a

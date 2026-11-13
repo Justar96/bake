@@ -179,6 +179,9 @@ impl Driver {
         let update = self.update.take().inspect(JoinHandle::abort);
         // Pi's `dispose`, awaited: the run, its writes, and its requests end
         // before the terminal is given back.
+        if let Some(desk) = &self.desk {
+            desk.close();
+        }
         shut_down(&self.session, self.approvals.as_ref()).await;
         if let Some(subscription) = self.subscription.take() {
             subscription.unsubscribe();

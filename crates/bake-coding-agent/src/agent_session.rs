@@ -849,6 +849,16 @@ pub struct AgentSession {
     /// The subagents this session starts, when `subagents` is on
     /// ([`Self::set_subagents`]).
     subagents: Option<crate::subagents::SubagentHost>,
+    /// The session's telecom station, or why it did not start, when
+    /// telecom is on ([`Self::set_telecom`]).
+    telecom: Option<Result<crate::telecom::Station, String>>,
+    /// The station's subscription to this session's runs.
+    telecom_subscription: Option<SessionSubscription>,
+    /// The queue of `ask_user` questions a frontend answers
+    /// ([`Self::set_questions`]).
+    questions: Option<crate::questions::QuestionBroker>,
+    /// The headless agents this session starts ([`Self::set_spawned`]).
+    spawned: Option<crate::spawned::SpawnHost>,
     /// The permission its tools resolve under, when the session was given
     /// one to switch ([`Self::set_permission`]).
     permission: Option<crate::permissions::LivePermission>,
@@ -1863,6 +1873,10 @@ impl AgentSession {
             hooks: shared_hooks,
             tool_hooks,
             subagents: None,
+            telecom: None,
+            telecom_subscription: None,
+            questions: None,
+            spawned: None,
             permission: None,
             #[cfg(test)]
             schedules,
@@ -2283,6 +2297,54 @@ impl AgentSession {
     /// children: [`Self::shutdown`] stops them.
     pub fn set_subagents(&mut self, host: crate::subagents::SubagentHost) {
         self.subagents = Some(host);
+    }
+
+    /// Records the session's telecom station, or why it did not start. A
+    /// station follows the session's runs to publish whether it is busy,
+    /// and briefs each prompt on the team ([`crate::telecom`]); it is
+    /// owned by the session's work gate, so [`Self::shutdown`] stops it and
+    /// gives its callsign back.
+    pub fn set_telecom(&mut self, telecom: Result<crate::telecom::Station, String>) {
+        if let Some(old) = self.telecom_subscription.take() {
+            old.unsubscribe();
+        }
+        if let Ok(station) = &telecom {
+            let station = station.clone();
+            self.telecom_subscription = Some(self.subscribe(move |event| station.observe(event)));
+        }
+        self.telecom = Some(telecom);
+    }
+
+    /// Records the queue the session's `ask_user` tool asks through; a
+    /// frontend connects to it ([`Self::questions`]), and
+    /// [`Self::shutdown`] closes it, declining what is still asked.
+    pub fn set_questions(&mut self, broker: crate::questions::QuestionBroker) {
+        self.questions = Some(broker);
+    }
+
+    /// Records the host of the headless agents this session's tools and
+    /// frontend start; they are owned by its work gate, so
+    /// [`Self::shutdown`] ends them.
+    pub fn set_spawned(&mut self, host: crate::spawned::SpawnHost) {
+        self.spawned = Some(host);
+    }
+
+    /// The headless agents this session starts, when it can.
+    pub fn spawned(&self) -> Option<&crate::spawned::SpawnHost> {
+        self.spawned.as_ref()
+    }
+
+    /// The queue of the person's questions, when the session can ask.
+    pub fn questions(&self) -> Option<&crate::questions::QuestionBroker> {
+        self.questions.as_ref()
+    }
+
+    /// The session's telecom station: `None` when telecom is off,
+    /// `Some(Err(_))` with why it did not start.
+    pub fn telecom(&self) -> Option<Result<&crate::telecom::Station, &str>> {
+        self.telecom
+            .as_ref()
+            .map(|telecom| telecom.as_ref().map_err(String::as_str))
     }
 
     /// Gives the session the permission its tools resolve under, so
@@ -3372,6 +3434,12 @@ impl AgentSession {
         // The jobs' drivers are the gate's tasks, so the drain below waits
         // for every job to become terminal; this future need not be kept.
         drop(self.jobs.close());
+        if let Some(Ok(station)) = &self.telecom {
+            station.leave();
+        }
+        if let Some(questions) = &self.questions {
+            questions.close();
+        }
         let drained = self.work.close();
         let agent = Arc::clone(&self.agent);
         let listeners = Arc::clone(&self.listeners);

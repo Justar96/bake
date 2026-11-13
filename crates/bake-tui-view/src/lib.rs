@@ -13,6 +13,7 @@ pub mod codemode;
 pub mod completion;
 pub mod composer;
 pub mod copy;
+pub mod crew;
 pub mod dialog;
 pub mod diff;
 pub mod editor;

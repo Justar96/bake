@@ -66,6 +66,7 @@ mod jobs;
 mod mcp;
 pub mod projection;
 mod publish;
+mod questions;
 mod requests;
 pub mod tree;
 
@@ -398,6 +399,17 @@ impl LivePort {
                 ))
             }));
         }
+        // The person answers the session's `ask_user` questions in dialogs
+        // whose ids commands share.
+        let dialog_ids: Arc<std::sync::atomic::AtomicU64> = Arc::default();
+        let desk = session.questions().and_then(|broker| {
+            questions::Desk::connect(
+                broker,
+                Arc::clone(&send),
+                Arc::clone(&dialog_ids),
+                runtime.clone(),
+            )
+        });
         let projector = Arc::new(Mutex::new(Projector::with_history(&session.messages())));
         let status_due = Arc::new(Notify::new());
         let subscription = subscribe(&session, &projector, &send, &status_due);
@@ -435,11 +447,13 @@ impl LivePort {
             #[cfg(test)]
             gh,
             command: None,
-            dialog_ids: Arc::default(),
+            dialog_ids,
+            desk,
             startup: None,
             orphans: Arc::default(),
             shells: Vec::new(),
             agents: Vec::new(),
+            crew_version: None,
             status_due,
             status: None,
         };
@@ -678,8 +692,11 @@ struct Driver {
     subscription: Option<bake_coding_agent::agent_session::SessionSubscription>,
     /// The command that is running; one at a time.
     command: Option<CommandRun>,
-    /// The id of the last dialog opened, shared by every command.
+    /// The id of the last dialog opened, shared by every command and the
+    /// question desk.
     dialog_ids: Arc<std::sync::atomic::AtomicU64>,
+    /// Where the session's `ask_user` questions are asked.
+    desk: Option<Arc<questions::Desk>>,
     /// The once-per-launch CLIProxyAPI refresh, and its abort.
     startup: Option<(JoinHandle<()>, AbortController)>,
     /// The update check the command line gave, until the driver begins.
@@ -696,6 +713,9 @@ struct Driver {
     shells: Vec<bake_tui_view::jobs::BackgroundJob>,
     /// The subagents last sent to the view.
     agents: Vec<bake_tui_view::agents::Agent>,
+    /// The spawn host's version the crew panel last showed; `None` for a
+    /// session that spawns no agents.
+    crew_version: Option<u64>,
     /// Woken by the session's listener when the status line may have
     /// changed ([`projection::moves_status`]).
     status_due: Arc<Notify>,
