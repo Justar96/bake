@@ -1,13 +1,11 @@
 name: Bake
 
 on:
-  pull_request:
-    branches: [main]
-  # A manual run from a scratch branch checks, during development, a
-  # platform a developer cannot check locally. Linux x86_64 is checked
-  # before every push, so a manual run leaves it out unless asked. Windows
-  # and macOS are not released yet and run only when a manual run names
-  # them.
+  # Bake's CI runs locally (AGENTS.md), so this workflow runs only by hand,
+  # when the owner asks for a check of a platform not at hand. Linux x86_64
+  # is checked before every push, so a manual run leaves it out unless
+  # asked. Windows and macOS are not released yet and run only when a
+  # manual run names them.
   workflow_dispatch:
     inputs:
       platforms:

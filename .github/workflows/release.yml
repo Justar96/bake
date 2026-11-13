@@ -1,12 +1,14 @@
 name: Release
 
-# Push a tag `v<version>` from the default branch to release the native agent
-# for linux-x64 and linux-arm64: each is built, packed, and installed by the
-# shipped installer on its own runner, the two archives are assembled into one
-# complete release, then one job signs the native manifest, drafts and
-# publishes the GitHub release, deploys the download service, and checks what
-# it serves. Run it by hand for a dry run of the builds and the assembly,
-# which publishes nothing and reports what would refuse a tag.
+# Bake releases are built, signed, and published locally, with the GitHub
+# release and its tag made by hand (distribution/README.md, "Release steps by
+# hand"), so a pushed tag no longer starts this workflow. It runs only by hand,
+# as a dry run: linux-x64 and linux-arm64 are each built, packed, and installed
+# by the shipped installer on their own runners, and the two archives are
+# assembled into one complete release with a throwaway key. It publishes
+# nothing and reports what would refuse a tag. The publish job, which signs,
+# drafts the GitHub release, and deploys the download service, runs only on a
+# tag push, so it no longer runs.
 #
 # Every step is `bake-release` (crates/bake-release), which checks each
 # artifact with `bake-update`, the code a user's `bake update` runs. Node runs
@@ -15,8 +17,6 @@ name: Release
 # 0.3 installs update from: the publish job carries the served copy forward
 # unchanged.
 on:
-  push:
-    tags: ['v[0-9]+.[0-9]+.[0-9]+*']
   workflow_dispatch:
 
 permissions:
