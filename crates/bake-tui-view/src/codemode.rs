@@ -9,8 +9,9 @@
 //!
 //! Bake draws it in the transcript's grammar:
 //!
-//! - A `{} codemode:` head whose status counts the calls: how many run while
-//!   the script runs, and how many failed or were cancelled once it ended.
+//! - A `{} codemode` head, with no colon since no argument follows, whose
+//!   status counts the calls: how many run while the script runs, and how
+//!   many failed or were cancelled once it ended.
 //!   It ends with how long the script took, Pi's `Took`, read from the
 //!   result's `Wall time` line, so a resumed transcript reads the same.
 //! - The script, numbered and coloured as JavaScript, and the box, marks,
@@ -211,7 +212,7 @@ pub(crate) fn present(
     lines
 }
 
-/// `{} codemode:`, labelled as every call is by its tool, then its status.
+/// `{} codemode`, named as every call is by its tool, then its status.
 fn head(script: &Codemode, width: usize, look: Look) -> Vec<Line<'static>> {
     let (mark, style) = transcript::script_mark(script.state, look);
     let mut lines = vec![Line::from(vec![
@@ -543,6 +544,13 @@ fn output(
     gutter: &dyn Fn() -> Vec<Span<'static>>,
 ) -> Vec<Line<'static>> {
     let lines: Vec<String> = script.output.iter().map(|line| clean(line)).collect();
+    // A returned object or array reads a member a line, as a tool's JSON
+    // output does, rather than one line wrapped through its tokens; a
+    // failed script's output stays as it came.
+    let lines = match transcript::json_lines(&lines) {
+        Some(laid) if script.state != CallState::Failed => laid,
+        _ => lines,
+    };
     let lines = trimmed(&lines);
     if lines.is_empty() {
         return Vec::new();
@@ -626,13 +634,36 @@ mod tests {
         assert_eq!(
             render(done, 60, PLAIN),
             [
-                "  ✓ codemode:  1 call · took 0.1s",
+                "  ✓ codemode  1 call · took 0.1s",
                 "  │",
                 r#"  │ ✓ read  {"path":"a"}  5ms"#,
                 "  │",
                 "  │ hello",
             ]
         );
+    }
+
+    #[test]
+    fn a_returned_json_value_reads_a_member_a_line() {
+        let mut done = script(CallState::Done);
+        done.output = vec![r#"[["read","bash"],{"name":"telecom","limit":10}]"#.into()];
+        assert_eq!(
+            render(done.clone(), 60, PLAIN),
+            [
+                "  ✓ codemode",
+                "  │",
+                "  │ [",
+                "  │   [",
+                r#"  │     "read","#,
+                r#"  │     "bash""#,
+                "  │   ],",
+                "  │ ⋯ 5 more lines",
+            ]
+        );
+        // A failed script's output is its error, kept as it came.
+        done.state = CallState::Failed;
+        done.output = vec![r#"{"error":"boom"}"#.into()];
+        assert_eq!(render(done, 60, PLAIN)[2], r#"  │ {"error":"boom"}"#);
     }
 
     // Pi's "shows the cost of model calls and their total" is not ported:
@@ -649,7 +680,7 @@ mod tests {
         assert_eq!(
             render(rejected, 80, PLAIN),
             [
-                "  ✗ codemode:",
+                "  ✗ codemode",
                 "  │ 1  // @options: {}",
                 "  │",
                 "  │ The @options line must be followed by JavaScript source",
@@ -689,7 +720,7 @@ mod tests {
             None,
         )];
         let lines = render(running.clone(), 60, PLAIN);
-        assert_eq!(lines[0], "  ● codemode:  1 call · 1 running");
+        assert_eq!(lines[0], "  ● codemode  1 call · 1 running");
         assert_eq!(lines[2], r#"  │ ● bash  {"command":"sleep 3"}"#);
         let mut done = running;
         done.state = CallState::Done;
@@ -697,7 +728,7 @@ mod tests {
         done.calls[0].duration = Some(Duration::from_millis(3_004));
         done.wall_time = Some(Duration::from_millis(5_100));
         let lines = render(done, 60, PLAIN);
-        assert_eq!(lines[0], "  ✓ codemode:  1 call · took 5.1s");
+        assert_eq!(lines[0], "  ✓ codemode  1 call · took 5.1s");
         assert_eq!(lines[2], r#"  │ ✓ bash  {"command":"sleep 3"}  3.0s"#);
         assert!(lines.iter().all(|line| !line.contains("running")));
     }
@@ -746,7 +777,7 @@ mod tests {
         assert_eq!(
             lines[..4],
             [
-                "  ✗ codemode:  10 calls · 1 failed · 1 cancelled",
+                "  ✗ codemode  10 calls · 1 failed · 1 cancelled",
                 "  │",
                 "  │ ⋯ 2 earlier calls",
                 r#"  │ ✓ read  {"path":"f3"}  3ms"#,
@@ -905,15 +936,15 @@ mod tests {
         let lines = render(stopped, 60, look);
         assert_eq!(
             lines[1],
-            "  {} codemode:  1 call · 1 cancelled   interrupted"
+            "  {} codemode  1 call · 1 cancelled   interrupted"
         );
         // A blinking head keeps its width while hidden.
         let mut running = script(CallState::Running);
         running.code = "return 1;".into();
         let on = render(running.clone(), 40, look);
         let off = render(running, 40, Look { lit: false, ..look });
-        assert_eq!(on[1], "  {} codemode:");
-        assert_eq!(off[1], "     codemode:");
+        assert_eq!(on[1], "  {} codemode");
+        assert_eq!(off[1], "     codemode");
     }
 
     #[test]

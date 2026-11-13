@@ -2660,3 +2660,157 @@ mod visual_properties {
         }
     }
 }
+
+#[test]
+fn every_tool_heads_its_card_with_a_title_and_what_it_acts_on() {
+    use bake_tui_view::transcript::{Look, present};
+    let tools: Vec<(&str, Value)> = vec![
+        (
+            "read",
+            json!({ "path": "crates/bake-tui/src/live/projection.rs", "offset": 10, "limit": 20 }),
+        ),
+        (
+            "bash",
+            json!({ "command": "cargo test --locked -p bake-tui" }),
+        ),
+        (
+            "edit",
+            json!({ "path": "src/main.rs", "edits": [{ "oldText": "a", "newText": "b" }] }),
+        ),
+        (
+            "write",
+            json!({ "path": "notes.md", "content": "hello\nworld" }),
+        ),
+        ("ls", json!({ "path": "src" })),
+        ("find", json!({ "pattern": "*.rs", "path": "crates" })),
+        (
+            "grep",
+            json!({ "pattern": "fn main", "path": "crates", "glob": "*.rs" }),
+        ),
+        ("job_output", json!({ "job_id": "bash-1" })),
+        ("job_list", json!({})),
+        ("job_kill", json!({ "job_id": "bash-1" })),
+        (
+            "web_search",
+            json!({ "queries": ["rust ratatui", "crossterm"] }),
+        ),
+        ("web_fetch", json!({ "url": "https://docs.rs/ratatui" })),
+        (
+            "task_document",
+            json!({ "operation": "revise", "id": "plan-1", "document": { "id": "plan-1", "kind": "plan", "body": "1. do it", "state": "active" } }),
+        ),
+        (
+            "schedule_create",
+            json!({ "prompt": "check CI", "after_seconds": 600 }),
+        ),
+        ("schedule_list", json!({})),
+        ("schedule_delete", json!({ "id": "schedule-1" })),
+        (
+            "subagent",
+            json!({ "description": "Review parser", "prompt": "review", "provider": "faux", "model": "m" }),
+        ),
+        (
+            "send_message",
+            json!({ "agent_id": "child-1", "message": "also check tests" }),
+        ),
+        ("interrupt_agent", json!({ "agent_id": "child-1" })),
+        ("list_agents", json!({})),
+        ("list_subagent_models", json!({})),
+        ("list_mcp_resources", json!({ "server": "github" })),
+        (
+            "read_mcp_resource",
+            json!({ "server": "github", "uri": "repo://bake/README.md" }),
+        ),
+        (
+            "mcp__github__list_issues",
+            json!({ "repo": "bake", "state": "open" }),
+        ),
+        ("telecom", json!({ "action": "board" })),
+        (
+            "telecom",
+            json!({ "action": "send", "to": "bravo", "message": "add.sh prints 5 for arguments 2 and 3" }),
+        ),
+        (
+            "telecom",
+            json!({ "action": "ask", "to": "alpha", "message": "which port does the dev server use?" }),
+        ),
+        (
+            "telecom",
+            json!({ "action": "reply", "askId": "a1", "message": "8080" }),
+        ),
+        (
+            "telecom",
+            json!({ "action": "status", "message": "fixing CI" }),
+        ),
+        (
+            "spawn_agent",
+            json!({ "task": "Read README.md and summarize it.\nDo not edit files.", "model": "cliproxyapi/claude-opus-5-5" }),
+        ),
+        (
+            "stop_agent",
+            json!({ "agent": "alpha-1", "interrupt": true }),
+        ),
+        (
+            "ask_user",
+            json!({ "questions": [{ "question": "Which database should the service use?", "header": "DB", "options": [{ "label": "Postgres" }, { "label": "SQLite" }] }, { "question": "Port?" }] }),
+        ),
+    ];
+    let look = Look {
+        tones: bake_tui_view::activity::Tones::None,
+        classic: false,
+        lit: true,
+        mermaid: bake_tui_view::mermaid::Mermaid::Streaming,
+    };
+    let heads: Vec<String> = tools
+        .into_iter()
+        .enumerate()
+        .map(|(index, (tool, args))| {
+            let mut projector = Projector::default();
+            let id = format!("c{index}");
+            run(&mut projector, start(&id, tool, args));
+            let rows = live_rows(run(&mut projector, end(&id, tool, "ok", None)));
+            present(&rows, 0, 100, look)
+                .iter()
+                .map(|line| line.to_string().trim_end().to_owned())
+                .find(|line| !line.is_empty())
+                .expect("a head")
+        })
+        .collect();
+    assert_eq!(
+        heads,
+        [
+            "  ✓ Read: crates/bake-tui/src/live/projection.rs:10-29  1 line",
+            "  ✓ Bash: cargo test --locked -p bake-tui",
+            "  ✓ Edit: src/main.rs",
+            "  ✓ Write: notes.md  +2",
+            "  ✓ Ls:   src  1 entry",
+            "  ✓ Find: *.rs in crates  1 file",
+            "  ✓ Grep: fn main in crates (*.rs)",
+            "  ✓ Job output   bash-1",
+            "  ✓ Jobs",
+            "  ✓ Stop job   bash-1  stopping",
+            "  ✓ Web search: rust ratatui, crossterm",
+            "  ✓ Web fetch: https://docs.rs/ratatui  1 line",
+            "  ✓ Task document: revise · plan-1 · plan · active",
+            "  ✓ Schedule: check CI · in 10m",
+            "  ✓ Schedules",
+            "  ✓ Unschedule: schedule-1",
+            "  ✓ Agent: Review parser · faux/m",
+            "  ✓ Message: also check tests   child-1  delivered",
+            "  ✓ Interrupt   child-1  stopping",
+            "  ✓ Agents",
+            "  ✓ Models",
+            "  ✓ MCP resources: github",
+            "  ✓ MCP resource: repo://bake/README.md · github",
+            "  ✓ github · list_issues: repo bake · state open",
+            "  ✓ Telecom: board",
+            "  ✓ Telecom: send to bravo · add.sh prints 5 for arguments 2 and 3",
+            "  ✓ Telecom: ask alpha · which port does the dev server use?",
+            "  ✓ Telecom: reply a1 · 8080",
+            "  ✓ Telecom: status · fixing CI",
+            "  ✓ Spawn: Read README.md and summarize it. … · cliproxyapi/claude-opus-5-5",
+            "  ✓ Stop agent: alpha-1 · interrupt",
+            "  ✓ Question: Which database should the service use? · +1 more",
+        ]
+    );
+}

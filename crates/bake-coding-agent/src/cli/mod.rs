@@ -1645,9 +1645,9 @@ async fn build_session(args: &Args, build: Build) -> Result<Built, String> {
         definitions.push(crate::telecom::tool::tool(station.clone()));
     }
     // A top-level session with someone to answer (a terminal, or an RPC
-    // client such as a parent Bake) can put questions to the person. The
-    // tool is available but not a default until its effect on models is
-    // measured: `-t +ask_user` or `"defaultTools": ["+ask_user"]`.
+    // client such as a parent Bake) can put questions to the person; the
+    // tool is one of its defaults, by the owner's decision, though no
+    // paired evaluation has measured it.
     let questions =
         (matches!(role, Role::Root(_)) && can_ask).then(crate::questions::QuestionBroker::new);
     if let Some(broker) = &questions {
@@ -1760,6 +1760,9 @@ async fn build_session(args: &Args, build: Build) -> Result<Built, String> {
     }
     if spawned.is_some() {
         bake_defaults.extend(crate::spawned::TOOL_NAMES.map(str::to_owned));
+    }
+    if questions.is_some() {
+        bake_defaults.push(crate::questions::TOOL_NAME.to_owned());
     }
     if settings.schedules {
         bake_defaults.extend(crate::agent_session::schedules::NAMES.map(str::to_owned));

@@ -1,6 +1,6 @@
 # Agent teams
 
-Bake sessions working in the same repository on one machine can form a team through telecom: each takes a callsign, shows what it works on, and can message, ask, and answer the others. A session in the team can also spawn headless Bake agents, shown in the crew panel above the composer, and the model can put questions to you with `ask_user`. These are off by default while their effect on models is measured.
+Bake sessions working in the same repository on one machine can form a team through telecom: each takes a callsign, shows what it works on, and can message, ask, and answer the others. A session in the team can also spawn headless Bake agents, shown in the crew panel above the composer, and the model can put questions to you with `ask_user`. Telecom and spawned agents are off by default while their effect on models is measured; `ask_user` is on wherever someone can answer.
 
 ## Telecom
 
@@ -47,4 +47,4 @@ Agents are owned by the session that spawned them: ending or replacing that sess
 
 ## Questions
 
-When someone can answer, in the interactive terminal or over RPC, the `ask_user` tool is available; turn it on for a run with `bake -t +ask_user`, or for every session with `"defaultTools": ["+ask_user"]`. It puts one to four questions to you, each with a short header and two to six options, or none for a typed answer, and `multiSelect` to allow several choices. The terminal shows each question as a list, with "Type my own answer" for an answer of your own; Esc declines the questions, and the model is told so. Over RPC, the questions are put to the client as `select` and `input` requests (`bake docs rpc`). `bake -p` has no one to ask, so the tool is not available there. A spawned agent's questions and approvals reach you through its parent session whether or not the parent has the tool.
+When someone can answer, in the interactive terminal or over RPC, a top-level session has the `ask_user` tool by default; remove it like any other tool, such as with `-t -ask_user` or `"defaultTools": ["-ask_user"]`. It puts one to four questions to you, each with a short header and two to six options, or none for a typed answer, and `multiSelect` to allow several choices. The terminal shows each question as a list, with "Type my own answer" for an answer of your own; Esc declines the questions, and the model is told so. Over RPC, the questions are put to the client as `select` and `input` requests (`bake docs rpc`). `bake -p` has no one to ask, so the tool is not available there. A spawned agent's questions and approvals reach you through its parent session whether or not the parent has the tool.

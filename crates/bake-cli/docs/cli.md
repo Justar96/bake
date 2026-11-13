@@ -90,7 +90,7 @@ Herdr 0.9.2 and later can reopen a saved session after a server restart. Bake re
 
 ## Tools
 
-A session starts with `read`, `bash`, `edit`, `write`, the background-job tools `job_output`, `job_list`, and `job_kill`, the web tools `web_search` and `web_fetch`, and `codemode` (or the `defaultTools` setting). `grep`, `find`, `ls`, and `visualize` are also available; `grep` and `find` need `rg` and `fd` (or `fdfind`) on `PATH`. With the `telecom` setting on, a top-level session also has `telecom`, `spawn_agent`, and `stop_agent`; `ask_user` is available when someone can answer, interactively or over RPC, and is turned on with `+ask_user` (`bake docs team`).
+A session starts with `read`, `bash`, `edit`, `write`, the background-job tools `job_output`, `job_list`, and `job_kill`, the web tools `web_search` and `web_fetch`, and `codemode` (or the `defaultTools` setting). `grep`, `find`, `ls`, and `visualize` are also available; `grep` and `find` need `rg` and `fd` (or `fdfind`) on `PATH`. With the `telecom` setting on, a top-level session also has `telecom`, `spawn_agent`, and `stop_agent`; `ask_user` is a default when someone can answer, interactively or over RPC (`bake docs team`).
 
 - `-t`, `--tools <list>` gives a comma-separated list. Names and `*` patterns allow only those tools; `+name` and `-name` add to or remove from the default set.
 - `-xt`, `--exclude-tools <list>` removes tools by name or `*` pattern.

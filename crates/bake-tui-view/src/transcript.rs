@@ -1405,13 +1405,24 @@ fn head(
     width: usize,
     look: Look,
 ) -> (Vec<Line<'static>>, Vec<Span<'static>>) {
-    let label = format!("{}:", clean_line(call.tool));
+    // A call with nothing to show after its name, such as `Jobs`, takes
+    // no colon.
+    let label = if bare(call) {
+        clean_line(call.tool)
+    } else {
+        format!("{}:", clean_line(call.tool))
+    };
     let column = TOOL_WIDTH.max(label.width() + 1);
     let name = vec![Span::styled(
         label,
         Style::new().add_modifier(Modifier::BOLD),
     )];
     labelled(lead, rest, call, name, column, width, look)
+}
+
+/// Whether a call has no argument and no fields to show.
+fn bare(call: &Call) -> bool {
+    call.argument.trim().is_empty() && call.fields.is_empty()
 }
 
 /// `text` on one line, with no escape sequence or control character: a
@@ -1477,9 +1488,14 @@ fn labelled(
     let mut first = lead;
     first.extend([Span::styled(mark, mark_style), pad(1)]);
     first.extend(name);
-    first.push(pad(column - name_cells));
     let mut rest = rest;
     rest.push(pad(indent - lead_cells));
+    // Nothing follows the name, so no column is kept for it: a status or
+    // tag rides two cells after the name.
+    if bare(call) {
+        return (vec![Line::from(first)], rest);
+    }
+    first.push(pad(column - name_cells));
     // A path that fits reads by its file name: the directory is dim.
     let fits = argument.width() + indent <= width && !argument.contains(char::is_whitespace);
     if kind.takes_path() && fits && call.fields.is_empty() {
@@ -2215,7 +2231,7 @@ fn present_call(call: Call, width: usize, look: Look, detail: Detail) -> Vec<Lin
 /// `output` laid out as indented JSON when all of it is one JSON object or
 /// array, so a tool's minified reply reads a member a line; `None` for any
 /// other output. Output past [`json::MAX_BYTES`] is never joined.
-fn json_lines(output: &[String]) -> Option<Vec<String>> {
+pub(crate) fn json_lines(output: &[String]) -> Option<Vec<String>> {
     let first = output.iter().find(|line| !line.trim().is_empty())?;
     if !first.trim_start().starts_with(['{', '[']) {
         return None;
@@ -3454,7 +3470,7 @@ mod tests {
         assert!(
             lines
                 .iter()
-                .any(|l| l.starts_with("  {} codemode:  13 calls"))
+                .any(|l| l.starts_with("  {} codemode  13 calls"))
         );
         // Its calls and every other call keep their state marks.
         assert!(lines.iter().any(|l| l.starts_with("    ✓ read")));
@@ -3482,7 +3498,7 @@ mod tests {
         let on = present(&script(CallState::Running), 0, 40, look);
         assert_eq!(fg_of(&on, "{}"), Some(Color::Rgb(0xff, 0xff, 0xff)));
         // Without colour the braces cannot tell the states apart.
-        assert!(script_lines(80, PLAIN)[1].starts_with("  ✓ codemode:"));
+        assert!(script_lines(80, PLAIN)[1].starts_with("  ✓ codemode"));
     }
 
     #[test]
@@ -3491,7 +3507,7 @@ mod tests {
             script_lines(80, PLAIN),
             [
                 "",
-                "  ✓ codemode:  13 calls · 1 failed · took 0.4s",
+                "  ✓ codemode  13 calls · 1 failed · took 0.4s",
                 // Code wraps under itself; eleven rows read whole, since a
                 // count would stand for one.
                 r#"  │  1  const files = (await tools.find({ pattern: "src/**/*.ts""#,

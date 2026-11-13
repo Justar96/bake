@@ -149,6 +149,16 @@ pub const TOOL_TITLES: &[(&str, &str)] = &[
     ("job_kill", "Stop job"),
     ("web_search", "Web search"),
     ("web_fetch", "Web fetch"),
+    ("task_document", "Task document"),
+    ("schedule_create", "Schedule"),
+    ("schedule_list", "Schedules"),
+    ("schedule_delete", "Unschedule"),
+    ("list_mcp_resources", "MCP resources"),
+    ("list_mcp_resource_templates", "MCP templates"),
+    ("read_mcp_resource", "MCP resource"),
+    ("spawn_agent", "Spawn"),
+    ("stop_agent", "Stop agent"),
+    ("ask_user", "Question"),
 ];
 /// Between the parts of a call's status, such as `exit 1 · earlier process`.
 pub const STATUS_SEP: &str = " · ";
@@ -241,7 +251,7 @@ pub const MCP_TOOL_SEP: &str = " · ";
 /// `13 calls · 4 running`; the count of the calls it lists no longer,
 /// `⋯ 5 earlier calls`; and the file holding output it cut, Pi's
 /// `Full output:`.
-pub const CODEMODE: &str = "codemode:";
+pub const CODEMODE: &str = "codemode";
 pub const CALL: &str = "call";
 pub const CALLS: &str = "calls";
 pub const FAILED: &str = "failed";
