@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc 286445ab988abec9c814bec4996d7b807bbfce001a61a378f318976c540427e0 # shrinks to output = ["", "", "", "", "", "", "", ""], tool = "Write", state = Running, width = 20, tones = None, classic = true
+cc a4462554c07502fb468ce5a96e2d50ae80747bf42d2ae1984ebbeeda8b738dba # shrinks to output = [], tool = "WebSearch", state = Running, width = 20, tones = TrueColor, classic = false

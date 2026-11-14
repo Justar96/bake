@@ -3535,7 +3535,10 @@ mod tests {
         let mut app = lines(20);
         for (height, shown) in [(24, 5), (40, 8), (60, 12)] {
             let (rows, _) = draw(&mut app, 80, height);
-            let count = rows
+            // The composer is the last box; the transcript's cards are
+            // boxed too.
+            let top = rows.iter().rposition(|r| r.starts_with('╭')).unwrap();
+            let count = rows[top..]
                 .iter()
                 .filter(|r| r.starts_with('│') && r.contains("line"))
                 .count();
@@ -3821,8 +3824,9 @@ mod tests {
     fn a_mode_change_never_rewraps_the_draft_or_moves_the_caret() {
         let mut app = State::default();
         app.draft.paste(&"steady words ".repeat(30));
+        // The composer is the last box; the transcript's cards are boxed too.
         let interior = |rows: &[String]| -> Vec<String> {
-            let top = rows.iter().position(|r| r.starts_with('╭')).unwrap();
+            let top = rows.iter().rposition(|r| r.starts_with('╭')).unwrap();
             let bottom = rows.iter().rposition(|r| r.starts_with('╰')).unwrap();
             rows[top + 1..bottom].to_vec()
         };

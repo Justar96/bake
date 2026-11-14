@@ -6,7 +6,9 @@
 
 The design keeps Pi's prompt machinery (named sections that a session records and later patches) and replaces the text: a one-sentence identity, Bake 0.3's measured rules, the tool-contributed guidelines, a one-line pointer to Bake's own documentation, a run-mode line, the permissions section, and a small environment section last. The prompt states the outcome and the boundaries and leaves the method to the model. A rule stays only when an eval or a cited failure shows that the model behaves worse without it, and the one rule that promises harness behavior, that tool calls in one response run in order, is made true by the harness. One prompt serves every model family until a paired eval shows that a family needs a delta.
 
-**Status: implemented, 2026-10-13.** [D33](scope-00/support.md#decision-register) makes the system prompt Bake's own. `bake` sends the prompt this page designs, measured in the [system prompt record](https://github.com/Justar96/bake/blob/97ce6abba01fddb5ed532b60a2e25a1e134b5244/evals/agent-loop/versions/v0.4.0/2026-10-13-bake-system-prompt/REPORT.md); the [implementation plan](#implementation-plan) and [evaluation plan](#evaluation-plan) record how it landed.
+**Status: implemented, 2026-10-13; revised 2026-11-14 ([Later changes](#later-changes)).** The sections below record the design as it landed; where the text sent today differs, Later changes says how.
+
+**Original status: implemented, 2026-10-13.** [D33](scope-00/support.md#decision-register) makes the system prompt Bake's own. `bake` sends the prompt this page designs, measured in the [system prompt record](https://github.com/Justar96/bake/blob/97ce6abba01fddb5ed532b60a2e25a1e134b5244/evals/agent-loop/versions/v0.4.0/2026-10-13-bake-system-prompt/REPORT.md); the [implementation plan](#implementation-plan) and [evaluation plan](#evaluation-plan) record how it landed.
 
 ## Table of Contents
 
@@ -18,6 +20,7 @@ The design keeps Pi's prompt machinery (named sections that a session records an
 - [Implementation plan](#implementation-plan)
 - [Candidates not adopted](#candidates-not-adopted)
 - [Open questions](#open-questions)
+- [Later changes](#later-changes)
 
 ## Goals
 
@@ -304,3 +307,23 @@ Pull requests 2 and 3 change the public Rust API, so each updates the `rust/READ
 - How large a context file can grow before it costs more than it saves; the published results are underpowered for sizes beyond typical files.
 - Whether the `workspace-write` text needs its own measured cell once the evaluator can run a confining backend.
 - How large the skills listing can grow before a budget pays for itself, and whether every model family loads a skill from its description alone.
+
+## Later changes
+
+The pinned first requests under [`crates/bake-cli/tests/fixtures/first-request/`](../../../crates/bake-cli/tests/fixtures/first-request/) hold the text `bake` sends now; the example under [The text](#the-text) is the 2026-10-13 prompt. The commands and paths in the [implementation plan](#implementation-plan) belong to tooling that has since been removed.
+
+Since the design landed, the default tools gained the job tools, the web tools, and `codemode` (2026-10-18 and 2026-10-20), and `codemode` contributes a guideline to `rules`.
+
+An audit on 2026-11-14 changed the following. No paired evaluation has measured these changes yet.
+
+| Change | Reason |
+|---|---|
+| The `run` section is interactive for a top-level session with someone to answer (a terminal or an RPC client) | No caller set the run mode, so every session was told that no one can answer questions, including those that declare `ask_user` |
+| When an `edit` or `write` call fails, later calls in the same response are answered with an error and not run, except other file changes and read-only calls; the round-trip rule says so | The rule asks for an edit and its check in one response. The check ran against the unedited file, and a passing check read as verification |
+| `codemode`'s guideline is "Use codemode for calls that depend on each other's results, a call repeated over many items, or large output to filter." | Pi's asks for a script "instead of many separate calls", against the round-trip rule's independent calls in one response |
+| `edit` contributes one guideline instead of Pi's four | The other three repeat the tool's description and its `edits` parameter; this settles the open question above |
+| The `bash` rule reads "ls, find, and rg (grep where rg is not installed)" | Bake neither bundles nor downloads ripgrep |
+| `ask_user` says "the user", and names an action that is hard to reverse or visible to others as a reason to ask | It said not to ask for permission, against the interactive `run` text |
+| With `subagents` and `telecom` both on, `spawn_agent` contributes a guideline saying which way of delegating is for what | Two sets of delegation tools were declared with nothing to choose between them |
+| The `powershell` branches of the rules are removed, and Bake's own tools carry no prompt snippet | `powershell` is not ported, and no prompt section lists snippets |
+| Plainer `schedule_*` and `run_in_background` descriptions; the MCP resource tools no longer say to prefer resources over web search | Implementation terms, a two-word parameter description, and steering that held whatever tools were selected |

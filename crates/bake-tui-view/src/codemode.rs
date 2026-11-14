@@ -935,16 +935,17 @@ mod tests {
         stopped.calls = vec![call("bash", "{}", NestedStatus::Cancelled, None)];
         let lines = render(stopped, 60, look);
         assert_eq!(
-            lines[1],
-            "  {} codemode  1 call · 1 cancelled   interrupted"
+            lines[0],
+            "╭─ {} codemode  1 call · 1 cancelled   interrupted ───────╮"
         );
         // A blinking head keeps its width while hidden.
         let mut running = script(CallState::Running);
         running.code = "return 1;".into();
         let on = render(running.clone(), 40, look);
         let off = render(running, 40, Look { lit: false, ..look });
-        assert_eq!(on[1], "  {} codemode");
-        assert_eq!(off[1], "     codemode");
+        assert_eq!(on[0].split(" ─").next(), Some("╭─ {} codemode"));
+        assert_eq!(off[0].split(" ─").next(), Some("╭─    codemode"));
+        assert_eq!(on[0].chars().count(), off[0].chars().count());
     }
 
     #[test]

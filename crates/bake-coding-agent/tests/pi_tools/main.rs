@@ -204,13 +204,28 @@ fn tool_sets_follow_pi_and_take_bash_from_its_slot() {
 /// Pi: `system-prompt.test.ts`'s rules for the sets the session builds:
 /// after Bake's own rules, the tool guidelines Pi lists, in Pi's order,
 /// from the tool definitions. Pi's last two rules and its `bash` guideline,
-/// which names the `PI_*` variables, are Pi's own and left out (D33).
+/// which names the `PI_*` variables, are Pi's own and left out (D33), as
+/// are the three `edit` guidelines Bake drops; Bake rewords Pi's first
+/// `edit` guideline and its `bash` rule, which keep Pi's places.
 #[test]
 fn tool_guidelines_match_pi() {
-    const PI_ONLY: [&str; 3] = [
+    const PI_ONLY: [&str; 6] = [
         "- Be concise in your responses",
         "- Show file paths clearly when working with files",
         "- You can inspect PI_* environment variables for current model and session details.",
+        "- When changing multiple separate locations in one file, use one edit call with multiple entries in edits[] instead of multiple edit calls",
+        "- Each edits[].oldText is matched against the original file, not after earlier edits are applied. Do not emit overlapping or nested edits. Merge nearby changes into one edit.",
+        "- Keep edits[].oldText as small as possible while still being unique in the file. Do not pad with large unchanged regions.",
+    ];
+    const REWORDED: [(&str, &str); 2] = [
+        (
+            "- Use bash for file operations like ls, rg, find",
+            "- Use bash for file operations like ls, find, and rg (grep where rg is not installed)",
+        ),
+        (
+            "- Use edit for precise changes (edits[].oldText must match exactly)",
+            "- Use edit for precise changes, with every change to one file in a single call as separate edits[] entries.",
+        ),
     ];
     let built = definitions(&ToolsOptions::default());
     let lines = |section: &str| -> Vec<String> {
@@ -243,6 +258,12 @@ fn tool_guidelines_match_pi() {
         let pi: Vec<String> = lines(case["rules"].as_str().expect("rules"))
             .into_iter()
             .filter(|line| !PI_ONLY.contains(&line.as_str()))
+            .map(|line| {
+                REWORDED
+                    .iter()
+                    .find(|(pi, _)| *pi == line)
+                    .map_or(line.clone(), |(_, bake)| (*bake).to_owned())
+            })
             .collect();
         assert!(rules.ends_with(&pi), "{:?}: {rules:?}", case["selected"]);
         let own = if options.selected_tools.is_empty() {

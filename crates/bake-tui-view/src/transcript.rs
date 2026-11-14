@@ -669,42 +669,99 @@ pub(crate) fn gutter(look: Look) -> &'static str {
     }
 }
 
-/// The background of a call's box: a soft grey a few steps above a dark
-/// terminal's own, and a faint red for a call that failed. Only a truecolor
-/// terminal draws it; sixteen colours have no step that subtle, and
-/// `NO_COLOR` draws none.
-pub fn box_colour(state: CallState, tones: Tones) -> Option<Color> {
+/// The colour of a call's box edge: a grey a step dimmer than quiet text,
+/// so the box holds the call together without competing with it, and a
+/// muted red for a call that failed. Only a truecolor terminal draws a box;
+/// sixteen colours and `NO_COLOR` keep the gutter's rule instead.
+pub fn edge_colour(state: CallState, tones: Tones) -> Option<Color> {
     (tones == Tones::TrueColor).then_some(match state {
-        CallState::Failed => Color::Rgb(0x2e, 0x22, 0x25),
-        CallState::Running | CallState::Done => Color::Rgb(0x25, 0x28, 0x2f),
+        CallState::Failed => Color::Rgb(0x7a, 0x3e, 0x46),
+        CallState::Running | CallState::Done => Color::Rgb(0x48, 0x4f, 0x5b),
     })
 }
 
-/// Makes `lines` a card: a padding row above and below, and every row
-/// filled with `bg` across the full `width`. A call of one line, such as a
-/// read or a search that found nothing to show, stays one tinted row, so a
-/// run of them reads as a list rather than a stack of boxes.
-fn card(lines: &mut Vec<Line<'static>>, width: usize, bg: Color) {
-    if lines.len() > 1 {
-        lines.insert(0, Line::default());
-        lines.push(Line::default());
+/// Draws `lines`, a call laid out from column [`RAIL`] at most `width` less
+/// [`BOX_PAD`] cells wide, in a rounded box `width` less one cell wide, so a
+/// cell stays clear of the scrollbar. Its first row rides in the top edge
+/// after `╭─`, so the state mark sits at column 3; every other row moves one
+/// cell right too, behind `│`, which keeps the output under the tool's name
+/// and a wrapped argument under its first row. A call of one row, such as
+/// a read, stays one row, unboxed, so a run of them reads as a list; it
+/// moves one cell right as well, so every call's mark is at column 3.
+fn frame(lines: &mut Vec<Line<'static>>, width: usize, edge: Color) {
+    if width < BOX_PAD + RAIL + 2 {
+        return;
     }
-    boxed(lines, width, bg);
+    if let [only] = lines.as_mut_slice() {
+        // Its mark lines up with the boxed calls' marks.
+        only.spans.insert(0, pad(1));
+        return;
+    }
+    let edge = Style::new().fg(edge);
+    let right = width - 1;
+    for (index, line) in lines.iter_mut().enumerate() {
+        // A row a narrow layout could not fit is cut at the box's inside.
+        let mut spans = clip_line(std::mem::take(line), width - BOX_PAD).spans;
+        let opening = if index == 0 {
+            drop_lead(&mut spans, RAIL);
+            vec![Span::styled("╭─", edge), pad(1)]
+        } else {
+            vec![Span::styled("│", edge)]
+        };
+        let mut row = opening;
+        row.extend(spans);
+        if index == 0 {
+            trim_end(&mut row);
+        }
+        let used: usize = row.iter().map(Span::width).sum();
+        if index == 0 {
+            let fill = right.saturating_sub(used + 2).max(1);
+            row.push(pad(1));
+            row.push(Span::styled(format!("{}╮", "─".repeat(fill)), edge));
+        } else {
+            row.push(pad(right.saturating_sub(used + 1)));
+            row.push(Span::styled("│", edge));
+        }
+        line.spans = row;
+    }
+    lines.push(Line::from(Span::styled(
+        format!("╰{}╯", "─".repeat(right.saturating_sub(2))),
+        edge,
+    )));
 }
 
-/// Fills `lines` with `bg` across the full `width`, under every span that
-/// sets no background of its own, so the call reads as one box.
-fn boxed(lines: &mut [Line<'static>], width: usize, bg: Color) {
-    for line in lines {
-        for span in &mut line.spans {
-            if span.style.bg.is_none() {
-                span.style = span.style.bg(bg);
+/// Removes the blank cells that end `spans`.
+fn trim_end(spans: &mut Vec<Span<'static>>) {
+    while let Some(last) = spans.last_mut() {
+        let kept = last.content.trim_end_matches(' ').len();
+        if kept > 0 {
+            if kept < last.content.len() {
+                last.content = last.content[..kept].to_owned().into();
             }
+            return;
         }
-        let used = line.width();
-        if used < width {
-            line.spans
-                .push(Span::styled(" ".repeat(width - used), Style::new().bg(bg)));
+        spans.pop();
+    }
+}
+
+/// Removes up to `cells` leading blank cells from `spans`.
+fn drop_lead(spans: &mut Vec<Span<'static>>, cells: usize) {
+    let mut left = cells;
+    while left > 0 {
+        let Some(first) = spans.first_mut() else {
+            return;
+        };
+        let blanks = first.content.chars().take_while(|c| *c == ' ').count();
+        let take = blanks.min(left);
+        if take == 0 {
+            return;
+        }
+        let rest = first.content[take..].to_owned();
+        left -= take;
+        if rest.is_empty() {
+            spans.remove(0);
+        } else {
+            first.content = rest.into();
         }
     }
 }
@@ -826,8 +883,10 @@ pub const TOOL_WIDTH: usize = 6;
 /// away. Column [`RAIL`] holds the call's structure: its state mark and the
 /// gutter.
 pub const BODY: usize = 4;
-/// Cells a call's text keeps clear of the box's right edge.
-pub const BOX_PAD: usize = 2;
+/// Cells a call's box takes beyond its text: the edges, the cell the first
+/// row moves right, a cell of clearance before the right edge, and the cell
+/// kept clear of the scrollbar.
+pub const BOX_PAD: usize = 5;
 
 /// `text` wrapped at `width` less `indent`; each row after the first opens
 /// with `rest`, the first with `first`.
@@ -1130,24 +1189,24 @@ fn present_row(
                 detail,
             );
             counted = hint_count(&mut block, inner, look, hinted);
-            if let Some(bg) = box_colour(*state, look.tones) {
-                card(&mut block, width, bg);
+            if let Some(edge) = edge_colour(*state, look.tones) {
+                frame(&mut block, width, edge);
             }
             lines.extend(block);
         }
         Row::Codemode(script) => {
             let mut block = codemode::present(script, inner, look, detail);
             counted = hint_count(&mut block, inner, look, hinted);
-            if let Some(bg) = box_colour(script.state, look.tones) {
-                card(&mut block, width, bg);
+            if let Some(edge) = edge_colour(script.state, look.tones) {
+                frame(&mut block, width, edge);
             }
             lines.extend(block);
         }
         Row::Visual(shown) => {
             let mut block = visual::present(shown, inner, look, detail);
             counted = hint_count(&mut block, inner, look, hinted);
-            if let Some(bg) = box_colour(shown.state, look.tones) {
-                card(&mut block, width, bg);
+            if let Some(edge) = edge_colour(shown.state, look.tones) {
+                frame(&mut block, width, edge);
             }
             lines.extend(block);
         }
@@ -3470,15 +3529,15 @@ mod tests {
         assert!(
             lines
                 .iter()
-                .any(|l| l.starts_with("  {} codemode  13 calls"))
+                .any(|l| l.starts_with("╭─ {} codemode  13 calls"))
         );
         // Its calls and every other call keep their state marks.
-        assert!(lines.iter().any(|l| l.starts_with("    ✓ read")));
+        assert!(lines.iter().any(|l| l.starts_with("│    ✓ read")));
         let rows = sample_session();
         let all: Vec<String> = (0..rows.len())
             .flat_map(|i| text(&present(&rows, i, 80, look)))
             .collect();
-        assert!(all.iter().any(|l| l.starts_with("  ✓ Bash: rg")));
+        assert!(all.iter().any(|l| l.starts_with("╭─ ✓ Bash: rg")));
         assert!(all.iter().all(|l| !l.contains("{} Bash")));
         let script = |state| {
             vec![Row::Codemode(Codemode {
@@ -3570,10 +3629,9 @@ mod tests {
         let on = present(&rows, 0, 40, look);
         let off = present(&rows, 0, 40, Look { lit: false, ..look });
         // A call of one line is one tinted row, without padding rows.
-        assert_eq!(text(&on), ["  ● Bash: bun run build"]);
-        assert_eq!(text(&off), ["    Bash: bun run build"]);
+        assert_eq!(text(&on), ["   ● Bash: bun run build"]);
+        assert_eq!(text(&off), ["     Bash: bun run build"]);
         assert_eq!(on[0].width(), off[0].width());
-        assert!(on[0].spans.iter().all(|s| s.style.bg.is_some()));
         let mark = on[0].spans.iter().find(|s| s.content == "●").unwrap();
         assert_eq!(mark.style.fg, Some(Color::Rgb(0xff, 0xff, 0xff)));
         // Shown for one pulse, hidden for the next; the loop wakes at each change.
@@ -3698,7 +3756,7 @@ mod tests {
     }
 
     #[test]
-    fn each_call_sits_in_its_own_light_box() {
+    fn each_call_sits_in_its_own_dim_box() {
         let rows = sample_session();
         let look = Look {
             tones: Tones::TrueColor,
@@ -3718,37 +3776,59 @@ mod tests {
             .unwrap();
         let failed = present(&rows, index, 60, look);
         let done = present(&rows, index + 2, 60, look);
-        // The opening blank stays outside the box; every other row is filled
-        // to the full width, under every span.
-        assert!(failed[0].spans.iter().all(|s| s.style.bg.is_none()));
-        for (lines, bg) in [
-            (&failed, Color::Rgb(0x2e, 0x22, 0x25)),
-            (&done, Color::Rgb(0x25, 0x28, 0x2f)),
+        // The opening blank stays outside the box. The head rides in the top
+        // edge with its mark at column 3, the other rows hang from `│`, and
+        // every row ends at the same edge, a cell clear of the scrollbar.
+        assert_eq!(failed[0].width(), 0);
+        for (lines, edge, mark) in [
+            (&failed, Color::Rgb(0x7a, 0x3e, 0x46), "✗"),
+            (&done, Color::Rgb(0x48, 0x4f, 0x5b), "✓"),
         ] {
-            for line in &lines[1..] {
-                assert_eq!(line.width(), 60, "{line}");
-                // Every cell has a background; the box's own frames each row,
-                // and a diff row's tint fills its middle.
-                assert!(line.spans.iter().all(|s| s.style.bg.is_some()), "{line}");
-                assert_eq!(line.spans[0].style.bg, Some(bg), "{line}");
+            let boxed = &lines[1..];
+            let top = boxed[0].to_string();
+            assert!(top.starts_with(&format!("╭─ {mark} ")), "{top}");
+            assert!(top.ends_with("─╮"), "{top}");
+            let bottom = boxed[boxed.len() - 1].to_string();
+            assert!(bottom.starts_with('╰') && bottom.ends_with('╯'), "{bottom}");
+            for line in boxed {
+                assert_eq!(line.width(), 59, "{line}");
+                assert_eq!(line.spans[0].style.fg, Some(edge), "{line}");
+                assert_eq!(line.spans.last().unwrap().style.fg, Some(edge), "{line}");
+            }
+            for line in &boxed[1..boxed.len() - 1] {
+                let text = line.to_string();
+                assert!(text.starts_with('│') && text.ends_with('│'), "{text}");
+            }
+            // The box fills no row with a background; only a diff's changed
+            // lines are tinted.
+            for line in boxed {
+                assert_eq!(line.spans[0].style.bg, None, "{line}");
+                assert_eq!(line.spans.last().unwrap().style.bg, None, "{line}");
             }
         }
+        // A call of one row stays one row, unboxed, its mark at column 3.
+        let read = vec![Row::Call {
+            tool: "Read".into(),
+            argument: "src/main.rs".into(),
+            fields: Vec::new(),
+            id: None,
+            state: CallState::Done,
+            summary: Some("10 lines".into()),
+            output: Vec::new(),
+            full_output_path: None,
+        }];
+        let read = text(&present(&read, 0, 60, look));
+        assert_eq!(read, ["   ✓ Read: src/main.rs  10 lines"]);
         // Prose is not boxed, and no box is drawn without truecolor.
         let answer = rows.len() - 1;
-        assert!(
-            present(&rows, answer, 60, look)
+        let unboxed = |lines: Vec<Line<'static>>| {
+            lines
                 .iter()
-                .flat_map(|l| &l.spans)
-                .all(|s| s.style.bg.is_none())
-        );
+                .all(|line| !line.to_string().contains(['╭', '╰']))
+        };
+        assert!(unboxed(present(&rows, answer, 60, look)));
         for tones in [Tones::Ansi, Tones::None] {
-            let plain = present(&rows, index, 60, Look { tones, ..PLAIN });
-            assert!(
-                plain
-                    .iter()
-                    .flat_map(|l| &l.spans)
-                    .all(|s| s.style.bg.is_none())
-            );
+            assert!(unboxed(present(&rows, index, 60, Look { tones, ..PLAIN })));
         }
     }
 
@@ -3769,13 +3849,18 @@ mod tests {
             ..PLAIN
         };
         let lines = present(&rows, 0, 20, look);
-        // Text wraps two cells short of the edge; the box still fills the
-        // row.
+        // Text wraps two cells short of the box's right edge, which stays a
+        // cell clear of the scrollbar.
         assert_eq!(
             text(&lines),
-            ["", "  ✓ Bash: x", "    0123456789abcd", "    efghij", ""]
+            [
+                "╭─ ✓ Bash: x ─────╮",
+                "│    0123456789a  │",
+                "│    bcdefghij    │",
+                "╰─────────────────╯"
+            ]
         );
-        assert!(lines.iter().all(|l| l.width() == 20));
+        assert!(lines.iter().all(|l| l.width() == 19));
     }
 
     /// The foreground colour of the span drawing `content` among `lines`.
@@ -3844,7 +3929,7 @@ mod tests {
         let lines = present(
             &rows,
             0,
-            24,
+            27,
             Look {
                 tones: Tones::TrueColor,
                 ..PLAIN
@@ -3853,11 +3938,10 @@ mod tests {
         assert_eq!(
             text(&lines),
             [
-                "",
-                "  ✓ Bash: echo \"a long",
-                "          quoted",
-                "          string\"",
-                ""
+                "╭─ ✓ Bash: echo \"a long ─╮",
+                "│          quoted        │",
+                "│          string\"       │",
+                "╰────────────────────────╯"
             ]
         );
         let lime = Some(Color::Rgb(0xbe, 0xf2, 0x64));
@@ -4238,56 +4322,61 @@ mod tests {
             text(&lines),
             [
                 "",
-                "",
-                "  ✓ Edit: src/parser.ts  +1 -1",
-                "       ⋯ 40 unmodified lines",
-                "    41     const fields = split(line);",
-                "    42 ▎   if (quote) fields.push(rest);",
-                r#"    42 ▎   if (quote) throw new SyntaxError("unterminated quote");"#,
-                "    43     return fields;",
-                "",
+                "╭─ ✓ Edit: src/parser.ts  +1 -1 ──────────────────────────────────────────────╮",
+                "│       ⋯ 40 unmodified lines                                                 │",
+                "│    41     const fields = split(line);                                       │",
+                "│    42 ▎   if (quote) fields.push(rest);                                     │",
+                r#"│    42 ▎   if (quote) throw new SyntaxError("unterminated quote");           │"#,
+                "│    43     return fields;                                                    │",
+                "╰─────────────────────────────────────────────────────────────────────────────╯",
             ]
         );
-        let head = &lines[2];
+        let head = &lines[1];
         assert!(
-            cell(head, 4).add_modifier.contains(Modifier::BOLD),
+            cell(head, 5).add_modifier.contains(Modifier::BOLD),
             "tool name"
         );
         assert!(
-            cell(head, 10).add_modifier.contains(Modifier::DIM),
+            cell(head, 11).add_modifier.contains(Modifier::DIM),
             "directory"
         );
         let (red, green) = (
             Some(Color::Rgb(0xef, 0x44, 0x44)),
             Some(Color::Rgb(0x22, 0xc5, 0x5e)),
         );
-        let (removed, added, context) = (&lines[5], &lines[6], &lines[4]);
+        let (removed, added, context) = (&lines[4], &lines[5], &lines[3]);
         // Numbers dim on context, in the change's colour on a changed line;
         // the bar in the change's colour.
-        assert!(cell(context, 4).add_modifier.contains(Modifier::DIM));
-        assert_eq!((cell(removed, 4).fg, cell(removed, 7).fg), (red, red));
-        assert_eq!((cell(added, 4).fg, cell(added, 7).fg), (green, green));
+        assert!(cell(context, 5).add_modifier.contains(Modifier::DIM));
+        assert_eq!((cell(removed, 5).fg, cell(removed, 8).fg), (red, red));
+        assert_eq!((cell(added, 5).fg, cell(added, 8).fg), (green, green));
         // The line is tinted; what changed takes the stronger tint; the
         // code keeps its syntax colour.
         let line_tint = Some(Color::Rgb(0x21, 0x3a, 0x2c));
         let strong = Some(Color::Rgb(0x2a, 0x5e, 0x3f));
-        let at = |needle: &str| added.to_string().find(needle).unwrap();
+        // The cell `needle` starts at in `line`.
+        let cell_of = |line: &Line, needle: &str| {
+            let text = line.to_string();
+            text[..text.find(needle).unwrap()].width()
+        };
+        let at = |needle: &str| cell_of(added, needle);
         assert_eq!(cell(added, at("if")).bg, line_tint);
         assert_eq!(cell(added, at("throw")).bg, strong);
         assert_eq!(
             cell(added, at("throw")).fg,
             Some(Color::Rgb(0xc4, 0xb5, 0xfd))
         );
+        let edge = Some(Color::Rgb(0x48, 0x4f, 0x5b));
         assert_eq!(
-            cell(added, 79).bg,
-            Some(Color::Rgb(0x25, 0x28, 0x2f)),
+            (cell(added, 0).fg, cell(added, 78).fg),
+            (edge, edge),
             "the box frames it"
         );
         assert_eq!(
-            cell(removed, removed.to_string().find("push").unwrap()).bg,
+            cell(removed, cell_of(removed, "push")).bg,
             Some(Color::Rgb(0x6b, 0x2f, 0x37))
         );
-        assert_eq!(cell(context, 20).bg, Some(Color::Rgb(0x25, 0x28, 0x2f)));
+        assert_eq!(cell(context, 20).bg, None, "context is not tinted");
     }
 
     #[test]
@@ -4342,12 +4431,21 @@ mod tests {
             tones: Tones::TrueColor,
             ..PLAIN
         };
-        // 104 columns leave the call 102 cells; each side takes 47.
-        let wide = present(&rows, index, 104, look);
+        // A row's text inside the box's edges.
+        let inside = |line: &String| {
+            line.strip_prefix('│')
+                .and_then(|line| line.strip_suffix('│'))
+                .unwrap_or(line)
+                .trim_end()
+                .to_owned()
+        };
+        // 107 columns leave the call 102 cells; each side takes 47.
+        let wide = present(&rows, index, 107, look);
         let side =
             |left: &str, right: &str| format!("    {left:<47} │ {right}").trim_end().to_owned();
+        let shown: Vec<String> = text(&wide)[2..7].iter().map(inside).collect();
         assert_eq!(
-            text(&wide)[3..8],
+            shown,
             [
                 "       ⋯ 40 unmodified lines".to_owned(),
                 side(
@@ -4363,17 +4461,20 @@ mod tests {
             ]
         );
         assert!(
-            wide[1..].iter().all(|l| l.width() == 104),
-            "the box fills every row"
+            wide[1..].iter().all(|l| l.width() == 106),
+            "the box closes every row at one edge"
         );
         // The removed side keeps its tint beside the added side's wrap.
         let red = Some(Color::Rgb(0x3d, 0x25, 0x29));
-        assert_eq!(cell(&wide[6], 20).bg, red);
+        assert_eq!(cell(&wide[5], 21).bg, red);
         // The wrapped part of the added line is all changed text.
-        assert_eq!(cell(&wide[6], 60).bg, Some(Color::Rgb(0x2a, 0x5e, 0x3f)));
+        assert_eq!(cell(&wide[5], 61).bg, Some(Color::Rgb(0x2a, 0x5e, 0x3f)));
         // Narrower, the same edit is unified.
-        let narrow = text(&present(&rows, index, 100, look));
-        assert_eq!(narrow[5], "    42 ▎   if (quote) fields.push(rest);");
+        let narrow = text(&present(&rows, index, 104, look));
+        assert_eq!(
+            inside(&narrow[4]),
+            "    42 ▎   if (quote) fields.push(rest);"
+        );
     }
 
     #[test]
@@ -4617,8 +4718,13 @@ mod tests {
         for (tool, coloured) in [("Bash", true), ("Notes", false)] {
             let rows = vec![call(tool)];
             let lines = present(&rows, 0, 40, look);
-            assert_eq!(lines[2].to_string().trim_end(), "    red    end", "{tool}");
-            let red = lines[2]
+            let body = lines[1].to_string();
+            let inside = body
+                .strip_prefix('│')
+                .and_then(|body| body.strip_suffix('│'))
+                .map(str::trim_end);
+            assert_eq!(inside, Some("    red    end"), "{tool}");
+            let red = lines[1]
                 .spans
                 .iter()
                 .find(|s| s.content == "red")

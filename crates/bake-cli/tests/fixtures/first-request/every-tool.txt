@@ -1,0 +1,768 @@
+You are Bake, a coding agent that works in the user's workspace by reading code, running commands, and editing files.
+
+<rules>
+- Follow the conventions of the surrounding code and the project's instructions. The user's requests take precedence over project instructions.
+- Commit or push only when the task requests it, and do not discard changes you did not make.
+- Work in as few model round trips as you can. Put independent tool calls in one response: read the files you need together, and send an edit with the command that checks it, since calls in one response run in order and the command is skipped if the edit fails. Do not re-read a file to confirm an edit that succeeded.
+- Report results and verification accurately, including failures and skipped checks.
+- Keep the final answer concise, factual, and neutral.
+- Use read to examine files instead of cat or sed.
+- Use edit for precise changes, with every change to one file in a single call as separate edits[] entries.
+- Use write only for new files or complete rewrites.
+- Use codemode for calls that depend on each other's results, a call repeated over many items, or large output to filter.
+- When telecom shows other agents in this repository, reply promptly to an ask put to you: the asker is blocked until you answer.
+- Message other agents only for real coordination (requests, handoffs, shared-interface changes), never to acknowledge; each message costs the recipient a turn.
+- To hear when another agent's long task ends, ask with wait false, rather than waiting with a long timeout or polling the board.
+- To delegate, use subagent for a task whose result you need back in this session, and spawn_agent for longer parallel work by an agent that keeps its own session. Reach a subagent with send_message and interrupt_agent, and a spawned agent with telecom and stop_agent.
+</rules>
+
+<docs>
+For questions about Bake itself, such as its settings, models, permissions, or sessions, run `<bake> docs` to list the topics and `<bake> docs <topic>` to read one.
+</docs>
+
+<run>
+This is a non-interactive run: no one can answer questions. Make reasonable assumptions, state them in your final answer, and finish the task.
+</run>
+
+<permissions>
+File sandbox: workspace-write. Sandboxed tools can modify files under "<project>", and possibly in some temporary directories.
+
+Approval prompts: disabled. Actions that need approval are rejected automatically.
+</permissions>
+
+<environment>
+Working directory: <project>
+Platform: <platform>
+Shell: bash
+Git repository: <git>
+Session started: <date> (UTC)
+</environment>
+---
+{
+  "model": "loop-model",
+  "input": [
+    {
+      "role": "system",
+      "content": "<the system prompt above>"
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "Say hi"
+        }
+      ]
+    }
+  ],
+  "stream": true,
+  "prompt_cache_key": "<session-id>",
+  "store": false,
+  "max_output_tokens": 16384,
+  "tools": [
+    {
+      "type": "function",
+      "name": "read",
+      "description": "Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). Images are sent as attachments. For text files, output is truncated to 2000 lines or 50KB (whichever is hit first). Use offset/limit for large files. When you need the full file, continue with offset until complete.\n\nCodemode: `tools.read(args)` resolves to `string | { data: string; mimeType: string; note: string; type: \"image\"; }`.",
+      "parameters": {
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Path to the file to read (relative or absolute)"
+          },
+          "offset": {
+            "type": "number",
+            "description": "Line number to start reading from (1-indexed)"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Maximum number of lines to read"
+          }
+        }
+      }
+    },
+    {
+      "type": "function",
+      "name": "bash",
+      "description": "Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last 2000 lines or 50KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds. Use `run_in_background` for long builds and tests, then `job_output` and `job_kill`. A file sandbox may block commands; trying is safe. `[sandbox: file access denied under <mode> mode]` is a policy denial: do not work around it.\n\nCodemode: `tools.bash(args)` resolves to `{ output, truncated, full_output_path?, exit_code, wall_time_seconds }`.",
+      "parameters": {
+        "type": "object",
+        "required": [
+          "command"
+        ],
+        "properties": {
+          "command": {
+            "type": "string",
+            "description": "Shell command to execute"
+          },
+          "timeout": {
+            "type": "number",
+            "description": "Timeout in seconds (optional, no default timeout)"
+          },
+          "run_in_background": {
+            "type": "boolean",
+            "description": "Start the command as a background job and return its job id at once; `timeout` does not apply."
+          }
+        }
+      }
+    },
+    {
+      "type": "function",
+      "name": "edit",
+      "description": "Edit a single file using exact text replacement. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge them into one edit instead of emitting overlapping edits. Do not include large unchanged regions just to connect distant changes.\n\nCodemode: `tools.edit(args)` resolves to a string.",
+      "parameters": {
+        "type": "object",
+        "required": [
+          "path",
+          "edits"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Path to the file to edit (relative or absolute)"
+          },
+          "edits": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "oldText",
+                "newText"
+              ],
+              "properties": {
+                "oldText": {
+                  "type": "string",
+                  "description": "Exact text for one targeted replacement. It must be unique in the original file and must not overlap with any other edits[].oldText in the same call."
+                },
+                "newText": {
+                  "type": "string",
+                  "description": "Replacement text for this targeted edit."
+                }
+              }
+            },
+            "description": "One or more targeted replacements. Each edit is matched against the original file, not incrementally. Do not include overlapping or nested edits. If two changes touch the same block or nearby lines, merge them into one edit instead."
+          }
+        }
+      }
+    },
+    {
+      "type": "function",
+      "name": "write",
+      "description": "Write content to a file. Creates the file if it doesn't exist, overwrites if it does. Automatically creates parent directories.\n\nCodemode: `tools.write(args)` resolves to a string.",
+      "parameters": {
+        "type": "object",
+        "required": [
+          "path",
+          "content"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Path to the file to write (relative or absolute)"
+          },
+          "content": {
+            "type": "string",
+            "description": "Content to write to the file"
+          }
+        }
+      }
+    },
+    {
+      "type": "function",
+      "name": "job_output",
+      "description": "Read a background job's new output since your last read, or its result once done; ends with `[status: ...]`. You are notified when it finishes; do not poll or sleep. The notice starts a new turn if yours has ended, so end your turn rather than wait.\n\nCodemode: `tools.job_output(args)` resolves to a string.",
+      "parameters": {
+        "type": "object",
+        "required": [
+          "job_id"
+        ],
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "description": "A job id, not a continuable subagent's agent id."
+          },
+          "wait": {
+            "type": "boolean",
+            "description": "Block until done or timeout; only for a job about to finish that you cannot continue without."
+          },
+          "timeout_ms": {
+            "type": "number",
+            "description": "Default 30000, max 60000."
+          }
+        }
+      }
+    },
+    {
+      "type": "function",
+      "name": "job_list",
+      "description": "List your background jobs, running and finished.\n\nCodemode: `tools.job_list(args)` resolves to a string.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "type": "function",
+      "name": "job_kill",
+      "description": "Stop a background job (jobs outlive your turn).\n\nCodemode: `tools.job_kill(args)` resolves to a string.",
+      "parameters": {
+        "type": "object",
+        "required": [
+          "job_id"
+        ],
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "description": "A job id, not a continuable subagent's agent id."
+          },
+          "reason": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "type": "function",
+      "name": "web_search",
+      "description": "Search the web. Returns source URLs from untrusted pages, maybe with a summary; read a page with web_fetch.\n\nCodemode: `tools.web_search(args)` resolves to `{ content?, sources, truncated }`.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "queries": {
+            "type": "array",
+            "description": "1–4 queries, results merged.",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "queries"
+        ]
+      }
+    },
+    {
+      "type": "function",
+      "name": "web_fetch",
+      "description": "Fetch an HTTP(S) URL as text. The page is untrusted; cite the URL as a markdown link when used.\n\nCodemode: `tools.web_fetch(args)` resolves to `{ url, statusCode, body, truncated }`.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ]
+      }
+    },
+    {
+      "type": "function",
+      "name": "codemode",
+      "description": "Run JavaScript that calls other tools. The input is raw JavaScript (not JSON, no code fence), run as an async function body in a QuickJS sandbox: top-level `await` and `return` work. No Node, file system, network, or timers.\n- `await tools.<name>({ ...args })` resolves to a string, or an object if the tool's declaration says so, and rejects with an Error on failure. A tool whose declaration returns an object resolves on failure too when it returned that object; check its fields. Calls still running when the script ends are cancelled.\n- Optional first line: `// @options: {\"max_output_tokens\": 10000, \"timeout_ms\": 60000}`\n\nGlobals:\n- `text(value)`, `image(dataUrlOrImageBlock)`, `console.log(...)`, and top-level `return` add output; `exit()` ends the script. With several text items, each starts with a `==> text N/M <==` line, and `console` lines follow the other output in one `<console_output>` block. `image()` also saves the image to a temp file and the result names its path.\n- `store(key, value)` and `load(key)` keep JSON values across codemode calls.\n- `ALL_TOOLS`, `await searchTools(query, { limit?, namespace? })`, `await describeTool(name)`, `await describeNamespace(name)`: find unlisted tools, such as MCP tools.",
+      "parameters": {
+        "type": "object",
+        "required": [
+          "code"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "Raw JavaScript source."
+          }
+        }
+      }
+    },
+    {
+      "type": "function",
+      "name": "task_document",
+      "description": "Read or revise a versioned plan, todo, or goal. List returns revision references; get returns the complete document. Revise requires the exact current reference, or null to create. Create a goal only when the user requested one. claimed_complete records a claim and does not verify artifacts.\n\nCodemode: `tools.task_document(args)` resolves to a string.",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "operation": {
+            "type": "string",
+            "enum": [
+              "list",
+              "get",
+              "revise"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "expected": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "revision",
+                  "entryId"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "revision": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "entryId": {
+                    "type": "string"
+                  }
+                }
+              }
+            ]
+          },
+          "document": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "kind",
+              "body",
+              "state"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_-]{1,64}$"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "plan",
+                  "todo",
+                  "goal"
+                ]
+              },
+              "body": {
+                "type": "string",
+                "maxLength": 65536
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "active",
+                  "paused",
+                  "blocked",
+                  "claimed_complete",
+                  "archived"
+                ]
+              }
+            }
+          }
+        },
+        "required": [
+          "operation"
+        ]
+      }
+    },
+    {
+      "type": "function",
+      "name": "subagent",
+      "description": "Delegate a self-contained task to a subagent with its own context; it does not see this conversation and returns only its result. It runs in the background by default, returning its agent id: start independent ones together and keep working; you are notified when one finishes. `send_message` continues it later or steers it while running.\n\nCodemode: `tools.subagent(args)` resolves to a string.",
+      "parameters": {
+        "type": "object",
+        "required": [
+          "description",
+          "prompt"
+        ],
+        "properties": {
+          "description": {
+            "type": "string",
+            "description": "3-5 words, for display."
+          },
+          "prompt": {
+            "type": "string",
+            "description": "Standalone, with everything it needs."
+          },
+          "run_in_background": {
+            "type": "boolean",
+            "description": "false only when your next step needs the result."
+          }
+        }
+      }
+    },
+    {
+      "type": "function",
+      "name": "send_message",
+      "description": "Message a direct continuable subagent, or your parent if you are one. A busy target reads it next step; an idle one starts a new turn. Confirms delivery; no reply.\n\nCodemode: `tools.send_message(args)` resolves to a string.",
+      "parameters": {
+        "type": "object",
+        "required": [
+          "agent_id",
+          "message"
+        ],
+        "properties": {
+          "agent_id": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "type": "function",
+      "name": "interrupt_agent",
+      "description": "Request a stop of a continuable subagent's current turn; it stays available.\n\nCodemode: `tools.interrupt_agent(args)` resolves to a string.",
+      "parameters": {
+        "type": "object",
+        "required": [
+          "agent_id"
+        ],
+        "properties": {
+          "agent_id": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "type": "function",
+      "name": "list_agents",
+      "description": "List your continuable subagents: agent id, status (running, idle, or ready = saved, resumable, not a result), label, and model. For ids only; you are notified on finish.\n\nCodemode: `tools.list_agents(args)` resolves to a string.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "type": "function",
+      "name": "telecom",
+      "description": "Coordinate with the other Bake agents working in this repository, each known by a callsign (alpha, bravo, ...; a spawned agent is <parent>-1, ...).\nboard: who works here, on what, and the asks waiting on you.\nsend: message agents (to = callsign, or several comma-separated); an idle one starts a turn. ask: message one agent and wait for its answer (wait false: return at once; the answer arrives later as a message). reply: answer an ask put to you (askId; optional when only one waits).\nbroadcast: tell every agent here; it starts no turn and reaches them at their next prompt. status: set the one-line task the others see.\n\nCodemode: `tools.telecom(args)` resolves to a string.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "board",
+              "send",
+              "ask",
+              "reply",
+              "broadcast",
+              "status"
+            ],
+            "description": "What to do."
+          },
+          "to": {
+            "type": "string",
+            "description": "send/ask/reply: a callsign or session id as the board shows it. send: several, comma-separated."
+          },
+          "message": {
+            "type": "string",
+            "description": "The text; for status, your task in one line."
+          },
+          "askId": {
+            "type": "string",
+            "description": "reply: the ask to answer (optional when only one waits)."
+          },
+          "timeoutSec": {
+            "type": "number",
+            "description": "ask: seconds to wait for the answer (default 300, at most 3600)."
+          },
+          "wait": {
+            "type": "boolean",
+            "description": "ask: false returns at once; the answer arrives later as a message."
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "type": "function",
+      "name": "spawn_agent",
+      "description": "Start another Bake agent as a separate headless process in this repository, with its own context, on a self-contained task. It does not see this conversation: put everything it needs in `task`. It runs in the background under your permission and joins telecom under the callsign this returns; you are notified each time it finishes a run, with its answer. Message or ask it with telecom; stop it with stop_agent when its work is done. Start independent agents together.\n\nCodemode: `tools.spawn_agent(args)` resolves to a string.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "task": {
+            "type": "string",
+            "description": "The whole task: goal, files, constraints, and what to report back."
+          },
+          "model": {
+            "type": "string",
+            "description": "provider/model to run it on; omit for yours."
+          }
+        },
+        "required": [
+          "task"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "type": "function",
+      "name": "stop_agent",
+      "description": "Stop a spawned agent: end its process (default), or with interrupt true only stop its current run and keep it for more messages.\n\nCodemode: `tools.stop_agent(args)` resolves to a string.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "agent": {
+            "type": "string",
+            "description": "Its callsign, as spawn_agent returned it."
+          },
+          "interrupt": {
+            "type": "boolean",
+            "description": "true: stop only its current run."
+          }
+        },
+        "required": [
+          "agent"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "type": "function",
+      "name": "schedule_create",
+      "description": "Create a reminder in this session: its prompt is presented to you when it is due. Give exactly one of after_seconds (a delay), at (a date and time), or every_seconds (a repeat). A repeating reminder keeps the rhythm of its creation time; occurrences it misses are skipped, and only the latest is delivered. Reminders run on time only while this session is open; otherwise one becomes overdue and is delivered when the session is resumed.\n\nCodemode: `tools.schedule_create(args)` resolves to a string.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "description": "What to present when the reminder is due; not empty."
+          },
+          "after_seconds": {
+            "type": "number",
+            "description": "Delay in whole seconds, above 0."
+          },
+          "every_seconds": {
+            "type": "number",
+            "description": "Interval in whole seconds, at least 300."
+          },
+          "at": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "date": {
+                    "type": "string"
+                  },
+                  "time": {
+                    "type": "string"
+                  },
+                  "time_zone": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "date",
+                  "time",
+                  "time_zone"
+                ]
+              }
+            ],
+            "description": "An RFC 3339 date-time with its offset, or a local date and time with an IANA time zone."
+          }
+        },
+        "required": [
+          "prompt"
+        ]
+      }
+    },
+    {
+      "type": "function",
+      "name": "schedule_list",
+      "description": "List this session's active reminders in creation order, each with its id, UTC target time, and whether it is scheduled or overdue.\n\nCodemode: `tools.schedule_list(args)` resolves to a string.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "type": "function",
+      "name": "schedule_delete",
+      "description": "Delete an active reminder by the id schedule_create or schedule_list returned. An unknown or finished id returns deleted false.\n\nCodemode: `tools.schedule_delete(args)` resolves to a string.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The reminder's id."
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "type": "function",
+      "name": "grep",
+      "description": "Search file contents for a pattern. Returns matching lines with file paths and line numbers. Respects .gitignore. Output is truncated to 100 matches or 50KB (whichever is hit first). Long lines are truncated to 500 chars.\n\nCodemode: `tools.grep(args)` resolves to a string.",
+      "parameters": {
+        "type": "object",
+        "required": [
+          "pattern"
+        ],
+        "properties": {
+          "pattern": {
+            "type": "string",
+            "description": "Search pattern (regex or literal string)"
+          },
+          "path": {
+            "type": "string",
+            "description": "Directory or file to search (default: current directory)"
+          },
+          "glob": {
+            "type": "string",
+            "description": "Filter files by glob pattern, relative to path, e.g. '*.ts', 'src/**/*.ts' or '**/*.spec.ts'. A pattern without '/' matches file names at any depth"
+          },
+          "ignoreCase": {
+            "type": "boolean",
+            "description": "Case-insensitive search (default: false)"
+          },
+          "literal": {
+            "type": "boolean",
+            "description": "Treat pattern as literal string instead of regex (default: false)"
+          },
+          "context": {
+            "type": "number",
+            "description": "Number of lines to show before and after each match (default: 0)"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Maximum number of matches to return (default: 100)"
+          }
+        }
+      }
+    },
+    {
+      "type": "function",
+      "name": "find",
+      "description": "Search for files by glob pattern. Returns matching file paths relative to the search directory. Respects .gitignore. Output is truncated to 1000 results or 50KB (whichever is hit first).\n\nCodemode: `tools.find(args)` resolves to a string.",
+      "parameters": {
+        "type": "object",
+        "required": [
+          "pattern"
+        ],
+        "properties": {
+          "pattern": {
+            "type": "string",
+            "description": "Glob pattern to match files, e.g. '*.ts', '**/*.json', or 'src/**/*.spec.ts'"
+          },
+          "path": {
+            "type": "string",
+            "description": "Directory to search in (default: current directory)"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Maximum number of results (default: 1000)"
+          }
+        }
+      }
+    },
+    {
+      "type": "function",
+      "name": "ls",
+      "description": "List directory contents. Returns entries sorted alphabetically, with '/' suffix for directories. Includes dotfiles. Output is truncated to 500 entries or 50KB (whichever is hit first).\n\nCodemode: `tools.ls(args)` resolves to a string.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Directory to list (default: current directory)"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Maximum number of entries to return (default: 500)"
+          }
+        }
+      }
+    },
+    {
+      "type": "function",
+      "name": "visualize",
+      "description": "Show the user a bar chart, line chart, table, or Mermaid diagram in the terminal. Use it for comparisons, trends, tables, or structure and flows the user should see at a glance. The user sees the drawing; you get a short confirmation, so do not repeat the data in prose.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "bar",
+              "line",
+              "table",
+              "diagram"
+            ],
+            "description": "bar: a bar per row and series; line: series over the rows in order; table: rows and columns; diagram: Mermaid source."
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "columns": {
+            "type": "array",
+            "maxItems": 8,
+            "items": {
+              "type": "string"
+            },
+            "description": "Column names. The first labels each row (its category or x); for bar and line, the rest are numeric series."
+          },
+          "y": {
+            "type": "object",
+            "properties": {
+              "min": {
+                "type": "number"
+              },
+              "max": {
+                "type": "number"
+              },
+              "unit": {
+                "type": "string",
+                "maxLength": 12
+              }
+            },
+            "description": "bar and line: the value axis, when not taken from the data."
+          },
+          "rows": {
+            "type": "array",
+            "maxItems": 500,
+            "items": {
+              "type": "array",
+              "items": {
+                "type": [
+                  "string",
+                  "number",
+                  "null"
+                ]
+              }
+            },
+            "description": "One array per row, in column order. Series values are numbers, or null when missing."
+          },
+          "source": {
+            "type": "string",
+            "maxLength": 16384,
+            "description": "diagram: Mermaid flowchart, sequenceDiagram, stateDiagram-v2, classDiagram, or erDiagram."
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      }
+    }
+  ]
+}

@@ -4,7 +4,10 @@ Notable changes to Bake. `bake` compiles this file in, and `/changelog` shows it
 
 ## [Unreleased]
 
+- **Tool cards in dim boxes.** On a truecolor terminal, a tool call with output is drawn in a rounded box with a dim edge (muted red when it failed), the call riding in its top edge, in place of the tinted background. Every call's state mark sits in one column, and its output lines up under the tool's name.
 - **Telecom in `/settings`.** `/settings` has an Agent team group with `Telecom`, which saves `"telecom"` in `settings.json` and applies from the next session (`/new`, `/resume`, or a restart); the row says when `BAKE_TELECOM` overrides it. `/telecom` and `/spawn` with telecom off say where to turn it on, and a startup tip names it.
+- **Prompt and tool text audit.** An interactive or RPC session's prompt now says someone can answer; it said every run was non-interactive, even with `ask_user` declared. When an `edit` or `write` fails, the commands sent after it in the same response are answered with an error instead of run, so a check cannot report on a file the change never reached; later edits and reads still run. The `codemode` guideline no longer competes with the rule to put independent calls in one response, `edit` contributes one guideline where it had four, the `bash` rule names `grep` for machines without `rg`, `ask_user` and the run rule agree on when to ask, and a session with both `subagents` and `telecom` is told which way of delegating is for what. The `schedule_*`, `run_in_background`, and MCP resource descriptions are plainer. These change what the model reads; a paired evaluation has not been run.
+
 ## [0.4.7] - 2026-11-14
 
 Bake 0.4.7 adds native Windows x64 releases, opt-in agent teams over telecom with headless spawned agents and a crew panel, lets the model ask you questions with `ask_user`, and makes tool cards clearer. It is signed with a new release key, so 0.4.6 and earlier installs reinstall once. Bake 0.4.6 was the last Linux arm64 release.
