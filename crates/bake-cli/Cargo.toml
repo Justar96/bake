@@ -24,6 +24,13 @@ tokio = { workspace = true, features = ["rt", "rt-multi-thread", "signal", "macr
 # documentation topic. Both are already in the binary through `bake-ai`.
 ring.workspace = true
 
+# Linux glibc builds define `acosf`, `atan2f`, and `hypotf` from libm's
+# musl port, so the executable needs no glibc newer than its floor
+# (`src/glibc_floor.rs`). libm already ships through Cranelift; its license
+# is clarified in `about.toml`.
+[target.'cfg(all(target_os = "linux", target_env = "gnu"))'.dependencies]
+libm.workspace = true
+
 [dev-dependencies]
 # The Wasm plugin session tests build their own tools.
 bake-agent.workspace = true

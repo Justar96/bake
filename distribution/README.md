@@ -103,7 +103,7 @@ The generator is a port of the Bun script that generated 0.4.0's bundle. On the 
 
 `bake-release glibc-floor <binary> [--floor GLIBC_2.34]` reports the oldest glibc a built Linux `bake` starts on, and fails above the floor the owner chose ([D50](../docs/roadmap/rust-0.4/scope-00/support.md#decision-register)): glibc 2.34, which RHEL 9, Amazon Linux 2023, Ubuntu 22.04, and Debian 12 meet.
 
-It reads the version needs with `readelf` from binutils, in the C locale. The floor is the highest non-weak `GLIBC_` need; weak references, which Rust's standard library uses for newer functions, are reported without raising it. It fails closed on output it cannot read. A failure names the symbols bound above the floor, or a link that left a weak need unmarked. The workflow links every Linux build with the pinned toolchain's rust-lld, which marks those needs weak.
+It reads the version needs with `readelf` from binutils, in the C locale. The floor is the highest non-weak `GLIBC_` need; weak references, which Rust's standard library uses for newer functions, are reported without raising it. It fails closed on output it cannot read. A failure names the symbols bound above the floor, or a link that left a weak need unmarked. The workflow links every Linux build with the pinned toolchain's rust-lld, which marks those needs weak. glibc 2.35 and 2.43 gave `hypotf`, `acosf`, and `atan2f` new symbol versions, which a build on a newer host would bind; the Linux `bake` defines those three from `libm` itself ([`glibc_floor.rs`](../crates/bake-cli/src/glibc_floor.rs)), so add any other function the check names there the same way.
 
 ## Installers
 

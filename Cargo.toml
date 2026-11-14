@@ -43,6 +43,9 @@ bake-svg = { path = "crates/bake-svg" }
 bake-tui = { path = "crates/bake-tui" }
 bake-tui-view = { path = "crates/bake-tui-view" }
 bake-update = { path = "crates/bake-update" }
+# Pure-Rust maths, the version Cranelift already brings; `bake-cli` defines
+# three `f32` functions from it to hold the Linux glibc floor.
+libm = { version = "=0.2.16", default-features = false }
 ratatui = { version = "=0.30.2", default-features = false, features = ["crossterm"] }
 # The core crate the pinned Ratatui release depends on; the view crate uses it
 # without the terminal backend.
