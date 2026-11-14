@@ -149,6 +149,7 @@ dependencies = [
  "bake-update",
  "getrandom 0.4.3",
  "libc",
+ "libm",
  "ring",
  "serde_json",
  "tokio",

@@ -15,6 +15,8 @@
 //! runs from, or rolls it back ([`update`]).
 
 mod docs;
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+mod glibc_floor;
 mod plugin_check;
 mod plugin_manage;
 mod print_output;
