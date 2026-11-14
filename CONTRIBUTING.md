@@ -15,7 +15,7 @@ Work on an up-to-date `develop`, rebased on `origin/develop`. Work lands directl
 
 Before pushing, run the checks above on Linux. CI runs locally, not on GitHub Actions: before a release, run these checks and the locked release build on Linux x86_64, and the locked release build, pack, and an `install.ps1` install on Windows x64. There are no macOS checks until Bake releases that platform. Report actual passes, failures, and skips, including host architectures. Terminal behavior needs an expected-output test and a real-terminal exercise; Cargo tests alone do not establish PTY coverage.
 
-See [testing](docs/testing.md) for property, mutation, coverage, and fuzz checks. Model-visible changes need paired evaluation against a clean build of the base `develop` commit, with model identifiers, prompts, trial counts, results, and accepted regressions recorded in the change's documentation. Do not infer model quality from keyless fixture tests.
+See [testing](docs/testing.md) for property, mutation, coverage, and fuzz checks. Model-visible changes need paired evaluation against a clean build of the base `develop` commit, run with `bake-eval` and recorded under [docs/evaluations](docs/evaluations/README.md) with its models, prompts, trial counts, results, and accepted regressions. Do not infer model quality from keyless fixture tests.
 
 Any change to observable semantics names the verification boundary it affects.
 

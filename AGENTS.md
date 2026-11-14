@@ -60,7 +60,7 @@ With a public API change, update the crate row and test paragraph in `docs/devel
 
 ## Evaluation and documentation
 
-Changes to prompts, tools, results and errors, context, compaction, caching, the agent loop, or model adapters need paired evaluation against a clean built worktree of the base `develop` commit. Compare the built executables and document the method, models, prompts, trial counts, results, and accepted regressions with the change. The repository has no evaluator runner; do not prescribe deleted commands or claim a standard suite ran. Report missing live-model access and regressions to the user; keyless fixtures alone do not measure model quality.
+Changes to prompts, tools, results and errors, context, compaction, caching, the agent loop, or model adapters need paired evaluation against a clean built worktree of the base `develop` commit. Compare the built executables and document the method, models, prompts, trial counts, results, and accepted regressions with the change. Run them with `bake-eval` and keep its record under `docs/evaluations/` ([evaluations](docs/evaluations/README.md)); read a change against the noise floor recorded there for the same tasks, models, and trial count, and do not claim more than the tasks that ran. Report missing live-model access and regressions to the user; keyless fixtures alone do not measure model quality.
 
 Documentation describes current Bake behavior in English. Update embedded user docs when changing commands or behavior, and the owning crate documentation when changing APIs. Keep comments local and explain obligations that code cannot show. Files end with one newline. Never commit credentials or `.env` files.
 

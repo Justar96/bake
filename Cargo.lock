@@ -210,6 +210,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "bake-eval"
+version = "0.4.8"
+dependencies = [
+ "bake-process",
+ "proptest",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "bake-mcp"
 version = "0.4.8"
 dependencies = [

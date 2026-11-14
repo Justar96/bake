@@ -1,0 +1,8 @@
+region	product	amount
+north	apples	1,200.50
+south	pears	300
+north	pears	99.95
+east	apples	410.10
+south	apples	250.25
+north	plums	0.05
+east	plums	12

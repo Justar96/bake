@@ -6,6 +6,7 @@ members = [
     "crates/bake-cli",
     "crates/bake-codemode",
     "crates/bake-coding-agent",
+    "crates/bake-eval",
     "crates/bake-mcp",
     "crates/bake-mermaid",
     "crates/bake-plugin-sdk",

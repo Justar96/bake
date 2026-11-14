@@ -29,6 +29,7 @@ Each row says what a crate owns. The crate's own module documentation describes 
 | [`bake-cli`](../crates/bake-cli/) | The `bake` executable: launch options, embedded docs, print and RPC modes, and update commands |
 | [`bake-codemode`](../crates/bake-codemode/) | Pi's codemode engine: the pinned QuickJS-NG WebAssembly binary run in process by Wasmtime, its prelude, declarations, and tool-search ranking; no agent types |
 | [`bake-coding-agent`](../crates/bake-coding-agent/) | Pi's coding-agent services for Bake: sessions, compaction, models and the CLIProxyAPI route, prompts and skills, the tools (files, bash, web, `visualize`, `ask_user`, codemode), the permission layer over `bake-sandbox`, MCP servers, plugins, hooks, opt-in subagents, reminders, telecom, and spawned agents |
+| [`bake-eval`](../crates/bake-eval/) | The paired evaluation runner, never shipped: runs two built `bake` executables on the tasks in its `tasks/`, each sample in a home of its own, and writes the records under `docs/evaluations/` |
 | [`bake-mcp`](../crates/bake-mcp/) | The Model Context Protocol client, ported from Pi's `mcp` package, over stdio and Streamable HTTP |
 | [`bake-mermaid`](../crates/bake-mermaid/) | A bounded, total Mermaid-to-text renderer adapted from OpenAI Codex's `codex-mermaid` (Apache-2.0) |
 | [`bake-plugin-sdk`](../crates/bake-plugin-sdk/) | Guest-side bindings for the `bake:plugin@0.1.0` WIT contract, for components built for `wasm32-wasip2` |

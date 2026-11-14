@@ -1,0 +1,1 @@
+"""Invoices and payment terms."""

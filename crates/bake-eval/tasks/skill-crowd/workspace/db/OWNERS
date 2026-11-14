@@ -1,0 +1,7 @@
+# Reviewers of schema changes, by table. The first matching line wins.
+ledger_*        @devi.okafor
+accounts        @devi.okafor
+users           @mara.lind
+user_*          @tomas.reyes
+sessions        @tomas.reyes
+*               @platform-db

@@ -1,0 +1,12 @@
+# Changes for the next release, one a line: <type> #<issue number> <text>
+# Types: security, removed, added, fixed, internal.
+# The release procedure empties this list.
+
+fixed #412 Fixed wrapping of lines that contain tabs.
+added #404 Added the `--strict` option, which turns warnings into errors.
+internal #417 Moved the test fixtures into tests/data.
+fixed #97 Fixed a typo in the `--help` text.
+security #421 `tidy.toml` is no longer read from the current directory unless `--config` names it.
+removed #415 Removed the deprecated `--legacy-wrap` option.
+fixed #398 Fixed a crash when the input file is empty.
+added #409 Added support for reading the width from `tidy.toml`.

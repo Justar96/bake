@@ -1,0 +1,4 @@
+id BIGINT not-null
+user_id BIGINT not-null
+started_at TIMESTAMPTZ not-null
+ended_at TIMESTAMPTZ null
