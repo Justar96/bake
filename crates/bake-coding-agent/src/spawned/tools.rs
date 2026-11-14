@@ -14,7 +14,9 @@ const SPAWN: &str = "Start another Bake agent as a separate headless process in 
 
 const STOP: &str = "Stop a spawned agent: end its process (default), or with interrupt true only stop its current run and keep it for more messages.";
 
-const SNIPPET: &str = "Start parallel headless Bake agents on self-contained tasks, and stop them";
+/// The guideline `spawn_agent` contributes in a session that also starts
+/// subagents: which of the two to delegate to, and how each is reached.
+pub const WITH_SUBAGENTS_GUIDELINE: &str = "To delegate, use subagent for a task whose result you need back in this session, and spawn_agent for longer parallel work by an agent that keeps its own session. Reach a subagent with send_message and interrupt_agent, and a spawned agent with telecom and stop_agent.";
 
 fn ok(text: String, details: Value) -> AgentToolResult {
     let mut result = AgentToolResult::text(text);
@@ -128,7 +130,7 @@ pub fn tools(host: &SpawnHost) -> Vec<ToolDefinition> {
     vec![
         ToolDefinition {
             tool: spawn,
-            prompt_snippet: Some(SNIPPET.to_owned()),
+            prompt_snippet: None,
             prompt_guidelines: None,
         },
         ToolDefinition {

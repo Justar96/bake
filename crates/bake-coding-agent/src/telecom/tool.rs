@@ -23,9 +23,6 @@ board: who works here, on what, and the asks waiting on you.
 send: message agents (to = callsign, or several comma-separated); an idle one starts a turn. ask: message one agent and wait for its answer (wait false: return at once; the answer arrives later as a message). reply: answer an ask put to you (askId; optional when only one waits).
 broadcast: tell every agent here; it starts no turn and reaches them at their next prompt. status: set the one-line task the others see.";
 
-const SNIPPET: &str =
-    "Coordinate with parallel Bake agents: team board, send/ask/reply, broadcast, status";
-
 const GUIDELINES: [&str; 3] = [
     "When telecom shows other agents in this repository, reply promptly to an ask put to you: the asker is blocked until you answer.",
     "Message other agents only for real coordination (requests, handoffs, shared-interface changes), never to acknowledge; each message costs the recipient a turn.",
@@ -104,7 +101,7 @@ pub fn tool(station: Station) -> ToolDefinition {
     tool.replay = Some(ToolReplay::Never);
     ToolDefinition {
         tool,
-        prompt_snippet: Some(SNIPPET.to_owned()),
+        prompt_snippet: None,
         prompt_guidelines: Some(GUIDELINES.iter().map(|line| (*line).to_owned()).collect()),
     }
 }

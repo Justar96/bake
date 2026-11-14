@@ -98,6 +98,15 @@ fn definitions_match_pi() {
         if tool.name == "grep" {
             pi["parameters"]["properties"]["glob"]["description"] = json!(GREP_GLOB_V1_5_2);
         }
+        // Bake's `edit` contributes one guideline of its own; Pi's four
+        // repeat the tool's description and parameters.
+        let bake_edit_guidelines = [
+            "Use edit for precise changes, with every change to one file in a single call as separate edits[] entries.",
+        ];
+        if tool.name == "edit" {
+            assert_eq!(pi["promptGuidelines"].as_array().map(Vec::len), Some(4));
+            pi["promptGuidelines"] = json!(bake_edit_guidelines);
+        }
         let pi = &pi;
         let mine = json!({
             "name": tool.name,
@@ -124,10 +133,12 @@ fn definitions_match_pi() {
             definition.prompt_snippet.as_deref(),
             contribution["snippet"].as_str()
         );
-        assert_eq!(
-            definition.prompt_guidelines.clone().unwrap_or_default(),
-            strings(&contribution["guidelines"]),
-        );
+        let guidelines = definition.prompt_guidelines.clone().unwrap_or_default();
+        if tool.name == "edit" {
+            assert_eq!(guidelines, bake_edit_guidelines);
+        } else {
+            assert_eq!(guidelines, strings(&contribution["guidelines"]));
+        }
     }
 }
 

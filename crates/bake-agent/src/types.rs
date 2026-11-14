@@ -413,6 +413,13 @@ pub struct AgentTool {
     /// set by default. A tool that runs other tools, such as code mode,
     /// clears it so it cannot call itself. It is not sent to the model.
     pub nested_callable: bool,
+    /// Whether a failed call of this tool stops later calls of the same
+    /// response that may depend on it: in a batch that runs one call at a
+    /// time, they are answered with an error instead of run, unless their
+    /// tool also sets this or is `read_only`. A file change sets it, so the
+    /// command sent to check a change does not run against a file the
+    /// change never reached. Clear by default; not sent to the model.
+    pub failure_skips_dependents: bool,
 }
 
 impl AgentTool {
@@ -449,6 +456,7 @@ impl AgentTool {
             execution_mode: None,
             read_only: false,
             nested_callable: true,
+            failure_skips_dependents: false,
         }
     }
 
@@ -471,6 +479,7 @@ impl fmt::Debug for AgentTool {
             .field("execution_mode", &self.execution_mode)
             .field("read_only", &self.read_only)
             .field("nested_callable", &self.nested_callable)
+            .field("failure_skips_dependents", &self.failure_skips_dependents)
             .finish_non_exhaustive()
     }
 }

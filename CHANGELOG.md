@@ -4,6 +4,7 @@ Notable changes to Bake. `bake` compiles this file in, and `/changelog` shows it
 
 ## [Unreleased]
 
+- **Telecom in `/settings`.** `/settings` has an Agent team group with `Telecom`, which saves `"telecom"` in `settings.json` and applies from the next session (`/new`, `/resume`, or a restart); the row says when `BAKE_TELECOM` overrides it. `/telecom` and `/spawn` with telecom off say where to turn it on, and a startup tip names it.
 ## [0.4.7] - 2026-11-14
 
 Bake 0.4.7 adds native Windows x64 releases, opt-in agent teams over telecom with headless spawned agents and a crew panel, lets the model ask you questions with `ask_user`, and makes tool cards clearer. It is signed with a new release key, so 0.4.6 and earlier installs reinstall once. Bake 0.4.6 was the last Linux arm64 release.

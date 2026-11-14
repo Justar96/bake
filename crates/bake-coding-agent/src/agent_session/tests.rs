@@ -1199,6 +1199,20 @@ fn tools_that_change_files_or_run_commands_run_in_order() {
         run_in_order(tool("bash", Some(ToolExecutionMode::Parallel))).execution_mode,
         Some(ToolExecutionMode::Parallel)
     );
+    // A failed file change stops the commands sent after it, whatever mode
+    // the tool sets.
+    for (name, mode, stops) in [
+        ("edit", None, true),
+        ("write", Some(ToolExecutionMode::Parallel), true),
+        ("bash", None, false),
+        ("read", None, false),
+    ] {
+        assert_eq!(
+            run_in_order(tool(name, mode)).failure_skips_dependents,
+            stops,
+            "{name}"
+        );
+    }
 }
 
 // Bake `packages/llm/llm-pi-ai/src/config.ts` `maxToolArgumentWhitespace`:

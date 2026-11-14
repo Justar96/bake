@@ -30,7 +30,7 @@ pub(super) async fn telecom(context: &Context, argument: &str) -> Outcome {
     let station = match context.session.telecom() {
         None => {
             return Ok(Done::Note(
-                "Telecom is off: set \"telecom\": true in settings.json, or start bake with BAKE_TELECOM=on, to join the other Bake sessions in this repository.".to_owned(),
+                "Telecom is off. Turn on Telecom in /settings, then /new, to join the other Bake sessions in this repository and /spawn agents; BAKE_TELECOM=on turns it on for one run.".to_owned(),
             ));
         }
         Some(Err(reason)) => return Ok(Done::Note(format!("Telecom did not start: {reason}"))),
@@ -61,7 +61,7 @@ pub(super) async fn telecom(context: &Context, argument: &str) -> Outcome {
 pub(super) async fn spawn(context: &Context, argument: &str) -> Outcome {
     let Some(host) = context.session.spawned() else {
         return Err(
-            "This session cannot spawn agents: it needs telecom on (bake docs team), and must not itself be a spawned agent; your draft is kept."
+            "This session cannot spawn agents: turn on Telecom in /settings, then /new (bake docs team); a spawned agent spawns none. Your draft is kept."
                 .to_owned(),
         );
     };

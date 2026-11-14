@@ -1093,6 +1093,12 @@ impl SettingsStore {
         })
     }
 
+    /// `telecom`, Bake's own: whether a top-level session joins its
+    /// repository's team when it starts.
+    pub fn set_telecom(&self, on: bool) -> Result<Settings, StoreError> {
+        self.update(|object| set_member(object, "telecom", on.into()))
+    }
+
     /// Pi v1.5.2's `setMermaidRenderingMode`: `markdown.mermaid`, keeping
     /// the section's other members, such as `codeBlockIndent`. A `markdown`
     /// that is not an object is replaced.

@@ -55,6 +55,14 @@ pub fn enabled(setting: bool) -> bool {
     from_choice(choice.as_deref(), setting)
 }
 
+/// The choice [`ENABLE_ENV`] makes for this run, whatever the setting
+/// says, or `None` when it makes none.
+pub fn env_choice() -> Option<bool> {
+    let choice = std::env::var(ENABLE_ENV).ok();
+    let on = from_choice(choice.as_deref(), true);
+    (on == from_choice(choice.as_deref(), false)).then_some(on)
+}
+
 /// [`enabled`] for an [`ENABLE_ENV`] value; any other value leaves
 /// `setting`.
 fn from_choice(choice: Option<&str>, setting: bool) -> bool {

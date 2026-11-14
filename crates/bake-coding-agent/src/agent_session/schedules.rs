@@ -44,9 +44,9 @@ pub(crate) const NAMES: [&str; 3] = ["schedule_create", "schedule_list", "schedu
 /// The longest the timer goes without reading the wall clock.
 pub(crate) const RECHECK: Duration = Duration::from_secs(60);
 
-const CREATE_DESCRIPTION: &str = "Create one reminder in the current session. Supply a non-empty prompt and exactly one selector: a positive safe-integer after_seconds delay, at as a strict offset date-time or local date/time object, or safe-integer every_seconds of at least 300. Fixed-rate reminders stay creation-aligned, skip missed occurrences, and batch one latest occurrence per overdue rule. Delivery is session-local: the reminder runs on time only while this session is live and otherwise becomes overdue until the session is resumed.";
-const LIST_DESCRIPTION: &str = "List every active reminder in the current session in creation order, including its exact id, UTC target, scheduled or overdue state, and session-local delivery mode.";
-const DELETE_DESCRIPTION: &str = "Delete one active reminder in the current session by the exact id returned by schedule_create or schedule_list. Unknown or already-finished ids return deleted false.";
+const CREATE_DESCRIPTION: &str = "Create a reminder in this session: its prompt is presented to you when it is due. Give exactly one of after_seconds (a delay), at (a date and time), or every_seconds (a repeat). A repeating reminder keeps the rhythm of its creation time; occurrences it misses are skipped, and only the latest is delivered. Reminders run on time only while this session is open; otherwise one becomes overdue and is delivered when the session is resumed.";
+const LIST_DESCRIPTION: &str = "List this session's active reminders in creation order, each with its id, UTC target time, and whether it is scheduled or overdue.";
+const DELETE_DESCRIPTION: &str = "Delete an active reminder by the id schedule_create or schedule_list returned. An unknown or finished id returns deleted false.";
 
 /// A replaced wall clock, for tests.
 #[cfg(test)]
@@ -375,9 +375,9 @@ pub(super) fn tools(core: &Arc<Core>, schedules: &Arc<Schedules>) -> Vec<Arc<Age
             json!({
                 "type": "object",
                 "properties": {
-                    "prompt": { "type": "string", "description": "Reminder content to present when the target becomes due." },
-                    "after_seconds": { "type": "number", "description": "Positive safe-integer delay in seconds." },
-                    "every_seconds": { "type": "number", "description": "Fixed-rate safe-integer interval in seconds, at least 300." },
+                    "prompt": { "type": "string", "description": "What to present when the reminder is due; not empty." },
+                    "after_seconds": { "type": "number", "description": "Delay in whole seconds, above 0." },
+                    "every_seconds": { "type": "number", "description": "Interval in whole seconds, at least 300." },
                     "at": {
                         "oneOf": [
                             { "type": "string" },
@@ -392,7 +392,7 @@ pub(super) fn tools(core: &Arc<Core>, schedules: &Arc<Schedules>) -> Vec<Arc<Age
                                 "required": ["date", "time", "time_zone"]
                             }
                         ],
-                        "description": "Absolute target as strict offset RFC 3339 or local date/time with an explicit IANA zone."
+                        "description": "An RFC 3339 date-time with its offset, or a local date and time with an IANA time zone."
                     }
                 },
                 "required": ["prompt"]
@@ -486,7 +486,7 @@ pub(super) fn tools(core: &Arc<Core>, schedules: &Arc<Schedules>) -> Vec<Arc<Age
             DELETE_DESCRIPTION,
             json!({
                 "type": "object",
-                "properties": { "id": { "type": "string", "description": "Exact session-local schedule id." } },
+                "properties": { "id": { "type": "string", "description": "The reminder's id." } },
                 "required": ["id"]
             }),
             ToolReplay::Never,

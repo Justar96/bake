@@ -169,7 +169,7 @@ pub fn create_visualize_tool_definition() -> ToolDefinition {
     tool.nested_callable = false;
     ToolDefinition {
         tool,
-        prompt_snippet: Some("Show the user a chart, table, or diagram".into()),
+        prompt_snippet: None,
         prompt_guidelines: None,
     }
 }

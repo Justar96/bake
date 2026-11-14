@@ -27,6 +27,7 @@ pub const TIPS: &[&str] = &[
     "/session shows this session's file, tokens, and cost",
     "Ctrl+- undoes an edit to your draft",
     "Ctrl+O shows every tool call's whole output",
+    "Telecom in /settings lets /spawn <task> run agents beside you",
 ];
 /// The idle placeholder's parts. The preview has no commands or file
 /// mentions to name, so it names its editing keys instead.

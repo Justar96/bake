@@ -1011,21 +1011,39 @@ async fn execute_tool_calls_sequential(
     let mut finalized_calls = Vec::new();
     let mut messages = Vec::new();
 
+    // The first tool of this batch whose failed call later calls may depend
+    // on ([`AgentTool::failure_skips_dependents`]).
+    let mut failed: Option<String> = None;
+
     for tool_call in tool_calls {
         emit_tool_execution_start(tool_call, sink).await;
-        let preparation = batch.prepare(tool_call).await;
-        let finalized = match preparation {
-            Preparation::Immediate { result, is_error } => AgentToolCallOutcome {
+        let tool = find_tool(&batch.context.tools, &tool_call.name);
+        let guards = tool.is_some_and(|tool| tool.failure_skips_dependents);
+        let independent = guards || tool.is_some_and(|tool| tool.read_only);
+        let finalized = match &failed {
+            Some(failed) if !independent => AgentToolCallOutcome {
                 tool_call: tool_call.clone(),
-                result,
-                is_error,
+                result: create_error_tool_result(skipped_after_failure(failed)),
+                is_error: true,
                 duration_ms: None,
                 nested: None,
             },
-            Preparation::Prepared { tool, args } => {
-                batch.run_prepared(tool_call, &tool, &args).await
-            }
+            _ => match batch.prepare(tool_call).await {
+                Preparation::Immediate { result, is_error } => AgentToolCallOutcome {
+                    tool_call: tool_call.clone(),
+                    result,
+                    is_error,
+                    duration_ms: None,
+                    nested: None,
+                },
+                Preparation::Prepared { tool, args } => {
+                    batch.run_prepared(tool_call, &tool, &args).await
+                }
+            },
         };
+        if guards && finalized.is_error && failed.is_none() {
+            failed = Some(tool_call.name.clone());
+        }
 
         emit_tool_execution_end(&finalized, sink).await;
         let message = create_tool_result_message(&finalized);
@@ -1173,6 +1191,14 @@ fn unavailable_context(tool_call: &ToolCall, parent_tool_call_id: Option<&str>) 
     ToolContext::new(
         NestedToolExecutor::unavailable(tool_call.id.clone()),
         parent_tool_call_id.map(str::to_owned),
+    )
+}
+
+/// What answers a call that was not run because a call of `failed`, earlier
+/// in the same response, failed.
+fn skipped_after_failure(failed: &str) -> String {
+    format!(
+        "Not run: the {failed} call before it in this response failed, and this call may depend on it. Fix that call, then send this one again."
     )
 }
 

@@ -1531,6 +1531,13 @@ async fn build_session(args: &Args, build: Build) -> Result<Built, String> {
         Role::Root(_) => crate::hooks::HookScope::Session,
     };
     let can_ask = approver.is_some();
+    // Someone answers a top-level session with an approver: a terminal, or
+    // an RPC client. A subagent's questions reach no one.
+    let run_mode = if can_ask && matches!(role, Role::Root(_)) {
+        crate::system_prompt::RunMode::Interactive
+    } else {
+        crate::system_prompt::RunMode::Print
+    };
     let approver: Arc<dyn Approver> = approver.unwrap_or_else(|| Arc::new(NoApprover));
     // One standing permission for the tools, the MCP servers' admission,
     // and the hooks' confinement.
@@ -1733,6 +1740,15 @@ async fn build_session(args: &Args, build: Build) -> Result<Built, String> {
             &crate::subagents::CHILD_TOOL_NAMES
         }
     };
+    // Two ways to delegate: the rules say which is for what.
+    if spawned.is_some() && subagent_host.is_some() {
+        for definition in &mut definitions {
+            if definition.name() == crate::spawned::TOOL_NAMES[0] {
+                definition.prompt_guidelines =
+                    Some(vec![crate::spawned::WITH_SUBAGENTS_GUIDELINE.to_owned()]);
+            }
+        }
+    }
     let mut available: Vec<String> = definitions
         .iter()
         .map(|definition| definition.name().to_owned())
@@ -1850,6 +1866,7 @@ async fn build_session(args: &Args, build: Build) -> Result<Built, String> {
     // Without an approver, escalations fail closed (D24), and the prompt
     // states the `never` policy whatever the session's.
     system_prompt.permissions = permission.prompt_text(Path::new(&session_cwd), can_ask);
+    system_prompt.run_mode = run_mode;
     system_prompt.environment = Environment::detect(Path::new(&session_cwd), started_ms);
     let mut session = AgentSession::create(AgentSessionOptions {
         session,
@@ -3348,6 +3365,82 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(faux.call_count(), 1);
+            started.session.shutdown().await;
+        }
+    }
+
+    // What the model is told about who can answer, and the tools that
+    // follow from it: with an approver the session is interactive and
+    // declares `ask_user`; without one, as in `-p`, neither. With `subagents`
+    // and `telecom` both on, the rules say which way of delegating is for
+    // what.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_prompt_states_who_can_answer_and_how_to_delegate() {
+        use bake_ai::providers::faux::{
+            FauxProvider, FauxProviderOptions, FauxResponseStep, faux_assistant_message,
+        };
+        const INTERACTIVE: &str = "<run>\nThis is an interactive session.";
+        const PRINT: &str = "<run>\nThis is a non-interactive run:";
+        for (answerer, team) in [(false, false), (true, false), (true, true)] {
+            let dir = setup_dirs("cli-run-mode");
+            let settings = serde_json::json!({ "subagents": team, "telecom": team });
+            write_owned(&dir.join("home/settings.json"), &settings.to_string());
+            let faux = Arc::new(FauxProvider::new(FauxProviderOptions::default()));
+            let declared = Arc::new(Mutex::new(Vec::new()));
+            let seen = Arc::clone(&declared);
+            faux.set_responses(vec![FauxResponseStep::from_fn(move |context, _, _, _| {
+                *seen.lock().unwrap() = bake_ai::transcript::get_current_tools(context.messages())
+                    .iter()
+                    .map(|tool| tool.name.clone())
+                    .collect();
+                Ok(faux_assistant_message("done"))
+            })]);
+            let (mut environment, errors) = setup_environment(dir.path());
+            environment.extra_providers.push((
+                "faux".into(),
+                serde_json::json!({
+                    "baseUrl":"http://127.0.0.1:9/unused", "api":faux.model().api,
+                    "models":[{"id":"faux-1"}]
+                }),
+                Some("test-key".into()),
+            ));
+            if answerer {
+                environment.approver = Some(Arc::new(crate::permissions::NeverApprover));
+            }
+            let args = [
+                "--model",
+                "faux/faux-1",
+                "--permission",
+                "danger-full-access",
+                "--no-session",
+                "--no-mcp",
+            ];
+            let Ok(started) = start_interactive(environment, parse_args(&strings(&args))).await
+            else {
+                panic!("setup failed: {}", text(&errors));
+            };
+            started.session.apis().register(faux.clone());
+            started
+                .session
+                .prompt("Continue", Vec::new())
+                .await
+                .unwrap();
+            let head = started.session.messages()[0]
+                .as_system()
+                .cloned()
+                .expect("system");
+            let system = bake_ai::utils::text::get_system_message_text(&head);
+            let declared = declared.lock().unwrap().clone();
+            let has = |name: &str| declared.iter().any(|tool| tool == name);
+            assert_eq!(system.contains(INTERACTIVE), answerer, "{system}");
+            assert_eq!(system.contains(PRINT), !answerer, "{system}");
+            assert_eq!(has("ask_user"), answerer, "{declared:?}");
+            assert_eq!(has("subagent") && has("spawn_agent"), team, "{declared:?}");
+            assert_eq!(
+                system.contains(&format!("- {}\n", crate::spawned::WITH_SUBAGENTS_GUIDELINE)),
+                team,
+                "{system}"
+            );
             started.session.shutdown().await;
         }
     }

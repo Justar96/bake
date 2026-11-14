@@ -259,7 +259,7 @@ pub const BASH_BACKGROUND_DESCRIPTION: &str =
 
 /// The `run_in_background` parameter, from `tool-bash`.
 fn background_parameter() -> Value {
-    json!({ "type": "boolean", "description": "No timeout." })
+    json!({ "type": "boolean", "description": "Start the command as a background job and return its job id at once; `timeout` does not apply." })
 }
 
 /// Pi's description, with [`BASH_BACKGROUND_DESCRIPTION`] when `background`.

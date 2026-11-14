@@ -458,7 +458,7 @@ async fn presents_callable_tools_per_codemode_mode() {
                 );
                 assert!(!description("codemode").unwrap().contains("Nested tools:"));
                 assert!(system.contains("Use read to examine files"));
-                assert!(system.contains("Use codemode to batch independent tool calls"));
+                assert!(system.contains("Use codemode for calls that depend"));
             }
             CodemodeMode::Only => {
                 let names: Vec<&str> = tools.iter().map(|tool| tool.name.as_str()).collect();
@@ -469,7 +469,7 @@ async fn presents_callable_tools_per_codemode_mode() {
                 assert!(codemode.contains("- Use read to examine files instead of cat or sed."));
                 // Hidden tools' guidelines move to their codemode sections.
                 assert!(!system.contains("Use read to examine files"));
-                assert!(system.contains("Use codemode to batch independent tool calls"));
+                assert!(system.contains("Use codemode for calls that depend"));
             }
         }
     }

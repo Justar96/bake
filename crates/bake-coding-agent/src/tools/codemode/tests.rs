@@ -227,7 +227,7 @@ fn the_description_without_tools_is_pis_text() {
     assert_eq!(
         prompt.guidelines,
         [
-            "Use codemode to batch independent tool calls (Promise.allSettled), chain them, or filter large output, instead of many separate calls."
+            "Use codemode for calls that depend on each other's results, a call repeated over many items, or large output to filter."
         ]
     );
 }

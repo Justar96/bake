@@ -730,6 +730,114 @@ async fn one_sequential_tool_among_several_forces_sequential_execution() {
     assert_eq!(*order.lock().unwrap(), ["slow:a", "fast:b"]);
 }
 
+/// Bake: after a failed call of a tool that sets
+/// `failure_skips_dependents`, a batch that runs in order answers the calls
+/// that may depend on it without running them; another such tool's call and
+/// a read-only call still run.
+#[tokio::test]
+async fn a_failed_change_skips_the_calls_that_may_depend_on_it() {
+    let ran = executed();
+    let named = |name: &'static str, fails: bool| {
+        let ran = Arc::clone(&ran);
+        AgentTool::new(
+            name,
+            name,
+            "A tool",
+            value_schema(),
+            move |_, params, _, _, _ctx| {
+                let value = params["value"].as_str().unwrap_or_default().to_owned();
+                ran.lock().unwrap().push(format!("{name}:{value}"));
+                Box::pin(async move {
+                    if fails && value == "bad" {
+                        Err("no match".to_owned())
+                    } else {
+                        Ok(AgentToolResult::text("ok"))
+                    }
+                })
+            },
+        )
+    };
+    let mut change = named("change", true);
+    change.execution_mode = Some(ToolExecutionMode::Sequential);
+    change.failure_skips_dependents = true;
+    let check = named("check", false);
+    let mut look = named("look", false);
+    look.read_only = true;
+    let stream = agent_loop(
+        vec![user("change and check")],
+        context(vec![change, check, look]),
+        config(),
+        None,
+        Some(scripted(|index, _, _| match index {
+            0 => tool_use(vec![
+                call("tool-1", "check", json!({ "value": "before" })),
+                call("tool-2", "change", json!({ "value": "bad" })),
+                call("tool-3", "check", json!({ "value": "after" })),
+                call("tool-4", "change", json!({ "value": "good" })),
+                call("tool-5", "look", json!({ "value": "x" })),
+                call("tool-6", "missing", json!({})),
+            ]),
+            // A failed `check` stops nothing, and a batch starts clean.
+            1 => tool_use(vec![
+                call("tool-7", "change", json!({ "value": "good" })),
+                call("tool-8", "check", json!({ "value": "again" })),
+            ]),
+            _ => assistant_text("done"),
+        })),
+    );
+    let events = drain(&stream).await;
+    assert_eq!(
+        *ran.lock().unwrap(),
+        [
+            "check:before",
+            "change:bad",
+            "change:good",
+            "look:x",
+            "change:good",
+            "check:again"
+        ]
+    );
+    let ends: Vec<(String, bool, String)> = events
+        .iter()
+        .filter_map(|event| match event {
+            AgentEvent::ToolExecutionEnd {
+                tool_call_id,
+                is_error,
+                result,
+                ..
+            } => Some((tool_call_id.clone(), *is_error, result_text(result))),
+            _ => None,
+        })
+        .collect();
+    let skipped = "Not run: the change call before it in this response failed, and this call may depend on it. Fix that call, then send this one again.";
+    assert_eq!(
+        ends.iter()
+            .map(|(id, is_error, _)| (id.as_str(), *is_error))
+            .collect::<Vec<_>>(),
+        [
+            ("tool-1", false),
+            ("tool-2", true),
+            ("tool-3", true),
+            ("tool-4", false),
+            ("tool-5", false),
+            ("tool-6", true),
+            ("tool-7", false),
+            ("tool-8", false),
+        ]
+    );
+    assert_eq!(ends[2].2, skipped);
+    assert_eq!(
+        ends[5].2, skipped,
+        "an unknown tool is not known to be independent"
+    );
+    assert_eq!(
+        tool_result_ids(&events),
+        [
+            "tool-1", "tool-2", "tool-3", "tool-4", "tool-5", "tool-6", "tool-7", "tool-8"
+        ]
+    );
+}
+
 /// Pi: "should allow parallel execution when all tools have
 /// executionMode=parallel".
 #[tokio::test(start_paused = true)]
