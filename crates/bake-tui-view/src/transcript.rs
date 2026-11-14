@@ -688,9 +688,9 @@ pub fn edge_colour(state: CallState, tones: Tones) -> Option<Color> {
 /// row moves one cell right too, behind `│`, which keeps the output under
 /// the tool's name and a wrapped argument under its first row. The rows'
 /// text keeps as many cells before the right edge as it has after the left
-/// one. A row's trailing blanks without a background do not widen the box;
-/// a coloured row, such as a diff's, counts whole and keeps its colour to
-/// the edge. A call of one row, such as a read,
+/// one, so a diff's coloured rows stand as far from either edge. A row's
+/// trailing blanks without a background do not widen the box; a coloured
+/// row, such as a diff's, counts whole. A call of one row, such as a read,
 /// stays one row, unboxed, so a run of them reads as a list; it moves one
 /// cell right as well, so every call's mark is at column 3.
 fn frame(lines: &mut Vec<Line<'static>>, width: usize, edge: Color) {
@@ -748,14 +748,7 @@ fn frame(lines: &mut Vec<Line<'static>>, width: usize, edge: Color) {
             row.push(pad(1));
             row.push(Span::styled(format!("{}╮", "─".repeat(fill)), edge));
         } else {
-            // A coloured row, such as a diff's, keeps its colour to the edge.
-            let rest = right.saturating_sub(taken + 1);
-            match row.last().map(|span| span.style) {
-                Some(style) if style.bg.is_some_and(|bg| bg != Color::Reset) => {
-                    row.push(Span::styled(" ".repeat(rest), style));
-                }
-                _ => row.push(pad(rest)),
-            }
+            row.push(pad(right.saturating_sub(taken + 1)));
             row.push(Span::styled("│", edge));
         }
         line.spans = row;
@@ -4420,6 +4413,31 @@ mod tests {
             })
             .map(|s| s.style)
             .unwrap()
+    }
+
+    #[test]
+    fn a_diff_s_tint_stands_as_far_from_either_edge() {
+        let rows = sample_session();
+        let index = edit_index(&rows);
+        let look = Look {
+            tones: Tones::TrueColor,
+            ..PLAIN
+        };
+        let tinted = |line: &Line, x: usize| cell(line, x).bg.is_some_and(|bg| bg != Color::Reset);
+        for width in [60, 80, 140] {
+            let lines = present(&rows, index, width, look);
+            let mut checked = 0;
+            for line in lines.iter().filter(|l| l.to_string().starts_with('│')) {
+                let edge = line.width() - 1;
+                let Some(first) = (1..edge).find(|&x| tinted(line, x)) else {
+                    continue;
+                };
+                let last = (1..edge).rev().find(|&x| tinted(line, x)).unwrap();
+                assert_eq!(first - 1, edge - 1 - last, "{width}: {line}");
+                checked += 1;
+            }
+            assert!(checked > 0, "{width}: no tinted rows in {:?}", text(&lines));
+        }
     }
 
     #[test]
