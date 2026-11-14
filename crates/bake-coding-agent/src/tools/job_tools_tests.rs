@@ -126,17 +126,27 @@ async fn a_read_consumes_new_output_and_ends_with_the_status() {
             .unwrap(),
         format!("(no new output)\n[status: running]\n{STILL_RUNNING}")
     );
-    // Past the wake budget, a running job's read gives no guidance.
+    // At the deepest wake, a job started there gives no guidance, since
+    // its notice cannot open a turn; the job started from the prompt's
+    // turn still does.
     for _ in 0..crate::jobs::MAX_CONSECUTIVE_WAKES {
         assert!(jobs.spend_wake());
     }
     assert!(!jobs.spend_wake());
+    let (_, deep) = held(&jobs, "deep", "");
     assert_eq!(
-        call(&jobs, "job_output", json!({ "job_id": "bash-1" }))
+        call(&jobs, "job_output", json!({ "job_id": "bash-2" }))
             .await
             .unwrap(),
         "(no new output)\n[status: running]"
     );
+    assert_eq!(
+        call(&jobs, "job_output", json!({ "job_id": "bash-1" }))
+            .await
+            .unwrap(),
+        format!("(no new output)\n[status: running]\n{STILL_RUNNING}")
+    );
+    drop(deep);
     release.send(()).unwrap();
     // A wait returns the settled job; its read claims the report.
     let text = call(

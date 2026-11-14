@@ -297,11 +297,9 @@ mod tests {
         let controller = bake_ai::AbortController::new();
         let signal = controller.signal();
         let started = std::time::Instant::now();
-        let abort = tokio::spawn(async move {
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-            controller.abort();
-        });
         // The background `sleep` holds the pipes; its pid is the first line.
+        // The abort waits for that line, so a loaded host cannot abort the
+        // child before it has said which process to clean up.
         let args: Vec<OsString> = ["-c", "sleep 30 & echo $!; exec sleep 30"]
             .map(OsString::from)
             .to_vec();
@@ -314,12 +312,12 @@ mod tests {
             Some(&signal),
             |line| {
                 seen.push(line);
+                controller.abort();
                 std::future::ready(Flow::Continue)
             },
         )
         .await
         .expect("spawn");
-        abort.await.expect("abort task");
         let pid: i32 = String::from_utf8_lossy(&seen[0])
             .trim()
             .parse()

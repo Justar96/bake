@@ -17,7 +17,7 @@
 //! The completion notice the descriptions promise is delivered by the
 //! session ([`crate::agent_session`]); a still-running read adds
 //! [`STILL_RUNNING`] while that notice would open the next turn
-//! ([`JobRegistry::notice_would_wake`]).
+//! ([`JobRegistry::completion_would_wake`]).
 
 use std::time::Duration;
 
@@ -223,7 +223,7 @@ async fn job_output(
     let body = body.strip_suffix('\n').unwrap_or(&body);
     let live = !read.snapshot.status.is_terminal();
     let mut text = format!("{body}\n{}", status_line(&read.snapshot));
-    if live && jobs.notice_would_wake() {
+    if live && JobRegistry::completion_would_wake(&read.snapshot) {
         text.push('\n');
         text.push_str(STILL_RUNNING);
     }

@@ -339,6 +339,52 @@ async fn idle_notices_wake_the_agent_within_the_budget_then_wait_for_a_prompt() 
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn jobs_started_side_by_side_each_wake_the_agent_past_the_budget() {
+    let h = harness();
+    let session = h
+        .session(in_memory(), Settings::default(), None, Vec::new())
+        .await;
+    let jobs = session.jobs();
+    let mut held = Vec::new();
+    for n in 0..MAX_CONSECUTIVE_WAKES + 2 {
+        let (release, released) = tokio::sync::oneshot::channel::<()>();
+        let id = jobs
+            .start(
+                JobSpec {
+                    kind: "bash",
+                    label: format!("job {n}"),
+                    output: OutputMode::Stream,
+                },
+                move |_| async move {
+                    let _ = released.await;
+                    JobOutcome::completed("exit code: 0")
+                },
+            )
+            .expect("admitted");
+        held.push((id, release));
+    }
+    // Each was started from the same turn, so each notice opens a turn at
+    // the first depth, however many came before it.
+    for (turn, (id, release)) in held.into_iter().enumerate() {
+        h.faux
+            .append_responses(vec![faux_assistant_message("noted").into()]);
+        release.send(()).expect("running");
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while !jobs.get(id).expect("kept").status.is_terminal() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("settled");
+        assert_eq!(jobs.get(id).expect("kept").depth, 0);
+        assert!(jobs.notice_would_wake());
+        assert!(session.deliver_job_notices().await.expect("delivered"));
+        assert_eq!(h.faux.call_count(), turn as u64 + 1);
+    }
+    session.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_job_that_settles_before_a_prompt_is_reported_with_it_once() {
     let h = harness();
     let session = h

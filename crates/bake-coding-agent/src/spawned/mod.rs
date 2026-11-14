@@ -67,8 +67,9 @@ const LINE_CAP: usize = 8 * 1024 * 1024;
 /// How much of an agent's standard error is kept, for a failure's reason.
 const STDERR_TAIL: usize = 2048;
 
-/// The longest answer a notice carries.
-const NOTICE_TEXT_CAP: usize = 4000;
+/// The longest answer a notice carries; a longer one ends with a marker
+/// that says how much was cut and how to get it.
+const NOTICE_TEXT_CAP: usize = 16 * 1024;
 
 /// Where an agent is.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -618,6 +619,10 @@ async fn drive(
                                 .find(|entry| entry.row.id == id)
                                 .map(|entry| entry.row.clone());
                             if let Some(row) = row.filter(|_| !stopping) {
+                                // Another agent's report, as a telecom
+                                // message is: it refills the wake budget, so
+                                // the parent always hears it.
+                                jobs.reset_wakes();
                                 let _ = jobs.post(settled_notice(&row, text, failed));
                             }
                         }
@@ -755,15 +760,7 @@ fn settled_notice(
     let body = match (&failed, text) {
         (Some(reason), _) => format!("[spawn] {who} failed its run: {reason}"),
         (None, Some(text)) => {
-            let mut text = text.trim().to_owned();
-            if text.len() > NOTICE_TEXT_CAP {
-                let mut cut = NOTICE_TEXT_CAP;
-                while !text.is_char_boundary(cut) {
-                    cut -= 1;
-                }
-                text.truncate(cut);
-                text.push_str("\n[...]");
-            }
+            let text = capped_answer(&text, name, NOTICE_TEXT_CAP);
             format!("[spawn] {who} finished a run and is idle. Its last answer:\n{text}")
         }
         (None, None) => format!("[spawn] {who} finished a run and is idle, with no answer."),
@@ -772,6 +769,64 @@ fn settled_notice(
         body,
         json!({ "agent": name, "status": if failed.is_some() { "failed" } else { "idle" } }),
     )
+}
+
+/// `text` trimmed and cut to `cap` bytes at a character boundary, ending
+/// with how many bytes were cut and how to get them from `name`.
+fn capped_answer(text: &str, name: &str, cap: usize) -> String {
+    let text = text.trim();
+    if text.len() <= cap {
+        return text.to_owned();
+    }
+    let mut cut = cap;
+    while !text.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    let more = text.len() - cut;
+    format!(
+        "{}\n[... {more} more bytes cut; ask {name} with telecom for the rest]",
+        &text[..cut]
+    )
+}
+
+#[cfg(test)]
+mod answer_tests {
+    use proptest::prelude::*;
+
+    use super::capped_answer;
+
+    proptest! {
+        /// Any answer keeps a prefix of its trimmed text within the cap,
+        /// and says exactly how many bytes the cut left out.
+        #[test]
+        fn any_answer_keeps_a_prefix_within_the_cap(text in "\\PC{0,64}", cap in 0usize..48) {
+            let out = capped_answer(&text, "x", cap);
+            let trimmed = text.trim();
+            match out.split_once("\n[... ") {
+                Some((kept, marker)) if trimmed.len() > cap => {
+                    prop_assert!(kept.len() <= cap);
+                    prop_assert!(trimmed.starts_with(kept));
+                    let more = trimmed.len() - kept.len();
+                    prop_assert_eq!(marker, format!("{more} more bytes cut; ask x with telecom for the rest]"));
+                }
+                _ => prop_assert_eq!(out, trimmed),
+            }
+        }
+    }
+
+    #[test]
+    fn a_long_answer_says_how_much_was_cut_and_whom_to_ask() {
+        assert_eq!(capped_answer("  short \n", "alpha-1", 16), "short");
+        assert_eq!(
+            capped_answer("0123456789abcdef!!", "alpha-1", 16),
+            "0123456789abcdef\n[... 2 more bytes cut; ask alpha-1 with telecom for the rest]"
+        );
+        // Never inside a character: "é" is two bytes.
+        assert_eq!(
+            capped_answer("aé", "b", 2),
+            "a\n[... 2 more bytes cut; ask b with telecom for the rest]"
+        );
+    }
 }
 
 #[cfg(all(test, unix))]

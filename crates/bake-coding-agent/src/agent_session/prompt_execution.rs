@@ -477,11 +477,11 @@ impl PromptExecution {
         if self.closed_reason().is_some() {
             return Ok((RunOutcome::FinishedTurn, false));
         }
-        let notices: Vec<CustomMessage> = job_notices::claim(&self.jobs);
+        let (notices, depth): (Vec<CustomMessage>, usize) = job_notices::claim_at(&self.jobs);
         if notices.is_empty() {
             return Ok((RunOutcome::FinishedTurn, false));
         }
-        if self.model().is_none() || !self.jobs.spend_wake() {
+        if self.model().is_none() || !self.jobs.wake_at(depth) {
             self.pending_notices
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
