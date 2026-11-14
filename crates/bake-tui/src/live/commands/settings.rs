@@ -30,6 +30,11 @@ pub const TREE: &str = "Branches · /tree";
 pub const STATUS_LINE: &str = "Status line";
 /// How answers draw.
 pub const ANSWERS: &str = "Answers";
+/// The agent team: telecom, and the agents `/spawn` starts.
+pub const TEAM: &str = "Agent team · /telecom, /spawn";
+
+/// When a change to `telecom` takes effect.
+const NEXT_SESSION: &str = "from the next session: /new, /resume, or a restart";
 
 /// What the sheet shows, read when it opens and after each change.
 #[derive(Debug, Clone, PartialEq)]
@@ -49,6 +54,16 @@ pub struct View {
     pub status_cache: bool,
     /// `markdown.mermaid`.
     pub mermaid: MermaidRendering,
+    /// `telecom`, as saved.
+    pub telecom: bool,
+    /// Whether this session joined its team when it started.
+    pub telecom_now: bool,
+    /// What `BAKE_TELECOM` chose for this run, whatever the setting says.
+    pub telecom_env: Option<bool>,
+    /// `visualize`, as saved.
+    pub visualize: bool,
+    /// Whether this session started with the `visualize` tool.
+    pub visualize_now: bool,
 }
 
 impl View {
@@ -70,6 +85,37 @@ impl View {
             status_tokens: settings.status_line.tokens,
             status_cache: settings.status_line.cache,
             mermaid: settings.mermaid,
+            telecom: settings.telecom,
+            telecom_now: matches!(session.telecom(), Some(Ok(_))),
+            telecom_env: bake_coding_agent::telecom::env_choice(),
+            visualize: settings.visualize,
+            visualize_now: session
+                .tool_active(bake_coding_agent::tools::visualize::VISUALIZE_TOOL_NAME),
+        }
+    }
+
+    /// What the `Visualize tool` row says under the sheet.
+    fn visualize_about(&self) -> String {
+        if self.visualize != self.visualize_now {
+            format!("Saved; it applies {NEXT_SESSION}.")
+        } else {
+            "Let the model draw charts, tables, diagrams, and SVG in the conversation.".into()
+        }
+    }
+
+    /// What the `Telecom` row says under the sheet.
+    fn telecom_about(&self) -> String {
+        if !cfg!(unix) {
+            "Telecom needs Unix sockets, so it does not start on this platform.".into()
+        } else if let Some(on) = self.telecom_env {
+            format!(
+                "BAKE_TELECOM turns it {} for this run, whatever this says.",
+                on_off(on)
+            )
+        } else if self.telecom != self.telecom_now {
+            format!("Saved; it applies {NEXT_SESSION}.")
+        } else {
+            "Join this repository's other Bake sessions, and /spawn headless agents.".into()
         }
     }
 
@@ -205,6 +251,20 @@ pub fn rows(view: &View) -> Vec<ListItem> {
             view.mermaid.name().into(),
             "Draw Mermaid code blocks as Unicode diagrams.".into(),
         ),
+        row(
+            "visualize",
+            ANSWERS,
+            "Visualize tool",
+            on_off(view.visualize).into(),
+            view.visualize_about(),
+        ),
+        row(
+            "telecom",
+            TEAM,
+            "Telecom",
+            on_off(view.telecom).into(),
+            view.telecom_about(),
+        ),
     ]
 }
 
@@ -274,6 +334,22 @@ pub fn choices(setting: &str, view: &View) -> Option<Choices> {
                 "final draws a diagram once its code block is complete; streaming also draws it while it is written."
                     .into(),
             ),
+        ),
+        "telecom" => simple(
+            "Telecom",
+            &["on", "off"],
+            on_off(view.telecom),
+            Some(format!(
+                "on joins this repository's team of Bake sessions: callsigns, /telecom messages, and /spawn for headless agents in a crew panel above the composer. It applies {NEXT_SESSION}."
+            )),
+        ),
+        "visualize" => simple(
+            "Visualize tool",
+            &["on", "off"],
+            on_off(view.visualize),
+            Some(format!(
+                "on gives the model the visualize tool, which draws bar and line charts, tables, Mermaid diagrams, and SVG images in the conversation as they stream. It applies {NEXT_SESSION}."
+            )),
         ),
         "steering" => simple(
             "Steering mode",
@@ -399,6 +475,8 @@ async fn apply(session: &AgentSession, setting: &str, value: &str) -> Result<Def
         }
         "status-tokens" => session.set_status_line_tokens(value == "on").await,
         "status-cache" => session.set_status_line_cache(value == "on").await,
+        "telecom" => session.set_telecom_setting(value == "on").await,
+        "visualize" => session.set_visualize_setting(value == "on").await,
         "mermaid" => {
             let mode = MermaidRendering::from_value(Some(&value.into()));
             session.set_mermaid_rendering(mode).await
@@ -484,7 +562,15 @@ pub async fn settings(context: &mut Context) -> Outcome {
                 crate::live::mermaid_mode(&session),
             ));
         }
-        changes.push(saved(format!("{}: {label}", choices.title), result));
+        let mut note = format!("{}: {label}", choices.title);
+        if setting == "telecom" && view.telecom_env.is_none() && (value == "on") != view.telecom_now
+        {
+            note = format!("{note} ({NEXT_SESSION})");
+        }
+        if setting == "visualize" && (value == "on") != view.visualize_now {
+            note = format!("{note} ({NEXT_SESSION})");
+        }
+        changes.push(saved(note, result));
         if context.signal.aborted() {
             break;
         }
@@ -512,6 +598,11 @@ mod tests {
             status_tokens: false,
             status_cache: true,
             mermaid: MermaidRendering::Streaming,
+            telecom: false,
+            telecom_now: false,
+            telecom_env: None,
+            visualize: true,
+            visualize_now: true,
         }
     }
 
@@ -543,6 +634,8 @@ mod tests {
                 (STATUS_LINE, "Token totals", "off"),
                 (STATUS_LINE, "Prompt cache", "on"),
                 (ANSWERS, "Mermaid diagrams", "streaming"),
+                (ANSWERS, "Visualize tool", "on"),
+                (TEAM, "Telecom", "off"),
             ]
         );
         assert!(rows.iter().all(|row| row.about.is_some()));
@@ -555,6 +648,57 @@ mod tests {
             assert!(choices(&row.value, &view()).is_some(), "{}", row.value);
         }
         assert_eq!(choices("theme", &view()), None);
+    }
+
+    #[test]
+    fn the_telecom_row_says_when_its_value_applies() {
+        let about = |view: &View| rows(view).last().and_then(|row| row.about.clone()).unwrap();
+        let mut view = view();
+        if !cfg!(unix) {
+            assert!(about(&view).contains("does not start on this platform"));
+            return;
+        }
+        assert_eq!(
+            about(&view),
+            "Join this repository's other Bake sessions, and /spawn headless agents."
+        );
+        view.telecom = true;
+        assert_eq!(
+            about(&view),
+            "Saved; it applies from the next session: /new, /resume, or a restart."
+        );
+        view.telecom_env = Some(false);
+        assert_eq!(
+            about(&view),
+            "BAKE_TELECOM turns it off for this run, whatever this says."
+        );
+        let choices = choices("telecom", &view).unwrap();
+        assert_eq!(choices.current, Some(0));
+        assert!(choices.note.unwrap().contains("/spawn"));
+    }
+
+    #[test]
+    fn the_visualize_row_says_when_its_value_applies() {
+        let about = |view: &View| {
+            rows(view)
+                .into_iter()
+                .find(|row| row.value == "visualize")
+                .and_then(|row| row.about)
+                .unwrap()
+        };
+        let mut view = view();
+        assert_eq!(
+            about(&view),
+            "Let the model draw charts, tables, diagrams, and SVG in the conversation."
+        );
+        view.visualize = false;
+        assert_eq!(
+            about(&view),
+            "Saved; it applies from the next session: /new, /resume, or a restart."
+        );
+        let choices = choices("visualize", &view).unwrap();
+        assert_eq!(choices.current, Some(1));
+        assert!(choices.note.unwrap().contains("SVG"));
     }
 
     #[test]
@@ -763,9 +907,9 @@ mod tests {
                 "  │   Branch summary    ask                                                  │",
                 "  │ Status line 2 ────────────────────────────────────────────────────────── │",
                 "  │   Token totals      off                                                  │",
-                "  │   ↓ 2 more                                                               │",
+                "  │   ↓ 4 more                                                               │",
                 "  │   Auto-compaction starts past 160k of 200k tokens.                       │",
-                "  │ ↑↓ choose · Enter select · Esc cancel                               2/10 │",
+                "  │ ↑↓ choose · Enter select · Esc cancel                               2/12 │",
                 "  ╰──────────────────────────────────────────────────────────────────────────╯",
             ],
             "{text}"

@@ -10,6 +10,7 @@ publish.workspace = true
 # the `ratatui` umbrella crate out of this manifest.
 [dependencies]
 bake-mermaid.workspace = true
+bake-svg.workspace = true
 ratatui-core.workspace = true
 unicode-segmentation.workspace = true
 unicode-width.workspace = true

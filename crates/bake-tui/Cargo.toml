@@ -13,6 +13,7 @@ bake-coding-agent.workspace = true
 # The sandbox mode the opening banner's access tags name.
 bake-sandbox.workspace = true
 bake-tui-view.workspace = true
+bake-svg.workspace = true
 base64.workspace = true
 serde_json.workspace = true
 regex.workspace = true

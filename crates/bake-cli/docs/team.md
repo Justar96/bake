@@ -4,7 +4,7 @@ Bake sessions working in the same repository on one machine can form a team thro
 
 ## Telecom
 
-With `"telecom": true` in `settings.json` (`bake docs settings`), a top-level session joins its repository's team when it starts. `BAKE_TELECOM` set to `1`, `on`, `true`, or `yes` turns telecom on for a run, and `0`, `off`, `false`, or `no` turns it off, whatever the setting says. Subagents do not join; they talk to their parent through their own tools. The team is every Bake session whose working directory is in the same Git repository, its worktrees included; a directory outside Git is a team of its own.
+Turn telecom on in `/settings`, under Agent team, which saves `"telecom": true` in `settings.json` (`bake docs settings`); it applies from the next session, so follow it with `/new`, `/resume`, or a restart. A top-level session then joins its repository's team when it starts. `BAKE_TELECOM` set to `1`, `on`, `true`, or `yes` turns telecom on for a run, and `0`, `off`, `false`, or `no` turns it off, whatever the setting says. Subagents do not join; they talk to their parent through their own tools. The team is every Bake session whose working directory is in the same Git repository, its worktrees included; a directory outside Git is a team of its own.
 
 A session takes the first free callsign of `alpha`, `bravo`, `charlie`, and so on, or `BAKE_TELECOM_CALLSIGN` when that one is free. A spawned agent takes its parent's callsign and a number, such as `alpha-1`. The callsign is held by a file lock for the life of the process, so a session that exits or crashes leaves the team at once; nothing has to time out.
 

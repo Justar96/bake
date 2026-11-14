@@ -294,11 +294,30 @@ pub struct TerminalSession {
     /// Dropped only through [`release`], never by Ratatui's own drop alone.
     terminal: ManuallyDrop<Terminal<CrosstermBackend<Stdout>>>,
     inline: Option<Inline>,
+    /// SVG images shown over their cells, on a terminal that shows images
+    /// ([`crate::graphics`]); full screen only.
+    graphics: Option<crate::graphics::Graphics>,
 }
 
 impl TerminalSession {
     pub fn acquire() -> io::Result<Self> {
         Self::acquire_mode(ScreenMode::Fullscreen)
+    }
+
+    /// Shows SVG images with `graphics` from the next frame. Ignored inline,
+    /// where rows pass into the scrollback.
+    pub fn show_images(&mut self, graphics: crate::graphics::Graphics) {
+        if self.inline.is_none() {
+            self.graphics = Some(graphics);
+        }
+    }
+
+    /// Removes the images shown, before the terminal is given back.
+    pub fn clear_images(&mut self) -> io::Result<()> {
+        match &mut self.graphics {
+            Some(graphics) => graphics.clear(self.terminal.backend_mut()),
+            None => Ok(()),
+        }
     }
 
     /// Acquires the terminal for an explicitly selected preview screen.
@@ -357,6 +376,7 @@ impl TerminalSession {
             Ok(terminal) => Ok(Self {
                 terminal: ManuallyDrop::new(terminal),
                 inline: (mode == ScreenMode::Inline).then(Inline::default),
+                graphics: None,
             }),
             Err(err) => {
                 let _ = restore();
@@ -407,10 +427,30 @@ impl Screen for TerminalSession {
             if stale {
                 let size = self.terminal.size()?;
                 self.terminal.resize(Rect::from(size))?;
+                if let Some(graphics) = &mut self.graphics {
+                    graphics.forget();
+                }
             }
             // Full screen redraws history expanded, so it can name Ctrl+O.
             state.transcript.offer_expand_hint();
             self.terminal.draw(|frame| render(state, frame))?;
+            if let Some(graphics) = &mut self.graphics {
+                use crate::graphics::Plan;
+                match graphics.plan(&state.svg_images) {
+                    Plan::Keep => {}
+                    plan => {
+                        if plan == Plan::Repaint {
+                            // The old images are in the cells: paint them
+                            // over before placing the new.
+                            let size = self.terminal.size()?;
+                            self.terminal.resize(Rect::from(size))?;
+                            graphics.forget();
+                            self.terminal.draw(|frame| render(state, frame))?;
+                        }
+                        graphics.place(&state.svg_images, self.terminal.backend_mut())?;
+                    }
+                }
+            }
             Ok(())
         })();
         let ended = execute!(self.terminal.backend_mut(), EndSynchronizedUpdate);
@@ -632,6 +672,13 @@ fn run(mode: ScreenMode, runtime: Runtime) -> io::Result<PreviewExit> {
             .map_or(0, |time| u64::from(time.subsec_nanos()) ^ time.as_secs());
         state.start_tips(seed);
     }
+    // Text in SVG images needs the system's fonts. Reading them takes a
+    // moment, so it runs beside the loop; the drawings made before it ends
+    // have no text, and the next frame draws it.
+    let fonts = std::thread::Builder::new()
+        .name("bake-fonts".into())
+        .spawn(|| bake_tui_view::svg::set_fonts(bake_svg::Fonts::system()))
+        .ok();
     let (sender, inputs) = mpsc::channel();
     // One clock for the loop's ticks, the reader's timestamps, and the
     // fixture's timeline.
@@ -653,6 +700,21 @@ fn run(mode: ScreenMode, runtime: Runtime) -> io::Result<PreviewExit> {
     // signals stay handled until the terminal is restored.
     let signals = signals::Forwarder::start(sender.clone())?;
     let mut session = TerminalSession::acquire_mode(mode)?;
+    // Sharp SVG images on a terminal that shows them. Sixel needs the
+    // cell's size in pixels: the window size reports it, or the terminal
+    // answers a query before the input reader starts.
+    if mode == ScreenMode::Fullscreen
+        && let Some(protocol) = crate::graphics::Protocol::detect(env)
+    {
+        let mut cell = crate::graphics::reported_cell();
+        #[cfg(unix)]
+        if cell.is_none() && protocol == crate::graphics::Protocol::Sixel {
+            cell = crate::graphics::query_cell(Duration::from_millis(150));
+        }
+        if let Some(graphics) = crate::graphics::Graphics::new(protocol, cell) {
+            session.show_images(graphics);
+        }
+    }
     if indicators.as_ref().is_some_and(Indicators::wants_focus) {
         session.report_focus()?;
     }
@@ -721,8 +783,13 @@ fn run(mode: ScreenMode, runtime: Runtime) -> io::Result<PreviewExit> {
         };
         outcome.and_then(|exit| ported.and(searched).and(stopped).map(|()| exit))
     });
+    let _ = session.clear_images();
     let closed = session.close();
     drop(signals);
+    // It ends on its own; joined, so no work outlives the terminal.
+    if let Some(fonts) = fonts {
+        let _ = fonts.join();
+    }
     let exit = outcome?;
     if exit != PreviewExit::Hangup {
         closed?;

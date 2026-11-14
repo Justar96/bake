@@ -355,6 +355,8 @@ fn settings_are_grouped_and_stay_open_until_esc() {
             (commands::settings::STATUS_LINE, "Token totals"),
             (commands::settings::STATUS_LINE, "Prompt cache"),
             (commands::settings::ANSWERS, "Mermaid diagrams"),
+            (commands::settings::ANSWERS, "Visualize tool"),
+            (commands::settings::TEAM, "Telecom"),
         ]
     );
     let choose = |id, value: &str| {

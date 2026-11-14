@@ -8,6 +8,7 @@ mod clipboard;
 mod files;
 mod fixture;
 mod git;
+mod graphics;
 mod herdr;
 mod indicators;
 mod inline;

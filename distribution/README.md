@@ -165,7 +165,7 @@ The Worker reports active installs to gissx.org when it has the `GISSX_ACTIVITY_
 Prepare the release on an up-to-date `develop`, once its changes are pushed:
 
 ```sh
-NEXT=0.4.7
+NEXT=0.4.8
 # set [workspace.package] version in Cargo.toml, then refresh both lockfiles:
 cargo update --workspace --offline && (cd fuzz && cargo update --workspace --offline)
 # turn CHANGELOG.md's [Unreleased] entries into a "## [$NEXT] - <date>" section, then:

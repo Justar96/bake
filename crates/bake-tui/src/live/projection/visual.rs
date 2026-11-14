@@ -11,15 +11,24 @@
 //! last newline, and the view draws the longest run of them that renders.
 //! A visual whose arguments pass [`PREVIEW_BYTES`] while they stream is
 //! drawn only once they are complete, so the drawing never costs more than
-//! that per update.
+//! that per update. An SVG image may be four times that size, so its
+//! source past [`PREVIEW_BYTES`] is drawn in steps of [`SVG_STEP`] bytes:
+//! the image still grows as it is written, and each step is parsed once.
 
-use bake_coding_agent::tools::visualize::{MAX_COLUMNS, MAX_ROWS, MAX_SOURCE_BYTES, VisualKind};
+use bake_coding_agent::tools::visualize::{
+    MAX_COLUMNS, MAX_HEATMAP_COLUMNS, MAX_ROWS, MAX_SOURCE_BYTES, MAX_SVG_BYTES, VisualKind,
+};
 use bake_tui_view::visual::{Cell, Kind, Number, Spec, Visual};
 
 use super::*;
 
 /// Arguments past this many bytes are drawn only once complete.
 pub const PREVIEW_BYTES: usize = 32 * 1024;
+/// The same for an SVG image: its source's limit and room for the rest.
+pub const SVG_PREVIEW_BYTES: usize = MAX_SVG_BYTES + 1024;
+/// Bytes between the drawings of an SVG source past [`PREVIEW_BYTES`]
+/// that is still arriving.
+pub const SVG_STEP: usize = 4 * 1024;
 /// Characters of any string the reader keeps; the view shows fewer.
 const STRING_CHARS: usize = 512;
 
@@ -39,8 +48,13 @@ pub enum Args {
 /// error instead of the visual; one interrupted keeps its drawing.
 pub(super) fn visual_row(args: &Value, outcome: Outcome, read: Args) -> Row {
     let streaming = read == Args::Streaming;
-    let too_large = streaming && size(args, PREVIEW_BYTES) > PREVIEW_BYTES;
     let mut spec = spec(args, read != Args::Complete);
+    let limit = if spec.kind == Some(Kind::Svg) {
+        SVG_PREVIEW_BYTES
+    } else {
+        PREVIEW_BYTES
+    };
+    let too_large = streaming && size(args, limit) > limit;
     if too_large {
         spec.rows.clear();
         spec.source.clear();
@@ -74,17 +88,29 @@ pub fn spec(args: &Value, provisional: bool) -> Spec {
         .and_then(VisualKind::parse)
         .map(|kind| match kind {
             VisualKind::Bar => Kind::Bar,
+            VisualKind::Stacked => Kind::Stacked,
             VisualKind::Line => Kind::Line,
+            VisualKind::Area => Kind::Area,
+            VisualKind::Scatter => Kind::Scatter,
+            VisualKind::Pie => Kind::Pie,
+            VisualKind::Heatmap => Kind::Heatmap,
             VisualKind::Table => Kind::Table,
             VisualKind::Diagram => Kind::Diagram,
+            VisualKind::Svg => Kind::Svg,
         });
+    // A heatmap takes more columns than a chart tells series apart.
+    let most_columns = if kind == Some(Kind::Heatmap) {
+        MAX_HEATMAP_COLUMNS
+    } else {
+        MAX_COLUMNS
+    };
     let mut columns: Vec<String> = map
         .get("columns")
         .and_then(Value::as_array)
         .map(|columns| {
             columns
                 .iter()
-                .take(MAX_COLUMNS)
+                .take(most_columns)
                 .map(|name| text(name).unwrap_or_else(|| cell_text(name)))
                 .collect()
         })
@@ -106,7 +132,7 @@ pub fn spec(args: &Value, provisional: bool) -> Spec {
             rows.iter()
                 .take(MAX_ROWS + 1)
                 .map(|row| match row {
-                    Value::Array(cells) => cells.iter().take(MAX_COLUMNS).map(cell).collect(),
+                    Value::Array(cells) => cells.iter().take(most_columns).map(cell).collect(),
                     other => vec![cell(other)],
                 })
                 .collect()
@@ -122,15 +148,31 @@ pub fn spec(args: &Value, provisional: bool) -> Spec {
         .map(|source| {
             // Past the tool's limit the renderer draws nothing, so twice
             // that is enough to show as code.
-            let mut end = source.len().min(2 * MAX_SOURCE_BYTES);
+            let limit = if kind == Some(Kind::Svg) {
+                MAX_SVG_BYTES
+            } else {
+                MAX_SOURCE_BYTES
+            };
+            let mut end = source.len().min(2 * limit);
             while !source.is_char_boundary(end) {
                 end -= 1;
             }
             source[..end].to_owned()
         })
         .unwrap_or_default();
-    if partial {
+    // A diagram draws its complete lines; an SVG image its complete tags
+    // (`bake_tui_view::svg`), on one line or many.
+    if partial && kind != Some(Kind::Svg) {
         source.truncate(source.rfind('\n').map_or(0, |at| at + 1));
+    }
+    // A long image still arriving is drawn in steps, so that most updates
+    // find the last drawing as it was.
+    if partial && kind == Some(Kind::Svg) && source.len() > PREVIEW_BYTES {
+        let mut end = source.len() / SVG_STEP * SVG_STEP;
+        while !source.is_char_boundary(end) {
+            end -= 1;
+        }
+        source.truncate(end);
     }
     Spec {
         kind,
@@ -144,6 +186,8 @@ pub fn spec(args: &Value, provisional: bool) -> Spec {
             .unwrap_or_default(),
         rows,
         source,
+        // A size still being written is not one yet.
+        large: !cut("size") && map.get("size").and_then(Value::as_str) == Some("large"),
         partial,
     }
 }
@@ -272,6 +316,99 @@ mod tests {
         let long =
             json!({ "kind": "diagram", "source": format!("a{}", "é".repeat(MAX_SOURCE_BYTES)) });
         assert_eq!(spec(&long, false).source.len(), MAX_SOURCE_BYTES * 2 - 1);
+    }
+
+    // An SVG image's source being written is kept whole: the view draws
+    // its complete tags, whatever its lines.
+    #[test]
+    fn an_svg_source_being_written_is_kept_whole() {
+        let args = json!({ "kind": "svg", "source": "<svg viewBox=\"0 0 4 4\"><rect wid" });
+        let read = spec(&args, true);
+        assert_eq!(read.kind, Some(Kind::Svg));
+        assert_eq!(
+            (read.source.as_str(), read.partial),
+            ("<svg viewBox=\"0 0 4 4\"><rect wid", true)
+        );
+        let long = json!({ "kind": "svg", "source": "x".repeat(3 * MAX_SVG_BYTES) });
+        assert_eq!(spec(&long, false).source.len(), 2 * MAX_SVG_BYTES);
+        // Past the preview's size it grows in steps, cut on a character;
+        // whole, it is kept as written.
+        let arriving = json!({ "kind": "svg", "source": format!("{}é", "x".repeat(PREVIEW_BYTES + SVG_STEP - 1)) });
+        assert_eq!(
+            spec(&arriving, true).source.len(),
+            PREVIEW_BYTES + SVG_STEP - 1
+        );
+        assert_eq!(
+            spec(&arriving, false).source.len(),
+            PREVIEW_BYTES + SVG_STEP + 1
+        );
+        let grown =
+            json!({ "kind": "svg", "source": "x".repeat(PREVIEW_BYTES + 2 * SVG_STEP + 5) });
+        assert_eq!(
+            spec(&grown, true).source.len(),
+            PREVIEW_BYTES + 2 * SVG_STEP
+        );
+    }
+
+    // An image streams its drawing up to its own limit, where a chart's
+    // rows stop at the preview's.
+    #[test]
+    fn an_svg_image_previews_up_to_its_source_s_limit() {
+        let large = |kind: &str, bytes: usize| {
+            let args = json!({ "kind": kind, "source": "x".repeat(bytes) });
+            let outcome = Outcome {
+                state: CallState::Running,
+                id: None,
+                summary: None,
+                output: Vec::new(),
+                calls: Vec::new(),
+                full_output_path: None,
+                wall_time: None,
+            };
+            match visual_row(&args, outcome, Args::Streaming) {
+                Row::Visual(visual) => visual.too_large,
+                _ => panic!("a visual"),
+            }
+        };
+        assert!(!large("svg", PREVIEW_BYTES + 1));
+        assert!(!large("svg", MAX_SVG_BYTES));
+        assert!(large("svg", SVG_PREVIEW_BYTES + 1));
+        assert!(large("diagram", PREVIEW_BYTES + 1));
+    }
+
+    // Every kind the tool takes is one the view draws, a heatmap keeps
+    // its columns, and `size` is read once it is whole.
+    #[test]
+    fn every_kind_and_size_reach_the_view() {
+        for (name, kind) in [
+            ("bar", Kind::Bar),
+            ("stacked", Kind::Stacked),
+            ("line", Kind::Line),
+            ("area", Kind::Area),
+            ("scatter", Kind::Scatter),
+            ("pie", Kind::Pie),
+            ("heatmap", Kind::Heatmap),
+            ("table", Kind::Table),
+            ("diagram", Kind::Diagram),
+            ("svg", Kind::Svg),
+        ] {
+            assert_eq!(spec(&json!({ "kind": name }), false).kind, Some(kind));
+        }
+        let names: Vec<String> = (0..40).map(|i| format!("c{i}")).collect();
+        let row: Vec<Value> = (0..40).map(|i| json!(i)).collect();
+        let heat = json!({ "kind": "heatmap", "columns": names, "rows": [row] });
+        let read = spec(&heat, false);
+        assert_eq!(read.columns.len(), MAX_HEATMAP_COLUMNS);
+        assert_eq!(read.rows[0].len(), MAX_HEATMAP_COLUMNS);
+        let bars = json!({ "kind": "bar", "columns": names, "rows": [row] });
+        assert_eq!(spec(&bars, false).columns.len(), MAX_COLUMNS);
+        let large = json!({ "kind": "line", "size": "large" });
+        assert!(spec(&large, false).large);
+        // `size` as the last member may still be arriving.
+        assert!(!spec(&large, true).large);
+        let settled = json!({ "kind": "line", "size": "large", "columns": ["a"] });
+        assert!(spec(&settled, true).large);
+        assert!(!spec(&json!({ "kind": "line", "size": "normal" }), false).large);
     }
 
     #[test]

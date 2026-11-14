@@ -50,7 +50,7 @@ use crate::session::messages::CustomMessage;
 use crate::telecom::Station;
 use bake_ai::{TextContent, UserContent, UserContentBlock};
 
-pub use tools::{TOOL_NAMES, tools};
+pub use tools::{TOOL_NAMES, WITH_SUBAGENTS_GUIDELINE, tools};
 
 /// The `customType` of a spawned agent's notice to its parent.
 pub const NOTICE_TYPE: &str = "bake.spawned";
@@ -681,6 +681,12 @@ async fn drive(
         process.kill();
     }
     let settled = process.settle().await;
+    // The tree is gone, so standard error reaches its end; let the reader
+    // take what is left, which says why a failed agent stopped.
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        while side.join_next().await.is_some() {}
+    })
+    .await;
     side.abort_all();
     while side.join_next().await.is_some() {}
     let tail = String::from_utf8_lossy(&lock(&stderr_tail).iter().copied().collect::<Vec<_>>())

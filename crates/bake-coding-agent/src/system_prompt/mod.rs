@@ -198,8 +198,9 @@ const LEADING_RULES: [&str; 2] = [
 /// Bake 0.3's round-trip paragraph, for a session with tools, without the
 /// sentence `edit`'s own guideline states. Calls in one response do run
 /// in order: the session makes the tools that change files or run commands
-/// sequential (`agent_session::ORDERED_TOOLS`).
-const ROUND_TRIP_RULE: &str = "Work in as few model round trips as you can. Put independent tool calls in one response: read the files you need together, and send an edit with the command that checks it, since calls in one response run in order. Do not re-read a file to confirm an edit that succeeded.";
+/// sequential (`agent_session::ORDERED_TOOLS`), and a failed file change
+/// stops the commands after it (`agent_session::FILE_CHANGE_TOOLS`).
+const ROUND_TRIP_RULE: &str = "Work in as few model round trips as you can. Put independent tool calls in one response: read the files you need together, and send an edit with the command that checks it, since calls in one response run in order and the command is skipped if the edit fails. Do not re-read a file to confirm an edit that succeeded.";
 
 /// Bake 0.3's last rules, before the tool-contributed guidelines.
 const TRAILING_RULES: [&str; 2] = [
@@ -225,17 +226,9 @@ fn build_rules(
     }
     TRAILING_RULES.iter().for_each(|rule| add(rule));
     let has = |name: &str| selected.iter().any(|tool| tool == name);
-    let (bash, powershell) = (has("bash"), has("powershell"));
-    if (bash || powershell) && !has("grep") && !has("find") && !has("ls") {
-        if bash && powershell {
-            add(
-                "Use bash or PowerShell for file operations like listing, searching, and finding files",
-            );
-        } else if powershell {
-            add("Use PowerShell for file operations like listing, searching, and finding files");
-        } else {
-            add("Use bash for file operations like ls, rg, find");
-        }
+    // Bake does not install ripgrep, so the rule names its fallback.
+    if has("bash") && !has("grep") && !has("find") && !has("ls") {
+        add("Use bash for file operations like ls, find, and rg (grep where rg is not installed)");
     }
     for name in selected {
         for (tool, guidelines) in tool_guidelines {

@@ -21,11 +21,11 @@
 //! registered but inactive (D42). Pi's names, sets, and selection rules
 //! are unchanged.
 //!
-//! Bake's [`crate::tools::visualize`] tool is registered with them but is
-//! opt-in, as `grep`, `find`, and `ls` are: `--tools +visualize` or a
-//! `defaultTools` entry turns it on. It stays out of
-//! [`BAKE_DEFAULT_TOOL_NAMES`] until a paired live-model evaluation has
-//! measured it.
+//! Bake's [`crate::tools::visualize`] tool is registered with them. It is
+//! not in [`BAKE_DEFAULT_TOOL_NAMES`]: the CLI adds it to the defaults of a
+//! session someone sees (a top-level session with an approver) while the
+//! `visualize` setting is on, as it is unless set to `false`, by the
+//! owner's decision of 2026-11-14.
 
 use std::path::Path;
 
@@ -39,7 +39,7 @@ use crate::tools::grep::owned_grep_tool_definition;
 use crate::tools::job_tools::create_job_tool_definitions;
 use crate::tools::ls::owned_ls_tool_definition;
 use crate::tools::read::{ReadToolOptions, owned_read_tool_definition};
-use crate::tools::visualize::create_visualize_tool_definition;
+use crate::tools::visualize::{VisualizeOptions, create_visualize_tool_definition_with};
 use crate::tools::web_tools::{WebTools, create_web_tool_definitions};
 use crate::tools::write::owned_write_tool_definition;
 
@@ -169,7 +169,8 @@ pub fn create_all_tool_definitions(cwd: &Path, options: &ToolsOptions) -> Vec<To
 
 /// Pi's `createAllToolDefinitions`, then the job tools when
 /// [`ToolsOptions::jobs`] is set, the web tools when [`ToolsOptions::web`]
-/// is, and the opt-in `visualize` tool.
+/// is, and the `visualize` tool, which reads the session's model and
+/// blocking-work owner from `options` as `read` does.
 pub fn create_bake_tool_definitions(cwd: &Path, options: &ToolsOptions) -> Vec<ToolDefinition> {
     let mut all = create_all_tool_definitions(cwd, options);
     if let Some(jobs) = &options.jobs {
@@ -178,7 +179,11 @@ pub fn create_bake_tool_definitions(cwd: &Path, options: &ToolsOptions) -> Vec<T
     if let Some(web) = &options.web {
         all.extend(create_web_tool_definitions(web));
     }
-    all.push(create_visualize_tool_definition());
+    all.push(create_visualize_tool_definition_with(VisualizeOptions {
+        model: options.read.model.clone(),
+        resize_options: options.read.resize_options,
+        owner: options.owner.clone(),
+    }));
     all
 }
 
@@ -488,9 +493,9 @@ mod tests {
         );
     }
 
-    // `visualize` is registered but opt-in: a session starts without it,
-    // and `--tools +visualize`, a `defaultTools` entry, or naming it turns
-    // it on.
+    // `visualize` is registered but not one of these defaults: the CLI
+    // adds it for a session someone sees, and `--tools +visualize`, a
+    // `defaultTools` entry, or naming it turns it on elsewhere.
     #[test]
     fn visualize_is_registered_but_not_a_default() {
         let names =

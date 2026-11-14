@@ -1,7 +1,7 @@
 //! The status line's fields and the order they give way in as the row
 //! narrows; a port of the TypeScript `status-line.ts` fitting.
 //!
-//! The row is minimal: `● deepseek-v4-flash high  ctx ▰▱▱▱▱ ~11%
+//! The row is minimal: `● deepseek-v4-flash high  ctx ~11%
 //! (15.2k/128k)  ~/bake ⎇ main`, the session's state dot, the model and
 //! its thinking level, the context window's occupancy as a gauge and a
 //! count, and the working directory with its git branch. A reading the
@@ -33,7 +33,6 @@ use crate::palette::Token;
 /// TypeScript table's half ranks stay exact. Only some fields exist in the
 /// preview; the rest keep their places for the fields that will.
 pub mod rank {
-    pub const CONTEXT_GAUGE: u16 = 5;
     pub const CONTEXT_ABSOLUTE: u16 = 10;
     pub const TOTALS: u16 = 20;
     pub const CONTEXT_MARK: u16 = 25;
@@ -80,8 +79,6 @@ pub const CONTEXT_WARN: u64 = 70;
 pub const CONTEXT_HOT: u64 = 80;
 /// Context occupancy from here up is close to the model's limit: `danger`.
 pub const CONTEXT_FULL: u64 = 90;
-/// Cells of the context gauge.
-pub const GAUGE_CELLS: usize = 5;
 /// A cache share from here up is healthy: `ok`.
 pub const CACHE_OK: u64 = 80;
 /// A cache share below here is mostly missing: `warn`; between, `notice`.
@@ -458,22 +455,6 @@ pub fn context_tone(percent: u64) -> Tone {
     }
 }
 
-/// The gauge's filled cells: `ok` while there is plenty of room, then the
-/// percentage's tone.
-pub fn gauge_tone(percent: u64) -> Tone {
-    match context_tone(percent) {
-        Tone::Plain => Tone::Ink(Token::Ok),
-        tone => tone,
-    }
-}
-
-/// Filled cells of the gauge, to the nearest: the gauge is full from 90%,
-/// where the context turns `danger`.
-pub fn gauge_filled(percent: u64) -> usize {
-    let cells = GAUGE_CELLS as u64;
-    ((percent.min(100) * cells + 50) / 100) as usize
-}
-
 /// The cache share's tone: `ok` while most of the prompt is read from the
 /// cache, `notice` from half, and `warn` below.
 pub fn cache_tone(hit: u64) -> Tone {
@@ -554,7 +535,7 @@ pub fn line(input: &StatusInput, state: SessionState, room: usize) -> Vec<Part> 
 pub fn fields(input: &StatusInput) -> Vec<Field> {
     let mut fields = vec![model_field(input)];
     if let Some(usage) = input.context {
-        fields.push(context_field(usage, input.ascii));
+        fields.push(context_field(usage));
     }
     if let Some(totals) = input.tokens {
         fields.push(tokens_field(totals, input.ascii));
@@ -603,12 +584,10 @@ fn model_field(input: &StatusInput) -> Field {
     }
 }
 
-/// `ctx ▰▱▱▱▱ ~11% (15.2k/128k)`, or `ctx [#----] ~11% (15.2k/128k)` in
-/// the classic frame. The gauge goes first, then the absolute count, except
-/// near the limit, where the count is among the last; the percentage never
-/// yields. Unknown tokens read `ctx ?/128k`, as Pi's footer has them, and
-/// then `ctx ?`, with no gauge.
-fn context_field(usage: ContextUsage, ascii: bool) -> Field {
+/// `ctx ~11% (15.2k/128k)`, with no gauge. The absolute count gives way,
+/// near the limit among the last; the percentage never yields. Unknown
+/// tokens read `ctx ?/128k`, as Pi's footer has them, and then `ctx ?`.
+fn context_field(usage: ContextUsage) -> Field {
     let label = Part::new(format!("{} ", copy::CONTEXT), Tone::Dim);
     let Some(used) = usage.used else {
         return Field {
@@ -637,39 +616,14 @@ fn context_field(usage: ContextUsage, ascii: bool) -> Field {
     } else {
         rank::CONTEXT_ABSOLUTE
     };
-    let mut gauged = vec![label.clone()];
-    gauged.extend(gauge(percent, ascii));
-    gauged.push(Part::new(format!(" {absolute}"), tone));
     Field {
         forms: vec![
-            gauged,
             vec![label.clone(), Part::new(absolute, tone)],
             vec![label, Part::new(format!("~{percent}%"), tone)],
         ],
-        yields: vec![rank::CONTEXT_GAUGE, absolute_rank],
+        yields: vec![absolute_rank],
         shrink: None,
     }
-}
-
-/// The context gauge: [`GAUGE_CELLS`] cells, the filled ones in the
-/// occupancy's tone and the rest dim.
-fn gauge(percent: u64, ascii: bool) -> Vec<Part> {
-    let filled = gauge_filled(percent);
-    let (on, off) = if ascii { ("#", "-") } else { ("▰", "▱") };
-    let mut parts = Vec::new();
-    if ascii {
-        parts.push(Part::new("[", Tone::Dim));
-    }
-    if filled > 0 {
-        parts.push(Part::new(on.repeat(filled), gauge_tone(percent)));
-    }
-    if filled < GAUGE_CELLS {
-        parts.push(Part::new(off.repeat(GAUGE_CELLS - filled), Tone::Dim));
-    }
-    if ascii {
-        parts.push(Part::new("]", Tone::Dim));
-    }
-    parts
 }
 
 /// `↑12k ↓3.4k`, or `in 12k out 3.4k` in the classic frame: the session's
@@ -977,7 +931,7 @@ mod tests {
             firsts,
             [
                 "deepseek-v4-flash high",
-                "ctx ▰▱▱▱▱ ~11% (15.2k/128k)",
+                "ctx ~11% (15.2k/128k)",
                 "~/bake ⎇ main"
             ]
         );
@@ -987,7 +941,7 @@ mod tests {
         assert_eq!(fields[1].forms[1][1].tone, Tone::Plain);
         assert_eq!(
             row(&fields, 80),
-            "deepseek-v4-flash high  ctx ▰▱▱▱▱ ~11% (15.2k/128k)  ~/bake ⎇ main"
+            "deepseek-v4-flash high  ctx ~11% (15.2k/128k)  ~/bake ⎇ main"
         );
     }
 
@@ -1040,7 +994,7 @@ mod tests {
         let fields = fields(&input);
         assert_eq!(
             row(&fields, 120),
-            "deepseek-v4-flash high  ctx ▰▱▱▱▱ ~11% (15.2k/128k)  ↑12k ↓3.4k  cache 99% (R180k W2k)  ~/bake ⎇ main"
+            "deepseek-v4-flash high  ctx ~11% (15.2k/128k)  ↑12k ↓3.4k  cache 99% (R180k W2k)  ~/bake ⎇ main"
         );
         assert_eq!(fields[3].forms[0][0].tone, Tone::Dim);
         assert_eq!(fields[3].forms[0][1].tone, Tone::Ink(Token::Ok));
@@ -1093,16 +1047,11 @@ mod tests {
         input.cwd = "~/projects/bake".into();
         let fields = fields(&input);
         assert_eq!(
-            row(&fields, 76),
-            "deepseek-v4-flash high  ctx ▰▱▱▱▱ ~11% (15.2k/128k)  ~/projects/bake ⎇ main"
+            row(&fields, 70),
+            "deepseek-v4-flash high  ctx ~11% (15.2k/128k)  ~/projects/bake ⎇ main"
         );
         // The directory fills what is left, cut from its start while its
         // few cells fit.
-        assert_eq!(
-            row(&fields, 70),
-            "deepseek-v4-flash high  ctx ▰▱▱▱▱ ~11% (15.2k/128k)  …ects/bake ⎇ main"
-        );
-        // To keep them, the gauge goes first.
         assert_eq!(
             row(&fields, 64),
             "deepseek-v4-flash high  ctx ~11% (15.2k/128k)  …ects/bake ⎇ main"
@@ -1195,12 +1144,7 @@ mod tests {
                 danger
             ]
         );
-        // The gauge is green while the percentage is still quiet.
         let ok = Tone::Ink(Token::Ok);
-        assert_eq!(
-            percents.map(gauge_tone),
-            [ok, ok, notice, notice, notice, warn, warn, danger, danger]
-        );
         // The cache's share warms as it falls.
         assert_eq!(
             [100, 80, 79, 50, 49, 0].map(cache_tone),
@@ -1215,71 +1159,32 @@ mod tests {
             .collect()
     }
 
-    // Bake: a five-cell gauge leads the context's reading, filled to the
-    // nearest cell and full from 90%, where the context turns `danger`. It
-    // gives way first, and an unknown context has none.
+    // The context reads as its percentage and count, with no gauge; the
+    // count gives way, later near the limit, and the percentage warms.
     #[test]
-    fn the_context_gauge_fills_warms_and_gives_way_first() {
-        let cells = [0, 9, 10, 23, 30, 50, 69, 70, 89, 90, 100].map(gauge_filled);
-        assert_eq!(cells, [0, 0, 1, 1, 2, 3, 3, 4, 4, 5, 5]);
-        let context = |used: u64, ascii: bool| {
-            context_field(
-                ContextUsage {
-                    used: Some(used),
-                    window: 100_000,
-                },
-                ascii,
-            )
-        };
-        let gauged = context(23_000, false);
-        assert_eq!(text(&gauged.forms[0]), "ctx ▰▱▱▱▱ ~23% (23k/100k)");
-        assert_eq!(form_width(&gauged.forms[0][1..3]), GAUGE_CELLS);
-        assert_eq!(gauged.yields, [rank::CONTEXT_GAUGE, rank::CONTEXT_ABSOLUTE]);
-        assert_eq!(
-            gauged.forms[0][1..3],
-            [
-                Part::new("▰", Tone::Ink(Token::Ok)),
-                Part::new("▱▱▱▱", Tone::Dim)
-            ]
-        );
-        assert_eq!(gauged.forms[0][3].tone, Tone::Plain);
-        let hot = context(85_000, false);
-        assert_eq!(
-            hot.forms[0][1..],
-            [
-                Part::new("▰▰▰▰", Tone::Ink(Token::Warn)),
-                Part::new("▱", Tone::Dim),
-                Part::new(" ~85% (85k/100k)", Tone::Ink(Token::Warn)),
-            ]
-        );
-        assert_eq!(
-            hot.yields,
-            [rank::CONTEXT_GAUGE, rank::CONTEXT_ABSOLUTE_WARM]
-        );
-        let full = context(95_000, false);
-        assert_eq!(
-            full.forms[0][1],
-            Part::new("▰▰▰▰▰", Tone::Ink(Token::Danger))
-        );
-        assert_eq!(full.forms[0].len(), 3, "no empty cells");
-        // The classic frame draws it in ASCII; an empty one has no fill.
-        assert_eq!(
-            text(&context(64_000, true).forms[0]),
-            "ctx [###--] ~64% (64k/100k)"
-        );
-        assert_eq!(
-            context(64_000, true).forms[0][2].tone,
-            Tone::Ink(Token::Notice)
-        );
-        assert_eq!(text(&context(0, true).forms[0]), "ctx [-----] ~0% (0/100k)");
-        let unknown = context_field(
-            ContextUsage {
-                used: None,
+    fn the_context_reads_as_a_percentage_and_a_count() {
+        let context = |used: u64| {
+            context_field(ContextUsage {
+                used: Some(used),
                 window: 100_000,
-            },
-            false,
+            })
+        };
+        let cool = context(23_000);
+        assert_eq!(text(&cool.forms[0]), "ctx ~23% (23k/100k)");
+        assert_eq!(text(&cool.forms[1]), "ctx ~23%");
+        assert_eq!(cool.forms[0][1].tone, Tone::Plain);
+        assert_eq!(cool.yields, [rank::CONTEXT_ABSOLUTE]);
+        let hot = context(85_000);
+        assert_eq!(
+            hot.forms[0][1],
+            Part::new("~85% (85k/100k)", Tone::Ink(Token::Warn))
         );
-        assert!(unknown.forms.iter().all(|form| !text(form).contains('▱')));
+        assert_eq!(hot.yields, [rank::CONTEXT_ABSOLUTE_WARM]);
+        let unknown = context_field(ContextUsage {
+            used: None,
+            window: 100_000,
+        });
+        assert_eq!(text(&unknown.forms[0]), "ctx ?/100k");
     }
 
     // Bake: the state dot leads the row and never gives way; each state has
@@ -1320,7 +1225,7 @@ mod tests {
         let input = full();
         assert_eq!(
             line_text(&input, SessionState::Working, 80),
-            "● deepseek-v4-flash high  ctx ▰▱▱▱▱ ~11% (15.2k/128k)  ~/bake ⎇ main"
+            "● deepseek-v4-flash high  ctx ~11% (15.2k/128k)  ~/bake ⎇ main"
         );
         // The fields fit the room the dot leaves.
         assert_eq!(

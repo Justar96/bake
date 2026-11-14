@@ -10,9 +10,7 @@ use crate::tools::definition::ToolDefinition;
 /// The tool's name.
 pub const TOOL_NAME: &str = "ask_user";
 
-const DESCRIPTION: &str = "Ask the person one to four questions and wait for the answers. Use it when a decision is theirs and cannot be settled from the request, the code, or a sensible default; not to ask for permission or to confirm a plan. Give each question 2 to 6 short options when the choices are known (the person may still type their own), or none for a typed answer. multiSelect lets them pick several.";
-
-const SNIPPET: &str = "Ask the person questions with options when a decision is genuinely theirs";
+const DESCRIPTION: &str = "Ask the user one to four questions and wait for the answers. Use it when a decision is theirs and cannot be settled from the request, the code, or a sensible default, or before an action that is hard to reverse or visible to others; not to confirm a plan or routine work. Give each question 2 to 6 short options when the choices are known (the user may still type their own), or none for a typed answer. multiSelect lets them pick several.";
 
 fn parameters() -> Value {
     json!({
@@ -99,7 +97,7 @@ pub(crate) fn questions(args: &Value) -> Result<Vec<Question>, String> {
 
 /// The answer as the model reads it.
 pub(crate) fn answer_text(questions: &[Question], answers: &[Vec<String>]) -> String {
-    let mut lines = vec!["The person answered:".to_owned()];
+    let mut lines = vec!["The user answered:".to_owned()];
     for (question, answer) in questions.iter().zip(answers) {
         let label = if question.header.is_empty() {
             &question.question
@@ -138,7 +136,7 @@ pub fn tool(broker: QuestionBroker) -> ToolDefinition {
                     }
                     QuestionAnswer::Declined => {
                         let mut result = AgentToolResult::text(
-                            "The person dismissed the questions without answering. Do not ask again; go on with your best judgment and say what you assumed.",
+                            "The user dismissed the questions without answering. Do not ask again; go on with your best judgment and say what you assumed.",
                         );
                         result.details = Some(json!({ "declined": true }));
                         Ok(result)
@@ -152,7 +150,7 @@ pub fn tool(broker: QuestionBroker) -> ToolDefinition {
     tool.read_only = true;
     ToolDefinition {
         tool,
-        prompt_snippet: Some(SNIPPET.to_owned()),
+        prompt_snippet: None,
         prompt_guidelines: None,
     }
 }
@@ -192,7 +190,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             answer_text(&parsed, &[vec!["SQLite".into()], vec![]]),
-            "The person answered:\n- Database: SQLite\n- Name?: (no answer)"
+            "The user answered:\n- Database: SQLite\n- Name?: (no answer)"
         );
     }
 }

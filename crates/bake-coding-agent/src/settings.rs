@@ -113,6 +113,10 @@ pub struct Settings {
     /// Defaults to false, while its effect on models is unmeasured;
     /// `BAKE_TELECOM` overrides it for a run ([`crate::telecom::enabled`]).
     pub telecom: bool,
+    /// `visualize`: makes the `visualize` tool one of an interactive
+    /// session's defaults ([`crate::tools::visualize`]). Defaults to true,
+    /// by the owner's decision of 2026-11-14; `false` leaves it opt-in.
+    pub visualize: bool,
     /// `schedules`: gives a top-level session the reminder tools and their
     /// timer ([`crate::schedules`]). Defaults to false.
     pub schedules: bool,
@@ -286,6 +290,7 @@ impl Default for Settings {
             task_documents: false,
             subagents: false,
             telecom: false,
+            visualize: true,
             schedules: false,
             hooks: HookSettings::default(),
             compaction: None,
@@ -627,6 +632,7 @@ impl Settings {
             task_documents: object.get("taskDocuments").and_then(Value::as_bool) == Some(true),
             subagents: object.get("subagents").and_then(Value::as_bool) == Some(true),
             telecom: object.get("telecom").and_then(Value::as_bool) == Some(true),
+            visualize: object.get("visualize").and_then(Value::as_bool) != Some(false),
             schedules: object.get("schedules").and_then(Value::as_bool) == Some(true),
             hooks: HookSettings::from_value(object.get("hooks")),
             max_concurrent_read_tools: object.get("maxConcurrentReadTools").cloned(),
@@ -1093,6 +1099,18 @@ impl SettingsStore {
         })
     }
 
+    /// `telecom`, Bake's own: whether a top-level session joins its
+    /// repository's team when it starts.
+    pub fn set_telecom(&self, on: bool) -> Result<Settings, StoreError> {
+        self.update(|object| set_member(object, "telecom", on.into()))
+    }
+
+    /// `visualize`, Bake's own: whether an interactive session starts with
+    /// the `visualize` tool.
+    pub fn set_visualize(&self, on: bool) -> Result<Settings, StoreError> {
+        self.update(|object| set_member(object, "visualize", on.into()))
+    }
+
     /// Pi v1.5.2's `setMermaidRenderingMode`: `markdown.mermaid`, keeping
     /// the section's other members, such as `codeBlockIndent`. A `markdown`
     /// that is not an object is replaced.
@@ -1200,6 +1218,16 @@ mod tests {
         );
         let settings = Settings::parse(r#"{"defaultTools":"read"}"#, Path::new("s.json"));
         assert_eq!(settings.default_tools, Some(Vec::new()));
+    }
+
+    // `visualize` is on unless the file says `false`.
+    #[test]
+    fn visualize_is_on_unless_set_false() {
+        let read = |text: &str| Settings::parse(text, Path::new("s.json")).visualize;
+        assert!(read("{}"));
+        assert!(read(r#"{"visualize":true}"#));
+        assert!(read(r#"{"visualize":"no"}"#));
+        assert!(!read(r#"{"visualize":false}"#));
     }
 
     // Pi v1.4.0 `settings-schema.ts` `showTerminalProgress`, and Bake's

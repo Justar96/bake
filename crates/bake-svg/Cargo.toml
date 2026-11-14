@@ -1,0 +1,16 @@
+[package]
+name = "bake-svg"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Bounded SVG checks, streaming-prefix repair, and rasterizing for Bake's visualize tool, on resvg"
+
+# No terminal or ANSI output: the view turns rasters into cells, and the
+# terminal crate into images. Reading fonts is the only I/O, in `Fonts::system`.
+[dependencies]
+resvg.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true

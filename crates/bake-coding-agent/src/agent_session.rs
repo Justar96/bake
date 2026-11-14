@@ -270,14 +270,27 @@ pub struct AgentSessionOptions {
 /// batch in parallel.
 const ORDERED_TOOLS: [&str; 3] = ["bash", "edit", "write"];
 
+/// The [`ORDERED_TOOLS`] that change a file. When a call of one fails, the
+/// calls after it in the same response that are neither file changes nor
+/// reads are answered with an error instead of run
+/// ([`AgentTool::failure_skips_dependents`]): the command sent with an edit
+/// to check it must not report on a file the edit never changed.
+const FILE_CHANGE_TOOLS: [&str; 2] = ["edit", "write"];
+
 /// `tool`, made sequential when it is one of the [`ORDERED_TOOLS`] and sets
-/// no mode of its own.
+/// no mode of its own, and marked when it is one of the
+/// [`FILE_CHANGE_TOOLS`].
 fn run_in_order(tool: Arc<AgentTool>) -> Arc<AgentTool> {
-    if tool.execution_mode.is_some() || !ORDERED_TOOLS.contains(&tool.name.as_str()) {
+    let order = tool.execution_mode.is_none() && ORDERED_TOOLS.contains(&tool.name.as_str());
+    let guard = !tool.failure_skips_dependents && FILE_CHANGE_TOOLS.contains(&tool.name.as_str());
+    if !order && !guard {
         return tool;
     }
     let mut ordered = (*tool).clone();
-    ordered.execution_mode = Some(ToolExecutionMode::Sequential);
+    if order {
+        ordered.execution_mode = Some(ToolExecutionMode::Sequential);
+    }
+    ordered.failure_skips_dependents |= guard;
     Arc::new(ordered)
 }
 
@@ -2339,6 +2352,12 @@ impl AgentSession {
         self.questions.as_ref()
     }
 
+    /// Whether the session started with the tool `name` among its active
+    /// tools.
+    pub fn tool_active(&self, name: &str) -> bool {
+        self.active_tool_names.iter().any(|active| active == name)
+    }
+
     /// The session's telecom station: `None` when telecom is off,
     /// `Some(Err(_))` with why it did not start.
     pub fn telecom(&self) -> Option<Result<&crate::telecom::Station, &str>> {
@@ -2759,6 +2778,29 @@ impl AgentSession {
             Ok(control
                 .save(move |store| store.set_compaction_member(key, value))
                 .await)
+        })
+        .await
+    }
+
+    /// Sets `telecom`. A session joins its repository's team when it is
+    /// built, so the change applies from the next session (`/new`,
+    /// `/resume`, or a restart); this one keeps the team state it started
+    /// with.
+    pub async fn set_telecom_setting(&self, on: bool) -> Result<DefaultSave, String> {
+        self.run_change(move |control| async move {
+            write_settings(&control.settings).telecom = on;
+            Ok(control.save(move |store| store.set_telecom(on)).await)
+        })
+        .await
+    }
+
+    /// Sets `visualize`. A session's tools are chosen when it is built, so
+    /// the change applies from the next session (`/new`, `/resume`, or a
+    /// restart); this one keeps the tools it started with.
+    pub async fn set_visualize_setting(&self, on: bool) -> Result<DefaultSave, String> {
+        self.run_change(move |control| async move {
+            write_settings(&control.settings).visualize = on;
+            Ok(control.save(move |store| store.set_visualize(on)).await)
         })
         .await
     }

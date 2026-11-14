@@ -45,12 +45,7 @@ fn default_options() -> SystemPromptOptions {
         ("read".into(), vec!["Use read to examine files instead of cat or sed.".into()]),
         (
             "edit".into(),
-            vec![
-                "Use edit for precise changes (edits[].oldText must match exactly)".into(),
-                "When changing multiple separate locations in one file, use one edit call with multiple entries in edits[] instead of multiple edit calls".into(),
-                "Each edits[].oldText is matched against the original file, not after earlier edits are applied. Do not emit overlapping or nested edits. Merge nearby changes into one edit.".into(),
-                "Keep edits[].oldText as small as possible while still being unique in the file. Do not pad with large unchanged regions.".into(),
-            ],
+            vec!["Use edit for precise changes, with every change to one file in a single call as separate edits[] entries.".into()],
         ),
         ("write".into(), vec!["Use write only for new files or complete rewrites.".into()]),
     ];
@@ -183,15 +178,12 @@ fn optional_sections() {
 #[test]
 fn shell_guidance() {
     let only_bash = prompt(&options("/tmp", &["bash"]));
-    assert!(only_bash.contains("- Use bash for file operations like ls, rg, find"));
+    assert!(only_bash.contains(
+        "- Use bash for file operations like ls, find, and rg (grep where rg is not installed)\n"
+    ));
     assert!(!prompt(&options("/tmp", &["bash", "grep"])).contains("Use bash for file operations"));
-    assert!(
-        prompt(&options("/tmp", &["powershell"])).contains("Use PowerShell for file operations")
-    );
-    assert!(
-        prompt(&options("/tmp", &["bash", "powershell"]))
-            .contains("Use bash or PowerShell for file operations")
-    );
+    // Pi's `powershell` tool is not ported, so no rule names it.
+    assert!(!prompt(&options("/tmp", &["powershell"])).contains("for file operations"));
 }
 
 // Pi: "appends promptGuidelines" and "deduplicates and trims

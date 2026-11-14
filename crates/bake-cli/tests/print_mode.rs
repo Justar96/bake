@@ -659,21 +659,48 @@ fn print_mode_answers_saves_and_continues() {
 /// The whole first request for each permission a run can start with, the
 /// two built-in presets and the read-only sandbox, against
 /// `fixtures/first-request/`: everything the model sees before it answers.
-/// A change to it is a model-visible change that needs an eval record.
+/// `every-tool` adds the tools a setting or `--tools` turns on, so their
+/// declarations and guidelines are pinned too. A change to it is a
+/// model-visible change that needs an eval record.
 #[cfg(unix)]
 #[test]
 fn first_request_matches_the_fixture() {
-    let cases: [(&str, &[&str]); 3] = [
-        ("workspace-write", &["--permission", "workspace-write"]),
+    let every_tool = json!({
+        "taskDocuments": true,
+        "schedules": true,
+        "subagents": true,
+        "telecom": true,
+    });
+    let cases: [(&str, &[&str], Option<&Value>); 4] = [
+        (
+            "workspace-write",
+            &["--permission", "workspace-write"],
+            None,
+        ),
         (
             "danger-full-access",
             &["--permission", "danger-full-access"],
+            None,
         ),
-        ("read-only", &["--sandbox", "read-only"]),
+        ("read-only", &["--sandbox", "read-only"], None),
+        (
+            "every-tool",
+            &[
+                "--permission",
+                "workspace-write",
+                "--tools",
+                "+grep,+find,+ls,+visualize",
+            ],
+            Some(&every_tool),
+        ),
     ];
-    for (name, flags) in cases {
+    for (name, flags, settings) in cases {
         let server = Server::start(Reply::sse());
         let workspace = Workspace::new("first-request", server.port);
+        if let Some(settings) = settings {
+            std::fs::write(workspace.home().join("settings.json"), settings.to_string())
+                .expect("settings.json");
+        }
         let mut args = vec!["-p"];
         args.extend_from_slice(flags);
         args.push("Say hi");
