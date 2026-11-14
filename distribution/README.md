@@ -183,7 +183,7 @@ target/release/bake-release glibc-floor target/release/bake
 target/release/bake-release rehearse --archive .artifacts/bake-native-release/<version>/bake-v<version>-<platform>.tar.gz
 ```
 
-On Windows x64, from a clone of the release commit, run `cargo build --release --locked -p bake-cli -p bake-release` and `target\release\bake-release pack` (it needs cargo-about 0.9.2 there too), and copy its archive beside the Linux one. `rehearse` drives only `install.sh`, so check the Windows install with `install.ps1` once the release is live.
+On Windows x64, from a clone of the release commit, run `cargo build --release --locked -p bake-cli -p bake-release` and `target\release\bake-release pack --binary target\release\bake.exe` (it needs cargo-about 0.9.2 there too), and copy its archive beside the Linux one. `rehearse` drives only `install.sh`, so check the Windows install with `install.ps1` once the release is live.
 
 With both archives in `.artifacts/bake-native-release/<version>/`, create the version's GitHub release by hand, tagged on `main`'s merge commit, so the archives the service redirects to are public:
 

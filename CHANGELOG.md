@@ -4,6 +4,12 @@ Notable changes to Bake. `bake` compiles this file in, and `/changelog` shows it
 
 ## [Unreleased]
 
+## [0.4.7] - 2026-11-14
+
+Bake 0.4.7 adds native Windows x64 releases, opt-in agent teams over telecom with headless spawned agents and a crew panel, lets the model ask you questions with `ask_user`, and makes tool cards clearer. It is signed with a new release key, so 0.4.6 and earlier installs reinstall once. Bake 0.4.6 was the last Linux arm64 release.
+
+- **Windows x64 releases.** Bake now publishes a native Windows x64 build: `irm https://bake.justar.dev/install.ps1 | iex` installs it, and `bake update` updates it. Windows has no qualified sandbox yet, so commands under `read-only` and `workspace-write` are refused there; use `danger-full-access`. Bake 0.4.6 was the last Linux arm64 release.
+- **A new release signing key.** This release is signed with a new native release key. Bake 0.4.6 and earlier cannot verify it, so `bake update` refuses it there: reinstall once with `curl -fsSL https://bake.justar.dev/install.sh | sh`, and updates work from then on.
 - **Agent teams, opt-in.** With `"telecom": true` in `settings.json`, or `BAKE_TELECOM=on` for a run, the Bake sessions working in one repository form a team: each takes a callsign (`alpha`, `bravo`, ...), and the model can see the board and message, ask, and answer the others with the `telecom` tool. `/telecom` shows the board, and `/telecom msg <agent> <text>` messages one as you. Incoming messages show in the transcript as `← bravo: ...`. Telecom is local to your machine and needs Unix sockets, so it does not start on Windows. See `bake docs team`.
 - **Spawned agents.** A session in the team can start headless Bake agents, with `/spawn <task>` or the model's `spawn_agent`. Each runs as a separate `bake --mode rpc` process with your sandbox and approvals, joins the team as `alpha-1`, `alpha-2`, ..., and reports back each time it finishes a run. A crew panel above the composer shows each agent: a spinner and its current tool while it works, `?` while it waits for you, `+` when idle, and `x` with the reason when it failed. Its questions and approvals come to you.
 - **The model can ask you questions.** In the terminal and over RPC, the model's `ask_user` tool puts one to four questions with options to you, as lists in the terminal, or as `select` and `input` requests over RPC, when a decision is yours to make. `-t -ask_user` or `"defaultTools": ["-ask_user"]` removes it.
