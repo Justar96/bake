@@ -37,7 +37,7 @@ Each row says what a crate owns. The crate's own module documentation describes 
 | [`bake-sandbox`](../crates/bake-sandbox/) | Process confinement: sandbox modes, per-call policies, escalation outcomes, and the backends behind the provider seam |
 | [`bake-svg`](../crates/bake-svg/) | Bounded SVG on resvg for `visualize`: size and element limits, no linked resources, text and shape reports, and rendering |
 | [`bake-tui`](../crates/bake-tui/) | Terminal ownership and effects: input, clipboard, title and notifications, images, the event loop, and live and fixture runtimes |
-| [`bake-tui-view`](../crates/bake-tui-view/) | Pure editor and presentation state: key bindings, the transcript and its tool cards, dialogs, the status line, `visualize` drawings, and layout |
+| [`bake-tui-view`](../crates/bake-tui-view/) | Pure editor and presentation state: key bindings, the transcript and its tool cards, dialogs, the status line, the crew panel and a spawned agent's transcript, `visualize` drawings, and layout |
 | [`bake-update`](../crates/bake-update/) | Signed release verification, bounded downloads, installation locks, atomic updates, and rollback |
 
 Dependencies are pinned exactly in `Cargo.toml`, with comments stating their purpose, license, and whether they ship. Keep test-only crates in dev-dependencies. Crate NOTICE files keep Pi's MIT attribution and source revisions, and `bake-mermaid`'s the Apache-2.0 license and NOTICE of the Codex source it adapts.

@@ -223,6 +223,12 @@ pub enum RuntimeUpdate {
     /// The headless agents the session spawned, in start order, each with
     /// its age when sent ([`crate::crew`]); an empty list hides the panel.
     Crew(Vec<crate::crew::CrewMember>),
+    /// The transcript of the spawned agent `id` the view asked to watch
+    /// ([`crate::state::Effect::WatchCrew`]), whole, each time it changes.
+    CrewLog {
+        id: u64,
+        rows: Vec<crate::transcript::Row>,
+    },
 }
 
 /// The refusal of a prompt sent while `/tree` navigates, its draft kept.

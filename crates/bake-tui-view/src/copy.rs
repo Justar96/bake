@@ -366,6 +366,14 @@ pub const TASKS_SAMPLES_NOTE: &str = "samples, nothing runs";
 pub const TASKS_LIST_KEYS: &str = "↑↓ select · Enter open · x stop · Esc back";
 pub const TASKS_SHELL_KEYS: &str = "↑↓ PgUp/PgDn scroll · x stop · Esc back";
 pub const TASKS_LEDGER_KEYS: &str = "Esc back";
+/// One spawned agent's transcript ([`crate::crew::transcript`]): the bar's
+/// label and keys, what shows before it is read and while it is empty, and
+/// Ctrl+X without a spawned agent.
+pub const CREW: &str = "Crew";
+pub const CREW_KEYS: &str = "↑↓ PgUp/PgDn scroll · ←→ agent · Esc back";
+pub const CREW_LOADING: &str = "Reading its session…";
+pub const CREW_EMPTY: &str = "Nothing in its session yet.";
+pub const NO_CREW: &str = "No spawned agents. With telecom on, /spawn <task> starts one.";
 pub const TASK_RUNNING: &str = "running";
 /// Each background shell's state words.
 pub const JOB_RUNNING: &str = "running";

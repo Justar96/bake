@@ -37,6 +37,8 @@ pub enum Request {
     StopAgent(String),
     /// Move to the model's next thinking level.
     CycleThinking,
+    /// Watch the transcript of the spawned agent with this id, or stop.
+    WatchCrew(Option<u64>),
 }
 
 /// Runs the fixture on a thread. Requests go in over a channel; updates
@@ -94,11 +96,12 @@ impl FixturePort {
                         Some(Request::StopJob(id)) => updates.extend(fixture.stop_job(&id, now)),
                         Some(Request::StopAgent(id)) => updates.extend(fixture.stop_agent(&id)),
                         // The fixture asks for no approval, opens no dialog,
-                        // and has no model.
+                        // has no model, and spawns no agents.
                         Some(
                             Request::Answer { .. }
                             | Request::Dialog { .. }
-                            | Request::CycleThinking,
+                            | Request::CycleThinking
+                            | Request::WatchCrew(_),
                         )
                         | None => {}
                     }

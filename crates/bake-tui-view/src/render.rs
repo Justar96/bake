@@ -101,7 +101,7 @@ fn tray_cap(focus: Focus, height: u16) -> u16 {
     match focus {
         Focus::Composer => 0,
         Focus::Tasks => u16::try_from(sheet_body_cap(height)).unwrap_or(0),
-        Focus::Inspect | Focus::Shell => (height / 2).max(3),
+        Focus::Inspect | Focus::Shell | Focus::Crew => (height / 2).max(3),
     }
 }
 
@@ -180,6 +180,24 @@ fn tray(app: &State, width: usize, rows: usize) -> Tray {
                     width,
                     rows,
                     app.shell_scroll,
+                    look,
+                );
+                (lines, None, 0, Some(most))
+            }
+            None => (Vec::new(), None, 0, None),
+        },
+        Focus::Crew => match app
+            .crew_viewed
+            .and_then(|id| app.crew.iter().find(|member| member.id == id))
+        {
+            Some(member) => {
+                let (lines, most) = crate::crew::transcript(
+                    member,
+                    app.crew_log.as_deref(),
+                    width,
+                    rows,
+                    app.crew_scroll,
+                    app.now,
                     look,
                 );
                 (lines, None, 0, Some(most))
@@ -1503,6 +1521,7 @@ fn render_region(
             Notice::ImagesWhileRunning => copy::IMAGES_WHILE_RUNNING,
             Notice::PreviewOnly => copy::PREVIEW_ONLY,
             Notice::NoTasks => copy::NO_TASKS,
+            Notice::NoCrew => copy::NO_CREW,
             Notice::Returned => copy::RETURNED,
             Notice::Restored => copy::RESTORED,
             Notice::ApprovalKeys => copy::APPROVAL_KEYS_ONLY,
@@ -1549,7 +1568,7 @@ fn render_region(
     let above_label = (above > 0).then(|| format!("+{above} {}", copy::ABOVE));
     // The tasks list and a shell hold the keyboard outside the composer,
     // so the composer names no key while either is open.
-    let listing = matches!(app.focus, Focus::Tasks | Focus::Shell);
+    let listing = matches!(app.focus, Focus::Tasks | Focus::Shell | Focus::Crew);
     let approving = app.approval().is_some();
     let asking = approving || app.dialog.is_some();
     let mut mode = mode::view(app.mode(), !app.draft.is_empty(), area.width);
@@ -1831,6 +1850,21 @@ fn bar_left(app: &State) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
             app.selected_agent().map(|agent| agent.name.as_str()),
             copy::TASKS_LEDGER_KEYS,
         ),
+        Focus::Crew => {
+            let name = app
+                .crew_viewed
+                .and_then(|id| app.crew.iter().find(|member| member.id == id))
+                .map(|member| tasks::one_line(&member.name))
+                .unwrap_or_default();
+            (
+                vec![
+                    Span::styled(copy::CREW, accent().add_modifier(Modifier::UNDERLINED)),
+                    Span::styled(" / ", dim()),
+                    Span::styled(name, Style::new().add_modifier(Modifier::BOLD)),
+                ],
+                vec![Span::styled(format!("  {}", copy::CREW_KEYS), dim())],
+            )
+        }
     }
 }
 
@@ -2288,7 +2322,7 @@ fn render_standing(
     // Bake: over one task's own view the counts are enough; naming the
     // newest running task there would repeat or rival what the tray shows.
     let newest = match app.focus {
-        Focus::Inspect | Focus::Shell => None,
+        Focus::Inspect | Focus::Shell | Focus::Crew => None,
         Focus::Composer | Focus::Tasks => app.newest_running(),
     };
     let (left, right) = tasks::standing(
@@ -2670,8 +2704,13 @@ fn render_tray(app: &mut State, area: Rect, buf: &mut Buffer) -> (usize, usize) 
         ..
     } = tray(app, usize::from(area.width), rows);
     if let Some(most) = most {
-        app.shell_most = most;
-        app.shell_scroll = app.shell_scroll.min(most);
+        if app.focus == Focus::Crew {
+            app.crew_most = most;
+            app.crew_scroll = app.crew_scroll.min(most);
+        } else {
+            app.shell_most = most;
+            app.shell_scroll = app.shell_scroll.min(most);
+        }
     }
     // The first rows, the subtitle among them, unless the selected entry
     // lies below them; then the window ends on it, or starts on it when it

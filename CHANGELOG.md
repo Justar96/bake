@@ -4,6 +4,7 @@ Notable changes to Bake. `bake` compiles this file in, and `/changelog` shows it
 
 ## [Unreleased]
 
+- **Read a spawned agent's transcript.** Ctrl+X opens the transcript of an agent in the crew panel under the composer, read from its session file and updated as it works: ↑↓ and PgUp/PgDn scroll, ←→ move between agents, and Esc or Ctrl+X closes it. The crew panel's header names the key.
 - **Background jobs always report back.** A background job's completion now wakes an idle session unless it ends a chain of three turns each opened by the one before: jobs started side by side, or one after another from the same turn, each wake it. Before, the fourth notice since your last prompt waited silently for the next one, which left a spawned agent waiting on a job forever.
 - **Spawned agents' reports arrive whole.** A spawned agent's finished run always wakes the session that started it, as a telecom message does, and its answer is carried up to 16 KiB instead of 4,000 bytes; a longer one says how much was cut and to ask the agent for the rest.
 - **Truecolor in more terminals.** Without `COLORTERM`, Bake now recognises terminals that draw 24-bit colour (kitty, Ghostty, WezTerm, Alacritty, foot, iTerm2, VS Code, Windows Terminal) and WSL outside SSH, so tool cards get their boxes there. A set `COLORTERM` still decides.

@@ -948,6 +948,7 @@ fn drive(
                             Effect::StopJob(id) => (owners.runtime)(Request::StopJob(id)),
                             Effect::StopAgent(id) => (owners.runtime)(Request::StopAgent(id)),
                             Effect::CycleThinking => (owners.runtime)(Request::CycleThinking),
+                            Effect::WatchCrew(id) => (owners.runtime)(Request::WatchCrew(id)),
                         }
                     }
                 }

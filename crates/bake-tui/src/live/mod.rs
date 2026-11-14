@@ -419,6 +419,7 @@ impl LivePort {
             shells: Vec::new(),
             agents: Vec::new(),
             crew_version: None,
+            crew_watch: None,
             status_due,
             status: None,
         };
@@ -681,6 +682,9 @@ struct Driver {
     /// The spawn host's version the crew panel last showed; `None` for a
     /// session that spawns no agents.
     crew_version: Option<u64>,
+    /// The spawned agent whose transcript the view shows
+    /// ([`Request::WatchCrew`]).
+    crew_watch: Option<publish::CrewWatch>,
     /// Woken by the session's listener when the status line may have
     /// changed ([`projection::moves_status`]).
     status_due: Arc<Notify>,

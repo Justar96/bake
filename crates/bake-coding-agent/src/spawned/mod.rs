@@ -32,7 +32,7 @@ mod tools;
 
 use std::collections::VecDeque;
 use std::ffi::OsString;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 use std::time::Duration;
@@ -47,6 +47,7 @@ use crate::owned_work::{TaskScope, WorkGate};
 use crate::permissions::StandingPermissions;
 use crate::questions::QuestionBroker;
 use crate::session::messages::CustomMessage;
+use crate::session::{NewSessionOptions, SessionManager, load_entries_from_file};
 use crate::telecom::Station;
 use bake_ai::{TextContent, UserContent, UserContentBlock};
 
@@ -199,6 +200,22 @@ impl SpawnHost {
                 version: AtomicU64::new(0),
             }),
         }
+    }
+
+    /// The session file of agent `id`, once it has reported its session
+    /// and the file is among the Bake home's sessions for its directory.
+    /// Reads session headers; a viewer keeps the path.
+    pub fn session_file(&self, id: u64) -> Option<PathBuf> {
+        let session = lock(&self.inner.agents)
+            .iter()
+            .find(|entry| entry.row.id == id)?
+            .row
+            .session_id
+            .clone()?;
+        let cwd = self.inner.options.cwd.to_string_lossy();
+        SessionManager::find_by_id(&cwd, &session, None)
+            .ok()
+            .flatten()
     }
 
     /// The agents, in start order.
@@ -771,6 +788,26 @@ fn settled_notice(
     )
 }
 
+/// The context messages a session file holds now: what a viewer of a
+/// spawned agent's transcript shows. The file is read without a lock and
+/// never written, as `/export` reads one, so the agent writing it is not
+/// disturbed; a missing or empty file holds none.
+pub fn read_transcript(path: &Path) -> Result<Vec<bake_agent::AgentMessage>, String> {
+    let entries =
+        load_entries_from_file(path).map_err(|error| format!("{}: {error}", path.display()))?;
+    if entries.is_empty() {
+        return Ok(Vec::new());
+    }
+    let session = SessionManager::in_memory(None, NewSessionOptions::default(), entries)
+        .map_err(|error| error.to_string())?;
+    Ok(session
+        .build_session_context()
+        .messages
+        .iter()
+        .map(|message| message.to_agent())
+        .collect())
+}
+
 /// `text` trimmed and cut to `cap` bytes at a character boundary, ending
 /// with how many bytes were cut and how to get them from `name`.
 fn capped_answer(text: &str, name: &str, cap: usize) -> String {
@@ -793,7 +830,27 @@ fn capped_answer(text: &str, name: &str, cap: usize) -> String {
 mod answer_tests {
     use proptest::prelude::*;
 
-    use super::capped_answer;
+    use super::{capped_answer, read_transcript};
+
+    #[test]
+    fn a_transcript_is_the_session_file_s_context() {
+        let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/pi-session/pi-v3.jsonl");
+        let expected: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(fixture.with_extension("pi.json")).expect("fixture"),
+        )
+        .expect("json");
+        let messages = read_transcript(&fixture).expect("read");
+        assert_eq!(
+            messages.len(),
+            expected["context"]["messages"]
+                .as_array()
+                .expect("messages")
+                .len()
+        );
+        let missing = fixture.with_file_name("no-such-session.jsonl");
+        assert!(read_transcript(&missing).expect("read").is_empty());
+    }
 
     proptest! {
         /// Any answer keeps a prefix of its trimmed text within the cap,
