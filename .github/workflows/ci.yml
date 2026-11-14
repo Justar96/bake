@@ -12,10 +12,8 @@ on:
         type: choice
         default: windows
         options:
-          - linux
-          - windows-and-macos
           - windows
-          - macos
+          - linux
           - all
 
 permissions:
@@ -31,10 +29,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ fromJSON('{"all":["ubuntu-latest","windows-latest","macos-latest"],"linux":["ubuntu-latest"],"windows-and-macos":["windows-latest","macos-latest"],"windows":["windows-latest"],"macos":["macos-latest"]}')[inputs.platforms || 'windows'] }}
+        os: ${{ fromJSON('{"all":["ubuntu-latest","windows-latest"],"linux":["ubuntu-latest"],"windows":["windows-latest"]}')[inputs.platforms || 'windows'] }}
     name: bake (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    # Cold Wasmtime builds need extra time on Windows and macOS.
+    # Cold Wasmtime builds need extra time on Windows.
     timeout-minutes: ${{ matrix.os == 'ubuntu-latest' && 30 || 60 }}
     steps:
       - uses: actions/checkout@v4
@@ -65,9 +63,6 @@ jobs:
         run: |
           echo 'BAKE_REQUIRE_SANDBOX_BACKENDS=bwrap,landlock' >> "$GITHUB_ENV"
           echo 'BAKE_REQUIRE_KERNEL_FAULTS=1' >> "$GITHUB_ENV"
-      - name: Install ripgrep and fd
-        if: runner.os == 'macOS'
-        run: brew install ripgrep fd
       - name: Install the pinned Rust toolchain
         run: rustup toolchain install --no-self-update
       # rust-lld marks the GLIBC_2.39 need of the weakly bound pidfd functions
