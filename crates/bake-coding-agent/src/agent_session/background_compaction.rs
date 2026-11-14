@@ -429,11 +429,7 @@ impl Core {
             // also append entries, which the snapshot revision rejects.
             let settings = read_settings(&core.settings);
             let current_model = core.model();
-            let current_settings = settings.compaction_settings(
-                current_model
-                    .as_ref()
-                    .map(|model| (model.provider.as_str(), model.id.as_str())),
-            );
+            let current_settings = settings.compaction_settings_for(current_model.as_ref());
             let current_thinking = core
                 .agent()
                 .map(|agent| agent.thinking_level())

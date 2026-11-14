@@ -290,6 +290,17 @@ impl Projector {
                 updates.extend(self.show_phase("waiting to retry"));
                 updates
             }
+            // Context files found while working, and those left out.
+            SessionEvent::NestedContext { loaded, warnings } => loaded
+                .iter()
+                .map(|path| Row::Info(format!("Loaded context file {path}")))
+                .chain(
+                    warnings
+                        .iter()
+                        .map(|warning| Row::Info(format!("Warning: {warning}"))),
+                )
+                .map(|row| self.commit_now(row))
+                .collect(),
             SessionEvent::SummarizationRetryAttemptStart { source } => match source {
                 SummarizationSource::Compaction(_) => self.show_phase(COMPACTION_RETRYING),
                 SummarizationSource::BranchSummary => self.show_phase(copy::SUMMARIZING_BRANCH),

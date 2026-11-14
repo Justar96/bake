@@ -1,0 +1,41 @@
+{
+  "name": "handover probe",
+  "date": "2026-11-14",
+  "base": {
+    "path": "/home/jtar-wsl/bake/.artifacts/eval/bake-m3",
+    "version": "bake 0.4.8",
+    "bytes": 71565800
+  },
+  "candidate": {
+    "path": "/home/jtar-wsl/bake/.artifacts/eval/bake-m3",
+    "version": "bake 0.4.8",
+    "bytes": 71565800
+  },
+  "same_executable": true,
+  "base_settings": {},
+  "candidate_settings": {
+    "bash": {
+      "foregroundSeconds": 20
+    }
+  },
+  "models": [
+    "cliproxyapi/gemini-4-hydrogen-xhigh:high",
+    "cliproxyapi/gpt-6.1-sol:high",
+    "cliproxyapi/claude-opus-5-5:high"
+  ],
+  "tasks": [
+    [
+      "slow-build",
+      "Build the release bundle and tell me the build id."
+    ],
+    [
+      "slow-build-plain",
+      "Run `sh build.sh` with one plain bash call, giving it no timeout and not running it in the background, and tell me the build id it prints on its last line. Do not work the id out any other way."
+    ]
+  ],
+  "trials": 3,
+  "jobs": 6,
+  "max_model_calls": 60,
+  "run_timeout_ms": 900000,
+  "host": "linux/x86_64"
+}

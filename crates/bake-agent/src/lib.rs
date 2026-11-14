@@ -26,6 +26,7 @@ pub mod nested;
 pub mod run_control;
 pub mod stream_fn;
 pub mod types;
+pub mod unknown_tool;
 pub mod validation;
 
 pub use agent::{Agent, AgentError, AgentInitialState, AgentOptions, PromptInput, Subscription};
@@ -43,3 +44,4 @@ pub use run_control::{
 };
 pub use stream_fn::{default_stream_fn, registry_stream_fn, set_default_stream_fn};
 pub use types::*;
+pub use unknown_tool::unknown_tool_message;

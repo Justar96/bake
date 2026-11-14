@@ -59,18 +59,25 @@ pub const BASH_JUSTIFICATION_DESCRIPTION: &str = "One sentence for the user.";
 pub const STDERR_CLASSIFY_BYTES: usize = 64 * 1024;
 
 /// Pi's description with the sandbox paragraph, whose escalation sentences
-/// appear only when `targets` is not empty, and the background sentence when
-/// the tool takes `run_in_background`.
-pub fn sandboxed_bash_tool_description(targets: &[SandboxMode], background: bool) -> String {
+/// appear only when `targets` is not empty, and, with `background` (the
+/// tool takes `run_in_background`), that foreground budget and the
+/// background sentence.
+pub fn sandboxed_bash_tool_description(
+    targets: &[SandboxMode],
+    background: Option<std::time::Duration>,
+) -> String {
+    sandboxed_description_over(&bash_tool_description_for(background), targets)
+}
+
+/// `base`, a bash description without the sandbox paragraph, with it for
+/// `targets`.
+pub(crate) fn sandboxed_description_over(base: &str, targets: &[SandboxMode]) -> String {
     let escalation = if targets.is_empty() {
         ""
     } else {
         BASH_SANDBOX_ESCALATION_DESCRIPTION
     };
-    format!(
-        "{}{BASH_SANDBOX_DESCRIPTION}{escalation}",
-        bash_tool_description_for(background)
-    )
+    format!("{base}{BASH_SANDBOX_DESCRIPTION}{escalation}")
 }
 
 /// Pi's parameters with `sandbox_permissions` (enum `targets`) and
@@ -332,8 +339,10 @@ pub fn create_sandboxed_bash_tool_definition(
     let cwd = cwd.to_path_buf();
     let permissions = permissions.clone();
     let background = options.jobs.is_some();
-    tool.description =
-        sandboxed_bash_tool_description(permissions.escalation_targets(), background);
+    tool.description = sandboxed_bash_tool_description(
+        permissions.escalation_targets(),
+        background.then_some(options.foreground_budget),
+    );
     tool.parameters = sandboxed_bash_tool_parameters(permissions.escalation_targets(), background);
     tool.execute = Arc::new(
         move |id: String, args: Value, signal: Option<AbortSignal>, on_update, ctx| {

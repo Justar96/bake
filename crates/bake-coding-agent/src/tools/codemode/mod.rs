@@ -688,6 +688,10 @@ pub fn create_codemode_tool(host: Option<Arc<dyn CodemodeHost>>) -> AgentTool {
     tool.replay = Some(ToolReplay::Never);
     // Scripts must not start other scripts.
     tool.nested_callable = false;
+    // The script has no effect of its own: its nested calls are ordered one
+    // by one by their own effects, so two scripts may run together. The
+    // explicit mode keeps the session from declaring it `Exec`.
+    tool.execution_mode = Some(bake_agent::ToolExecutionMode::Parallel);
     tool
 }
 

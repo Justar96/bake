@@ -42,8 +42,11 @@ struct Harness {
     child_gates: Mutex<Vec<WorkGate>>,
     /// The job registry of each child built, in build order.
     child_jobs: Mutex<Vec<JobRegistry>>,
-    /// The settings a parent session runs with; a child's are the default.
+    /// The settings a parent session runs with.
     parent_settings: Mutex<Settings>,
+    /// The settings each child is built with; the default unless a test
+    /// sets them.
+    child_settings: Mutex<Settings>,
 }
 
 fn harness(name: &str) -> Arc<Harness> {
@@ -82,6 +85,7 @@ fn harness_in(name: &str, place: Option<PathBuf>) -> Arc<Harness> {
         child_gates: Mutex::default(),
         child_jobs: Mutex::default(),
         parent_settings: Mutex::default(),
+        child_settings: Mutex::default(),
     })
 }
 
@@ -234,6 +238,7 @@ fn builder(h: &Arc<Harness>, parent_id: String, parent_file: Option<PathBuf>) ->
             h.child_gates.lock().expect("gates").push(work.clone());
             let jobs = JobRegistry::new(work.clone(), crate::jobs::JobLimits::default());
             h.child_jobs.lock().expect("jobs").push(jobs.clone());
+            let settings = h.child_settings.lock().expect("settings").clone();
             h.session(
                 store,
                 child_tools(&spec.link),
@@ -242,7 +247,7 @@ fn builder(h: &Arc<Harness>, parent_id: String, parent_file: Option<PathBuf>) ->
                 SessionSelection::default(),
                 spec.route.as_ref().map(|route| route.model.clone()),
                 spec.route.and_then(|route| route.thinking_level),
-                Settings::default(),
+                settings,
             )
             .await
         })
@@ -631,6 +636,72 @@ async fn foreground_returns_the_answer_and_refusals_start_nothing() {
     assert!(
         !parent.session.jobs().has_undelivered(),
         "a foreground run sends no notice"
+    );
+    parent.session.shutdown().await;
+}
+
+// Children inherit their parent's settings, model profiles among them, and
+// a child on another model gets that model's profile: its `model_notes`,
+// not the parent's.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_child_on_another_model_gets_that_models_profile() {
+    let h = harness("subagent-profile");
+    let settings = Settings::from_object(
+        json!({
+            "modelProfiles": {
+                "faux-1": { "prompt": "Parent notes." },
+                "faux-2": { "prompt": "Child notes." }
+            }
+        })
+        .as_object()
+        .expect("object"),
+    );
+    *h.parent_settings.lock().expect("settings") = settings.clone();
+    *h.child_settings.lock().expect("settings") = settings;
+    // Each request's model and its `model_notes` section.
+    type Notes = Vec<(String, Option<String>)>;
+    let notes: Arc<Mutex<Notes>> = Arc::default();
+    let seen = Arc::clone(&notes);
+    h.think(Arc::new(move |model, messages| {
+        let section = bake_ai::transcript::get_current_system_message(messages)
+            .and_then(|system| system.sections)
+            .and_then(|sections| {
+                sections
+                    .0
+                    .into_iter()
+                    .find(|(name, _)| name == "model_notes")
+                    .and_then(|(_, value)| value)
+            });
+        seen.lock().expect("notes").push((model.to_owned(), section));
+        if is_child(messages) {
+            return Some(faux_assistant_message("child done"));
+        }
+        if after_tool(messages) {
+            return Some(faux_assistant_message("done"));
+        }
+        Some(call(
+            "subagent",
+            json!({ "description": "x", "prompt": "Do.", "provider": "faux", "model": "faux-2", "run_in_background": false }),
+        ))
+    }));
+    let parent = parent(&h, None).await;
+    parent
+        .session
+        .prompt("delegate", Vec::new())
+        .await
+        .expect("prompt");
+    let answered = tool_results(&parent.session, "subagent");
+    assert_eq!(answered[0].0, "child done");
+    let notes = notes.lock().expect("notes").clone();
+    let parent_notes = Some("<model_notes>\nParent notes.\n</model_notes>".to_owned());
+    let child_notes = Some("<model_notes>\nChild notes.\n</model_notes>".to_owned());
+    assert_eq!(
+        notes,
+        [
+            ("faux-1".to_owned(), parent_notes.clone()),
+            ("faux-2".to_owned(), child_notes),
+            ("faux-1".to_owned(), parent_notes),
+        ]
     );
     parent.session.shutdown().await;
 }

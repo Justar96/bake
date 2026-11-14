@@ -188,8 +188,21 @@ pub fn refresh_escalation_offer(
                 .get("properties")
                 .and_then(|properties| properties.get("run_in_background"))
                 .is_some();
+            // The description before the sandbox paragraph keeps what the
+            // tool was built with, such as its foreground budget.
+            let description = match tool.description.find(bash::BASH_SANDBOX_DESCRIPTION) {
+                Some(end) => bash::sandboxed_description_over(&tool.description[..end], targets),
+                None => bash::sandboxed_bash_tool_description(
+                    targets,
+                    background.then(|| {
+                        std::time::Duration::from_secs(
+                            crate::tools::bash::DEFAULT_FOREGROUND_SECONDS,
+                        )
+                    }),
+                ),
+            };
             (
-                bash::sandboxed_bash_tool_description(targets, background),
+                description,
                 bash::sandboxed_bash_tool_parameters(targets, background),
             )
         }

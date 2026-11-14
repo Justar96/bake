@@ -221,9 +221,12 @@ fn parses_disable_model_invocation() {
 
 #[test]
 fn formats_skills_as_xml() {
-    assert_eq!(format_skills_for_prompt(&[], SkillReader::Read), "");
+    assert_eq!(
+        format_skills_for_prompt(&[], SkillReader::Read, DEFAULT_LISTING_TOKENS),
+        ""
+    );
     let one = [skill("test-skill", "A test skill.", "/path/to/skill")];
-    let text = format_skills_for_prompt(&one, SkillReader::Read);
+    let text = format_skills_for_prompt(&one, SkillReader::Read, DEFAULT_LISTING_TOKENS);
     for part in [
         "<available_skills>",
         "</available_skills>",
@@ -243,16 +246,23 @@ fn formats_skills_as_xml() {
         "A skill with <special> & \"characters\".",
         "/path/to/skill",
     )];
-    let text = format_skills_for_prompt(&escaped, SkillReader::Read);
+    let text = format_skills_for_prompt(&escaped, SkillReader::Read, DEFAULT_LISTING_TOKENS);
     assert!(text.contains("&lt;special&gt;"));
     assert!(text.contains("&amp;"));
-    assert!(text.contains("&quot;characters&quot;"));
+    // Quotes and apostrophes are sent as written, unlike Pi's.
+    assert!(text.contains("\"characters\"."));
+    let quoted = [skill("it's", "Don't \"guess\".", "/a'b\"c")];
+    let text = format_skills_for_prompt(&quoted, SkillReader::Read, DEFAULT_LISTING_TOKENS);
+    assert!(text.contains("<name>it's</name>"));
+    assert!(text.contains("<description>Don't \"guess\".</description>"));
+    assert!(text.contains("<location>/a'b\"c/SKILL.md</location>"));
+    assert!(!text.contains("&quot;") && !text.contains("&apos;"));
 
     let two = [
         skill("skill-one", "First skill.", "/path/one"),
         skill("skill-two", "Second skill.", "/path/two"),
     ];
-    let text = format_skills_for_prompt(&two, SkillReader::Read);
+    let text = format_skills_for_prompt(&two, SkillReader::Read, DEFAULT_LISTING_TOKENS);
     assert!(text.contains("<name>skill-one</name>"));
     assert!(text.contains("<name>skill-two</name>"));
     assert_eq!(text.matches("<skill>").count(), 2);
@@ -266,11 +276,14 @@ fn hidden_skills_stay_out_of_the_prompt() {
         skill("visible-skill", "A visible skill.", "/path/visible"),
         hidden.clone(),
     ];
-    let text = format_skills_for_prompt(&both, SkillReader::Read);
+    let text = format_skills_for_prompt(&both, SkillReader::Read, DEFAULT_LISTING_TOKENS);
     assert!(text.contains("<name>visible-skill</name>"));
     assert!(!text.contains("<name>hidden-skill</name>"));
     assert_eq!(text.matches("<skill>").count(), 1);
-    assert_eq!(format_skills_for_prompt(&[hidden], SkillReader::Read), "");
+    assert_eq!(
+        format_skills_for_prompt(&[hidden], SkillReader::Read, DEFAULT_LISTING_TOKENS),
+        ""
+    );
 }
 
 // describe("loadSkills with options")
@@ -653,6 +666,8 @@ fn recorded_section(case: &str, name: &str) -> Option<String> {
     let prompt = recorded[case].as_str().unwrap_or_default();
     let (_, rest) = prompt.split_once(&format!("<{name}>\n"))?;
     let (section, _) = rest.split_once(&format!("\n</{name}>"))?;
+    // Bake sends quotes and apostrophes as written, where Pi escapes them.
+    let section = section.replace("&quot;", "\"").replace("&apos;", "'");
     Some(format!("<{name}>\n{section}\n</{name}>"))
 }
 

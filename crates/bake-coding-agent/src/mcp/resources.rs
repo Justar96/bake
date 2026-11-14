@@ -39,7 +39,7 @@
 //!   where Pi passes it into each request.
 //!
 //! Replay class: all three are [`ToolReplay::Safe`], and all three declare
-//! `read_only`. Unlike an `mcp__<server>__<tool>` call, whose effect is
+//! the `Read` effect. Unlike an `mcp__<server>__<tool>` call, whose effect is
 //! whatever the server's own `readOnlyHint` claims it is, each of these
 //! sends one MCP read method that Bake, not the server, chose
 //! (`resources/list`, `resources/templates/list`, `resources/read`), which
@@ -540,7 +540,7 @@ fn resource_tool(
     // Each call sends one MCP read method Bake chose; see the module
     // documentation's replay paragraph.
     tool.replay = Some(ToolReplay::Safe);
-    tool.read_only = true;
+    tool.effect = Some(bake_agent::ToolEffect::Read);
     Arc::new(tool)
 }
 

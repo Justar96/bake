@@ -128,7 +128,7 @@ pub use run_journal::{RecoverableRunResult, RunRecovery, RunRecoveryDisposition}
 use bake_agent::{
     AfterToolCallResult, Agent, AgentError, AgentEvent, AgentInitialState,
     AgentMessage as LiveMessage, AgentOptions, AgentTool, PromptInput, QueueMode, RunControl,
-    RunOutcome, Subscription, ToolExecutionMode, hook,
+    RunOutcome, Subscription, ToolEffect, ToolExecutionMode, hook,
 };
 use bake_ai::transcript::get_current_system_message;
 use bake_ai::{
@@ -222,7 +222,8 @@ pub struct AgentSessionOptions {
     pub model: Option<Model>,
     /// An explicit thinking level; otherwise restored or the default.
     pub thinking_level: Option<ModelThinkingLevel>,
-    /// The executable tools.
+    /// The executable tools. A tool without an [`AgentTool::effect`] is run
+    /// as [`ToolEffect::Exec`] unless it sets `execution_mode` to parallel.
     pub tools: Vec<Arc<AgentTool>>,
     /// The active tools by name, Pi's `initialActiveToolNames`: the
     /// prompt's rules follow these, and requests declare the ones present
@@ -263,35 +264,52 @@ pub struct AgentSessionOptions {
     pub jobs: Option<JobRegistry>,
 }
 
-/// Tools whose calls change files or run commands. The prompt's round-trip
-/// rule sends an edit with the command that checks it in one response, so a
-/// batch holding one of these runs one call at a time, in the order the
-/// model wrote them; a batch of reads still runs in parallel. Pi runs every
-/// batch in parallel.
-const ORDERED_TOOLS: [&str; 3] = ["bash", "edit", "write"];
-
-/// The [`ORDERED_TOOLS`] that change a file. When a call of one fails, the
-/// calls after it in the same response that are neither file changes nor
-/// reads are answered with an error instead of run
-/// ([`AgentTool::failure_skips_dependents`]): the command sent with an edit
-/// to check it must not report on a file the edit never changed.
-const FILE_CHANGE_TOOLS: [&str; 2] = ["edit", "write"];
-
-/// `tool`, made sequential when it is one of the [`ORDERED_TOOLS`] and sets
-/// no mode of its own, and marked when it is one of the
-/// [`FILE_CHANGE_TOOLS`].
-fn run_in_order(tool: Arc<AgentTool>) -> Arc<AgentTool> {
-    let order = tool.execution_mode.is_none() && ORDERED_TOOLS.contains(&tool.name.as_str());
-    let guard = !tool.failure_skips_dependents && FILE_CHANGE_TOOLS.contains(&tool.name.as_str());
-    if !order && !guard {
+/// `tool` as the session runs it. A tool that declares no effect, such as
+/// an SDK or plugin tool, is [`ToolEffect::Exec`]: the session cannot see
+/// what it does, so its calls run alone, in the order the model wrote them,
+/// as the prompt's round-trip rule promises. A tool that explicitly sets
+/// `execution_mode` to parallel keeps no effect, the documented opt-in to
+/// run beside other calls as in Pi.
+fn declare_effect(tool: Arc<AgentTool>) -> Arc<AgentTool> {
+    if tool.effect.is_some() || tool.execution_mode == Some(ToolExecutionMode::Parallel) {
         return tool;
     }
-    let mut ordered = (*tool).clone();
-    if order {
-        ordered.execution_mode = Some(ToolExecutionMode::Sequential);
+    let mut declared = (*tool).clone();
+    declared.effect = Some(ToolEffect::Exec);
+    Arc::new(declared)
+}
+
+/// The profile of `model` in `settings` ([`Settings::model_profile`]);
+/// empty without a model.
+fn model_profile(
+    settings: &SharedSettings,
+    model: Option<&Model>,
+) -> crate::settings::ModelProfile {
+    model
+        .map(|model| read_settings(settings).model_profile(model))
+        .unwrap_or_default()
+}
+
+/// The active tool names under `profile`: `base`, the session's, with the
+/// profile's `tools` applied, of the session's `tools`. Without `bash` the
+/// job tools are left out, as the session's selection leaves them out.
+fn profile_tool_names(
+    profile: &crate::settings::ModelProfile,
+    base: &[String],
+    tools: &[Arc<AgentTool>],
+) -> Vec<String> {
+    if profile.tools.is_empty() {
+        return base.to_vec();
     }
-    ordered.failure_skips_dependents |= guard;
-    Arc::new(ordered)
+    let mut names: Vec<String> = profile
+        .active_tools(base)
+        .into_iter()
+        .filter(|name| tools.iter().any(|tool| &tool.name == name))
+        .collect();
+    if !names.iter().any(|name| name == "bash") {
+        names.retain(|name| !crate::tools::job_tools::JOB_TOOL_NAMES.contains(&name.as_str()));
+    }
+    names
 }
 
 /// The prompt text of one tool, from Pi's `ToolDefinition`.
@@ -572,6 +590,15 @@ pub enum SessionEvent<'a> {
     },
     /// Pi's `summarization_retry_finished`.
     SummarizationRetryFinished,
+    /// Bake's own: context files the session's file tool calls found while
+    /// working joined the prompt from the next request, or were left out
+    /// (`nestedContextFiles`). The warnings are for the user only.
+    NestedContext {
+        /// The paths of the files added, outermost first.
+        loaded: &'a [String],
+        /// Why a file was left out or could not be read.
+        warnings: &'a [String],
+    },
     /// Pi's `queue_update`: the steering and follow-up prompts still
     /// waiting, in the order they will be delivered.
     QueueUpdate {
@@ -959,7 +986,7 @@ fn select_model(
     if thinking_level.is_none()
         && let Some(model) = &model
     {
-        thinking_level = settings.model_thinking_level(&model.provider, &model.id);
+        thinking_level = settings.thinking_level_for(model);
     }
     let thinking_level = thinking_level
         .or(settings.default_thinking_level)
@@ -1138,6 +1165,21 @@ fn next_turn_hook(
             // Context `PostToolUse` hooks added during the step.
             if let Some(hooks) = &hooks {
                 update.messages.extend(hooks.take_pending());
+            }
+            // Context files the step's calls found, before the next request.
+            let systems: Vec<Message> = update
+                .context
+                .as_ref()
+                .unwrap_or(turn.context)
+                .messages
+                .iter()
+                .chain(update.messages.iter())
+                .filter_map(|message| message.as_system().cloned().map(Message::System))
+                .collect();
+            if let Some(patch) =
+                nested_context::section_patch(&systems, core.nested.section().as_deref())
+            {
+                update.messages.push(patch.into());
             }
             // One read, so the model and level come from one change.
             let selected = selection.get();
@@ -1526,6 +1568,14 @@ impl AgentSession {
             jobs,
         } = options;
         let max_concurrent_read_tools = settings.read_tool_concurrency()?;
+        // A malformed model profile stops the session, as a malformed
+        // `permission` section does.
+        settings.model_profiles()?;
+        let nested = nested_context::NestedContext::new(
+            settings.nested_context_files()? && !settings.no_context_files,
+            &system_prompt.cwd,
+            &system_prompt.context_files,
+        );
         let plugins = VetoDispatcher::new(plugins).map(Arc::new);
         system_prompt.docs_command = docs_command.clone();
         let task_documents_enabled = settings.task_documents;
@@ -1542,7 +1592,7 @@ impl AgentSession {
         {
             return Err("The schedule tool names are reserved when schedules is enabled.".into());
         }
-        let mut tools: Vec<Arc<AgentTool>> = tools.into_iter().map(run_in_order).collect();
+        let mut tools = tools;
         // The session's own `codemode` tool, registered unless the caller
         // gives one; it is active when `active_tool_names` names it, as the
         // CLI's defaults do, and its guideline then joins the rules.
@@ -1597,15 +1647,21 @@ impl AgentSession {
             notices.extend(crate::subagents::lost_runs(&session));
             Arc::new(Mutex::new(notices))
         };
-        let (context, has_thinking_entry) = with_session(&work, &session, |session| {
-            let context = session.build_session_context();
-            let has_thinking_entry = session
-                .branch_entries(None)
-                .iter()
-                .any(|entry| entry.entry_type() == "thinking_level_change");
-            (context, has_thinking_entry)
-        })
-        .await?;
+        let (context, has_thinking_entry, nested_paths) =
+            with_session(&work, &session, |session| {
+                let context = session.build_session_context();
+                let branch = session.branch_entries(None);
+                let has_thinking_entry = branch
+                    .iter()
+                    .any(|entry| entry.entry_type() == "thinking_level_change");
+                (
+                    context,
+                    has_thinking_entry,
+                    nested_context::recorded_paths(&branch),
+                )
+            })
+            .await?;
+        nested.restore(&nested_paths);
         let has_existing_session = !context.messages.is_empty();
         let snapshot = registry.snapshot();
         let selection = select_model(
@@ -1659,6 +1715,7 @@ impl AgentSession {
             state: Mutex::new(RunState::default()),
             activity: tokio::sync::watch::Sender::new(Activity::default()),
             gap: Arc::default(),
+            nested,
             #[cfg(test)]
             hooks: Mutex::default(),
             #[cfg(test)]
@@ -1706,6 +1763,7 @@ impl AgentSession {
         if let Some(schedules) = &schedules {
             tools.extend(schedules::tools(&core, schedules));
         }
+        let tools: Vec<Arc<AgentTool>> = tools.into_iter().map(declare_effect).collect();
         let after_tool_core = Arc::clone(&core);
         let persist_error = Arc::new(Mutex::new(None));
         let executions: prompt_execution::SharedExecutions = Arc::default();
@@ -1741,6 +1799,16 @@ impl AgentSession {
                 Box::pin(async move { converted })
             })),
             after_tool_call: Some(hook::after_tool_call(move |context, _signal| {
+                // The directories a successful file tool call makes the
+                // session check for context files, outermost first.
+                let directories = if context.is_error {
+                    Vec::new()
+                } else {
+                    after_tool_core
+                        .nested
+                        .directories(&context.tool_call.name, context.args)
+                };
+                let nested_core = Arc::clone(&after_tool_core);
                 let content = context.result.content.clone();
                 let details = context_masking::observation_details(
                     &context,
@@ -1754,6 +1822,9 @@ impl AgentSession {
                     .unwrap_or_default();
                 let work = after_tool_core.work.clone();
                 Box::pin(async move {
+                    if !directories.is_empty() {
+                        nested_context::find(&nested_core, directories).await;
+                    }
                     if !content
                         .iter()
                         .any(|block| matches!(block, UserContentBlock::Image(_)))
@@ -2615,7 +2686,7 @@ impl AgentSession {
             let level = {
                 let settings = read_settings(&control.settings);
                 settings
-                    .model_thinking_level(&model.provider, &model.id)
+                    .thinking_level_for(&model)
                     .or(settings.default_thinking_level)
                     .unwrap_or(previous)
             };
@@ -3525,15 +3596,22 @@ mod codemode_tests;
 #[cfg(test)]
 mod control_tests;
 #[cfg(test)]
+mod foreground_job_tests;
+#[cfg(test)]
 mod hook_tests;
 #[cfg(test)]
 mod job_tests;
+#[cfg(test)]
+mod model_profile_tests;
 #[cfg(test)]
 mod navigation_summary_tests;
 #[cfg(test)]
 mod navigation_tests;
 #[cfg(test)]
 mod nested_call_tests;
+mod nested_context;
+#[cfg(test)]
+mod nested_context_tests;
 #[cfg(test)]
 mod plugin_tests;
 #[cfg(test)]

@@ -34,7 +34,8 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use bake_agent::{
-    AgentContext, AgentLoopConfig, AgentMessage, AgentTool, StreamFn, ToolReplay, run_agent_loop,
+    AgentContext, AgentLoopConfig, AgentMessage, AgentTool, StreamFn, ToolEffect, ToolReplay,
+    run_agent_loop,
 };
 use bake_ai::providers::faux::{
     FauxProvider, FauxProviderOptions, FauxResponseStep, faux_assistant_blocks,
@@ -166,6 +167,9 @@ fn main() {
         }),
         ("a_resource_list_change_republishes_nothing", |case| {
             Box::pin(a_resource_list_change_republishes_nothing(case))
+        }),
+        ("trust_read_only_maps_hinted_tools_to_read", |case| {
+            Box::pin(trust_read_only_maps_hinted_tools_to_read(case))
         }),
         (
             "every_composed_tool_has_a_replay_class_no_request_carries",
@@ -852,6 +856,50 @@ async fn tools_are_admitted_declared_called_and_logged(case: Arc<Case>) {
     assert!(servers.tool_names().is_empty());
 }
 
+// A server's `readOnlyHint` makes its tool a read only when the user's
+// entry sets `trustReadOnly`; every other MCP tool runs alone, in order.
+async fn trust_read_only_maps_hinted_tools_to_read(case: Arc<Case>) {
+    let model = Model::new();
+    let session = session(&case, &model, None).await;
+    let mut trusted = server_json(&case, "trusted", "");
+    trusted["trustReadOnly"] = json!(true);
+    let servers = entries(
+        &case,
+        json!({ "trusted": trusted, "plain": server_json(&case, "plain", "") }),
+    );
+    let servers = session
+        .start_mcp(options(
+            &case,
+            servers,
+            SandboxMode::DangerFullAccess,
+            Arc::new(UnavailableProvider::new(None)),
+        ))
+        .expect("start");
+    wait_for(&servers, "both servers", |states| {
+        states.iter().all(|state| connected(state, 1))
+    })
+    .await;
+    model.respond(vec![faux_assistant_message("done")]);
+    session.prompt("go", Vec::new()).await.expect("prompt");
+    let effects: BTreeMap<String, Option<ToolEffect>> = session
+        .agent()
+        .tools()
+        .iter()
+        .filter(|tool| ["echo", "env"].iter().any(|name| tool.name.ends_with(name)))
+        .map(|tool| (tool.name.clone(), tool.effect))
+        .collect();
+    assert_eq!(
+        effects,
+        BTreeMap::from([
+            ("mcp__plain__echo".to_owned(), Some(ToolEffect::Exec)),
+            ("mcp__plain__env".to_owned(), Some(ToolEffect::Exec)),
+            ("mcp__trusted__echo".to_owned(), Some(ToolEffect::Read)),
+            ("mcp__trusted__env".to_owned(), Some(ToolEffect::Exec)),
+        ])
+    );
+    session.shutdown().await;
+}
+
 // Nothing runs before admission, and a mode no backend enforces, a
 // `url` the egress policy refuses, or an unresolvable value is refused.
 async fn denied_admission_starts_nothing(case: Arc<Case>) {
@@ -1078,13 +1126,15 @@ async fn a_refresh_publishes_a_whole_generation_and_calls_keep_theirs(case: Arc<
         .expect("start");
     let release = case.dir.join("release");
     model.respond(vec![
+        // MCP tools run in order, so `change` comes first and `slow` is in
+        // flight when the server's new listing arrives.
         calls(&[
+            ("mcp__fixture__change", json!({}), "change-1"),
             (
                 "mcp__fixture__slow",
                 json!({ "release": release.to_string_lossy() }),
                 "slow-1",
             ),
-            ("mcp__fixture__change", json!({}), "change-1"),
         ]),
         faux_assistant_message("first done"),
     ]);
@@ -1578,6 +1628,36 @@ const REPLAY_CLASSES: [(&str, ToolReplay); 23] = [
     ("visualize", ToolReplay::Safe),
 ];
 
+/// The effect of every tool `bake` composes with every opt-in on: only
+/// Bake's own observations are reads; `codemode` and the coordination tools
+/// declare none and opt in to running beside other calls (`cli` module's
+/// `every_bake_tool_declares_its_scheduling` holds their modes).
+const EFFECTS: [(&str, Option<ToolEffect>); 23] = [
+    ("read", Some(ToolEffect::Read)),
+    ("bash", Some(ToolEffect::Exec)),
+    ("edit", Some(ToolEffect::Write)),
+    ("write", Some(ToolEffect::Write)),
+    ("grep", Some(ToolEffect::Read)),
+    ("find", Some(ToolEffect::Read)),
+    ("ls", Some(ToolEffect::Read)),
+    ("job_output", None),
+    ("job_list", None),
+    ("job_kill", None),
+    ("subagent", None),
+    ("list_subagent_models", Some(ToolEffect::Read)),
+    ("send_message", None),
+    ("interrupt_agent", None),
+    ("list_agents", Some(ToolEffect::Read)),
+    ("task_document", Some(ToolEffect::Exec)),
+    ("schedule_create", Some(ToolEffect::Exec)),
+    ("schedule_list", Some(ToolEffect::Exec)),
+    ("schedule_delete", Some(ToolEffect::Exec)),
+    ("web_search", Some(ToolEffect::Read)),
+    ("web_fetch", Some(ToolEffect::Read)),
+    ("codemode", None),
+    ("visualize", Some(ToolEffect::Read)),
+];
+
 /// Writes `text` at `path`, writable by its owner only, as the home's
 /// files must be.
 fn write_owned(path: &Path, text: &str) {
@@ -1674,8 +1754,11 @@ async fn first_request(tools: Vec<Arc<AgentTool>>) -> Vec<String> {
 // resources, has a replay class, the one recovery reads (`run_journal`):
 // every MCP tool is `Never`, and the three resource tools, whose MCP read
 // method Bake chooses, are `Safe`. Plugins add no
-// tools, only vetoes (`plugins` module). Neither the class nor `read_only`
-// reaches the provider: the session's request declares exactly each tool's
+// tools, only vetoes (`plugins` module). Every tool has the effect the
+// session schedules it by ([`EFFECTS`]): a native read is `Read`, `edit` and
+// `write` are `Write`, `codemode` and the coordination tools declare none,
+// and every other tool, MCP tools included, is `Exec`. Neither the class nor the effect reaches
+// the provider: the session's request declares exactly each tool's
 // declaration, and flipping or clearing both on every tool leaves the
 // transcript and every wire body byte-identical.
 async fn every_composed_tool_has_a_replay_class_no_request_carries(case: Arc<Case>) {
@@ -1742,6 +1825,9 @@ async fn every_composed_tool_has_a_replay_class_no_request_carries(case: Arc<Cas
         plugins: WasmSetup::default(),
         warnings: Vec::new(),
         interrupt: no_interrupt(),
+        // Not the environment the test runs under, which may be a spawned
+        // agent's.
+        telecom_env: bake_coding_agent::telecom::TelecomEnv::default(),
     };
     let args = [
         "--model",
@@ -1799,6 +1885,28 @@ async fn every_composed_tool_has_a_replay_class_no_request_carries(case: Arc<Cas
         .collect();
     assert_eq!(classes, expected);
     assert_eq!(classes.len(), tools.len(), "a tool name repeats");
+    let effects: BTreeMap<String, Option<ToolEffect>> = tools
+        .iter()
+        .map(|tool| (tool.name.clone(), tool.effect))
+        .collect();
+    let expected: BTreeMap<String, Option<ToolEffect>> = EFFECTS
+        .iter()
+        .map(|(name, effect)| ((*name).to_owned(), *effect))
+        .chain(
+            FIXTURE_TOOLS
+                .iter()
+                .chain(std::iter::once(&"mcp__fixture__change_resources"))
+                .filter(|_| with_mcp)
+                .map(|name| ((*name).to_owned(), Some(ToolEffect::Exec))),
+        )
+        .chain(
+            RESOURCE_TOOL_NAMES
+                .iter()
+                .filter(|_| with_mcp)
+                .map(|name| ((*name).to_owned(), Some(ToolEffect::Read))),
+        )
+        .collect();
+    assert_eq!(effects, expected);
 
     // The session's own request declares each tool as its declaration.
     let requests = requests
@@ -1840,12 +1948,15 @@ async fn every_composed_tool_has_a_replay_class_no_request_carries(case: Arc<Cas
             Some(ToolReplay::Safe) => Some(ToolReplay::Never),
             _ => Some(ToolReplay::Safe),
         };
-        tool.read_only = !tool.read_only;
+        tool.effect = match tool.effect {
+            Some(ToolEffect::Read) => Some(ToolEffect::Exec),
+            _ => Some(ToolEffect::Read),
+        };
     });
     assert_eq!(first_request(flipped).await, original);
     let cleared = altered(|tool| {
         tool.replay = None;
-        tool.read_only = false;
+        tool.effect = None;
     });
     assert_eq!(first_request(cleared).await, original);
 }

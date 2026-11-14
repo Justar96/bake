@@ -77,6 +77,10 @@ pub struct McpServerSettings {
     pub timeout: Duration,
     /// `description`.
     pub description: Option<String>,
+    /// `trustReadOnly`: the user trusts the server's `readOnlyHint`, so a
+    /// tool it hints as read-only runs as a read, beside other reads.
+    /// Default: false, which leaves the hint the server's own claim.
+    pub trust_read_only: bool,
 }
 
 impl Default for McpServerSettings {
@@ -87,6 +91,7 @@ impl Default for McpServerSettings {
             tool_exposure: Vec::new(),
             timeout: Duration::from_secs(60),
             description: None,
+            trust_read_only: false,
         }
     }
 }
@@ -456,6 +461,15 @@ fn validate_settings(name: &str, object: &Map<String, Value>) -> Result<McpServe
         Some(Value::Bool(enabled)) => settings.enabled = *enabled,
         Some(_) => return Err(format!("server \"{name}\": enabled must be a boolean")),
     }
+    match object.get("trustReadOnly") {
+        None => {}
+        Some(Value::Bool(trust)) => settings.trust_read_only = *trust,
+        Some(_) => {
+            return Err(format!(
+                "server \"{name}\": trustReadOnly must be a boolean"
+            ));
+        }
+    }
     match object.get("description") {
         None => {}
         Some(Value::String(description)) => settings.description = Some(description.clone()),
@@ -667,6 +681,37 @@ mod tests {
         );
         assert!(overflow.servers.is_empty());
         assert_eq!(overflow.errors.len(), 1, "{:?}", overflow.errors);
+    }
+
+    // Bake: `trustReadOnly` is a boolean, false unless set; any other
+    // value refuses the entry.
+    #[test]
+    fn trust_read_only_is_a_boolean() {
+        let config = parse(json!({
+            "mcpServers": {
+                "trusted": { "command": "x", "trustReadOnly": true },
+                "distrusted": { "command": "x", "trustReadOnly": false },
+                "plain": { "command": "x" },
+                "text": { "command": "x", "trustReadOnly": "true" },
+                "number": { "url": "https://example.com/mcp", "trustReadOnly": 1 },
+            }
+        }));
+        let trust: Vec<(&str, bool)> = config
+            .servers
+            .iter()
+            .map(|server| (server.name.as_str(), server.settings.trust_read_only))
+            .collect();
+        assert_eq!(
+            trust,
+            [("trusted", true), ("distrusted", false), ("plain", false)]
+        );
+        assert_eq!(
+            config.errors,
+            [
+                "/home/u/.bake/mcp.json: server \"text\": trustReadOnly must be a boolean",
+                "/home/u/.bake/mcp.json: server \"number\": trustReadOnly must be a boolean",
+            ]
+        );
     }
 
     #[test]

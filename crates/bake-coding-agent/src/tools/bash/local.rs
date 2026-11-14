@@ -119,17 +119,28 @@ impl BashOperations for LocalShellOperations {
     }
 }
 
-/// Pi's `resolveTimeoutMs`, in seconds; `Err` holds Pi's message.
+/// What a refused `timeout` adds: how to run without one.
+const WITHOUT_TIMEOUT: &str = "Leave timeout out to run the command without one.";
+
+/// Pi's `resolveTimeoutMs`, in seconds. `Err` holds Pi's message for a
+/// value that is not a finite number; Bake's own says that the value must
+/// be greater than 0 for 0 or a negative one, which models send to mean no
+/// timeout, and how to run without one.
 pub(super) fn resolve_timeout(timeout: Option<f64>) -> Result<Option<Duration>, String> {
     let Some(timeout) = timeout else {
         return Ok(None);
     };
-    if !timeout.is_finite() || timeout <= 0.0 {
+    if !timeout.is_finite() {
         return Err("Invalid timeout: must be a finite number of seconds".to_owned());
+    }
+    if timeout <= 0.0 {
+        return Err(format!(
+            "Invalid timeout: must be greater than 0 seconds. {WITHOUT_TIMEOUT}"
+        ));
     }
     if timeout * 1000.0 > MAX_TIMEOUT_MS {
         return Err(format!(
-            "Invalid timeout: maximum is {} seconds",
+            "Invalid timeout: maximum is {} seconds. {WITHOUT_TIMEOUT}",
             js_number_to_string(MAX_TIMEOUT_MS / 1000.0)
         ));
     }

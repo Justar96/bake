@@ -4651,6 +4651,42 @@ mod tests {
         assert_eq!(lines.len(), 1 + 7);
     }
 
+    // A command handed over to a job, and the context files a read found
+    // while working, as the live terminal draws them.
+    #[test]
+    fn a_handed_over_command_and_found_context_files_read_so() {
+        let card =
+            |tool: &str, argument: &str, id: Option<&str>, summary: Option<&str>| Row::Call {
+                tool: tool.into(),
+                argument: argument.into(),
+                fields: Vec::new(),
+                id: id.map(str::to_owned),
+                state: CallState::Done,
+                summary: summary.map(str::to_owned),
+                output: Vec::new(),
+                full_output_path: None,
+            };
+        let rows = vec![
+            card("Bash", "./slow.sh", Some("bash-1"), Some("background")),
+            card("Read", "pkg/a.txt", None, None),
+            Row::Info("Loaded context file /w/pkg/AGENTS.md".into()),
+            Row::Info("Warning: Skipped context file /w/pkg/sub/AGENTS.md: the context files found while working may hold at most 64 KiB.".into()),
+        ];
+        let lines = |index| text(&present(&rows, index, 60, PLAIN));
+        assert_eq!(lines(0), ["  ✓ Bash: ./slow.sh   bash-1  background"]);
+        assert_eq!(lines(1), ["", "  ✓ Read: pkg/a.txt"]);
+        assert_eq!(lines(2), ["", "  Loaded context file /w/pkg/AGENTS.md"]);
+        assert_eq!(
+            lines(3),
+            [
+                "",
+                "  Warning: Skipped context file /w/pkg/sub/AGENTS.md: the",
+                "  context files found while working may hold at most 64",
+                "  KiB."
+            ]
+        );
+    }
+
     #[test]
     fn a_failed_edit_or_write_shows_its_error_as_text() {
         for tool in ["Edit", "Write"] {

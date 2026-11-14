@@ -190,6 +190,10 @@ pub struct CliEnvironment {
     /// Resolves with an exit code when the process should stop, such as on
     /// `SIGTERM`; print mode then shuts the session down and returns it.
     pub interrupt: Interrupt,
+    /// What the process's environment says about telecom and spawned
+    /// agents: the binary passes [`crate::telecom::TelecomEnv::from_process`],
+    /// a test its own.
+    pub telecom_env: crate::telecom::TelecomEnv,
 }
 
 /// Applies the home's CLIProxyAPI account to `registry`, from one
@@ -1283,6 +1287,8 @@ struct Build {
     docs_command: String,
     sandbox_provider: Arc<dyn SandboxProvider>,
     approver: Option<Arc<dyn Approver>>,
+    /// The process's telecom environment ([`CliEnvironment::telecom_env`]).
+    telecom_env: crate::telecom::TelecomEnv,
     role: Role,
     /// The interactive terminal shows this session, so it draws what the
     /// `visualize` tool shows.
@@ -1405,6 +1411,7 @@ fn build_child(
                 docs_command: factory.docs_command.clone(),
                 sandbox_provider: Arc::clone(&factory.sandbox_provider),
                 approver: factory.approver.clone(),
+                telecom_env: factory.telecom_env.clone(),
                 role: Role::Child(link),
                 drawn: false,
             },
@@ -1425,7 +1432,7 @@ async fn build_session(args: &Args, build: Build) -> Result<Built, String> {
         session,
         apis,
         resources,
-        settings,
+        mut settings,
         registry,
         model,
         thinking_level,
@@ -1433,6 +1440,7 @@ async fn build_session(args: &Args, build: Build) -> Result<Built, String> {
         docs_command,
         sandbox_provider,
         approver,
+        telecom_env,
         role,
         drawn,
     } = build;
@@ -1500,6 +1508,11 @@ async fn build_session(args: &Args, build: Build) -> Result<Built, String> {
     // The session's background jobs, shared by `bash`, the job tools, and
     // the session that delivers their notices.
     let jobs = crate::jobs::JobRegistry::new(work.clone(), crate::jobs::JobLimits::default());
+    // How long a `bash` call without `timeout` waits before its command
+    // continues as a job; an invalid value stops the start.
+    let foreground_budget = settings.bash_foreground_budget()?;
+    // What the skills list may take of the prompt; likewise.
+    let skills_listing_tokens = settings.skills_listing_tokens()?;
     let bash_context: crate::tools::bash::BashToolContextFn = {
         let selection = published.clone();
         let session_cwd = PathBuf::from(&session_cwd);
@@ -1531,6 +1544,7 @@ async fn build_session(args: &Args, build: Build) -> Result<Built, String> {
             crate::tools::bash::BashToolOptions {
                 context: Some(bash_context.clone()),
                 owner: Some(work.clone()),
+                foreground_budget,
                 ..Default::default()
             },
             &tool_permissions,
@@ -1561,16 +1575,18 @@ async fn build_session(args: &Args, build: Build) -> Result<Built, String> {
     let mut subagent_host = None;
     // Only a top-level session joins its repository's telecom team; an
     // in-process subagent talks to its parent through its own tools.
-    let telecom = (matches!(role, Role::Root(_)) && crate::telecom::enabled(settings.telecom))
-        .then(|| {
-            let options = crate::telecom::options_from_env(
-                Path::new(&session_cwd),
-                session.session_id(),
-                model
-                    .as_ref()
-                    .map(|model| format!("{}/{}", model.provider, model.id)),
-            )
-            .ok_or_else(|| "telecom: no Bake home to place the team in".to_owned())?;
+    let telecom =
+        (matches!(role, Role::Root(_)) && telecom_env.enabled(settings.telecom)).then(|| {
+            let options = telecom_env
+                .station_options(
+                    Some(&home),
+                    Path::new(&session_cwd),
+                    session.session_id(),
+                    model
+                        .as_ref()
+                        .map(|model| format!("{}/{}", model.provider, model.id)),
+                )
+                .ok_or_else(|| "telecom: no Bake home to place the team in".to_owned())?;
             crate::telecom::Station::start(options, jobs.clone(), &work)
         });
     if let Some(Ok(station)) = &telecom {
@@ -1589,26 +1605,24 @@ async fn build_session(args: &Args, build: Build) -> Result<Built, String> {
     // telecom, so a top-level session with a station spawns them; a
     // spawned agent spawns none.
     let spawned = match &telecom {
-        Some(Ok(station)) if !crate::spawned::is_spawned() => {
-            std::env::current_exe().ok().map(|program| {
-                let selection = published.clone();
-                crate::spawned::SpawnHost::new(crate::spawned::HostOptions {
-                    program,
-                    cwd: PathBuf::from(&session_cwd),
-                    station: Some(station.clone()),
-                    jobs: jobs.clone(),
-                    work: work.clone(),
-                    questions: questions.clone(),
-                    standing: Arc::clone(&standing),
-                    model: Arc::new(move || {
-                        selection
-                            .get()
-                            .model
-                            .map(|model| format!("{}/{}", model.provider, model.id))
-                    }),
-                })
+        Some(Ok(station)) if !telecom_env.spawned => std::env::current_exe().ok().map(|program| {
+            let selection = published.clone();
+            crate::spawned::SpawnHost::new(crate::spawned::HostOptions {
+                program,
+                cwd: PathBuf::from(&session_cwd),
+                station: Some(station.clone()),
+                jobs: jobs.clone(),
+                work: work.clone(),
+                questions: questions.clone(),
+                standing: Arc::clone(&standing),
+                model: Arc::new(move || {
+                    selection
+                        .get()
+                        .model
+                        .map(|model| format!("{}/{}", model.provider, model.id))
+                }),
             })
-        }
+        }),
         _ => None,
     };
     if let Some(host) = &spawned {
@@ -1689,6 +1703,36 @@ async fn build_session(args: &Args, build: Build) -> Result<Built, String> {
     // codemode`, a `-codemode` entry, or a `defaultTools` list of names that
     // omits it turns it off.
     available.push(crate::tools::codemode::CODEMODE_TOOL_NAME.to_owned());
+    // A model profile's `tools` name tools Bake has in some session; one
+    // that names no such tool stops the start, as any malformed profile
+    // does. A known tool this session lacks is left out when it applies.
+    // An explicit selection wins over the profiles, as over `defaultTools`.
+    settings.explicit_tools = args.tools.is_some() || args.no_tools || args.no_builtin_tools;
+    // Without context files, none is found while working either.
+    settings.no_context_files = args.no_context_files;
+    {
+        let mut known = available.clone();
+        known.extend(
+            [
+                crate::agent_session::task_documents::NAME,
+                crate::telecom::tool::TOOL_NAME,
+                crate::questions::TOOL_NAME,
+            ]
+            .into_iter()
+            .chain(crate::agent_session::schedules::NAMES)
+            .chain(crate::subagents::PARENT_TOOL_NAMES)
+            .chain(crate::subagents::CHILD_TOOL_NAMES)
+            .chain(crate::spawned::TOOL_NAMES)
+            .map(str::to_owned),
+        );
+        for (pattern, profile) in settings.model_profiles()? {
+            if let Some(name) = profile.unknown_tool(&known) {
+                return Err(format!(
+                    "Invalid modelProfiles[\"{pattern}\"].tools setting: unknown tool \"{name}\"."
+                ));
+            }
+        }
+    }
     let mut bake_defaults: Vec<String> = crate::tools::index::BAKE_DEFAULT_TOOL_NAMES
         .map(str::to_owned)
         .to_vec();
@@ -1770,6 +1814,7 @@ async fn build_session(args: &Args, build: Build) -> Result<Built, String> {
                 context: Some(bash_context),
                 owner: Some(work.clone()),
                 jobs: Some(jobs.clone()),
+                foreground_budget,
                 ..Default::default()
             },
             &tool_permissions,
@@ -1795,6 +1840,7 @@ async fn build_session(args: &Args, build: Build) -> Result<Built, String> {
     }
     system_prompt.context_files = context_files;
     system_prompt.skills = skills;
+    system_prompt.skills_listing_tokens = skills_listing_tokens;
     // Without an approver, escalations fail closed, and the prompt
     // states the `never` policy whatever the session's.
     system_prompt.permissions = permission.prompt_text(Path::new(&session_cwd), can_ask);
@@ -1982,6 +2028,8 @@ pub struct SessionFactory {
     plugins: WasmSetup,
     /// The interactive terminal shows its sessions ([`Build::drawn`]).
     drawn: bool,
+    /// The process's telecom environment ([`CliEnvironment::telecom_env`]).
+    telecom_env: crate::telecom::TelecomEnv,
 }
 
 impl std::fmt::Debug for SessionFactory {
@@ -2014,6 +2062,7 @@ impl SessionFactory {
             approver,
             plugins: WasmSetup::default(),
             drawn: false,
+            telecom_env: crate::telecom::TelecomEnv::from_process(),
         }
     }
 
@@ -2122,6 +2171,7 @@ impl SessionFactory {
                 docs_command: self.docs_command.clone(),
                 sandbox_provider: Arc::clone(&self.sandbox_provider),
                 approver: self.approver.clone(),
+                telecom_env: self.telecom_env.clone(),
                 role: Role::Root(Some(Box::new(self.clone()))),
                 drawn: self.drawn,
             },
@@ -2193,6 +2243,7 @@ async fn start_with(
         plugins,
         warnings: startup_warnings,
         mut interrupt,
+        telecom_env,
     } = environment;
     let mut args = args;
     let Some(home) = home else {
@@ -2211,6 +2262,7 @@ async fn start_with(
         approver: approver.clone(),
         plugins: plugins.clone(),
         drawn: kind == StartKind::Interactive,
+        telecom_env,
     };
 
     let loaded = {
@@ -2413,6 +2465,7 @@ async fn start_with(
             docs_command: docs_command.clone(),
             sandbox_provider,
             approver,
+            telecom_env: factory.telecom_env.clone(),
             role: Role::Root(Some(Box::new(factory.clone()))),
             drawn: kind == StartKind::Interactive,
         },
@@ -3198,6 +3251,14 @@ mod tests {
             warnings: Vec::new(),
             interrupt: no_interrupt(),
             plugins: WasmSetup::default(),
+            // Not the environment the tests run under, which may be a
+            // spawned agent's: no telecom choice, callsign, or spawn depth,
+            // and the team directory in the test's own directory, kept
+            // short for the sockets' path limit.
+            telecom_env: crate::telecom::TelecomEnv {
+                dir: Some(dir.join("t")),
+                ..crate::telecom::TelecomEnv::default()
+            },
         };
         (environment, buffer)
     }
@@ -3266,6 +3327,169 @@ mod tests {
                 .unwrap();
             assert_eq!(faux.call_count(), 1);
             started.session.shutdown().await;
+        }
+    }
+
+    // The first request of a session with many skills carries the list
+    // within `skills.listingTokens`, 4000 when unset: every skill, in order,
+    // the notice, and the shortened descriptions; an invalid value stops the
+    // start.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_first_request_carries_the_budgeted_skills_list() {
+        use bake_ai::providers::faux::{
+            FauxProvider, FauxProviderOptions, FauxResponseStep, faux_assistant_message,
+        };
+        for (settings, valid) in [("{}", true), (r#"{"skills":{"listingTokens":0}}"#, false)] {
+            let dir = setup_dirs("cli-skills-listing");
+            write_owned(&dir.join("home/settings.json"), settings);
+            let description = ["Use this skill for a task of its kind."; 12].join(" ");
+            for index in 0..30 {
+                let skill = dir
+                    .path()
+                    .join(format!("user/.agents/skills/skill-{index:02}"));
+                std::fs::create_dir_all(&skill).expect("skill dir");
+                std::fs::write(
+                    skill.join("SKILL.md"),
+                    format!(
+                        "---\nname: skill-{index:02}\ndescription: {description}\n---\nBody.\n"
+                    ),
+                )
+                .expect("skill");
+            }
+            let faux = Arc::new(FauxProvider::new(FauxProviderOptions::default()));
+            let section = Arc::new(Mutex::new(String::new()));
+            let seen = Arc::clone(&section);
+            faux.set_responses(vec![FauxResponseStep::from_fn(move |context, _, _, _| {
+                let prompt = bake_ai::transcript::get_current_system_prompt(context.messages());
+                let start = prompt.find("<skills>").expect("skills");
+                let end = prompt.find("</skills>").expect("end") + "</skills>".len();
+                *seen.lock().unwrap() = prompt[start..end].to_owned();
+                Ok(faux_assistant_message("done"))
+            })]);
+            let (mut environment, errors) = setup_environment(dir.path());
+            environment.extra_providers.push((
+                "faux".into(),
+                serde_json::json!({
+                    "baseUrl":"http://127.0.0.1:9/unused", "api":faux.model().api,
+                    "models":[{"id":"faux-1"}]
+                }),
+                Some("test-key".into()),
+            ));
+            let args = [
+                "--model",
+                "faux/faux-1",
+                "--permission",
+                "danger-full-access",
+                "--no-session",
+                "--no-mcp",
+            ];
+            let started = start_interactive(environment, parse_args(&strings(&args))).await;
+            if !valid {
+                assert!(started.is_err());
+                assert!(
+                    text(&errors).contains(
+                        "Invalid skills.listingTokens setting: expected a positive integer."
+                    ),
+                    "{}",
+                    text(&errors)
+                );
+                continue;
+            }
+            let Ok(started) = started else {
+                panic!("setup failed: {}", text(&errors));
+            };
+            started.session.apis().register(faux.clone());
+            started.session.prompt("Go", Vec::new()).await.unwrap();
+            started.session.shutdown().await;
+            let section = section.lock().unwrap().clone();
+            assert!(
+                section.contains(crate::skills::SHORTENED_NOTICE),
+                "{section}"
+            );
+            let names: Vec<usize> = (0..30)
+                .map(|index| {
+                    section
+                        .find(&format!("<name>skill-{index:02}</name>"))
+                        .expect("every skill listed")
+                })
+                .collect();
+            assert!(names.windows(2).all(|pair| pair[0] < pair[1]), "in order");
+            assert!(section.contains("…</description>"), "{section}");
+            assert!(!section.contains(&format!("<description>{description}</description>")));
+            assert!(bake_ai::utils::estimate::estimate_text_tokens(&section) <= 4000 + 5);
+        }
+    }
+
+    // A model profile's `tools` apply after `defaultTools`; `--tools`
+    // chooses the tools alone; and a profile naming no tool Bake has stops
+    // the start with the reason.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn model_profile_tools_follow_default_tools_and_yield_to_tools() {
+        use bake_ai::providers::faux::{
+            FauxProvider, FauxProviderOptions, FauxResponseStep, faux_assistant_message,
+        };
+        for (extra, tools, expected) in [
+            (vec![], "[\"+grep\", \"-write\"]", Ok(vec!["read", "grep"])),
+            (
+                vec!["--tools", "read,write"],
+                "[\"+grep\", \"-write\"]",
+                Ok(vec!["read", "write"]),
+            ),
+            (
+                vec![],
+                "[\"+nope\"]",
+                Err("Invalid modelProfiles[\"faux/faux-1\"].tools setting: unknown tool \"nope\"."),
+            ),
+        ] {
+            let dir = setup_dirs("cli-model-profile-tools");
+            let settings = format!(
+                r#"{{"defaultTools":["read","write"],"modelProfiles":{{"faux/faux-1":{{"tools":{tools}}}}}}}"#
+            );
+            write_owned(&dir.join("home/settings.json"), &settings);
+            let faux = Arc::new(FauxProvider::new(FauxProviderOptions::default()));
+            let declared = Arc::new(Mutex::new(Vec::new()));
+            let seen = Arc::clone(&declared);
+            faux.set_responses(vec![FauxResponseStep::from_fn(move |context, _, _, _| {
+                *seen.lock().unwrap() = bake_ai::transcript::get_current_tools(context.messages())
+                    .iter()
+                    .map(|tool| tool.name.clone())
+                    .collect();
+                Ok(faux_assistant_message("done"))
+            })]);
+            let (mut environment, errors) = setup_environment(dir.path());
+            environment.extra_providers.push((
+                "faux".into(),
+                serde_json::json!({
+                    "baseUrl":"http://127.0.0.1:9/unused", "api":faux.model().api,
+                    "models":[{"id":"faux-1"}]
+                }),
+                Some("test-key".into()),
+            ));
+            let mut args = vec![
+                "--model",
+                "faux/faux-1",
+                "--permission",
+                "danger-full-access",
+                "--no-session",
+                "--no-mcp",
+            ];
+            args.extend(extra);
+            let started = start_interactive(environment, parse_args(&strings(&args))).await;
+            match expected {
+                Ok(expected) => {
+                    let Ok(started) = started else {
+                        panic!("setup failed: {}", text(&errors));
+                    };
+                    started.session.apis().register(faux.clone());
+                    started.session.prompt("Go", Vec::new()).await.unwrap();
+                    assert_eq!(*declared.lock().unwrap(), expected);
+                    started.session.shutdown().await;
+                }
+                Err(reason) => {
+                    assert!(started.is_err());
+                    assert!(text(&errors).contains(reason), "{}", text(&errors));
+                }
+            }
         }
     }
 
@@ -3346,6 +3570,176 @@ mod tests {
                 "{system}"
             );
             started.session.shutdown().await;
+        }
+    }
+
+    // Every tool Bake itself registers declares how it is scheduled, by
+    // name: with every opt-in on, each composed tool has the effect and mode
+    // of this table. The session's default (`Exec` for a tool that declares
+    // nothing) only ever produces `Exec`, so a tool here that is not `Exec`
+    // did not rely on it; the `Exec` ones declare it in their constructors
+    // (`bash` in `tests/pi_tools`, `task_document` and `schedule_*` in
+    // `agent_session::tests`). A new tool must be added to the table.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn every_bake_tool_declares_its_scheduling() {
+        use bake_agent::ToolEffect::{Exec, Read, Write};
+        use bake_agent::ToolExecutionMode::{Parallel, Sequential};
+        use bake_ai::providers::faux::{FauxProvider, FauxProviderOptions, faux_assistant_message};
+        let expected = [
+            ("read", Some(Read), None),
+            ("bash", Some(Exec), None),
+            ("edit", Some(Write), None),
+            ("write", Some(Write), None),
+            ("grep", Some(Read), None),
+            ("find", Some(Read), None),
+            ("ls", Some(Read), None),
+            ("job_output", None, Some(Parallel)),
+            ("job_list", None, Some(Parallel)),
+            ("job_kill", None, Some(Parallel)),
+            ("web_search", Some(Read), None),
+            ("web_fetch", Some(Read), None),
+            ("visualize", Some(Read), None),
+            ("codemode", None, Some(Parallel)),
+            ("ask_user", Some(Read), None),
+            ("telecom", None, Some(Parallel)),
+            ("spawn_agent", None, Some(Parallel)),
+            ("stop_agent", None, Some(Parallel)),
+            ("subagent", None, Some(Parallel)),
+            ("send_message", None, Some(Parallel)),
+            ("interrupt_agent", None, Some(Parallel)),
+            ("list_agents", Some(Read), None),
+            ("list_subagent_models", Some(Read), None),
+            ("task_document", Some(Exec), Some(Sequential)),
+            ("schedule_create", Some(Exec), Some(Sequential)),
+            ("schedule_list", Some(Exec), Some(Sequential)),
+            ("schedule_delete", Some(Exec), Some(Sequential)),
+        ];
+        let dir = setup_dirs("cli-tool-scheduling");
+        let settings = serde_json::json!({
+            "subagents": true,
+            "telecom": true,
+            "visualize": true,
+            "schedules": true,
+            "taskDocuments": true,
+        });
+        write_owned(&dir.join("home/settings.json"), &settings.to_string());
+        let faux = Arc::new(FauxProvider::new(FauxProviderOptions::default()));
+        faux.set_responses(vec![faux_assistant_message("done").into()]);
+        let (mut environment, errors) = setup_environment(dir.path());
+        // Two models, so `list_subagent_models` is composed too.
+        environment.extra_providers.push((
+            "faux".into(),
+            serde_json::json!({
+                "baseUrl": "http://127.0.0.1:9/unused", "api": faux.model().api,
+                "models": [{ "id": "faux-1" }, { "id": "faux-2" }]
+            }),
+            Some("test-key".into()),
+        ));
+        environment.approver = Some(Arc::new(crate::permissions::NeverApprover));
+        let args = [
+            "--model",
+            "faux/faux-1",
+            "--permission",
+            "danger-full-access",
+            "--no-session",
+            "--no-mcp",
+            "--tools",
+            "*",
+        ];
+        let Ok(started) = start_interactive(environment, parse_args(&strings(&args))).await else {
+            panic!("setup failed: {}", text(&errors));
+        };
+        started.session.apis().register(faux.clone());
+        started.session.prompt("go", Vec::new()).await.unwrap();
+        let mut composed: Vec<_> = started
+            .session
+            .agent()
+            .tools()
+            .iter()
+            .map(|tool| (tool.name.clone(), tool.effect, tool.execution_mode))
+            .collect();
+        started.session.shutdown().await;
+        let mut expected: Vec<_> = expected
+            .iter()
+            .map(|(name, effect, mode)| ((*name).to_owned(), *effect, *mode))
+            .collect();
+        composed.sort_by(|a, b| a.0.cmp(&b.0));
+        expected.sort_by(|a, b| a.0.cmp(&b.0));
+        assert_eq!(composed, expected);
+    }
+
+    // `bash.foregroundSeconds` reaches `bash`: its description names the
+    // configured budget, and an invalid value stops the start with the
+    // reason.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_foreground_budget_setting_reaches_bash() {
+        use bake_ai::providers::faux::{FauxProvider, FauxProviderOptions, faux_assistant_message};
+        for (value, expected) in [
+            (
+                serde_json::json!(45),
+                Ok("a command still running after 45 seconds continues"),
+            ),
+            (
+                serde_json::json!(null),
+                Ok("a command still running after 300 seconds continues"),
+            ),
+            (
+                serde_json::json!(0),
+                Err("Invalid bash.foregroundSeconds setting: expected a positive integer."),
+            ),
+        ] {
+            let dir = setup_dirs("cli-foreground-budget");
+            let settings = if value.is_null() {
+                serde_json::json!({})
+            } else {
+                serde_json::json!({ "bash": { "foregroundSeconds": value } })
+            };
+            write_owned(&dir.join("home/settings.json"), &settings.to_string());
+            let faux = Arc::new(FauxProvider::new(FauxProviderOptions::default()));
+            faux.set_responses(vec![faux_assistant_message("done").into()]);
+            let (mut environment, errors) = setup_environment(dir.path());
+            environment.extra_providers.push((
+                "faux".into(),
+                serde_json::json!({
+                    "baseUrl": "http://127.0.0.1:9/unused", "api": faux.model().api,
+                    "models": [{ "id": "faux-1" }]
+                }),
+                Some("test-key".into()),
+            ));
+            let args = [
+                "--model",
+                "faux/faux-1",
+                "--permission",
+                "danger-full-access",
+                "--no-session",
+                "--no-mcp",
+            ];
+            let started = start_interactive(environment, parse_args(&strings(&args))).await;
+            match (started, expected) {
+                (Ok(started), Ok(sentence)) => {
+                    started.session.apis().register(faux.clone());
+                    started.session.prompt("go", Vec::new()).await.unwrap();
+                    let bash = started
+                        .session
+                        .agent()
+                        .tools()
+                        .into_iter()
+                        .find(|tool| tool.name == "bash")
+                        .expect("bash");
+                    assert!(bash.description.contains(sentence), "{}", bash.description);
+                    started.session.shutdown().await;
+                }
+                (Err(_), Err(reason)) => {
+                    assert!(text(&errors).contains(reason), "{}", text(&errors));
+                }
+                (started, expected) => {
+                    panic!(
+                        "{value}: started {}, expected {expected:?}: {}",
+                        started.is_ok(),
+                        text(&errors)
+                    )
+                }
+            }
         }
     }
 

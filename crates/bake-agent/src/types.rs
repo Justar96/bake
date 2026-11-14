@@ -380,6 +380,23 @@ pub enum ToolReplay {
     Safe,
 }
 
+/// What a tool's call does to the world, as the host declares it; the loop
+/// orders a response's calls by it ([`AgentTool::effect`]). Bake's own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ToolEffect {
+    /// Only observes state, and the host's own code vouches for that. Calls
+    /// next to each other run together.
+    Read,
+    /// Changes files. Runs alone, in order; when a call fails, the later
+    /// calls of the same response that are neither `Read` nor `Write` are
+    /// not run.
+    Write,
+    /// Runs commands, or does something the host cannot see. Runs alone, in
+    /// order.
+    Exec,
+}
+
 /// A tool the agent can run, Pi's `AgentTool`.
 #[derive(Clone)]
 pub struct AgentTool {
@@ -404,22 +421,16 @@ pub struct AgentTool {
     /// Per-tool execution mode; `sequential` forces the whole batch to run
     /// one call at a time.
     pub execution_mode: Option<ToolExecutionMode>,
-    /// Trusted host declaration that this implementation only observes state.
-    /// Used by `max_concurrent_read_tools`; never inferred from the name,
-    /// replay policy, or remote tool annotations. Wrappers that add effects
-    /// must clear this declaration. It is not sent to the model.
-    pub read_only: bool,
+    /// Trusted host declaration of what a call does, which orders a
+    /// response's calls (see [`crate::agent_loop`]); `None`, undeclared,
+    /// keeps Pi's behavior. Never inferred from the name, replay policy, or
+    /// remote tool annotations. A wrapper that adds effects must not keep
+    /// [`ToolEffect::Read`]. It is not sent to the model.
+    pub effect: Option<ToolEffect>,
     /// Whether other tools may run this one through [`ToolContext::nested`];
     /// set by default. A tool that runs other tools, such as code mode,
     /// clears it so it cannot call itself. It is not sent to the model.
     pub nested_callable: bool,
-    /// Whether a failed call of this tool stops later calls of the same
-    /// response that may depend on it: in a batch that runs one call at a
-    /// time, they are answered with an error instead of run, unless their
-    /// tool also sets this or is `read_only`. A file change sets it, so the
-    /// command sent to check a change does not run against a file the
-    /// change never reached. Clear by default; not sent to the model.
-    pub failure_skips_dependents: bool,
 }
 
 impl AgentTool {
@@ -454,9 +465,8 @@ impl AgentTool {
             execute: Arc::new(execute),
             replay: None,
             execution_mode: None,
-            read_only: false,
+            effect: None,
             nested_callable: true,
-            failure_skips_dependents: false,
         }
     }
 
@@ -477,9 +487,8 @@ impl fmt::Debug for AgentTool {
             .field("name", &self.name)
             .field("label", &self.label)
             .field("execution_mode", &self.execution_mode)
-            .field("read_only", &self.read_only)
+            .field("effect", &self.effect)
             .field("nested_callable", &self.nested_callable)
-            .field("failure_skips_dependents", &self.failure_skips_dependents)
             .finish_non_exhaustive()
     }
 }
@@ -714,9 +723,10 @@ pub struct AgentLoopConfig {
     pub get_follow_up_messages: Option<GetMessages>,
     /// Tool execution mode; parallel by default.
     pub tool_execution: ToolExecutionMode,
-    /// Opt-in bound for batches containing only host-declared read-only
-    /// tools. Any other tool makes the entire batch sequential. `None`
-    /// preserves Pi's unlimited parallel batches and per-tool barriers.
+    /// Opt-in bound on the calls of one run of adjacent
+    /// [`ToolEffect::Read`] calls that execute at once. With it, a call
+    /// whose tool is not `Read` (undeclared or unknown too) runs alone, in
+    /// order. `None` leaves undeclared tools running together, as in Pi.
     pub max_concurrent_read_tools: Option<std::num::NonZeroUsize>,
     /// Runs before a tool executes, after validation; may block the call.
     pub before_tool_call: Option<BeforeToolCall>,

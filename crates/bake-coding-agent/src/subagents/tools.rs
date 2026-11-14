@@ -99,6 +99,8 @@ pub fn child_tools(link: &ParentLink) -> Vec<ToolDefinition> {
         },
     );
     tool.replay = Some(ToolReplay::Never);
+    // Coordination with no workspace effect of its own: runs beside other calls.
+    tool.execution_mode = Some(bake_agent::ToolExecutionMode::Parallel);
     vec![definition(tool)]
 }
 
@@ -146,6 +148,8 @@ fn subagent_tool(host: SubagentHost, model_choice: bool) -> ToolDefinition {
         },
     );
     tool.replay = Some(ToolReplay::Never);
+    // Coordination with no workspace effect of its own: runs beside other calls.
+    tool.execution_mode = Some(bake_agent::ToolExecutionMode::Parallel);
     definition(tool)
 }
 
@@ -247,7 +251,7 @@ fn list_models_tool(host: SubagentHost) -> ToolDefinition {
         },
     );
     tool.replay = Some(ToolReplay::Safe);
-    tool.read_only = true;
+    tool.effect = Some(bake_agent::ToolEffect::Read);
     definition(tool)
 }
 
@@ -286,6 +290,8 @@ fn parent_send_message_tool(host: SubagentHost) -> ToolDefinition {
         },
     );
     tool.replay = Some(ToolReplay::Never);
+    // Coordination with no workspace effect of its own: runs beside other calls.
+    tool.execution_mode = Some(bake_agent::ToolExecutionMode::Parallel);
     definition(tool)
 }
 
@@ -309,6 +315,8 @@ fn interrupt_tool(host: SubagentHost) -> ToolDefinition {
         },
     );
     tool.replay = Some(ToolReplay::Never);
+    // Coordination with no workspace effect of its own: runs beside other calls.
+    tool.execution_mode = Some(bake_agent::ToolExecutionMode::Parallel);
     definition(tool)
 }
 
@@ -341,6 +349,6 @@ fn list_agents_tool(host: SubagentHost) -> ToolDefinition {
         },
     );
     tool.replay = Some(ToolReplay::Safe);
-    tool.read_only = true;
+    tool.effect = Some(bake_agent::ToolEffect::Read);
     definition(tool)
 }

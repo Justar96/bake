@@ -73,6 +73,9 @@ fn definitions(jobs: &JobRegistry, subagents: bool) -> Vec<ToolDefinition> {
 /// `job_output` advances the job's read cursor and `job_kill` stops the job.
 fn definition(mut tool: AgentTool, replay: ToolReplay) -> ToolDefinition {
     tool.replay = Some(replay);
+    // Job bookkeeping with no workspace effect of its own: runs beside other
+    // calls, so a wait on one job does not hold the others.
+    tool.execution_mode = Some(bake_agent::ToolExecutionMode::Parallel);
     ToolDefinition {
         tool,
         prompt_snippet: None,

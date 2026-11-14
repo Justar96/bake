@@ -925,7 +925,9 @@ async fn run_script(
                             queue.push_back(QueuedCall { id, index, tool: Arc::clone(tool), args });
                         }
                         None => {
-                            let _ = handle.answer(id, Err(CallError::new(format!("Tool {name} not found"))));
+                            let available: Vec<&str> = catalog.tools.iter().map(|tool| tool.name.as_str()).collect();
+                            let message = bake_agent::unknown_tool_message(&name, &available);
+                            let _ = handle.answer(id, Err(CallError::new(message)));
                         }
                     }
                 }

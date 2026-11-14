@@ -522,19 +522,25 @@ async fn run(
         Some(session.subscribe(move |event| {
             write_out(&out, &format!("{}\n", session_event_json(event)));
         }))
-    } else if !matches!(options.recovery, PrintRunRecovery::Disabled) {
+    } else {
         let out = Arc::clone(stderr);
         let file = session.session_file();
-        Some(session.subscribe(move |event| {
-            if let SessionEvent::RecoverableRunStarted { run_id } = event {
+        let recoverable = !matches!(options.recovery, PrintRunRecovery::Disabled);
+        Some(session.subscribe(move |event| match event {
+            SessionEvent::RecoverableRunStarted { run_id } if recoverable => {
                 write_out(&out, &format!("Run ID: {run_id}\n"));
                 if let Some(file) = &file {
                     write_out(&out, &format!("Session: {file:?}\n"));
                 }
             }
+            // A context file found while working that was left out.
+            SessionEvent::NestedContext { warnings, .. } => {
+                for warning in *warnings {
+                    write_out(&out, &format!("Warning: {warning}\n"));
+                }
+            }
+            _ => {}
         }))
-    } else {
-        None
     };
     let result = prompts(session, options.clone(), stderr).await;
     // Keep observers through owned summary and shutdown persistence.

@@ -86,8 +86,9 @@ struct Fixture {
     registry: Arc<ModelRegistry>,
     apis: Arc<ApiRegistry>,
     asked: Arc<AtomicUsize>,
-    /// Runs `write` and `edit` in parallel batches, as any tool a manifest
-    /// lists other than Bake's ordered ones would.
+    /// Runs `write` and `edit` in parallel batches, as a tool a manifest
+    /// lists that declares no effect and opts in to running beside others
+    /// would.
     parallel: bool,
 }
 
@@ -168,6 +169,7 @@ impl Fixture {
         .map(|definition| {
             let mut tool = definition.tool;
             if self.parallel {
+                tool.effect = None;
                 tool.execution_mode = Some(ToolExecutionMode::Parallel);
             }
             Arc::new(tool)

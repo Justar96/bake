@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use bake_agent::{
     AgentContext, AgentEvent, AgentLoopConfig, AgentMessage, AgentTool, AgentToolResult,
-    NestedToolCallOptions, ToolExecutionMode, agent_loop, hook,
+    NestedToolCallOptions, ToolEffect, ToolExecutionMode, agent_loop, hook,
 };
 use bake_ai::{AbortController, Message, Usage};
 use common::*;
@@ -525,15 +525,15 @@ async fn a_pending_caller_update_does_not_block_closing_its_nested_calls() {
 }
 
 /// With `max_concurrent_read_tools`, a nested call to a tool that is not
-/// read-only runs exclusively, one at a time, as the loop runs such a
-/// batch; read-only nested calls run concurrently, beside them and without
-/// the read limit, which caps the model's batches only.
+/// `Read` runs exclusively, one at a time, as the loop runs such a call;
+/// `Read` nested calls run concurrently, beside them and without the read
+/// limit, which caps the model's batches only.
 #[tokio::test(start_paused = true)]
 async fn nested_calls_under_max_concurrent_read_tools() {
     let reads = Arc::new(Concurrency::default());
     let writes = Arc::new(Concurrency::default());
     let mut read = slow("read", Arc::clone(&reads));
-    read.read_only = true;
+    read.effect = Some(ToolEffect::Read);
     let write = slow("write", Arc::clone(&writes));
     let script = caller("script", |ctx, _| async move {
         let run = |name: &'static str| {
@@ -580,4 +580,63 @@ async fn nested_calls_under_max_concurrent_read_tools() {
     assert!(nested.calls.iter().all(|call| call.status == "ok"));
     assert_eq!(writes.max.load(Ordering::SeqCst), 1);
     assert_eq!(reads.max.load(Ordering::SeqCst), 3);
+}
+
+/// Without `max_concurrent_read_tools`, a nested call runs exclusively by
+/// its tool's effect: `Write` and `Exec` calls one at a time, and
+/// undeclared and `Read` calls beside each other and beside them.
+#[tokio::test(start_paused = true)]
+async fn nested_calls_run_exclusively_by_effect() {
+    let exclusive = Arc::new(Concurrency::default());
+    let free = Arc::new(Concurrency::default());
+    let reads = Arc::new(Concurrency::default());
+    let mut write = slow("write", Arc::clone(&exclusive));
+    write.effect = Some(ToolEffect::Write);
+    let mut exec = slow("exec", Arc::clone(&exclusive));
+    exec.effect = Some(ToolEffect::Exec);
+    let undeclared = slow("undeclared", Arc::clone(&free));
+    let mut read = slow("read", Arc::clone(&reads));
+    read.effect = Some(ToolEffect::Read);
+    let script = caller("script", |ctx, _| async move {
+        let run = |name: &'static str| {
+            let ctx = ctx.clone();
+            async move {
+                ctx.nested()
+                    .execute(name, json!({}), NestedToolCallOptions::default())
+                    .await
+            }
+        };
+        let outcomes = tokio::join!(
+            run("write"),
+            run("exec"),
+            run("undeclared"),
+            run("write"),
+            run("undeclared"),
+            run("read"),
+            run("exec"),
+            run("read"),
+        );
+        assert!(
+            [
+                outcomes.0, outcomes.1, outcomes.2, outcomes.3, outcomes.4, outcomes.5, outcomes.6,
+                outcomes.7
+            ]
+            .iter()
+            .all(|outcome| !outcome.is_error)
+        );
+        Ok(AgentToolResult::default())
+    });
+    let stream = agent_loop(
+        vec![user("go")],
+        context(vec![write, exec, undeclared, read, script]),
+        config(),
+        None,
+        Some(tools_then_done(vec![call("c1", "script", json!({}))])),
+    );
+    tokio::time::timeout(Duration::from_secs(10), drain(&stream))
+        .await
+        .expect("no deadlock");
+    assert_eq!(exclusive.max.load(Ordering::SeqCst), 1);
+    assert_eq!(free.max.load(Ordering::SeqCst), 2);
+    assert_eq!(reads.max.load(Ordering::SeqCst), 2);
 }

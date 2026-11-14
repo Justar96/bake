@@ -11,6 +11,8 @@ bake has no built-in model catalog: every model comes from `models.json` in the 
 - `--thinking <level>` sets the thinking level: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. It wins over a suffix. A level the model does not support is clamped to one it does.
 - `--list-models [search]` lists the available models (provider, model id, context window, max output tokens, thinking support, and image support), optionally filtered by a fuzzy search pattern, and exits.
 
+A model's `modelProfiles` entries in `settings.json` choose its tools, code mode, thinking level, compaction, and notes for its system prompt, and apply again after each switch to another model (`bake docs settings`).
+
 Without `--model`, a resumed session keeps the model it last used while that model's provider has a key. Otherwise bake uses `defaultProvider` and `defaultModel` from `settings.json` when that provider has a key, else another model whose provider has one. A run with no usable model fails before sending anything. The ids `--model` accepts are the `id` members in `models.json` and the ids of the signed-in CLIProxyAPI route; `--list-models` prints them.
 
 ## models.json

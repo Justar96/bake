@@ -139,7 +139,7 @@ fn tools(variant: char, mode: &str) -> Value {
         }
         _ => tools.insert(
             0,
-            json!({ "name": "echo", "description": "Echo text", "inputSchema": object(json!({ "text": { "type": "string" } })) }),
+            json!({ "name": "echo", "description": "Echo text", "inputSchema": object(json!({ "text": { "type": "string" } })), "annotations": { "readOnlyHint": true } }),
         ),
     }
     if mode.contains("bad_schema") {

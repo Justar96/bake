@@ -189,7 +189,7 @@ async fn lists_and_reads_resources_with_codex_tools() {
     );
     for tool in &tools {
         assert_eq!(tool.replay, Some(ToolReplay::Safe));
-        assert!(tool.read_only);
+        assert_eq!(tool.effect, Some(bake_agent::ToolEffect::Read));
     }
 
     let listed = run(&tools[0], json!({})).await.unwrap();

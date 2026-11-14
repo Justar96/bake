@@ -931,6 +931,13 @@ fn home_command(root: &TempDir, args: &[&str]) -> Command {
         "HERDR_PANE_ID",
         "HERDR_BIN_PATH",
         "HERDR_SOCKET_PATH",
+        // Nor a calling Bake's telecom and spawning choices, as inside a
+        // spawned agent.
+        "BAKE_TELECOM",
+        "BAKE_TELECOM_CALLSIGN",
+        "BAKE_TELECOM_PARENT",
+        "BAKE_TELECOM_DIR",
+        "BAKE_SPAWN_DEPTH",
     ] {
         command.env_remove(name);
     }

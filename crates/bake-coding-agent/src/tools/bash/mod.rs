@@ -15,6 +15,16 @@
 //! files are named `bake-bash-…` where Pi's are `pi-bash-…`, and the tool
 //! contributes no prompt guideline, since Pi's names the `PI_*` variables.
 //!
+//! With the session's jobs ([`BashToolOptions::jobs`]) the tool is Bake's
+//! beyond `run_in_background`: a call without `timeout` waits at most
+//! [`BashToolOptions::foreground_budget`], and a command still running
+//! then is handed over, not killed, to a `bash` job whose start is durable
+//! first, exactly as a background start's. The call returns the output so
+//! far, the job's id, and no exit code; the command's later output goes to
+//! the job, switched under the stream's lock, so `job_output` repeats none
+//! of it. The description's `timeout` sentence, the `timeout` parameter, and
+//! the output schema say so; without jobs they are Pi's.
+//!
 //! [`BashOperations`] is the one execution seam: the tool hands it the
 //! final command, directory, and environment, and a wrapper can refuse or
 //! rewrite the spawn there, and [`LocalShellOperations::exec_prepared`]
@@ -35,13 +45,16 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use bake_agent::{AgentTool, AgentToolResult, AgentToolUpdateCallback, BoxFuture};
-use bake_ai::{AbortSignal, ConstrainedSampling, StrictPreference, TextContent, UserContentBlock};
+use bake_ai::{
+    AbortController, AbortSignal, ConstrainedSampling, StrictPreference, TextContent,
+    UserContentBlock,
+};
 use serde_json::{Map, Value, json};
-use tokio::sync::Notify;
+use tokio::sync::{Notify, oneshot};
 use tokio::time::Instant;
 
 use crate::agent_session::ToolPrompt;
-use crate::jobs::{JobContext, JobOutcome, JobRegistry, JobSpec, OutputMode};
+use crate::jobs::{JobContext, JobId, JobOutcome, JobOutput, JobRegistry, JobSpec, OutputMode};
 use crate::session::json::js_number_to_string;
 use crate::tools::output_accumulator::{
     OutputAccumulator, OutputAccumulatorOptions, OutputSnapshot,
@@ -67,6 +80,9 @@ pub const BASH_TOOL_PROMPT_SNIPPET: &str = "Execute bash commands (ls, grep, fin
 pub const BASH_UPDATE_THROTTLE: Duration = Duration::from_millis(100);
 /// Pi's `STRUCTURED_OUTPUT_MAX_BYTES`: the cap on `structured_content.output`.
 pub const STRUCTURED_OUTPUT_MAX_BYTES: usize = 1024 * 1024;
+/// The default of `bash.foregroundSeconds`: how long a call with jobs and
+/// no `timeout` waits before its command continues as a background job.
+pub const DEFAULT_FOREGROUND_SECONDS: u64 = 300;
 
 /// The spill file's name prefix; Pi's is `pi-bash`.
 const TEMP_FILE_PREFIX: &str = "bake-bash";
@@ -215,6 +231,11 @@ pub struct BashToolOptions {
     /// through the same `operations`, so a sandbox confines it alike, and
     /// returns its id after the session records its start. `None` keeps Pi's tool.
     pub jobs: Option<JobRegistry>,
+    /// With `jobs`, how long a call without `timeout` waits for its
+    /// command: one still running then continues as a background job, and
+    /// the call returns its output so far and the job's id. Ignored
+    /// without `jobs`. Default: [`DEFAULT_FOREGROUND_SECONDS`].
+    pub foreground_budget: Duration,
 }
 
 impl Default for BashToolOptions {
@@ -230,6 +251,7 @@ impl Default for BashToolOptions {
             spill_directory: None,
             owner: None,
             jobs: None,
+            foreground_budget: Duration::from_secs(DEFAULT_FOREGROUND_SECONDS),
         }
     }
 }
@@ -245,6 +267,7 @@ impl std::fmt::Debug for BashToolOptions {
             )
             .field("bin_dir", &self.bin_dir)
             .field("spill_directory", &self.spill_directory)
+            .field("foreground_budget", &self.foreground_budget)
             .finish_non_exhaustive()
     }
 }
@@ -262,16 +285,41 @@ fn background_parameter() -> Value {
     json!({ "type": "boolean", "description": "Start the command as a background job and return its job id at once; `timeout` does not apply." })
 }
 
-/// Pi's description, with [`BASH_BACKGROUND_DESCRIPTION`] when `background`.
-pub fn bash_tool_description_for(background: bool) -> String {
+/// Pi's sentence about `timeout`, which the tool with jobs replaces
+/// ([`foreground_timeout_sentence`]).
+const PI_TIMEOUT_SENTENCE: &str = "Optionally provide a timeout in seconds.";
+
+/// Pi's `timeout` parameter description, which the tool with jobs replaces.
+const PI_TIMEOUT_PARAMETER: &str = "Timeout in seconds (optional, no default timeout)";
+
+/// The `timeout` parameter description of the tool with jobs: a call
+/// without it has the foreground budget, so it no longer says there is no
+/// default.
+pub const FOREGROUND_TIMEOUT_PARAMETER: &str = "Timeout in seconds (optional)";
+
+/// The `timeout` sentence of the tool with jobs, naming `budget`.
+pub fn foreground_timeout_sentence(budget: Duration) -> String {
+    format!(
+        "Optionally provide a timeout in seconds; without one, a command still running after {} seconds continues as a background job.",
+        js_number_to_string(budget.as_secs_f64())
+    )
+}
+
+/// Pi's description; with `background`, the tool takes
+/// `run_in_background` and has that foreground budget: the `timeout`
+/// sentence names it, and [`BASH_BACKGROUND_DESCRIPTION`] follows.
+pub fn bash_tool_description_for(background: Option<Duration>) -> String {
     let mut description = bash_tool_description();
-    if background {
+    if let Some(budget) = background {
+        description =
+            description.replace(PI_TIMEOUT_SENTENCE, &foreground_timeout_sentence(budget));
         description.push_str(BASH_BACKGROUND_DESCRIPTION);
     }
     description
 }
 
-/// Pi's parameters, with `run_in_background` when `background`.
+/// Pi's parameters; with `background`, `run_in_background`, and the
+/// `timeout` description of a call that has a foreground budget.
 pub fn bash_tool_parameters_for(background: bool) -> Value {
     let mut parameters = bash_tool_parameters();
     if background
@@ -279,6 +327,12 @@ pub fn bash_tool_parameters_for(background: bool) -> Value {
             .get_mut("properties")
             .and_then(Value::as_object_mut)
     {
+        if let Some(timeout) = properties.get_mut("timeout").and_then(Value::as_object_mut) {
+            timeout.insert(
+                "description".to_owned(),
+                Value::String(FOREGROUND_TIMEOUT_PARAMETER.to_owned()),
+            );
+        }
         properties.insert("run_in_background".to_owned(), background_parameter());
     }
     parameters
@@ -287,7 +341,7 @@ pub fn bash_tool_parameters_for(background: bool) -> Value {
 /// Pi's tool description.
 pub fn bash_tool_description() -> String {
     format!(
-        "Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last {DEFAULT_MAX_LINES} lines or {}KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds.",
+        "Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last {DEFAULT_MAX_LINES} lines or {}KB (whichever is hit first). If truncated, full output is saved to a temp file. {PI_TIMEOUT_SENTENCE}",
         DEFAULT_MAX_BYTES / 1024
     )
 }
@@ -301,10 +355,29 @@ pub fn bash_tool_parameters() -> Value {
             "command": { "type": "string", "description": "Shell command to execute" },
             "timeout": {
                 "type": "number",
-                "description": "Timeout in seconds (optional, no default timeout)"
+                "description": PI_TIMEOUT_PARAMETER
             }
         }
     })
+}
+
+/// [`bash_tool_output_schema`]; with `background`, a call may return
+/// while its command still runs, so `exit_code` is optional and `job_id`
+/// names the job the command continues as.
+pub fn bash_tool_output_schema_for(background: bool) -> Value {
+    let mut schema = bash_tool_output_schema();
+    if background {
+        if let Some(required) = schema.get_mut("required").and_then(Value::as_array_mut) {
+            required.retain(|name| name != "exit_code");
+        }
+        if let Some(properties) = schema.get_mut("properties").and_then(Value::as_object_mut) {
+            properties.insert(
+                "job_id".to_owned(),
+                json!({ "type": "string", "description": "The background job the command continues as, when it was still running" }),
+            );
+        }
+    }
+    schema
 }
 
 /// Pi's `bashOutputSchema`, the shape of `structured_content`.
@@ -344,6 +417,7 @@ pub fn create_bash_tool(cwd: impl Into<PathBuf>, options: BashToolOptions) -> Ag
         )
     });
     let background = options.jobs.is_some();
+    let budget = background.then_some(options.foreground_budget);
     let shared = Arc::new(Shared {
         cwd: cwd.into(),
         operations,
@@ -352,15 +426,16 @@ pub fn create_bash_tool(cwd: impl Into<PathBuf>, options: BashToolOptions) -> Ag
     let mut tool = AgentTool::new(
         "bash",
         "bash",
-        bash_tool_description_for(background),
+        bash_tool_description_for(budget),
         bash_tool_parameters_for(background),
         move |_id, params, signal, on_update, _ctx| {
             let shared = Arc::clone(&shared);
             Box::pin(async move { shared.execute(params, signal, on_update).await })
         },
     );
-    tool.output_schema = Some(bash_tool_output_schema());
+    tool.output_schema = Some(bash_tool_output_schema_for(background));
     tool.replay = Some(bake_agent::ToolReplay::Never);
+    tool.effect = Some(bake_agent::ToolEffect::Exec);
     tool.constrained_sampling = Some(ConstrainedSampling::JsonSchema {
         strict: StrictPreference::Prefer,
     });
@@ -376,6 +451,8 @@ struct Shared {
 /// Streaming state the data callback and the update timer share.
 struct Stream {
     output: OutputAccumulator,
+    /// Set when the command continues as a job: its output goes there.
+    job: Option<JobOutput>,
     accepting: bool,
     dirty: bool,
     last_update_at: Option<Instant>,
@@ -600,6 +677,7 @@ impl Shared {
         .map_err(|error| error.to_string())?;
         let stream = Arc::new(Mutex::new(Stream {
             output,
+            job: None,
             accepting: true,
             dirty: false,
             last_update_at: None,
@@ -616,6 +694,12 @@ impl Shared {
             Arc::new(move |data: &[u8]| {
                 let update = {
                     let mut stream = lock(&stream);
+                    // Once the command continues as a job, its output is
+                    // the job's.
+                    if let Some(job) = &stream.job {
+                        job.append(data);
+                        return;
+                    }
                     if !stream.accepting {
                         return;
                     }
@@ -632,23 +716,80 @@ impl Shared {
             })
         };
 
+        // With jobs and no `timeout`, the call waits at most the foreground
+        // budget, and the command runs under a signal of its own so it can
+        // outlive the call as a job; the call's signal is forwarded to it
+        // until then.
+        let foreground = match (&self.options.jobs, timeout) {
+            (Some(jobs), None) => Some(Foreground {
+                jobs: jobs.clone(),
+                budget: self.options.foreground_budget,
+                abort: AbortController::new(),
+                label: label.clone(),
+            }),
+            _ => None,
+        };
+        let exec_signal = match &foreground {
+            Some(foreground) => {
+                if signal.as_ref().is_some_and(AbortSignal::aborted) {
+                    foreground.abort.abort();
+                }
+                Some(foreground.abort.signal())
+            }
+            None => signal.clone(),
+        };
+
         let started_at = Instant::now();
-        let exec = self.operations.exec(
-            spawn.command,
-            spawn.cwd,
-            BashExecOptions {
-                on_data,
-                signal,
-                timeout,
-                env: Some(spawn.env),
-            },
-        );
-        tokio::pin!(exec);
+        // The command's start in wall-clock time: a job it is handed over
+        // to is as old as the command.
+        let started_ms = bake_ai::now_ms();
+        let operations = Arc::clone(&self.operations);
+        let exec_options = BashExecOptions {
+            on_data,
+            signal: exec_signal,
+            timeout,
+            env: Some(spawn.env),
+        };
+        let (command, cwd) = (spawn.command, spawn.cwd);
+        let mut exec: ExecFuture =
+            Box::pin(async move { operations.exec(command, cwd, exec_options).await });
+        let mut budget_deadline = foreground
+            .as_ref()
+            .and_then(|foreground| started_at.checked_add(foreground.budget));
+        let mut forwarded = false;
         let outcome = loop {
             let deadline = lock(&stream).timer;
             tokio::select! {
                 biased;
                 outcome = &mut exec => break outcome,
+                () = crate::child_process::aborted(signal.as_ref()), if foreground.is_some() && !forwarded => {
+                    forwarded = true;
+                    budget_deadline = None;
+                    if let Some(foreground) = &foreground {
+                        foreground.abort.abort();
+                    }
+                }
+                () = sleep_until(budget_deadline), if budget_deadline.is_some() => {
+                    budget_deadline = None;
+                    let Some(foreground) = &foreground else {
+                        continue;
+                    };
+                    match foreground
+                        .promote(exec, &stream, &on_update, started_at, started_ms)
+                        .await
+                    {
+                        Promotion::Promoted(result) => {
+                            // An abort that arrived during the handover was
+                            // not forwarded: it still stops the command,
+                            // whose job then ends as killed.
+                            if signal.as_ref().is_some_and(AbortSignal::aborted) {
+                                foreground.abort.abort();
+                            }
+                            return *result;
+                        }
+                        Promotion::Kept(kept) => exec = kept,
+                    }
+                }
                 () = sleep_until(deadline) => {
                     let update = {
                         let mut stream = lock(&stream);
@@ -663,25 +804,7 @@ impl Shared {
             }
         };
 
-        // Pi's `finishOutput`.
-        let (snapshot, last_line_bytes) = {
-            let finished = {
-                let mut stream = lock(&stream);
-                stream.accepting = false;
-                stream.timer = None;
-                stream.output.finish().map(|()| stream.take_update())
-            };
-            let update = finished.map_err(|error| error.to_string())?;
-            if let Some(update) = update {
-                on_update.update(update);
-            }
-            let stream = lock(&stream);
-            let snapshot = stream
-                .output
-                .snapshot()
-                .map_err(|error| error.to_string())?;
-            (snapshot, stream.output.last_line_bytes())
-        };
+        let (snapshot, last_line_bytes) = finish_stream(&stream, &on_update, None)?;
 
         let exit_code = match outcome {
             Ok(exit_code) => exit_code,
@@ -722,24 +845,12 @@ impl Shared {
                 "Command terminated without an exit code",
             ));
         };
-        let wall_time = wall_time_seconds(started_at.elapsed());
-        let full_output = lock(&stream)
-            .output
-            .read_full_output(STRUCTURED_OUTPUT_MAX_BYTES)
-            .map_err(|error| error.to_string())?;
-        let mut structured = Map::new();
-        structured.insert("output".to_owned(), Value::String(full_output.content));
-        structured.insert("truncated".to_owned(), Value::Bool(full_output.truncated));
-        if full_output.truncated
-            && let Some(path) = &snapshot.full_output_path
-        {
-            structured.insert(
-                "full_output_path".to_owned(),
-                Value::String(path.display().to_string()),
-            );
-        }
+        let mut structured = structured_output(&stream, &snapshot)?;
         structured.insert("exit_code".to_owned(), Value::from(exit_code));
-        structured.insert("wall_time_seconds".to_owned(), wall_time);
+        structured.insert(
+            "wall_time_seconds".to_owned(),
+            wall_time_seconds(started_at.elapsed()),
+        );
         if exit_code != 0 {
             return Ok(AgentToolResult {
                 content: text_result(append_status(
@@ -759,6 +870,199 @@ impl Shared {
             ..AgentToolResult::default()
         })
     }
+}
+
+/// A running command's future, which a promotion hands to its job.
+type ExecFuture = BoxFuture<'static, Result<Option<i64>, BashExecError>>;
+
+/// Pi's `finishOutput`: stops the call's accumulator and takes its
+/// snapshot. With `job`, the command's later output goes to that job,
+/// switched under the same lock, so no byte is lost or repeated.
+fn finish_stream(
+    stream: &Mutex<Stream>,
+    on_update: &AgentToolUpdateCallback,
+    job: Option<JobOutput>,
+) -> Result<(OutputSnapshot, usize), String> {
+    let finished = {
+        let mut stream = lock(stream);
+        if job.is_some() {
+            stream.job = job;
+        }
+        stream.accepting = false;
+        stream.timer = None;
+        stream.output.finish().map(|()| stream.take_update())
+    };
+    let update = finished.map_err(|error| error.to_string())?;
+    if let Some(update) = update {
+        on_update.update(update);
+    }
+    let stream = lock(stream);
+    let snapshot = stream
+        .output
+        .snapshot()
+        .map_err(|error| error.to_string())?;
+    Ok((snapshot, stream.output.last_line_bytes()))
+}
+
+/// `structured_content` without `exit_code` and `wall_time_seconds`.
+fn structured_output(
+    stream: &Mutex<Stream>,
+    snapshot: &OutputSnapshot,
+) -> Result<Map<String, Value>, String> {
+    let full_output = lock(stream)
+        .output
+        .read_full_output(STRUCTURED_OUTPUT_MAX_BYTES)
+        .map_err(|error| error.to_string())?;
+    let mut structured = Map::new();
+    structured.insert("output".to_owned(), Value::String(full_output.content));
+    structured.insert("truncated".to_owned(), Value::Bool(full_output.truncated));
+    if full_output.truncated
+        && let Some(path) = &snapshot.full_output_path
+    {
+        structured.insert(
+            "full_output_path".to_owned(),
+            Value::String(path.display().to_string()),
+        );
+    }
+    Ok(structured)
+}
+
+/// The foreground budget of a call with jobs and no `timeout`.
+struct Foreground {
+    jobs: JobRegistry,
+    budget: Duration,
+    /// The command's own signal; the call's is forwarded to it until the
+    /// command becomes a job, and then the job's.
+    abort: AbortController,
+    /// The command as the model wrote it: the job's label.
+    label: String,
+}
+
+/// What came of the budget's end.
+enum Promotion {
+    /// The command continues as a job; the call's result.
+    Promoted(Box<Result<AgentToolResult, String>>),
+    /// No job could take it: the call keeps waiting for it.
+    Kept(ExecFuture),
+}
+
+impl Foreground {
+    /// Hands the running command over to a new `bash` job, as a
+    /// `run_in_background` call's: the job's start is durable before its
+    /// producer runs, and the producer takes the command's future and
+    /// output. The job is as old as the command: its start is the
+    /// command's (`started_ms`). A refused start or a failed journal write keeps the
+    /// command in the call; a job stopped before it took the command
+    /// stops the command too.
+    async fn promote(
+        &self,
+        exec: ExecFuture,
+        stream: &Mutex<Stream>,
+        on_update: &AgentToolUpdateCallback,
+        started_at: Instant,
+        started_ms: i64,
+    ) -> Promotion {
+        let (ready_tx, ready_rx) = oneshot::channel::<JobOutput>();
+        let (handover_tx, handover_rx) = oneshot::channel::<ExecFuture>();
+        let abort = self.abort.clone();
+        let spec = JobSpec {
+            kind: "bash",
+            label: self.label.clone(),
+            output: OutputMode::Stream,
+        };
+        let Ok(id) = self.jobs.start_since(spec, started_ms, move |context| {
+            run_promoted(context, ready_tx, handover_rx, abort)
+        }) else {
+            return Promotion::Kept(exec);
+        };
+        if self.jobs.wait_admitted(id).await.is_err() {
+            return Promotion::Kept(exec);
+        }
+        let Ok(output) = ready_rx.await else {
+            // The job was stopped before it ran, as the session shut down:
+            // the command stops with it, and the call reports the abort.
+            self.abort.abort();
+            return Promotion::Kept(exec);
+        };
+        let finished = finish_stream(stream, on_update, Some(output));
+        // From here the job owns the command. Should the job be gone
+        // already, dropping the future kills the command's tree.
+        drop(handover_tx.send(exec));
+        Promotion::Promoted(Box::new(finished.and_then(
+            |(snapshot, last_line_bytes)| {
+                self.promoted_result(id, stream, &snapshot, last_line_bytes, started_at)
+            },
+        )))
+    }
+
+    /// The result of a call whose command continues as job `id`.
+    fn promoted_result(
+        &self,
+        id: JobId,
+        stream: &Mutex<Stream>,
+        snapshot: &OutputSnapshot,
+        last_line_bytes: usize,
+        started_at: Instant,
+    ) -> Result<AgentToolResult, String> {
+        let (text, details) = format_output(snapshot, last_line_bytes, "(no output)");
+        let text = append_status(
+            &text,
+            &format!(
+                "Command still running after {} seconds; it continues as background job {id}: `job_output` reads more of its output, `job_kill` stops it, and a notice arrives when it finishes.",
+                js_number_to_string(self.budget.as_secs_f64())
+            ),
+        );
+        let label = self.jobs.get(id).map(|job| job.label).unwrap_or_default();
+        let mut details = match details {
+            Some(Value::Object(details)) => details,
+            _ => Map::new(),
+        };
+        details.insert(
+            BACKGROUND_JOB_DETAIL.to_owned(),
+            json!({ "id": id.to_string(), "label": label }),
+        );
+        let mut structured = structured_output(stream, snapshot)?;
+        structured.insert(
+            "wall_time_seconds".to_owned(),
+            wall_time_seconds(started_at.elapsed()),
+        );
+        structured.insert("job_id".to_owned(), Value::String(id.to_string()));
+        Ok(AgentToolResult {
+            content: text_result(text),
+            details: Some(Value::Object(details)),
+            structured_content: Some(Value::Object(structured)),
+            ..AgentToolResult::default()
+        })
+    }
+}
+
+/// A promoted command's job: hands the call its output, takes the
+/// command, and stops it when the job is stopped. Its outcome is a
+/// background command's ([`run_job`]).
+async fn run_promoted(
+    context: JobContext,
+    ready: oneshot::Sender<JobOutput>,
+    handover: oneshot::Receiver<ExecFuture>,
+    abort: AbortController,
+) -> JobOutcome {
+    let Some(output) = context.output().cloned() else {
+        return JobOutcome::failed("the job has no output stream");
+    };
+    if ready.send(output).is_err() {
+        return JobOutcome::killed("killed before exit");
+    }
+    let Ok(mut exec) = handover.await else {
+        return JobOutcome::killed("killed before exit");
+    };
+    let outcome = tokio::select! {
+        biased;
+        outcome = &mut exec => outcome,
+        () = context.signal().cancelled() => {
+            abort.abort();
+            exec.await
+        }
+    };
+    exec_outcome(outcome)
 }
 
 impl Shared {
@@ -831,14 +1135,19 @@ async fn run_job(
             env: Some(spawn.env),
         },
     );
-    match exec.await {
+    exec_outcome(exec.await)
+}
+
+/// A background command's outcome, `processOutcome`'s mapping.
+fn exec_outcome(outcome: Result<Option<i64>, BashExecError>) -> JobOutcome {
+    match outcome {
         Ok(Some(code)) => JobOutcome::completed(format!("exit code: {code}")),
         Ok(None)
         | Err(
             BashExecError::Aborted
             | BashExecError::TimedOut(_)
             | BashExecError::TimedOutAfterShellExit { .. },
-        ) => killed(),
+        ) => JobOutcome::killed("killed before exit"),
         Err(BashExecError::Failed(message)) => JobOutcome::failed(message),
     }
 }

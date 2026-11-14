@@ -116,6 +116,7 @@ name = "bake-agent"
 version = "0.4.8"
 dependencies = [
  "bake-ai",
+ "proptest",
  "regex",
  "serde",
  "serde_json",

@@ -22,7 +22,7 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use bake_agent::{AgentTool, AgentToolResult, ToolReplay};
+use bake_agent::{AgentTool, AgentToolResult, ToolEffect, ToolReplay};
 use bake_ai::{ImageContent, TextContent, UserContentBlock};
 use bake_mcp::{CallToolResult, McpClient, Tool};
 use serde_json::{Map, Value, json};
@@ -96,6 +96,9 @@ pub(crate) struct PlannedTool {
     /// What scripts receive ([`mcp_result_schema`]); never sent to the
     /// model.
     pub(crate) output_schema: Value,
+    /// The server hints the tool is read-only (`annotations.readOnlyHint`)
+    /// and its entry sets `trustReadOnly`.
+    pub(crate) trusted_read: bool,
 }
 
 /// The tools of one listing the model will see, in the server's order,
@@ -144,6 +147,7 @@ pub(crate) fn plan_tools(
                     .get("outputSchema")
                     .and_then(Value::as_object),
             ),
+            trusted_read: settings.trust_read_only && read_only_hint(tool.definition),
         });
     }
     if planned.len() > MAX_TOOLS_PER_SERVER {
@@ -153,6 +157,15 @@ pub(crate) fn plan_tools(
         ));
     }
     Ok(planned)
+}
+
+/// Whether a definition's `annotations.readOnlyHint` is `true`.
+fn read_only_hint(definition: &Map<String, Value>) -> bool {
+    definition
+        .get("annotations")
+        .and_then(|annotations| annotations.get("readOnlyHint"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
 }
 
 /// The planned tools bound to `caller`: one generation.
@@ -211,6 +224,7 @@ fn agent_tool(caller: Arc<Caller>, planned: PlannedTool) -> AgentTool {
         description,
         parameters,
         output_schema,
+        trusted_read,
     } = planned;
     let label = format!("{}/{tool}", caller.server);
     let mut agent_tool = AgentTool::new(
@@ -254,8 +268,15 @@ fn agent_tool(caller: Arc<Caller>, planned: PlannedTool) -> AgentTool {
         },
     );
     // A server's `readOnlyHint` is its own claim, not a promise Bake can
-    // check, so no MCP call is rerun.
+    // check, so no MCP call is rerun. Only the user's `trustReadOnly` makes
+    // a hinted tool a read, which runs beside other reads; every other MCP
+    // tool runs alone, in order.
     agent_tool.replay = Some(ToolReplay::Never);
+    agent_tool.effect = Some(if trusted_read {
+        ToolEffect::Read
+    } else {
+        ToolEffect::Exec
+    });
     agent_tool.output_schema = Some(output_schema);
     agent_tool
 }

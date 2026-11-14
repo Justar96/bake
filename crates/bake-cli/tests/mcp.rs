@@ -347,7 +347,13 @@ impl Case {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         for (key, _) in std::env::vars_os() {
-            if key.to_string_lossy().starts_with("PI_") {
+            // Nor a calling Bake's telecom and spawning variables, as
+            // inside a spawned agent.
+            let name = key.to_string_lossy();
+            if name.starts_with("PI_")
+                || name.starts_with("BAKE_TELECOM")
+                || name == "BAKE_SPAWN_DEPTH"
+            {
                 command.env_remove(key);
             }
         }

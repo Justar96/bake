@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use bake_agent::{
     AgentContext, AgentEvent, AgentLoopConfig, AgentTool, AgentToolResult, BeforeToolCallResult,
-    ToolExecutionMode, agent_loop, hook,
+    ToolEffect, ToolExecutionMode, agent_loop, hook,
 };
 use bake_ai::AbortController;
 use common::*;
@@ -62,7 +62,7 @@ impl Batch {
                         })
                     },
                 );
-                tool.read_only = true;
+                tool.effect = Some(ToolEffect::Read);
                 tool
             })
             .collect();
@@ -182,44 +182,73 @@ async fn bounded_reads_fill_free_slots_and_keep_result_order() {
 }
 
 #[tokio::test]
-async fn unknown_or_sequential_tool_is_a_whole_batch_barrier() {
-    for sequential in [false, true] {
-        let mut batch = Batch::new();
-        if sequential {
-            batch.tools[1].execution_mode = Some(ToolExecutionMode::Sequential);
-        } else {
-            batch.tools[1].read_only = false;
-            batch.tools[1].execution_mode = Some(ToolExecutionMode::Parallel);
-        }
-        let stream = agent_loop(
-            vec![user("read edit read")],
-            batch.context(),
-            config(Some(4)),
-            None,
-            Some(response()),
-        );
-        assert_eq!(batch.next().await, 0);
-        let excess = batch.entered.try_recv().ok();
-        for release in batch.release.iter() {
-            release.notify_one();
-        }
-        let events = tokio::time::timeout(PATIENCE, drain(&stream))
-            .await
-            .unwrap();
-        assert_eq!(excess, None);
-        assert_eq!(batch.peak.load(Ordering::SeqCst), 1);
-        assert_eq!(
-            tool_end_ids(&events),
-            ["call_0", "call_1", "call_2", "call_3"]
-        );
+async fn a_sequential_tool_is_a_whole_batch_barrier() {
+    let mut batch = Batch::new();
+    batch.tools[1].execution_mode = Some(ToolExecutionMode::Sequential);
+    let stream = agent_loop(
+        vec![user("read edit read")],
+        batch.context(),
+        config(Some(4)),
+        None,
+        Some(response()),
+    );
+    assert_eq!(batch.next().await, 0);
+    let excess = batch.entered.try_recv().ok();
+    for release in batch.release.iter() {
+        release.notify_one();
     }
+    let events = tokio::time::timeout(PATIENCE, drain(&stream))
+        .await
+        .unwrap();
+    assert_eq!(excess, None);
+    assert_eq!(batch.peak.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        tool_end_ids(&events),
+        ["call_0", "call_1", "call_2", "call_3"]
+    );
+}
+
+/// With the cap, a tool that declares no effect runs alone, in order, while
+/// the reads after it still run together.
+#[tokio::test]
+async fn an_undeclared_tool_is_a_barrier_for_itself_only() {
+    let mut batch = Batch::new();
+    batch.tools[1].effect = None;
+    batch.tools[1].execution_mode = Some(ToolExecutionMode::Parallel);
+    let stream = agent_loop(
+        vec![user("read edit read")],
+        batch.context(),
+        config(Some(4)),
+        None,
+        Some(response()),
+    );
+    assert_eq!(batch.next().await, 0);
+    let alone = batch.entered.try_recv().ok();
+    batch.release[0].notify_one();
+    assert_eq!(batch.next().await, 1);
+    let before_reads = batch.entered.try_recv().ok();
+    batch.release[1].notify_one();
+    let reads = [batch.next().await, batch.next().await];
+    batch.release[2].notify_one();
+    batch.release[3].notify_one();
+    let events = tokio::time::timeout(PATIENCE, drain(&stream))
+        .await
+        .unwrap();
+    assert_eq!(alone, None, "a call ran beside the read before the barrier");
+    assert_eq!(before_reads, None, "a read ran beside the undeclared tool");
+    assert_eq!(reads, [2, 3]);
+    assert_eq!(batch.peak.load(Ordering::SeqCst), 2);
+    assert_eq!(
+        tool_result_ids(&events),
+        ["call_0", "call_1", "call_2", "call_3"]
+    );
 }
 
 #[tokio::test]
 async fn absent_cap_preserves_unlimited_unknown_parallel_tools() {
     let mut batch = Batch::new();
     for tool in &mut batch.tools {
-        tool.read_only = false;
+        tool.effect = None;
     }
     let stream = agent_loop(
         vec![user("read all")],

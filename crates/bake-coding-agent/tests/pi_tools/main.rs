@@ -16,9 +16,10 @@ mod support;
 use std::path::Path;
 use std::sync::Arc;
 
-use bake_agent::{AgentToolResult, AgentToolUpdateCallback};
+use bake_agent::{AgentToolResult, AgentToolUpdateCallback, ToolEffect};
 use bake_ai::{AbortController, ConstrainedSampling, ImageContent, Model, UserContentBlock};
 use bake_coding_agent::system_prompt::{SystemPromptOptions, build_system_prompt_sections};
+use bake_coding_agent::tools::bash::{BashToolOptions, create_bash_tool};
 use bake_coding_agent::tools::definition::ToolDefinition;
 use bake_coding_agent::tools::edit::prepare_edit_arguments;
 use bake_coding_agent::tools::image::ImageResizeOptions;
@@ -142,12 +143,30 @@ fn definitions_match_pi() {
     }
 }
 
+/// Bake: the native observations declare `Read`, the file changes `Write`,
+/// and `bash` `Exec`, in their own constructors; a tool built with the same
+/// name declares nothing.
 #[test]
-fn only_native_observation_factories_declare_read_only() {
-    for definition in definitions(&ToolsOptions::default()) {
+fn native_tools_declare_their_effects() {
+    let bash = bake_coding_agent::tools::definition::create_tool_definition_from_agent_tool(
+        create_bash_tool("/workspace", BashToolOptions::default()),
+    );
+    let options = ToolsOptions {
+        bash: Some(bash),
+        ..ToolsOptions::default()
+    };
+    for definition in definitions(&options) {
+        let expected = match definition.name() {
+            "read" | "grep" | "find" | "ls" => ToolEffect::Read,
+            "edit" | "write" => ToolEffect::Write,
+            "bash" => ToolEffect::Exec,
+            other => panic!("unexpected tool {other}"),
+        };
         assert_eq!(
-            definition.tool.read_only,
-            matches!(definition.name(), "read" | "grep" | "find" | "ls")
+            definition.tool.effect,
+            Some(expected),
+            "{}",
+            definition.name()
         );
     }
     let remote = bake_agent::AgentTool::new(
@@ -157,7 +176,7 @@ fn only_native_observation_factories_declare_read_only() {
         json!({}),
         |_, _, _, _, _ctx| Box::pin(async { Ok(AgentToolResult::text("remote")) }),
     );
-    assert!(!remote.read_only);
+    assert_eq!(remote.effect, None);
 }
 
 /// Pi: `index.ts`'s sets, and the bash slot.

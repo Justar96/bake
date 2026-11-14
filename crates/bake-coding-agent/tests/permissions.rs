@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use bake_agent::{AgentTool, AgentToolResult, AgentToolUpdateCallback};
+use bake_agent::{AgentTool, AgentToolResult, AgentToolUpdateCallback, ToolEffect};
 use bake_ai::{AbortController, AbortSignal, UserContentBlock};
 use bake_coding_agent::permissions::approval::ApprovalFuture;
 use bake_coding_agent::permissions::{
@@ -220,6 +220,21 @@ fn offering_nothing(root: &Path) -> [(&'static str, ToolPermissions); 3] {
         ),
         ("no answerer", headless(root, WW).without_escalation()),
     ]
+}
+
+// Bake: the sandboxed forms keep the effects of the tools they wrap.
+#[test]
+fn sandboxed_tools_keep_their_effects() {
+    let root = std::env::temp_dir();
+    let tools = sandboxed(&root, &headless(&root, WW));
+    for (name, effect) in [
+        ("write", ToolEffect::Write),
+        ("edit", ToolEffect::Write),
+        ("bash", ToolEffect::Exec),
+        ("read", ToolEffect::Read),
+    ] {
+        assert_eq!(tool(&tools, name).effect, Some(effect), "{name}");
+    }
 }
 
 // "advertises the closed target vocabulary on write and edit

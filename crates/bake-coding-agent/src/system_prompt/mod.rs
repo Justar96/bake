@@ -125,6 +125,9 @@ pub struct SystemPromptOptions {
     pub context_files: Vec<ContextFile>,
     /// Loaded skills.
     pub skills: Vec<Skill>,
+    /// The estimated tokens the skills list may take, `skills.listingTokens`
+    /// ([`format_skills_for_prompt`]).
+    pub skills_listing_tokens: u64,
 }
 
 impl SystemPromptOptions {
@@ -148,6 +151,7 @@ impl SystemPromptOptions {
             environment: Environment::default(),
             context_files: Vec::new(),
             skills: Vec::new(),
+            skills_listing_tokens: crate::skills::DEFAULT_LISTING_TOKENS,
         }
     }
 }
@@ -195,9 +199,11 @@ const LEADING_RULES: [&str; 2] = [
 
 /// Bake's round-trip paragraph, for a session with tools, without the
 /// sentence `edit`'s own guideline states. Calls in one response do run
-/// in order: the session makes the tools that change files or run commands
-/// sequential (`agent_session::ORDERED_TOOLS`), and a failed file change
-/// stops the commands after it (`agent_session::FILE_CHANGE_TOOLS`).
+/// in order for every tool that is not a trusted read: `edit` and `write`
+/// declare the `Write` effect, `bash` and every tool the session registers
+/// without an effect `Exec`, and the agent loop runs each such call alone,
+/// in order (`bake_agent::ToolEffect`). After a failed `Write` call, the
+/// loop skips the later `Exec` and undeclared calls of the response.
 const ROUND_TRIP_RULE: &str = "Work in as few model round trips as you can. Put independent tool calls in one response: read the files you need together, and send an edit with the command that checks it, since calls in one response run in order and the command is skipped if the edit fails. Do not re-read a file to confirm an edit that succeeded.";
 
 /// Bake's last rules, before the tool-contributed guidelines.
@@ -371,7 +377,8 @@ pub fn build_system_prompt_sections(
     if let Some(reader) = reader
         && !options.skills.is_empty()
     {
-        let skills = format_skills_for_prompt(&options.skills, reader);
+        let skills =
+            format_skills_for_prompt(&options.skills, reader, options.skills_listing_tokens);
         let skills = crate::tools::js::trim(&skills);
         if !skills.is_empty() {
             set_section(&mut sections, "skills", skills.to_owned());

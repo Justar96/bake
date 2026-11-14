@@ -620,6 +620,7 @@ fn environment(
         },
         warnings: Vec::new(),
         interrupt,
+        telecom_env: bake_coding_agent::telecom::TelecomEnv::from_process(),
     }
 }
 

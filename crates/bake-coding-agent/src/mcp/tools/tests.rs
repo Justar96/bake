@@ -185,6 +185,51 @@ fn hidden_tools_are_left_out_but_still_checked() {
     assert!(refused.is_err());
 }
 
+// Bake: a server's `readOnlyHint` makes a tool a read only under the
+// entry's `trustReadOnly`; without it the hint is the server's own claim.
+#[test]
+fn a_read_only_hint_counts_only_when_the_server_is_trusted() {
+    let tools = [
+        (
+            "hinted",
+            json!({}),
+            json!({"annotations": {"readOnlyHint": true}}),
+        ),
+        (
+            "denied",
+            json!({}),
+            json!({"annotations": {"readOnlyHint": false}}),
+        ),
+        (
+            "odd",
+            json!({}),
+            json!({"annotations": {"readOnlyHint": "true"}}),
+        ),
+        ("silent", json!({}), json!({})),
+    ];
+    let reads = |settings: &McpServerSettings| -> Vec<(String, bool)> {
+        plan_settings("s", settings, &tools)
+            .unwrap()
+            .into_iter()
+            .map(|tool| (tool.tool, tool.trusted_read))
+            .collect()
+    };
+    let trusted = McpServerSettings {
+        trust_read_only: true,
+        ..McpServerSettings::default()
+    };
+    let expected = |hinted: bool| {
+        vec![
+            ("hinted".to_owned(), hinted),
+            ("denied".to_owned(), false),
+            ("odd".to_owned(), false),
+            ("silent".to_owned(), false),
+        ]
+    };
+    assert_eq!(reads(&trusted), expected(true));
+    assert_eq!(reads(&McpServerSettings::default()), expected(false));
+}
+
 // Pi: "converts results, passing the CallToolResult to scripts and
 // flagging errors".
 #[tokio::test]

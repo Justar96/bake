@@ -52,6 +52,8 @@ pub(super) fn tool(core: Arc<Core>) -> Arc<AgentTool> {
         },
     );
     tool.execution_mode = Some(ToolExecutionMode::Sequential);
+    // It changes the session's documents, which no other tool observes.
+    tool.effect = Some(bake_agent::ToolEffect::Exec);
     // `revise` appends a revision: a rerun of one that landed would report
     // its own revision as a conflict.
     tool.replay = Some(bake_agent::ToolReplay::Never);

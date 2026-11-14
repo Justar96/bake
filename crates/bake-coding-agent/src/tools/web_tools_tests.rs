@@ -116,11 +116,11 @@ fn declares_0_3s_names_descriptions_and_parameters() {
             .all(|definition| definition.prompt_snippet.is_none()
                 && definition.prompt_guidelines.is_none())
     );
-    // Both are concurrency-safe, so read-only batching runs them together.
+    // Both are concurrency-safe, so they declare `Read` and run together.
     assert!(
         definitions
             .iter()
-            .all(|definition| definition.tool.read_only)
+            .all(|definition| definition.tool.effect == Some(bake_agent::ToolEffect::Read))
     );
     // An external request is never replayed by a recovered run.
     assert!(

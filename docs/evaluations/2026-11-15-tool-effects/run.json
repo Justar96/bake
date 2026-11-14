@@ -1,0 +1,51 @@
+{
+  "name": "tool effects",
+  "date": "2026-11-14",
+  "base": {
+    "path": "/home/jtar-wsl/bake/.worktrees/base-4ed086385c/target/release/bake",
+    "version": "bake 0.4.8",
+    "bytes": 71221360
+  },
+  "candidate": {
+    "path": "/tmp/bake-m2-candidate",
+    "version": "bake 0.4.8",
+    "bytes": 71403256
+  },
+  "same_executable": false,
+  "models": [
+    "cliproxyapi/gemini-4-hydrogen-xhigh:high",
+    "cliproxyapi/gpt-6.1-sol:high",
+    "cliproxyapi/claude-opus-5-5:high"
+  ],
+  "tasks": [
+    [
+      "add-flag",
+      "Add a `--words` option to linecount.py. With `--words`, each line of output is `<lines> <words> <path>`, where words are separated by whitespace, and the total line is `<lines> <words> total`. Without the option the output must stay exactly as it is now. `--words` may come before or after the file names. Add unit tests for the option to tests/test_linecount.py."
+    ],
+    [
+      "cascade-fix",
+      "Run `python3 verify.py` and fix the project until it prints OK. Do not edit verify.py."
+    ],
+    [
+      "fix-test",
+      "The unit tests in tests/ fail. Fix the bugs in the inventory package so that they all pass. Do not change the tests."
+    ],
+    [
+      "log-count",
+      "app.log is a service log; README.md describes its format. How many ERROR lines have code=E417, and what is the timestamp of the first of them? Answer with the count and the timestamp. Do not change any file."
+    ],
+    [
+      "rename-api",
+      "Rename the function `normalize_ws` to `collapse_whitespace` everywhere in this project: the code, the tests, the README, and the filter name the command line accepts. Keep the behaviour the same and leave no alias or mention of the old name behind. Run the tests when you are done."
+    ],
+    [
+      "trace-question",
+      "In this codebase, which function applies the bulk (volume) discount to an order line, which file is it in, and how many units of one item must a line hold to get it? Answer in one or two sentences. Do not change any file."
+    ]
+  ],
+  "trials": 5,
+  "jobs": 6,
+  "max_model_calls": 60,
+  "run_timeout_ms": 900000,
+  "host": "linux/x86_64"
+}

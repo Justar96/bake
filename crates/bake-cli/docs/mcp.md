@@ -32,6 +32,7 @@ The file uses the `mcpServers` shape other MCP clients share:
 - `enabled: false` keeps an entry without starting it.
 - `exposure` is `direct` (the default: its tools are given to the model) or `hidden` (they are not); `toolExposure` sets it for single tools by name or `*` pattern. A `hidden` server's resources are not reachable either.
 - `description` is a one-sentence note about what the server offers. The model reads its first line in the `mcp_servers` section of the system prompt, in place of the server's own instructions.
+- `trustReadOnly: true` trusts the server's `readOnlyHint`: a tool the server marks read-only runs as a read, at once with the reads next to it in a response, and still runs after a failed `edit` or `write`. Without it, the hint is only the server's claim, and every tool of the server runs alone, in the order the model wrote the calls, and is answered with an error instead of run after a failed `edit` or `write` earlier in the same response. Set it only for a server you trust to mark its tools truthfully.
 
 A server name may use letters, digits, `_`, and `-`, up to 32 characters. bake reads only this file: there is no project `mcp.json`, so a repository cannot add or change a server.
 

@@ -389,9 +389,24 @@ fn definition_and_prompt_match_pi() {
     assert!(prompt.guidelines.is_empty());
 }
 
+/// Bake's texts for the invalid timeouts where they differ from Pi's: a
+/// value of 0 or less states the rule, and both say how to run without a
+/// timeout.
+fn bake_timeout_error(pi: &str, name: &str) -> String {
+    const WITHOUT: &str = "Leave timeout out to run the command without one.";
+    match name {
+        "timeout-zero" | "timeout-negative" => {
+            format!("Invalid timeout: must be greater than 0 seconds. {WITHOUT}")
+        }
+        "timeout-over-max" => format!("{pi}. {WITHOUT}"),
+        _ => pi.to_owned(),
+    }
+}
+
 /// Failures Pi's local operations raise before spawning: invalid timeouts,
-/// "should throw error when cwd does not exist", and "should pass shellPath
-/// through to shell resolution".
+/// with Bake's texts ([`bake_timeout_error`]), "should throw error when cwd
+/// does not exist", and "should pass shellPath through to shell
+/// resolution".
 #[tokio::test]
 async fn local_failures_before_spawn_match_pi() {
     let oracle = golden();
@@ -413,7 +428,11 @@ async fn local_failures_before_spawn_match_pi() {
             },
         );
         let error = run(&tool, case["params"].clone()).await.unwrap_err();
-        assert_eq!(error, case["error"].as_str().unwrap(), "{name}");
+        assert_eq!(
+            error,
+            bake_timeout_error(case["error"].as_str().unwrap(), name),
+            "{name}"
+        );
     }
 }
 

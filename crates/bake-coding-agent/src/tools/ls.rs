@@ -72,7 +72,7 @@ pub(crate) fn owned_ls_tool_definition(
             boxed(execute(cwd.clone(), args, signal, owner.clone()))
         },
     );
-    tool.read_only = true;
+    tool.effect = Some(bake_agent::ToolEffect::Read);
     tool.replay = Some(ToolReplay::Safe);
     ToolDefinition {
         tool,

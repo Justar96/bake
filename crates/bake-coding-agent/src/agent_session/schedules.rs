@@ -356,6 +356,8 @@ fn tool(
     );
     // One change at a time, in call order.
     tool.execution_mode = Some(ToolExecutionMode::Sequential);
+    // It changes the session's schedules, which no other tool observes.
+    tool.effect = Some(bake_agent::ToolEffect::Exec);
     tool.replay = Some(replay);
     Arc::new(tool)
 }

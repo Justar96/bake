@@ -1,0 +1,37 @@
+{
+  "name": "foreground budget probe",
+  "date": "2026-11-14",
+  "base": {
+    "path": "/home/jtar-wsl/bake/.artifacts/eval/bake-m3",
+    "version": "bake 0.4.8",
+    "bytes": 71565800
+  },
+  "candidate": {
+    "path": "/home/jtar-wsl/bake/.artifacts/eval/bake-m3",
+    "version": "bake 0.4.8",
+    "bytes": 71565800
+  },
+  "same_executable": true,
+  "base_settings": {},
+  "candidate_settings": {
+    "bash": {
+      "foregroundSeconds": 20
+    }
+  },
+  "models": [
+    "cliproxyapi/gemini-4-hydrogen-xhigh:high",
+    "cliproxyapi/gpt-6.1-sol:high",
+    "cliproxyapi/claude-opus-5-5:high"
+  ],
+  "tasks": [
+    [
+      "hanging-command",
+      "The tests of this project don't pass in CI. Run the test suite as the README says, find what is wrong in the code, and fix it. Do not change the tests or the job files."
+    ]
+  ],
+  "trials": 5,
+  "jobs": 6,
+  "max_model_calls": 60,
+  "run_timeout_ms": 900000,
+  "host": "linux/x86_64"
+}

@@ -1108,10 +1108,11 @@ async fn an_abort_mid_script_cancels_and_reaps_a_nested_bash() {
 }
 
 /// A tool that counts its starts and waits for its signal, then fails as
-/// aborted at once.
+/// aborted at once. It opts in to running beside other calls, so a script's
+/// calls of it run together.
 fn waiting(started: &Arc<AtomicUsize>) -> AgentTool {
     let started = Arc::clone(started);
-    AgentTool::new(
+    let mut tool = AgentTool::new(
         "wait",
         "Wait",
         "Wait until aborted",
@@ -1126,7 +1127,9 @@ fn waiting(started: &Arc<AtomicUsize>) -> AgentTool {
                 Err("Operation aborted".to_owned())
             })
         },
-    )
+    );
+    tool.execution_mode = Some(bake_agent::ToolExecutionMode::Parallel);
+    tool
 }
 
 /// Runs the prompt, aborts it once `count` waiting calls have started, and
@@ -1287,4 +1290,63 @@ async fn partial_results_carry_the_nested_calls() {
     assert_eq!(last["calls"][0]["name"], "echo");
     assert_eq!(last["calls"][0]["status"], "ok");
     assert_eq!(last["calls"][0]["id"], "c1/1");
+}
+
+/// `timeout: 0`, which models send to mean no timeout, is refused with the
+/// rule and how to run without one, the same for the model's own `bash`
+/// call and a script's.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_zero_timeout_reads_the_same_from_a_call_and_a_script() {
+    const REFUSED: &str = "Invalid timeout: must be greater than 0 seconds. Leave timeout out to run the command without one.";
+    let fx = Fixture::new("codemode-zero-timeout");
+    let bash = create_bash_tool_definition(
+        &fx.ws(),
+        BashToolOptions {
+            spill_directory: Some(fx.dir.path().to_path_buf()),
+            ..BashToolOptions::default()
+        },
+    );
+    let session = fx
+        .session_with(
+            vec![Arc::new(bash.tool.clone())],
+            vec![bash.prompt()],
+            &["bash", "codemode"],
+            Settings::default(),
+        )
+        .await;
+    fx.h.faux.append_responses(vec![
+        fx.recording(faux_assistant_blocks(
+            vec![faux_tool_call(
+                "bash",
+                json!({ "command": "echo hi", "timeout": 0 }),
+                Some("b1"),
+            )],
+            StopReason::ToolUse,
+        )),
+        fx.recording(faux_assistant_message("done")),
+    ]);
+    prompt(&session).await;
+    let direct = session
+        .messages()
+        .iter()
+        .find_map(|message| {
+            message
+                .as_tool_result()
+                .filter(|result| result.tool_name == "bash")
+                .cloned()
+        })
+        .expect("a bash result");
+    assert!(direct.is_error);
+    let UserContentBlock::Text(direct_text) = &direct.content[0] else {
+        panic!("text");
+    };
+    assert_eq!(direct_text.text, REFUSED);
+    fx.script(
+        "try { await tools.bash({ command: \"echo hi\", timeout: 0 }); return \"ran\"; } catch (error) { return error.message; }",
+        "c1",
+    );
+    prompt(&session).await;
+    let result = codemode_result(&session);
+    session.shutdown().await;
+    assert_eq!(result_text(&result), REFUSED);
 }

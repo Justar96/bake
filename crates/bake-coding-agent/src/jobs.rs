@@ -1039,6 +1039,22 @@ impl JobRegistry {
         F: FnOnce(JobContext) -> Fut + Send + 'static,
         Fut: Future<Output = JobOutcome> + Send + 'static,
     {
+        self.start_since(spec, bake_ai::now_ms(), producer)
+    }
+
+    /// [`Self::start`] for work that began before it became a job, at
+    /// `started_at` (milliseconds since the epoch), such as a foreground
+    /// command handed over to a job: the job's age counts from then.
+    pub fn start_since<F, Fut>(
+        &self,
+        spec: JobSpec,
+        started_at: i64,
+        producer: F,
+    ) -> Result<JobId, StartError>
+    where
+        F: FnOnce(JobContext) -> Fut + Send + 'static,
+        Fut: Future<Output = JobOutcome> + Send + 'static,
+    {
         if !valid_kind(spec.kind) {
             return Err(StartError::InvalidKind);
         }
@@ -1088,7 +1104,7 @@ impl JobRegistry {
             final_output: None,
             final_omitted: 0,
             stream,
-            started_at: bake_ai::now_ms(),
+            started_at,
             finished_at: None,
             claim: Claim::Unclaimed,
             admission: None,

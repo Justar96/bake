@@ -137,7 +137,9 @@ Both tools are in every session's default set, a subagent's included, and are re
 
 MCP servers configured in the Bake home's `mcp.json` add tools named `mcp__<server>__<tool>`. These flags restrict them too, including tools a server adds later: a `--tools` list of names or patterns must match one (`+name`/`-name` lists leave them alone), `--exclude-tools` removes the ones it matches, and `--no-tools` alone starts no server. `--no-mcp` starts no MCP server, so a session has none of their tools (`bake docs mcp`).
 
-When the model sends several tool calls in one response, they run at once if they only read; a response with a `bash`, `edit`, or `write` call runs its calls one at a time, in the order the model wrote them, so a command that checks an edit sees the edited file.
+When the model sends several tool calls in one response, they run in the order the model wrote them: reads next to each other, such as `read`, `grep`, and the web tools, run at once, and a `bash`, `edit`, `write`, or MCP call runs alone, so a command that checks an edit sees the edited file. When an `edit` or `write` fails, the calls after it in the same response that are neither reads nor file changes are answered with an error instead of run (`bake docs settings`).
+
+A `bash` command the model gives no `timeout` runs in the foreground for at most 300 seconds (the `bash.foregroundSeconds` setting). One still running then is not stopped: it continues as a background job, like one started with `run_in_background`, and the call returns the output so far with the job's id. The model reads the rest with `job_output` or stops it with `job_kill`, the job shows in the tasks row, and a notice reports it when it finishes. A command with a `timeout` is still stopped at that time.
 
 Commands the `bash` tool runs receive the session's details: `BAKE_SESSION_ID`, `BAKE_SESSION_FILE` (when the session is saved), `BAKE_PROVIDER`, `BAKE_MODEL`, and `BAKE_REASONING_LEVEL`. Output too long for the result is saved to a `bake-bash-…` or `bake-output-…` file in the temporary directory, which the result names.
 

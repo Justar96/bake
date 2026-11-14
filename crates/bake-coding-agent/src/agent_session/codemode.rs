@@ -24,7 +24,7 @@ use crate::mcp::McpServers;
 use crate::owned_work::WorkGate;
 use crate::settings::Settings;
 use crate::tools::codemode::{
-    CODEMODE_STORE_ENTRY_TYPE, CODEMODE_TOOL_NAME, CodemodeHost, CodemodeNamespace,
+    CODEMODE_STORE_ENTRY_TYPE, CODEMODE_TOOL_NAME, CodemodeHost, CodemodeMode, CodemodeNamespace,
     CodemodeStoreEntryData, ToolLoadout, prepare_codemode_loadout, read_codemode_store,
 };
 
@@ -102,6 +102,7 @@ impl CodemodeHost for SessionCodemodeHost {
 pub(super) fn apply_codemode_loadout(
     tools: Vec<Arc<AgentTool>>,
     settings: &Settings,
+    mode: CodemodeMode,
     host: &SessionCodemodeHost,
 ) -> (Vec<Arc<AgentTool>>, Vec<String>) {
     let mut own_descriptions = host
@@ -120,7 +121,7 @@ pub(super) fn apply_codemode_loadout(
             namespace: &namespace,
             guidelines: &guidelines,
         },
-        settings.codemode_mode,
+        mode,
         settings.codemode_inline_budget,
     );
     let tools = tools

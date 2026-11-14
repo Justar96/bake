@@ -5,7 +5,29 @@
 //! provider boundary. It emits Pi's events in Pi's order and runs Pi's hooks
 //! at the same points.
 //!
-//! Differences from Pi, none of them visible in the event sequence:
+//! Differences from Pi in how a response's tool calls run, decided by the
+//! effect each tool declares ([`AgentTool::effect`]):
+//!
+//! - Pi's rule stays: a sequential agent, or any call's tool with
+//!   `execution_mode` sequential, runs the whole batch one call at a time.
+//!   Otherwise the calls, in the order the model wrote them, are split into
+//!   segments that run one after another. A call whose tool declares
+//!   [`ToolEffect::Write`] or [`ToolEffect::Exec`], or, with
+//!   `max_concurrent_read_tools`, whose tool is not [`ToolEffect::Read`]
+//!   (undeclared, or unknown), is a segment of its own; each maximal run of
+//!   the other calls is one segment whose calls run together, bounded by
+//!   `max_concurrent_read_tools` when set. Nothing of a segment, not even
+//!   its preparation, starts before the one before it finished. Inside a
+//!   segment the events are Pi's: a batch that is one segment emits what
+//!   Pi's parallel path does, and a batch of single calls what its
+//!   sequential path does. Without the bound, a batch whose tools declare
+//!   no effect runs as in Pi.
+//! - After a call of a `Write` tool failed, each later call of the same
+//!   response whose tool is neither `Read` nor `Write` (`Exec`, undeclared,
+//!   or unknown) is answered with an error instead of run: it may depend on
+//!   the change that did not happen.
+//!
+//! Other differences from Pi, none of them visible in the event sequence:
 //!
 //! - Pi swaps the streamed partial into the context on every delta; nothing
 //!   reads the context while a response streams, so here only the final
@@ -49,7 +71,7 @@ use crate::types::{
     AfterToolCall, AfterToolCallContext, AgentContext, AgentEvent, AgentEventSink, AgentLoopConfig,
     AgentMessage, AgentTool, AgentToolCallOutcome, AgentToolResult, AgentToolUpdateCallback,
     AgentTurnContext, AgentTurnDecision, BeforeToolCall, BeforeToolCallContext, BoxFuture,
-    PrepareRequestContext, StreamFn, ToolContext, ToolExecutionMode,
+    PrepareRequestContext, StreamFn, ToolContext, ToolEffect, ToolExecutionMode,
 };
 use crate::validation::validate_tool_arguments;
 use crate::{ModelCallKind, RunControl, RunOutcome};
@@ -881,7 +903,58 @@ impl<'h> ToolCallHooks<'h> {
     }
 }
 
-/// Pi's `executeToolCalls`.
+/// How one call of a response is scheduled ([`segments`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CallClass {
+    /// Runs alone, after the calls before it and before the calls after it.
+    Barrier,
+    /// Runs together with the adjacent calls of this class.
+    Together,
+}
+
+/// Calls of one response that run as one step, by their index in it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Segment {
+    /// One [`CallClass::Barrier`] call.
+    Alone(usize),
+    /// A maximal run of adjacent [`CallClass::Together`] calls.
+    Together(std::ops::Range<usize>),
+}
+
+/// Splits a response's calls, in the order the model wrote them, into the
+/// segments that run one after another: each barrier alone, and each
+/// maximal run of the other calls together.
+pub(crate) fn segments(classes: &[CallClass]) -> Vec<Segment> {
+    let mut segments = Vec::new();
+    let mut start = 0;
+    for (index, class) in classes.iter().enumerate() {
+        if *class == CallClass::Barrier {
+            if start < index {
+                segments.push(Segment::Together(start..index));
+            }
+            segments.push(Segment::Alone(index));
+            start = index + 1;
+        }
+    }
+    if start < classes.len() {
+        segments.push(Segment::Together(start..classes.len()));
+    }
+    segments
+}
+
+/// Whether a call of `tool` (`None` when no tool has its name) runs alone by
+/// its effect: a `Write` or `Exec` tool always does, and with
+/// `max_concurrent_read_tools` (`capped`) so does every tool that is not
+/// `Read`. Pi's `execution_mode` is checked by the callers.
+pub(crate) fn runs_alone(tool: Option<&AgentTool>, capped: bool) -> bool {
+    match tool.and_then(|tool| tool.effect) {
+        Some(ToolEffect::Write | ToolEffect::Exec) => true,
+        Some(ToolEffect::Read) => false,
+        None => capped,
+    }
+}
+
+/// Pi's `executeToolCalls`, run in segments ([`segments`]).
 async fn execute_tool_calls(
     context: &AgentContext,
     assistant_message: &AssistantMessage,
@@ -890,15 +963,28 @@ async fn execute_tool_calls(
     signal: Option<&AbortSignal>,
     sink: &AgentEventSink,
 ) -> ExecutedToolCallBatch {
-    let has_sequential_tool_call = tool_calls.iter().any(|tool_call| {
-        find_tool(&context.tools, &tool_call.name).map_or(
-            config.max_concurrent_read_tools.is_some(),
-            |tool| {
-                tool.execution_mode == Some(ToolExecutionMode::Sequential)
-                    || (config.max_concurrent_read_tools.is_some() && !tool.read_only)
-            },
-        )
-    });
+    let tools: Vec<Option<&AgentTool>> = tool_calls
+        .iter()
+        .map(|tool_call| find_tool(&context.tools, &tool_call.name).map(AsRef::as_ref))
+        .collect();
+    // Pi's rule: a sequential agent or tool runs the whole batch one call at
+    // a time.
+    let one_at_a_time = config.tool_execution == ToolExecutionMode::Sequential
+        || tools
+            .iter()
+            .flatten()
+            .any(|tool| tool.execution_mode == Some(ToolExecutionMode::Sequential));
+    let capped = config.max_concurrent_read_tools.is_some();
+    let classes: Vec<CallClass> = tools
+        .iter()
+        .map(|tool| {
+            if one_at_a_time || runs_alone(*tool, capped) {
+                CallClass::Barrier
+            } else {
+                CallClass::Together
+            }
+        })
+        .collect();
     let hooks = ToolCallHooks::of(config);
     let (requests, mut site_requests) = tokio::sync::mpsc::unbounded_channel();
     let nested = NestedToolCallRunner::new(NestedPipeline::new(
@@ -917,13 +1003,13 @@ async fn execute_tool_calls(
         sink,
         nested: &nested,
     };
-    let executing = async {
-        if config.tool_execution == ToolExecutionMode::Sequential || has_sequential_tool_call {
-            execute_tool_calls_sequential(&batch, tool_calls).await
-        } else {
-            execute_tool_calls_parallel(&batch, tool_calls, config.max_concurrent_read_tools).await
-        }
-    };
+    let segments = segments(&classes);
+    let executing = execute_segments(
+        &batch,
+        tool_calls,
+        &segments,
+        config.max_concurrent_read_tools,
+    );
     tokio::pin!(executing);
     // Nested calls copy the batch's context and assistant message only when
     // a tool first makes one.
@@ -997,82 +1083,137 @@ impl Batch<'_> {
         finalized.nested = nested.take_summary();
         finalized
     }
+
+    fn effect(&self, tool_call: &ToolCall) -> Option<ToolEffect> {
+        find_tool(&self.context.tools, &tool_call.name).and_then(|tool| tool.effect)
+    }
 }
 
 fn is_aborted(signal: Option<&AbortSignal>) -> bool {
     signal.is_some_and(AbortSignal::aborted)
 }
 
-async fn execute_tool_calls_sequential(
-    batch: &Batch<'_>,
-    tool_calls: &[ToolCall],
-) -> ExecutedToolCallBatch {
-    let Batch { signal, sink, .. } = *batch;
-    let mut finalized_calls = Vec::new();
-    let mut messages = Vec::new();
+/// The calls of one batch finalized so far, in assistant order.
+#[derive(Default)]
+struct BatchRecord {
+    finalized: Vec<AgentToolCallOutcome>,
+    messages: Vec<ToolResultMessage>,
+    /// The first `Write` tool of this batch whose call failed.
+    failed_write: Option<String>,
+}
 
-    // The first tool of this batch whose failed call later calls may depend
-    // on ([`AgentTool::failure_skips_dependents`]).
-    let mut failed: Option<String> = None;
-
-    for tool_call in tool_calls {
-        emit_tool_execution_start(tool_call, sink).await;
-        let tool = find_tool(&batch.context.tools, &tool_call.name);
-        let guards = tool.is_some_and(|tool| tool.failure_skips_dependents);
-        let independent = guards || tool.is_some_and(|tool| tool.read_only);
-        let finalized = match &failed {
-            Some(failed) if !independent => AgentToolCallOutcome {
-                tool_call: tool_call.clone(),
-                result: create_error_tool_result(skipped_after_failure(failed)),
-                is_error: true,
-                duration_ms: None,
-                nested: None,
-            },
-            _ => match batch.prepare(tool_call).await {
-                Preparation::Immediate { result, is_error } => AgentToolCallOutcome {
-                    tool_call: tool_call.clone(),
-                    result,
-                    is_error,
-                    duration_ms: None,
-                    nested: None,
-                },
-                Preparation::Prepared { tool, args } => {
-                    batch.run_prepared(tool_call, &tool, &args).await
-                }
-            },
-        };
-        if guards && finalized.is_error && failed.is_none() {
-            failed = Some(tool_call.name.clone());
+impl BatchRecord {
+    /// The answer to a call not run because a `Write` call before it failed:
+    /// any call whose tool is neither `Read` nor `Write` may depend on that
+    /// change, so the command sent to check an edit does not run against a
+    /// file the edit never reached.
+    fn skipped(&self, batch: &Batch<'_>, tool_call: &ToolCall) -> Option<AgentToolCallOutcome> {
+        let failed = self.failed_write.as_deref()?;
+        if matches!(
+            batch.effect(tool_call),
+            Some(ToolEffect::Read | ToolEffect::Write)
+        ) {
+            return None;
         }
-
-        emit_tool_execution_end(&finalized, sink).await;
-        let message = create_tool_result_message(&finalized);
-        emit_tool_result_message(&message, sink).await;
-        finalized_calls.push(finalized);
-        messages.push(message);
-
-        if is_aborted(signal) {
-            break;
-        }
+        Some(AgentToolCallOutcome {
+            tool_call: tool_call.clone(),
+            result: create_error_tool_result(skipped_after_failure(failed)),
+            is_error: true,
+            duration_ms: None,
+            nested: None,
+        })
     }
 
-    ExecutedToolCallBatch {
-        messages,
-        terminate: should_terminate_tool_batch(&finalized_calls),
+    /// Records a finalized call and emits its tool-result message.
+    async fn push(&mut self, batch: &Batch<'_>, finalized: AgentToolCallOutcome) {
+        if finalized.is_error
+            && self.failed_write.is_none()
+            && batch.effect(&finalized.tool_call) == Some(ToolEffect::Write)
+        {
+            self.failed_write = Some(finalized.tool_call.name.clone());
+        }
+        let message = create_tool_result_message(&finalized);
+        emit_tool_result_message(&message, batch.sink).await;
+        self.finalized.push(finalized);
+        self.messages.push(message);
     }
 }
 
-async fn execute_tool_calls_parallel(
+/// Runs the segments of a batch in order; nothing of a segment starts
+/// before the one before it finished.
+async fn execute_segments(
+    batch: &Batch<'_>,
+    tool_calls: &[ToolCall],
+    segments: &[Segment],
+    max_concurrent: Option<std::num::NonZeroUsize>,
+) -> ExecutedToolCallBatch {
+    let mut record = BatchRecord::default();
+    for segment in segments {
+        match segment {
+            Segment::Alone(index) => {
+                if let Some(tool_call) = tool_calls.get(*index) {
+                    execute_alone(batch, tool_call, &mut record).await;
+                }
+            }
+            Segment::Together(range) => {
+                if let Some(calls) = tool_calls.get(range.clone()) {
+                    execute_together(batch, calls, max_concurrent, &mut record).await;
+                }
+            }
+        }
+        if is_aborted(batch.signal) {
+            break;
+        }
+    }
+    ExecutedToolCallBatch {
+        terminate: should_terminate_tool_batch(&record.finalized),
+        messages: record.messages,
+    }
+}
+
+/// Runs one call from its start event to its tool-result message.
+async fn execute_alone(batch: &Batch<'_>, tool_call: &ToolCall, record: &mut BatchRecord) {
+    emit_tool_execution_start(tool_call, batch.sink).await;
+    let finalized = match record.skipped(batch, tool_call) {
+        Some(skipped) => skipped,
+        None => match batch.prepare(tool_call).await {
+            Preparation::Immediate { result, is_error } => AgentToolCallOutcome {
+                tool_call: tool_call.clone(),
+                result,
+                is_error,
+                duration_ms: None,
+                nested: None,
+            },
+            Preparation::Prepared { tool, args } => {
+                batch.run_prepared(tool_call, &tool, &args).await
+            }
+        },
+    };
+    emit_tool_execution_end(&finalized, batch.sink).await;
+    record.push(batch, finalized).await;
+}
+
+/// Prepares `tool_calls` in order, executes the prepared ones together,
+/// `tool_execution_end` in completion order, and then emits their
+/// tool-result messages in assistant order.
+async fn execute_together(
     batch: &Batch<'_>,
     tool_calls: &[ToolCall],
     max_concurrent: Option<std::num::NonZeroUsize>,
-) -> ExecutedToolCallBatch {
+    record: &mut BatchRecord,
+) {
     let Batch { signal, sink, .. } = *batch;
     let mut entries: Vec<BoxFuture<'_, AgentToolCallOutcome>> = Vec::new();
 
     for tool_call in tool_calls {
         emit_tool_execution_start(tool_call, sink).await;
-        let preparation = batch.prepare(tool_call).await;
+        let preparation = match record.skipped(batch, tool_call) {
+            Some(skipped) => Preparation::Immediate {
+                result: skipped.result,
+                is_error: skipped.is_error,
+            },
+            None => batch.prepare(tool_call).await,
+        };
         match preparation {
             Preparation::Immediate { result, is_error } => {
                 let finalized = AgentToolCallOutcome {
@@ -1111,16 +1252,8 @@ async fn execute_tool_calls_parallel(
         }
     }
 
-    let ordered = join_all(entries, max_concurrent).await;
-    let mut messages = Vec::new();
-    for finalized in &ordered {
-        let message = create_tool_result_message(finalized);
-        emit_tool_result_message(&message, sink).await;
-        messages.push(message);
-    }
-    ExecutedToolCallBatch {
-        messages,
-        terminate: should_terminate_tool_batch(&ordered),
+    for finalized in join_all(entries, max_concurrent).await {
+        record.push(batch, finalized).await;
     }
 }
 
@@ -1261,7 +1394,11 @@ async fn prepare_tool_call(
     parent_tool_call_id: Option<&str>,
 ) -> Preparation {
     let Some(tool) = find_tool(tools, &tool_call.name) else {
-        return immediate_error(format!("Tool {} not found", tool_call.name));
+        let available: Vec<&str> = tools.iter().map(|tool| tool.name.as_str()).collect();
+        return immediate_error(crate::unknown_tool::unknown_tool_message(
+            &tool_call.name,
+            &available,
+        ));
     };
 
     let raw = Value::Object(tool_call.arguments.clone());
@@ -1710,4 +1847,68 @@ pub(crate) async fn run_tool_call_in(
         parent_tool_call_id,
     )
     .await
+}
+
+#[cfg(test)]
+mod segment_tests {
+    use proptest::prelude::*;
+
+    use super::{CallClass, Segment, segments};
+
+    fn classes() -> impl Strategy<Value = Vec<CallClass>> {
+        proptest::collection::vec(
+            prop_oneof![Just(CallClass::Barrier), Just(CallClass::Together)],
+            0..24,
+        )
+    }
+
+    #[test]
+    fn a_mixed_response_splits_at_each_barrier() {
+        use CallClass::{Barrier as B, Together as T};
+        assert_eq!(
+            segments(&[T, T, B, B, T, T]),
+            [
+                Segment::Together(0..2),
+                Segment::Alone(2),
+                Segment::Alone(3),
+                Segment::Together(4..6),
+            ]
+        );
+        assert_eq!(segments(&[]), []);
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(512))]
+
+        // The segments cover every call once, in order; each barrier is
+        // alone, each other call shares a segment only with other calls
+        // that run together, and no two such segments are adjacent.
+        #[test]
+        fn segments_partition_the_calls_in_order(classes in classes()) {
+            let split = segments(&classes);
+            let mut next = 0;
+            for segment in &split {
+                match segment {
+                    Segment::Alone(index) => {
+                        prop_assert_eq!(*index, next);
+                        prop_assert_eq!(classes[*index], CallClass::Barrier);
+                        next += 1;
+                    }
+                    Segment::Together(range) => {
+                        prop_assert_eq!(range.start, next);
+                        prop_assert!(range.end > range.start);
+                        prop_assert!(classes[range.clone()].iter().all(|class| *class == CallClass::Together));
+                        next = range.end;
+                    }
+                }
+            }
+            prop_assert_eq!(next, classes.len());
+            for pair in split.windows(2) {
+                prop_assert!(
+                    !matches!(pair, [Segment::Together(_), Segment::Together(_)]),
+                    "{:?}", pair
+                );
+            }
+        }
+    }
 }

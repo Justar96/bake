@@ -192,7 +192,7 @@ pub struct AgentOptions {
     pub max_retry_delay_ms: Option<u64>,
     /// Tool execution mode; parallel by default.
     pub tool_execution: ToolExecutionMode,
-    /// Opt-in read-only batch bound; see [`AgentLoopConfig::max_concurrent_read_tools`].
+    /// Opt-in bound on adjacent `Read` calls; see [`AgentLoopConfig::max_concurrent_read_tools`].
     pub max_concurrent_read_tools: Option<std::num::NonZeroUsize>,
 }
 
