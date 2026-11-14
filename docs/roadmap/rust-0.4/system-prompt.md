@@ -314,16 +314,46 @@ The pinned first requests under [`crates/bake-cli/tests/fixtures/first-request/`
 
 Since the design landed, the default tools gained the job tools, the web tools, and `codemode` (2026-10-18 and 2026-10-20), and `codemode` contributes a guideline to `rules`.
 
-An audit on 2026-11-14 changed the following. No paired evaluation has measured these changes yet.
+An audit on 2026-11-14 changed the following; [the evaluation](#evaluation-of-the-later-changes) follows the table.
 
 | Change | Reason |
 |---|---|
 | The `run` section is interactive for a top-level session with someone to answer (a terminal or an RPC client) | No caller set the run mode, so every session was told that no one can answer questions, including those that declare `ask_user` |
 | When an `edit` or `write` call fails, later calls in the same response are answered with an error and not run, except other file changes and read-only calls; the round-trip rule says so | The rule asks for an edit and its check in one response. The check ran against the unedited file, and a passing check read as verification |
-| `codemode`'s guideline is "Use codemode for calls that depend on each other's results, a call repeated over many items, or large output to filter." | Pi's asks for a script "instead of many separate calls", against the round-trip rule's independent calls in one response |
 | `edit` contributes one guideline instead of Pi's four | The other three repeat the tool's description and its `edits` parameter; this settles the open question above |
 | The `bash` rule reads "ls, find, and rg (grep where rg is not installed)" | Bake neither bundles nor downloads ripgrep |
 | `ask_user` says "the user", and names an action that is hard to reverse or visible to others as a reason to ask | It said not to ask for permission, against the interactive `run` text |
 | With `subagents` and `telecom` both on, `spawn_agent` contributes a guideline saying which way of delegating is for what | Two sets of delegation tools were declared with nothing to choose between them |
 | The `powershell` branches of the rules are removed, and Bake's own tools carry no prompt snippet | `powershell` is not ported, and no prompt section lists snippets |
 | Plainer `schedule_*` and `run_in_background` descriptions; the MCP resource tools no longer say to prefer resources over web search | Implementation terms, a two-word parameter description, and steering that held whatever tools were selected |
+
+### Evaluation of the later changes
+
+Run on 2026-11-14 with an ad hoc harness, since the repository has no evaluator runner. Both arms were release builds from clean worktrees: the base at `281e6dd1e1` (0.4.7) and the candidate at `8031f98cf7`, whose only other difference is the `/settings` Telecom row, which the model does not see.
+
+- **Models.** `claude-sonnet-5-5`, `gpt-6.1-terra`, and `gemini-3.8-flash-high` through the CLIProxyAPI route, each at its default thinking level.
+- **Print-mode tasks.** Six small Python fixtures, each with a check the harness runs: fix one failing test; rename a function across four files; answer which environment variables five files read, changing nothing; summarize fourteen CSV files into a JSON file; fix two bugs and add a missing function; change one of three near-identical functions. `bake -p --output-format json --permission workspace-write --no-mcp`, three trials a cell, the arms interleaved: 108 runs a round.
+- **Interactive probe.** The same six tasks and a seventh, "Clean up this project: delete the files that are no longer needed", over `--mode rpc`, where the candidate's `run` section is interactive and the base's is not; two trials a cell, 84 runs. The harness declines every question and approval.
+
+Round 1 measured the candidate with the narrower `codemode` guideline the audit first wrote ("Use codemode for calls that depend on each other's results, a call repeated over many items, or large output to filter."). All 108 runs passed, but GPT-6.1 Terra's requests rose 30.6% [18.5, 42.5] and its tokens 24.3% [11.2, 36.9]. It sends one tool call a response on this route, and under Pi's guideline it batches through `codemode` (41 of its 52 calls in the base); under the narrower one it made 9 `codemode` calls and sent its reads, edits, and checks one a request. The guideline was restored to Pi's text. Gemini's fixtures in that round sat beside the worktrees, and in some runs it read their git history, so its round 1 token counts are not used.
+
+Round 2 measured the candidate with Pi's `codemode` guideline, the fixtures in a directory of their own:
+
+| Model | Passed, base and candidate | Requests | Total tokens |
+|---|---|---|---|
+| Claude Sonnet 5.5 | 18 of 18, 18 of 18 | +0.9% [0.0, 2.8] | −1.4% [−2.9, 0.5] |
+| GPT-6.1 Terra | 18 of 18, 18 of 18 | 0.0% [−5.3, 6.4] | −2.3% [−9.2, 5.2] |
+| Gemini 3.8 Flash | 18 of 18, 18 of 18 | +2.8% [−5.0, 12.6] | −1.5% [−11.7, 13.1] |
+
+Each change is the mean over the six tasks of the candidate's mean divided by the base's, with a 95% bootstrap interval over runs. No model changed beyond noise, and no regression is accepted.
+
+In the interactive probe all 84 runs passed, no model called `ask_user` in either arm, and requests and tokens stayed within the spread of two trials. On the clean-up task every run deleted the two or three stale files without asking.
+
+What these runs do not show:
+
+- No run had a failed `edit` or `write` followed by a command in the same response, so the skip was never triggered; its tests cover it.
+- No task was ambiguous enough for a question to be the right move, so the probe shows that the interactive text does not cause needless questions, not that it causes useful ones.
+- `subagents`, `telecom`, the `schedule_*` tools, and the MCP resource tools were off, so their changed text is unmeasured.
+- Three trials a cell detect large effects only, and the tasks are far smaller than real work.
+
+Two behaviors seen in both arms, and so not caused by these changes: Claude Sonnet 5.5's first `edit` call in the one-bug task carried malformed `edits` (`[{}, ","]`) in all twelve runs and succeeded on the second try, and under `--approval ask` GPT-6.1 Terra asked for `danger-full-access` up front for a write inside the workspace.

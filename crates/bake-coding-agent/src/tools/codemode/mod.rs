@@ -235,15 +235,16 @@ pub fn codemode_details(calls: &[CodemodeNestedCall], full_output_path: Option<&
     details
 }
 
-/// Pi's `codemodeToolSystemPromptContribution`, with Bake's guideline: Pi's
-/// asks for a script "instead of many separate calls", against the prompt's
-/// rule to put independent calls in one response.
+/// Pi's `codemodeToolSystemPromptContribution`. Its guideline stays as Pi
+/// wrote it: a model that sends one tool call a response batches through a
+/// script, and a narrower guideline cost GPT-6.1 Terra 31% more requests
+/// (`docs/roadmap/rust-0.4/system-prompt.md`, Later changes).
 pub fn codemode_tool_prompt() -> ToolPrompt {
     ToolPrompt {
         name: CODEMODE_TOOL_NAME.to_owned(),
         snippet: Some("Run JavaScript that calls other tools".to_owned()),
         guidelines: vec![
-            "Use codemode for calls that depend on each other's results, a call repeated over many items, or large output to filter.".to_owned(),
+            "Use codemode to batch independent tool calls (Promise.allSettled), chain them, or filter large output, instead of many separate calls.".to_owned(),
         ],
     }
 }
