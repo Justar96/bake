@@ -681,13 +681,16 @@ pub fn edge_colour(state: CallState, tones: Tones) -> Option<Color> {
 }
 
 /// Draws `lines`, a call laid out from column [`RAIL`] at most `width` less
-/// [`BOX_PAD`] cells wide, in a rounded box `width` less one cell wide, so a
-/// cell stays clear of the scrollbar. Its first row rides in the top edge
-/// after `╭─`, so the state mark sits at column 3; every other row moves one
-/// cell right too, behind `│`, which keeps the output under the tool's name
-/// and a wrapped argument under its first row. A call of one row, such as
-/// a read, stays one row, unboxed, so a run of them reads as a list; it
-/// moves one cell right as well, so every call's mark is at column 3.
+/// [`BOX_PAD`] cells wide, in a rounded box as wide as its widest row needs,
+/// and at most `width` less one cell, so a cell stays clear of the
+/// scrollbar: a short call's box ends near its text. Its first row rides in
+/// the top edge after `╭─`, so the state mark sits at column 3; every other
+/// row moves one cell right too, behind `│`, which keeps the output under
+/// the tool's name and a wrapped argument under its first row. A row's
+/// trailing blanks without a background do not widen the box; a coloured
+/// row, such as a diff's, counts whole. A call of one row, such as a read,
+/// stays one row, unboxed, so a run of them reads as a list; it moves one
+/// cell right as well, so every call's mark is at column 3.
 fn frame(lines: &mut Vec<Line<'static>>, width: usize, edge: Color) {
     if width < BOX_PAD + RAIL + 2 {
         return;
@@ -698,28 +701,42 @@ fn frame(lines: &mut Vec<Line<'static>>, width: usize, edge: Color) {
         return;
     }
     let edge = Style::new().fg(edge);
-    let right = width - 1;
+    let mut rows: Vec<Vec<Span<'static>>> = Vec::with_capacity(lines.len());
     for (index, line) in lines.iter_mut().enumerate() {
         // A row a narrow layout could not fit is cut at the box's inside.
         let mut spans = clip_line(std::mem::take(line), width - BOX_PAD).spans;
-        let opening = if index == 0 {
+        let mut row = if index == 0 {
             drop_lead(&mut spans, RAIL);
             vec![Span::styled("╭─", edge), pad(1)]
         } else {
             vec![Span::styled("│", edge)]
         };
-        let mut row = opening;
         row.extend(spans);
         if index == 0 {
             trim_end(&mut row);
+        } else {
+            trim_plain_end(&mut row);
         }
-        let used: usize = row.iter().map(Span::width).sum();
+        rows.push(row);
+    }
+    let used = |row: &Vec<Span<'static>>| -> usize { row.iter().map(Span::width).sum() };
+    // The head needs a space, one `─`, and `╮` after it; a row a space and
+    // `│`.
+    let needed = rows
+        .iter()
+        .enumerate()
+        .map(|(index, row)| used(row) + if index == 0 { 3 } else { 2 })
+        .max()
+        .unwrap_or(0);
+    let right = needed.min(width - 1);
+    for (index, (line, mut row)) in lines.iter_mut().zip(rows).enumerate() {
+        let taken = used(&row);
         if index == 0 {
-            let fill = right.saturating_sub(used + 2).max(1);
+            let fill = right.saturating_sub(taken + 2).max(1);
             row.push(pad(1));
             row.push(Span::styled(format!("{}╮", "─".repeat(fill)), edge));
         } else {
-            row.push(pad(right.saturating_sub(used + 1)));
+            row.push(pad(right.saturating_sub(taken + 1)));
             row.push(Span::styled("│", edge));
         }
         line.spans = row;
@@ -728,6 +745,23 @@ fn frame(lines: &mut Vec<Line<'static>>, width: usize, edge: Color) {
         format!("╰{}╯", "─".repeat(right.saturating_sub(2))),
         edge,
     )));
+}
+
+/// Removes the blank cells that end `spans` where no background shows.
+fn trim_plain_end(spans: &mut Vec<Span<'static>>) {
+    while let Some(last) = spans.last_mut() {
+        if last.style.bg.is_some_and(|bg| bg != Color::Reset) {
+            return;
+        }
+        let kept = last.content.trim_end_matches(' ').len();
+        if kept > 0 {
+            if kept < last.content.len() {
+                last.content = last.content[..kept].to_owned().into();
+            }
+            return;
+        }
+        spans.pop();
+    }
 }
 
 /// Removes the blank cells that end `spans`.
@@ -2674,6 +2708,34 @@ impl Transcript {
         }
     }
 
+    /// Where row `index`'s SVG image is drawn, when it is a finished
+    /// `visualize` call's image: the line of the row its cells start on,
+    /// the column, and the image ([`visual::image_spot`]). The terminal
+    /// shows the image over those cells where it can.
+    pub fn image(&self, index: usize) -> Option<(usize, u16, crate::svg::Image)> {
+        let Some(Row::Visual(shown)) = self.rows.get(index) else {
+            return None;
+        };
+        let (width, look) = (self.width, self.look);
+        let boxed = boxes(look) && width >= BOX_PAD + RAIL + 2;
+        let inner = if boxes(look) {
+            width.saturating_sub(BOX_PAD).max(1)
+        } else {
+            width
+        };
+        let (head, image) = visual::image_spot(shown, inner, look)?;
+        let before = opening(
+            index.checked_sub(1).map(|i| &self.rows[i]),
+            &self.rows[index],
+            width,
+            look,
+        )
+        .len();
+        // A box moves every row but its first one cell right, behind `│`.
+        let x = BODY + usize::from(boxed);
+        Some((before + head, x as u16, image))
+    }
+
     fn lines(&self, index: usize) -> Vec<Line<'static>> {
         // Bake: the hint follows the newest card with a count, so a short
         // call after a folded one leaves it where it was.
@@ -3778,7 +3840,8 @@ mod tests {
         let done = present(&rows, index + 2, 60, look);
         // The opening blank stays outside the box. The head rides in the top
         // edge with its mark at column 3, the other rows hang from `│`, and
-        // every row ends at the same edge, a cell clear of the scrollbar.
+        // every row ends at the same edge, as far as the widest row needs
+        // and a cell clear of the scrollbar at most.
         assert_eq!(failed[0].width(), 0);
         for (lines, edge, mark) in [
             (&failed, Color::Rgb(0x7a, 0x3e, 0x46), "✗"),
@@ -3790,8 +3853,10 @@ mod tests {
             assert!(top.ends_with("─╮"), "{top}");
             let bottom = boxed[boxed.len() - 1].to_string();
             assert!(bottom.starts_with('╰') && bottom.ends_with('╯'), "{bottom}");
+            let edge_at = boxed[0].width();
+            assert!(edge_at <= 59, "{}", boxed[0]);
             for line in boxed {
-                assert_eq!(line.width(), 59, "{line}");
+                assert_eq!(line.width(), edge_at, "{line}");
                 assert_eq!(line.spans[0].style.fg, Some(edge), "{line}");
                 assert_eq!(line.spans.last().unwrap().style.fg, Some(edge), "{line}");
             }
@@ -3849,18 +3914,27 @@ mod tests {
             ..PLAIN
         };
         let lines = present(&rows, 0, 20, look);
-        // Text wraps two cells short of the box's right edge, which stays a
-        // cell clear of the scrollbar.
+        // Text wraps short of the box's right edge, which ends a cell after
+        // the widest row and stays a cell clear of the scrollbar.
         assert_eq!(
             text(&lines),
             [
-                "╭─ ✓ Bash: x ─────╮",
-                "│    0123456789a  │",
-                "│    bcdefghij    │",
-                "╰─────────────────╯"
+                "╭─ ✓ Bash: x ────╮",
+                "│    0123456789a │",
+                "│    bcdefghij   │",
+                "╰────────────────╯"
             ]
         );
-        assert!(lines.iter().all(|l| l.width() == 19));
+        assert!(lines.iter().all(|l| l.width() == 18));
+        // On a wide screen, the box still ends at its content.
+        assert_eq!(
+            text(&present(&rows, 0, 100, look)),
+            [
+                "╭─ ✓ Bash: x ─────────────╮",
+                "│    0123456789abcdefghij │",
+                "╰─────────────────────────╯"
+            ]
+        );
     }
 
     /// The foreground colour of the span drawing `content` among `lines`.
@@ -4322,13 +4396,13 @@ mod tests {
             text(&lines),
             [
                 "",
-                "╭─ ✓ Edit: src/parser.ts  +1 -1 ──────────────────────────────────────────────╮",
-                "│       ⋯ 40 unmodified lines                                                 │",
-                "│    41     const fields = split(line);                                       │",
-                "│    42 ▎   if (quote) fields.push(rest);                                     │",
-                r#"│    42 ▎   if (quote) throw new SyntaxError("unterminated quote");           │"#,
-                "│    43     return fields;                                                    │",
-                "╰─────────────────────────────────────────────────────────────────────────────╯",
+                "╭─ ✓ Edit: src/parser.ts  +1 -1 ─────────────────────────────────────────────╮",
+                "│       ⋯ 40 unmodified lines                                                │",
+                "│    41     const fields = split(line);                                      │",
+                "│    42 ▎   if (quote) fields.push(rest);                                    │",
+                r#"│    42 ▎   if (quote) throw new SyntaxError("unterminated quote");          │"#,
+                "│    43     return fields;                                                   │",
+                "╰────────────────────────────────────────────────────────────────────────────╯",
             ]
         );
         let head = &lines[1];
@@ -4368,7 +4442,7 @@ mod tests {
         );
         let edge = Some(Color::Rgb(0x48, 0x4f, 0x5b));
         assert_eq!(
-            (cell(added, 0).fg, cell(added, 78).fg),
+            (cell(added, 0).fg, cell(added, added.width() - 1).fg),
             (edge, edge),
             "the box frames it"
         );
@@ -4461,7 +4535,9 @@ mod tests {
             ]
         );
         assert!(
-            wide[1..].iter().all(|l| l.width() == 106),
+            wide[1..]
+                .iter()
+                .all(|l| l.width() == wide[1].width() && l.width() <= 106),
             "the box closes every row at one edge"
         );
         // The removed side keeps its tint beside the added side's wrap.

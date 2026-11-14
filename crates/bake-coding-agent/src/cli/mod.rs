@@ -1363,6 +1363,9 @@ struct Build {
     sandbox_provider: Arc<dyn SandboxProvider>,
     approver: Option<Arc<dyn Approver>>,
     role: Role,
+    /// The interactive terminal shows this session, so it draws what the
+    /// `visualize` tool shows.
+    drawn: bool,
 }
 
 /// Whether a session can start subagents, or is one.
@@ -1483,6 +1486,7 @@ fn build_child(
                 sandbox_provider: Arc::clone(&factory.sandbox_provider),
                 approver: factory.approver.clone(),
                 role: Role::Child(link),
+                drawn: false,
             },
         )
         .await?;
@@ -1510,6 +1514,7 @@ async fn build_session(args: &Args, build: Build) -> Result<Built, String> {
         sandbox_provider,
         approver,
         role,
+        drawn,
     } = build;
     let Resources {
         context_files,
@@ -1780,6 +1785,13 @@ async fn build_session(args: &Args, build: Build) -> Result<Built, String> {
     if questions.is_some() {
         bake_defaults.push(crate::questions::TOOL_NAME.to_owned());
     }
+    // The interactive terminal draws what a top-level session shows, so
+    // there the `visualize` tool is one of its defaults unless the
+    // `visualize` setting is false: the owner's decision of 2026-11-14.
+    // Print and RPC runs draw nothing, so they leave it opt-in.
+    if questions.is_some() && drawn && settings.visualize {
+        bake_defaults.push(crate::tools::visualize::VISUALIZE_TOOL_NAME.to_owned());
+    }
     if settings.schedules {
         bake_defaults.extend(crate::agent_session::schedules::NAMES.map(str::to_owned));
     }
@@ -2049,6 +2061,8 @@ pub struct SessionFactory {
     approver: Option<Arc<dyn Approver>>,
     imported_default_preset: Option<String>,
     plugins: WasmSetup,
+    /// The interactive terminal shows its sessions ([`Build::drawn`]).
+    drawn: bool,
 }
 
 impl std::fmt::Debug for SessionFactory {
@@ -2081,6 +2095,7 @@ impl SessionFactory {
             approver,
             imported_default_preset: None,
             plugins: WasmSetup::default(),
+            drawn: false,
         }
     }
 
@@ -2191,6 +2206,7 @@ impl SessionFactory {
                 sandbox_provider: Arc::clone(&self.sandbox_provider),
                 approver: self.approver.clone(),
                 role: Role::Root(Some(Box::new(self.clone()))),
+                drawn: self.drawn,
             },
         )
         .await?;
@@ -2280,6 +2296,7 @@ async fn start_with(
         approver: approver.clone(),
         imported_default_preset: imported_default_preset.clone(),
         plugins: plugins.clone(),
+        drawn: kind == StartKind::Interactive,
     };
 
     let loaded = {
@@ -2493,6 +2510,7 @@ async fn start_with(
             sandbox_provider,
             approver,
             role: Role::Root(Some(Box::new(factory.clone()))),
+            drawn: kind == StartKind::Interactive,
         },
     )
     .await
@@ -3371,7 +3389,8 @@ mod tests {
 
     // What the model is told about who can answer, and the tools that
     // follow from it: with an approver the session is interactive and
-    // declares `ask_user`; without one, as in `-p`, neither. With `subagents`
+    // declares `ask_user` and, unless the `visualize` setting is false,
+    // `visualize`; without one, as in `-p`, neither. With `subagents`
     // and `telecom` both on, the rules say which way of delegating is for
     // what.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -3383,7 +3402,9 @@ mod tests {
         const PRINT: &str = "<run>\nThis is a non-interactive run:";
         for (answerer, team) in [(false, false), (true, false), (true, true)] {
             let dir = setup_dirs("cli-run-mode");
-            let settings = serde_json::json!({ "subagents": team, "telecom": team });
+            // The team run also turns the `visualize` setting off.
+            let settings =
+                serde_json::json!({ "subagents": team, "telecom": team, "visualize": !team });
             write_owned(&dir.join("home/settings.json"), &settings.to_string());
             let faux = Arc::new(FauxProvider::new(FauxProviderOptions::default()));
             let declared = Arc::new(Mutex::new(Vec::new()));
@@ -3435,6 +3456,7 @@ mod tests {
             assert_eq!(system.contains(INTERACTIVE), answerer, "{system}");
             assert_eq!(system.contains(PRINT), !answerer, "{system}");
             assert_eq!(has("ask_user"), answerer, "{declared:?}");
+            assert_eq!(has("visualize"), answerer && !team, "{declared:?}");
             assert_eq!(has("subagent") && has("spawn_agent"), team, "{declared:?}");
             assert_eq!(
                 system.contains(&format!("- {}\n", crate::spawned::WITH_SUBAGENTS_GUIDELINE)),

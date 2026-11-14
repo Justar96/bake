@@ -124,6 +124,16 @@ pub struct DraftSpot {
     pub width: usize,
 }
 
+/// An SVG image wholly on screen: the cell its top left corner is drawn
+/// at, and the image, which covers [`crate::svg::Image::columns`] by
+/// [`crate::svg::Image::rows`] cells.
+#[derive(Clone, Debug)]
+pub struct ImagePlacement {
+    pub x: u16,
+    pub y: u16,
+    pub image: crate::svg::Image,
+}
+
 /// Where the transcript's lines were last drawn: the cell of the first
 /// line's first column, and the columns and lines the text takes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -484,6 +494,9 @@ pub struct State {
     pub draft_spot: Option<DraftSpot>,
     /// The transcript's lines as last drawn; a press there selects.
     pub transcript_area: Option<Area>,
+    /// The SVG images wholly on screen as last drawn, for the terminal to
+    /// show over their cells where it can show images.
+    pub svg_images: Vec<ImagePlacement>,
     /// Settled rows excluded from the inline live region while following.
     pub(crate) transcript_published: usize,
     /// How many times the runtime replaced the transcript
@@ -638,6 +651,7 @@ impl State {
             latest: None,
             draft_spot: None,
             transcript_area: None,
+            svg_images: Vec::new(),
             transcript_published: 0,
             transcript_epoch: 0,
             selecting: Selecting::default(),

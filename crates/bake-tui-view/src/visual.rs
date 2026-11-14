@@ -1,6 +1,6 @@
-//! A `visualize` call as one transcript block: a bar chart, a line chart,
-//! a table, or a Mermaid diagram, drawn from the call's arguments at the
-//! width it is given.
+//! A `visualize` call as one transcript block: a chart, a table, a Mermaid
+//! diagram, or an SVG image, drawn from the call's arguments at the width
+//! it is given.
 //!
 //! The block reads as any call does: a state mark, the kind of visual as
 //! its title (`Bar chart: Build time by crate`), and a status that counts
@@ -12,8 +12,16 @@
 //!   blocks (`▏▎▍▌▋▊▉█`). Labels take a column padded to a multiple of
 //!   [`LABEL_STEP`] cells, at most [`LABEL_COLUMN`], so most later labels
 //!   do not move the bars; each bar ends with its value.
-//! - **Lines** are a braille plot of [`PLOT_ROWS`] rows with a y axis at
-//!   its bounds and middle, and the first, middle, and last x labels.
+//! - **Stacked bars** are one row per category, its series end to end
+//!   and its total after it ([`charts`]).
+//! - **Lines** are a braille plot of [`PLOT_ROWS`] rows, or
+//!   [`LARGE_PLOT_ROWS`] when the call asks for a large one, with a y axis
+//!   at its bounds and middle, and the first, middle, and last x labels.
+//! - **Areas** are lines filled down to 0, a smaller area in front of a
+//!   larger.
+//! - **Scatters**, **pies**, and **heatmaps** are drawn by [`charts`]:
+//!   points on two value axes, shares as a disc of half blocks beside
+//!   their legend, and a grid of cells coloured by value.
 //! - **Tables** are drawn in box-drawing borders, numbers aligned right.
 //! - **Diagrams** are drawn as an answer's ```` ```mermaid ```` fence is
 //!   ([`crate::mermaid`]): the same role colours, ASCII under the classic
@@ -22,6 +30,9 @@
 //!   arriving draws the longest run of its complete lines that renders, so
 //!   it never turns back into source. `markdown.mermaid` governs answers
 //!   only: the model asked to show this diagram, so it always draws.
+//!
+//! - **SVG images** are drawn in half blocks, two pixels a cell
+//!   ([`crate::svg`]), growing tag by tag while the source arrives.
 //!
 //! Series take their colours from [`palette::SERIES`]. Under `NO_COLOR`
 //! they are told apart by glyph instead (`█▓▒░` bars, `•×+o` points), and
@@ -55,10 +66,16 @@ use crate::transcript::{
     self, BODY, CallState, Detail, EXPANDED_ROWS, FAILED_LINES, Look, RAIL, dim, pad,
 };
 
+mod charts;
+
 /// Rows of the drawing a preview shows before it counts the rest.
 pub const PREVIEW_ROWS: usize = 24;
 /// Rows a line chart's plot takes, whatever its data.
 pub const PLOT_ROWS: usize = 10;
+/// Rows a plot takes when the call asks for a large one.
+pub const LARGE_PLOT_ROWS: usize = 20;
+/// Most columns of values a heatmap draws: the columns after the first.
+pub const HEAT_COLUMNS: usize = 24;
 /// Most cells a label, a column name, or a table cell shows before `…`.
 pub const LABEL_CELLS: usize = 40;
 /// Most cells a bar chart's label column takes.
@@ -76,9 +93,15 @@ const LABEL_INPUT: usize = 512;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     Bar,
+    Stacked,
     Line,
+    Area,
+    Scatter,
+    Pie,
+    Heatmap,
     Table,
     Diagram,
+    Svg,
 }
 
 /// A finite number. A value that is not finite reads as missing, so it
@@ -125,8 +148,11 @@ pub struct Spec {
     pub unit: String,
     /// One row per category or x, in column order.
     pub rows: Vec<Vec<Cell>>,
-    /// A diagram's Mermaid source.
+    /// A diagram's Mermaid source, or an image's SVG.
     pub source: String,
+    /// The call asks for a large drawing: a taller plot, or an image in
+    /// more cells.
+    pub large: bool,
     /// The arguments may go on: they are still arriving or were cut off,
     /// so a diagram draws the longest run of its source's complete lines
     /// that renders, its last line left out as the one being written.
@@ -167,9 +193,15 @@ impl Visual {
 fn title_of(kind: Option<Kind>) -> &'static str {
     match kind {
         Some(Kind::Bar) => copy::VISUAL_BAR,
+        Some(Kind::Stacked) => copy::VISUAL_STACKED,
         Some(Kind::Line) => copy::VISUAL_LINE,
+        Some(Kind::Area) => copy::VISUAL_AREA,
+        Some(Kind::Scatter) => copy::VISUAL_SCATTER,
+        Some(Kind::Pie) => copy::VISUAL_PIE,
+        Some(Kind::Heatmap) => copy::VISUAL_HEATMAP,
         Some(Kind::Table) => copy::VISUAL_TABLE,
         Some(Kind::Diagram) => copy::VISUAL_DIAGRAM,
+        Some(Kind::Svg) => copy::VISUAL_SVG,
         None => copy::VISUALIZE,
     }
 }
@@ -212,7 +244,17 @@ pub(crate) fn present(
         ));
     } else {
         let mut drawn = draw(&visual.spec, room, look);
-        let limit = if full { EXPANDED_ROWS } else { PREVIEW_ROWS };
+        // A plot, a pie, and an image have a height of their own, which a
+        // preview keeps whole: half of one says nothing.
+        let whole = matches!(
+            visual.spec.kind,
+            Some(Kind::Line | Kind::Area | Kind::Scatter | Kind::Pie | Kind::Svg)
+        );
+        let limit = if full || whole {
+            EXPANDED_ROWS
+        } else {
+            PREVIEW_ROWS
+        };
         let mut more = None;
         if drawn.len() > limit + 1 {
             more = Some(drawn.len() - limit);
@@ -240,6 +282,31 @@ pub(crate) fn present(
         .into_iter()
         .map(|line| transcript::clip_line(line, width))
         .collect()
+}
+
+/// Where an SVG image's cells start among the lines [`present`] draws at
+/// `width`: the line after the head, at column [`BODY`]; and the image.
+/// `None` for any other visual, one still streaming, failed, or too large,
+/// and one whose source does not draw.
+pub(crate) fn image_spot(
+    visual: &Visual,
+    width: usize,
+    look: Look,
+) -> Option<(usize, crate::svg::Image)> {
+    if visual.spec.kind != Some(Kind::Svg)
+        || visual.streaming
+        || visual.too_large
+        || visual.state == CallState::Failed
+    {
+        return None;
+    }
+    let room = width.saturating_sub(BODY).max(1);
+    let drawing = crate::svg::draw(&visual.spec, room, look);
+    let image = drawing.image.clone()?;
+    if drawing.error.is_some() || drawing.lines.is_empty() {
+        return None;
+    }
+    Some((head(visual, width, look).len(), image))
 }
 
 /// `● Bar chart: title`, then the status: the counts, `streaming` while
@@ -306,8 +373,13 @@ fn counts(spec: &Spec) -> Option<String> {
     let rows = cards::count(spec.rows.len(), copy::ROW_NOUNS);
     let other = match kind {
         Kind::Table => cards::count(columns_of(spec), copy::COLUMN_NOUNS),
-        Kind::Bar | Kind::Line => cards::count(series_of(spec), copy::SERIES_NOUNS),
+        Kind::Heatmap => cards::count(series_of(spec), copy::COLUMN_NOUNS),
+        Kind::Pie => return Some(rows),
+        Kind::Bar | Kind::Stacked | Kind::Line | Kind::Area | Kind::Scatter => {
+            cards::count(series_of(spec), copy::SERIES_NOUNS)
+        }
         Kind::Diagram => return family(&spec.source).map(str::to_owned),
+        Kind::Svg => return None,
     };
     Some(format!("{rows}{}{other}", copy::STATUS_SEP))
 }
@@ -335,9 +407,15 @@ fn family(source: &str) -> Option<&'static str> {
 pub fn draw(spec: &Spec, width: usize, look: Look) -> Vec<Line<'static>> {
     let lines = match spec.kind {
         Some(Kind::Bar) => bar_chart(spec, width, look),
-        Some(Kind::Line) => line_chart(spec, width, look),
+        Some(Kind::Stacked) => charts::stacked(spec, width, look),
+        Some(Kind::Line) => line_chart(spec, width, look, false),
+        Some(Kind::Area) => line_chart(spec, width, look, true),
+        Some(Kind::Scatter) => charts::scatter(spec, width, look),
+        Some(Kind::Pie) => charts::pie(spec, width, look),
+        Some(Kind::Heatmap) => charts::heatmap(spec, width, look),
         Some(Kind::Table) => table(spec, width, look),
         Some(Kind::Diagram) => diagram(spec, width, look),
+        Some(Kind::Svg) => svg_image(spec, width, look),
         None => Vec::new(),
     };
     lines
@@ -392,10 +470,25 @@ fn padded(text: &str, cells: usize) -> String {
     format!("{text}{}", " ".repeat(cells.saturating_sub(w)))
 }
 
-/// Columns a spec's rows and names fill, at most eight.
+/// Columns a spec's rows and names fill: at most eight, or a heatmap's
+/// label column and [`HEAT_COLUMNS`].
 fn columns_of(spec: &Spec) -> usize {
     let widest = spec.rows.iter().map(Vec::len).max().unwrap_or(0);
-    spec.columns.len().max(widest).min(MAX_SERIES + 1)
+    let most = if spec.kind == Some(Kind::Heatmap) {
+        HEAT_COLUMNS
+    } else {
+        MAX_SERIES
+    };
+    spec.columns.len().max(widest).min(most + 1)
+}
+
+/// Rows a plot of `spec` takes.
+fn plot_rows(spec: &Spec) -> usize {
+    if spec.large {
+        LARGE_PLOT_ROWS
+    } else {
+        PLOT_ROWS
+    }
 }
 
 /// Series a chart draws: the columns after the first.
@@ -465,9 +558,19 @@ fn round_out(x: f64, up: bool) -> f64 {
     if rounded.is_finite() { rounded } else { x }
 }
 
+/// [`bounds_of`] with the bounds `spec` gives.
+fn bounds(spec: &Spec, data: Option<(f64, f64)>, zero: bool) -> (f64, f64) {
+    bounds_of(spec.min, spec.max, data, zero)
+}
+
 /// Bounds `lo < hi` from the given ones, else from `data` rounded out;
 /// with `zero`, they hold 0, as a bar chart's do.
-fn bounds(spec: &Spec, data: Option<(f64, f64)>, zero: bool) -> (f64, f64) {
+fn bounds_of(
+    min: Option<Number>,
+    max: Option<Number>,
+    data: Option<(f64, f64)>,
+    zero: bool,
+) -> (f64, f64) {
     let (data_lo, data_hi) = data.unwrap_or((0.0, 0.0));
     let mut lo = round_out(data_lo, false);
     let mut hi = round_out(data_hi, true);
@@ -475,20 +578,20 @@ fn bounds(spec: &Spec, data: Option<(f64, f64)>, zero: bool) -> (f64, f64) {
         lo = lo.min(0.0);
         hi = hi.max(0.0);
     }
-    if let Some(min) = spec.min {
+    if let Some(min) = min {
         lo = min.get();
     }
-    if let Some(max) = spec.max {
+    if let Some(max) = max {
         hi = max.get();
     }
-    if data.is_none() && spec.min.is_none() && spec.max.is_none() {
+    if data.is_none() && min.is_none() && max.is_none() {
         return (0.0, 1.0);
     }
     if hi > lo && (hi / 2.0 - lo / 2.0) > 0.0 {
         return (lo, hi);
     }
     // One value, or bounds given the wrong way round: a range around it.
-    let centre = if spec.max.is_some() && spec.min.is_none() {
+    let centre = if max.is_some() && min.is_none() {
         hi
     } else {
         lo
@@ -834,42 +937,149 @@ fn segment(a: (i64, i64), b: (i64, i64)) -> Vec<(i64, i64)> {
     }
 }
 
-/// A line chart: a legend for several series, the plot with its y axis,
-/// the x axis, and the x labels under it.
-fn line_chart(spec: &Spec, width: usize, look: Look) -> Vec<Line<'static>> {
-    let series = series_of(spec).max(1);
-    let glyphs = glyphs(look, series);
-    let unit = fit(&clean(&spec.unit), UNIT_CELLS);
-    let values = values(spec, series);
-    let (lo, hi) = bounds(spec, extent(&values), false);
+/// A plot's cells: each holds braille dots or a marker, and the series
+/// drawn in it last.
+struct Plot {
+    cells: Vec<Vec<(u8, Option<&'static str>, usize)>>,
+    braille: bool,
+}
+
+impl Plot {
+    fn new(columns: usize, rows: usize, braille: bool) -> Self {
+        Self {
+            cells: vec![vec![(0, None, 0); columns]; rows],
+            braille,
+        }
+    }
+
+    /// The dots across and down: two by four a cell in braille, else one.
+    fn dots(&self) -> (usize, usize) {
+        let columns = self.cells.first().map_or(0, Vec::len);
+        if self.braille {
+            (columns * 2, self.cells.len() * 4)
+        } else {
+            (columns, self.cells.len())
+        }
+    }
+
+    /// Draws the dot at `x`, `y` for `series`; outside the plot, nothing.
+    fn set(&mut self, x: i64, y: i64, series: usize, glyphs: &Glyphs) {
+        let (Ok(x), Ok(y)) = (usize::try_from(x), usize::try_from(y)) else {
+            return;
+        };
+        if self.braille {
+            let cell = self.cells.get_mut(y / 4).and_then(|row| row.get_mut(x / 2));
+            if let Some(cell) = cell {
+                cell.0 |= DOTS[x % 2][y % 4];
+                cell.2 = series;
+            }
+        } else if let Some(cell) = self.cells.get_mut(y).and_then(|row| row.get_mut(x)) {
+            cell.1 = Some(glyphs.markers[series % MAX_SERIES]);
+            cell.2 = series;
+        }
+    }
+
+    /// The plot's rows behind a y axis labelled at its top, middle, and
+    /// bottom, then the x axis under them.
+    fn lines(
+        &self,
+        y_labels: &[String; 3],
+        y_cells: usize,
+        glyphs: &Glyphs,
+        look: Look,
+    ) -> Vec<Line<'static>> {
+        let rows = self.cells.len();
+        let columns = self.cells.first().map_or(0, Vec::len);
+        let mid_row = rows / 2;
+        let mut lines = Vec::with_capacity(rows + 1);
+        for (r, row) in self.cells.iter().enumerate() {
+            let (text, tick) = match r {
+                0 => (&y_labels[0], true),
+                r if r == mid_row => (&y_labels[1], true),
+                r if r + 1 == rows => (&y_labels[2], true),
+                _ => (&String::new(), false),
+            };
+            let mut spans = vec![
+                Span::styled(format!("{:>y_cells$}", fit(text, y_cells)), dim()),
+                pad(1),
+                Span::styled(if tick { glyphs.tick } else { glyphs.axis }, dim()),
+            ];
+            let mut run = String::new();
+            let mut run_style = Style::new();
+            for &(bits, marker, s) in row {
+                let (glyph, style) = match (bits, marker) {
+                    (0, None) => (" ".to_owned(), Style::new()),
+                    (bits, None) => (
+                        char::from_u32(0x2800 + u32::from(bits))
+                            .unwrap_or(' ')
+                            .to_string(),
+                        series_style(s, look),
+                    ),
+                    (_, Some(marker)) => (marker.to_owned(), series_style(s, look)),
+                };
+                if style != run_style && !run.is_empty() {
+                    spans.push(Span::styled(std::mem::take(&mut run), run_style));
+                }
+                run_style = style;
+                run.push_str(&glyph);
+            }
+            let kept = run.trim_end();
+            if !kept.is_empty() {
+                spans.push(Span::styled(kept.to_owned(), run_style));
+            }
+            lines.push(Line::from(spans));
+        }
+        lines.push(Line::from(vec![
+            pad(y_cells + 1),
+            Span::styled(
+                format!("{}{}", glyphs.corner, glyphs.rule.repeat(columns)),
+                dim(),
+            ),
+        ]));
+        lines
+    }
+}
+
+/// A value axis's labels at its top, middle, and bottom, and the cells
+/// they take, at most a third of `width`.
+fn y_axis(lo: f64, hi: f64, unit: &str, width: usize) -> ([String; 3], usize) {
     let mid = lo / 2.0 + hi / 2.0;
-    let mid_row = PLOT_ROWS / 2;
     let label = |v: f64| format!("{}{unit}", short(v));
-    let y_labels = [label(hi), label(mid), label(lo)];
-    let y_cells = y_labels
+    let labels = [label(hi), label(mid), label(lo)];
+    let cells = labels
         .iter()
         .map(|text| text.width())
         .max()
         .unwrap_or(0)
         .min(width / 3);
-    let plot = width.saturating_sub(y_cells + 2).max(1);
+    (labels, cells)
+}
+
+/// A line chart: a legend for several series, the plot with its y axis,
+/// the x axis, and the x labels under it. With `fill`, an area chart: each
+/// series is filled down to 0, which its bounds then hold, and where
+/// areas cover each other the one nearer 0 shows in front.
+fn line_chart(spec: &Spec, width: usize, look: Look, fill: bool) -> Vec<Line<'static>> {
+    let series = series_of(spec).max(1);
+    let glyphs = glyphs(look, series);
+    let unit = fit(&clean(&spec.unit), UNIT_CELLS);
+    let values = values(spec, series);
+    let (lo, hi) = bounds(spec, extent(&values), fill);
+    let (y_labels, y_cells) = y_axis(lo, hi, &unit, width);
+    let columns = width.saturating_sub(y_cells + 2).max(1);
     let key = |s: usize| {
-        if glyphs.braille {
-            glyphs.line_key
-        } else {
+        if !glyphs.braille {
             glyphs.markers[s % MAX_SERIES]
+        } else if fill {
+            "█"
+        } else {
+            glyphs.line_key
         }
     };
     let mut lines = legend(spec, series, &key, width, look);
-    // Each cell: braille bits, or a marker, and the series drawn last.
-    let mut cells: Vec<Vec<(u8, Option<&'static str>, usize)>> =
-        vec![vec![(0, None, 0); plot]; PLOT_ROWS];
+    let mut plot = Plot::new(columns, plot_rows(spec), glyphs.braille);
     let count = values.len();
-    let (dots_x, dots_y) = if glyphs.braille {
-        (plot * 2, PLOT_ROWS * 4)
-    } else {
-        (plot, PLOT_ROWS)
-    };
+    let (dots_x, dots_y) = plot.dots();
     let x_of = |i: usize| -> i64 {
         let x = if count <= 1 {
             dots_x / 2
@@ -882,7 +1092,10 @@ fn line_chart(spec: &Spec, width: usize, look: Look) -> Vec<Line<'static>> {
         let y = ((1.0 - ratio(v, lo, hi)) * (dots_y - 1) as f64).round();
         y as i64
     };
-    for s in 0..series {
+    let base = y_of(0f64.clamp(lo, hi));
+    // An area's dots by series and x: the one farthest from the base.
+    let mut tops: Vec<Vec<Option<i64>>> = vec![vec![None; dots_x]; series];
+    for (s, tops) in tops.iter_mut().enumerate() {
         let mut previous: Option<(i64, i64)> = None;
         for (i, row) in values.iter().enumerate() {
             let Some(v) = row.get(s).copied().flatten() else {
@@ -891,68 +1104,37 @@ fn line_chart(spec: &Spec, width: usize, look: Look) -> Vec<Line<'static>> {
             };
             let point = (x_of(i), y_of(v));
             for (x, y) in segment(previous.unwrap_or(point), point) {
-                let (Ok(x), Ok(y)) = (usize::try_from(x), usize::try_from(y)) else {
+                if !fill {
+                    plot.set(x, y, s, &glyphs);
                     continue;
-                };
-                if glyphs.braille {
-                    let cell = cells.get_mut(y / 4).and_then(|row| row.get_mut(x / 2));
-                    if let Some(cell) = cell {
-                        cell.0 |= DOTS[x % 2][y % 4];
-                        cell.2 = s;
-                    }
-                } else if let Some(cell) = cells.get_mut(y).and_then(|row| row.get_mut(x)) {
-                    cell.1 = Some(glyphs.markers[s % MAX_SERIES]);
-                    cell.2 = s;
+                }
+                let top = usize::try_from(x).ok().and_then(|x| tops.get_mut(x));
+                if let Some(top) = top
+                    && top.is_none_or(|kept| (y - base).abs() > (kept - base).abs())
+                {
+                    *top = Some(y);
                 }
             }
             previous = Some(point);
         }
     }
-    for (r, row) in cells.iter().enumerate() {
-        let (text, tick) = match r {
-            0 => (&y_labels[0], true),
-            r if r == mid_row => (&y_labels[1], true),
-            r if r + 1 == PLOT_ROWS => (&y_labels[2], true),
-            _ => (&String::new(), false),
-        };
-        let mut spans = vec![
-            Span::styled(format!("{:>y_cells$}", fit(text, y_cells)), dim()),
-            pad(1),
-            Span::styled(if tick { glyphs.tick } else { glyphs.axis }, dim()),
-        ];
-        let mut run = String::new();
-        let mut run_style = Style::new();
-        for &(bits, marker, s) in row {
-            let (glyph, style) = match (bits, marker) {
-                (0, None) => (" ".to_owned(), Style::new()),
-                (bits, None) => (
-                    char::from_u32(0x2800 + u32::from(bits))
-                        .unwrap_or(' ')
-                        .to_string(),
-                    series_style(s, look),
-                ),
-                (_, Some(marker)) => (marker.to_owned(), series_style(s, look)),
-            };
-            if style != run_style && !run.is_empty() {
-                spans.push(Span::styled(std::mem::take(&mut run), run_style));
+    for x in 0..dots_x {
+        // The farthest from the base first, so a smaller area is drawn
+        // over a larger. A line chart kept no dots here.
+        let mut column: Vec<(usize, i64)> = tops
+            .iter()
+            .enumerate()
+            .filter_map(|(s, tops)| Some((s, tops.get(x).copied().flatten()?)))
+            .collect();
+        column.sort_by_key(|&(s, y)| (std::cmp::Reverse((y - base).abs()), s));
+        for (s, top) in column {
+            for y in top.min(base)..=top.max(base) {
+                plot.set(i64::try_from(x).unwrap_or(0), y, s, &glyphs);
             }
-            run_style = style;
-            run.push_str(&glyph);
         }
-        let kept = run.trim_end();
-        if !kept.is_empty() {
-            spans.push(Span::styled(kept.to_owned(), run_style));
-        }
-        lines.push(Line::from(spans));
     }
-    lines.push(Line::from(vec![
-        pad(y_cells + 1),
-        Span::styled(
-            format!("{}{}", glyphs.corner, glyphs.rule.repeat(plot)),
-            dim(),
-        ),
-    ]));
-    lines.push(x_labels(spec, plot, y_cells + 2, x_of, glyphs.braille));
+    lines.extend(plot.lines(&y_labels, y_cells, &glyphs, look));
+    lines.push(x_labels(spec, columns, y_cells + 2, x_of, glyphs.braille));
     lines
 }
 
@@ -1104,6 +1286,19 @@ fn table(spec: &Spec, width: usize, look: Look) -> Vec<Line<'static>> {
 
 /// A diagram, drawn as an answer's Mermaid fence is but with no rail: the
 /// card's gutter takes its place. Nothing until the source has a line.
+/// An SVG image in cells ([`crate::svg`]), or why its complete source does
+/// not draw.
+fn svg_image(spec: &Spec, width: usize, look: Look) -> Vec<Line<'static>> {
+    let drawing = crate::svg::draw(spec, width, look);
+    match &drawing.error {
+        Some(error) => vec![Line::from(Span::styled(
+            format!("{} {error}", copy::SVG_NOT_DRAWN),
+            dim(),
+        ))],
+        None => drawing.lines.clone(),
+    }
+}
+
 fn diagram(spec: &Spec, width: usize, look: Look) -> Vec<Line<'static>> {
     if spec.source.trim().is_empty() {
         return Vec::new();
@@ -1888,6 +2083,433 @@ mod tests {
         assert_eq!(expanded.len(), full.len());
     }
 
+    fn parts() -> Spec {
+        Spec {
+            kind: Some(Kind::Stacked),
+            columns: vec![
+                "crate".into(),
+                "debug".into(),
+                "release".into(),
+                "test".into(),
+            ],
+            unit: "s".into(),
+            rows: vec![
+                vec![t("bake-ai"), n(12.5), n(30.0), n(4.0)],
+                vec![t("bake-tui"), n(8.0), Cell::Empty, n(11.0)],
+                vec![t("bake-cli"), n(1.0), n(0.3), n(-2.0)],
+            ],
+            ..Spec::default()
+        }
+    }
+
+    fn cloud() -> Spec {
+        Spec {
+            kind: Some(Kind::Scatter),
+            columns: vec!["size".into(), "parse".into(), "render".into()],
+            unit: "ms".into(),
+            rows: vec![
+                vec![n(1.0), n(2.0), n(9.0)],
+                vec![n(2.0), n(4.0), Cell::Empty],
+                vec![n(4.0), n(3.0), n(6.0)],
+                vec![Cell::Empty, n(50.0), n(50.0)],
+                vec![n(9.0), n(10.0), n(1.0)],
+            ],
+            ..Spec::default()
+        }
+    }
+
+    fn shares() -> Spec {
+        Spec {
+            kind: Some(Kind::Pie),
+            columns: vec!["lang".into(), "lines".into()],
+            rows: vec![
+                vec![t("Rust"), n(182_000.0)],
+                vec![t("Markdown"), n(41_000.0)],
+                vec![t("TOML"), n(-5.0)],
+                vec![t("JSON"), n(15_000.0)],
+                vec![t("Shell"), n(1_200.0)],
+            ],
+            ..Spec::default()
+        }
+    }
+
+    fn grid() -> Spec {
+        Spec {
+            kind: Some(Kind::Heatmap),
+            columns: vec![
+                "day".into(),
+                "00h".into(),
+                "06h".into(),
+                "12h".into(),
+                "18h".into(),
+            ],
+            unit: "%".into(),
+            rows: vec![
+                vec![t("Mon"), n(0.0), n(25.0), n(50.0), n(100.0)],
+                vec![t("Tue"), n(75.0), Cell::Empty, n(10.0), n(60.0)],
+            ],
+            ..Spec::default()
+        }
+    }
+
+    /// The first span of `line` whose text holds `needle`.
+    fn span_of<'a>(line: &'a Line<'static>, needle: &str) -> &'a Span<'static> {
+        line.spans
+            .iter()
+            .find(|span| span.content.contains(needle))
+            .unwrap_or_else(|| panic!("no span holds {needle:?}: {line:?}"))
+    }
+
+    // One bar a row: its series end to end, a cell two series share drawn
+    // in both colours, and the total after it. A value below 0 is no part.
+    #[test]
+    fn stacked_bars_put_a_row_s_series_end_to_end() {
+        assert_eq!(
+            drawn(&parts(), 48, COLOUR),
+            [
+                "█ debug  █ release  █ test",
+                "bake-ai  ████████▊████████████████████▉██▋ 46.5s",
+                "bake-tui █████▋███████▍ 19s",
+                "bake-cli ▊ 1.3s",
+            ]
+        );
+        let lines = draw(&parts(), 48, COLOUR);
+        let shared = span_of(&lines[1], "▊");
+        assert_eq!(
+            (shared.style.fg, shared.style.bg),
+            (Some(rgb(Token::Teal)), Some(rgb(Token::XHigh)))
+        );
+        // The bar's last cell has nothing behind it.
+        let last = span_of(&lines[1], "▋");
+        assert_eq!(
+            (last.style.fg, last.style.bg),
+            (Some(rgb(Token::High)), None)
+        );
+        // Without colour each cell takes its series' shade.
+        assert_eq!(
+            drawn(&parts(), 48, PLAIN),
+            [
+                "█ debug  ▓ release  ▒ test",
+                "bake-ai  █████████▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▒▒▒ 46.5s",
+                "bake-tui ██████▒▒▒▒▒▒▒ 19s",
+                "bake-cli █ 1.3s",
+            ]
+        );
+        assert_eq!(
+            drawn(&parts(), 30, CLASSIC),
+            [
+                "# debug  = release  * test",
+                "bake-ai  ####==========* 46.5s",
+                "bake-tui ##**** 19s",
+                "bake-cli  1.3s",
+            ]
+        );
+    }
+
+    // Lines filled down to 0, the smaller area in front.
+    #[test]
+    fn areas_fill_their_lines_down_to_zero() {
+        let area = Spec {
+            kind: Some(Kind::Area),
+            ..trend()
+        };
+        assert_eq!(
+            drawn(&area, 30, COLOUR),
+            [
+                "█ a  █ b",
+                "8 ┤                  ⢀⣾⣶⣄",
+                "  │                 ⣠⣿⣿⣿⣿⣿⣦⣄",
+                "  │                ⣰⣿⣿⣿⣿⣿⣿⣿⣿⣷⣦",
+                "  │      ⢀⡀      ⢀⣼⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿",
+                "  │   ⢀⣤⣾⣿⣿⣷⣶⣤⣄⡀⢠⣾⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿",
+                "4 ┤⢀⣠⣶⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿",
+                "  │⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿",
+                "  │⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿",
+                "  │⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿",
+                "0 ┤⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿",
+                "  └───────────────────────────",
+                "   1            3            5",
+            ]
+        );
+        // The peak is the first series'; along the axis the second, which
+        // stays under it, is in front.
+        let lines = draw(&area, 30, COLOUR);
+        assert_eq!(span_of(&lines[1], "⣾").style.fg, Some(rgb(Token::Teal)));
+        assert_eq!(span_of(&lines[10], "⣿").style.fg, Some(rgb(Token::XHigh)));
+        // In markers, the series in front shows by its glyph.
+        assert_eq!(
+            drawn(&area, 30, CLASSIC),
+            [
+                "* a  o b",
+                "8 +                   **",
+                "  |                  *******",
+                "  |                ***********",
+                "  |     ***       ************",
+                "  |   *********  *************",
+                "4 + **********************oooo",
+                "  |****************ooooooooooo",
+                "  |**********ooooooooooooooooo",
+                "  |***oooooooooooooooooooooooo",
+                "0 +ooooooooooooooooooooooooooo",
+                "  +---------------------------",
+                "   1            3            5",
+            ]
+        );
+    }
+
+    // Points by their x and y: both axes labelled, the x axis named, and
+    // a row without an x left out.
+    #[test]
+    fn scatters_plot_points_on_two_value_axes() {
+        assert_eq!(
+            drawn(&cloud(), 36, COLOUR),
+            [
+                "● parse  ● render",
+                " 10ms ┤                            ⠛",
+                "      │⠛",
+                "      │",
+                "      │",
+                "      │          ⠶",
+                "5.5ms ┤",
+                "      │   ⠶",
+                "      │          ⣤",
+                "      │⣤",
+                "  1ms ┤                            ⣤",
+                "      └─────────────────────────────",
+                "       1             5             9",
+                "                   size",
+            ]
+        );
+        let lines = draw(&cloud(), 36, COLOUR);
+        assert_eq!(span_of(&lines[1], "⠛").style.fg, Some(rgb(Token::Teal)));
+        assert_eq!(span_of(&lines[2], "⠛").style.fg, Some(rgb(Token::XHigh)));
+        assert_eq!(
+            drawn(&cloud(), 36, CLASSIC),
+            [
+                "* parse  o render",
+                " 10ms +                            *",
+                "      |o",
+                "      |",
+                "      |",
+                "      |           o",
+                "5.5ms +",
+                "      |    *",
+                "      |           *",
+                "      |*",
+                "  1ms +                            o",
+                "      +-----------------------------",
+                "       1             5             9",
+                "                   size",
+            ]
+        );
+    }
+
+    // A disc beside its legend, under it when the width is short, and
+    // bars where a disc's slices could not be told apart.
+    #[test]
+    fn pies_show_shares_as_a_disc_or_as_bars() {
+        assert_eq!(
+            drawn(&shares(), 48, COLOUR),
+            [
+                "   ▄▄██████▄▄",
+                " ▄████████████▄",
+                "▄█████▀████████▄  █ Rust      76%  182k",
+                "▀██████▀████████  █ Markdown  17%   41k",
+                "████████████████  █ JSON       6%   15k",
+                "▀██████████████▀  █ Shell      1%  1200",
+                " ▀████████████▀",
+                "   ▀▀██████▀▀",
+            ]
+        );
+        // Each legend key is its slice's colour, in the series' order.
+        let lines = draw(&shares(), 48, COLOUR);
+        for (line, token) in [
+            (2, Token::Teal),
+            (3, Token::XHigh),
+            (4, Token::High),
+            (5, Token::Slate),
+        ] {
+            let key = lines[line]
+                .spans
+                .iter()
+                .rev()
+                .find(|span| span.content == "█")
+                .expect("a key");
+            assert_eq!(key.style.fg, Some(rgb(token)), "line {line}");
+        }
+        // Clockwise from the top, the first slice comes first.
+        assert_eq!(
+            lines[0].spans.last().and_then(|span| span.style.fg),
+            Some(rgb(Token::Teal))
+        );
+        let narrow = drawn(&shares(), 24, COLOUR);
+        assert_eq!(narrow.len(), 8 + 4);
+        assert_eq!(narrow[8], "█ Rust      76%  182k");
+        assert_eq!(
+            drawn(&shares(), 40, PLAIN),
+            [
+                "Rust     ███████████████▎      76%  182k",
+                "Markdown ███▍                  17%   41k",
+                "JSON     █▎                     6%   15k",
+                "Shell    ▏                      1%  1200",
+            ]
+        );
+        assert_eq!(
+            drawn(&shares(), 40, CLASSIC),
+            [
+                "Rust     ###############       76%  182k",
+                "Markdown ###                   17%   41k",
+                "JSON     #                      6%   15k",
+                "Shell                           1%  1200",
+            ]
+        );
+        // A large pie takes more rows.
+        let large = Spec {
+            large: true,
+            ..shares()
+        };
+        assert_eq!(drawn(&large, 60, COLOUR).len(), 14);
+        // More rows than slices keep the largest, in the rows' order, and
+        // gather the rest; a share that rounds to nothing still shows.
+        let many = Spec {
+            kind: Some(Kind::Pie),
+            rows: (0..10)
+                .map(|i| {
+                    vec![
+                        t(&format!("s{i}")),
+                        n(if i == 3 { 0.4 } else { f64::from(i) + 1.0 }),
+                    ]
+                })
+                .collect(),
+            ..Spec::default()
+        };
+        assert_eq!(
+            drawn(&many, 30, PLAIN),
+            [
+                "s4       █▏           10%    5",
+                "s5       █▎           12%    6",
+                "s6       █▌           14%    7",
+                "s7       █▊           16%    8",
+                "s8       █▉           18%    9",
+                "s9       ██▏          19%   10",
+                "other    █▍           12%  6.4",
+            ]
+        );
+        assert_eq!(charts::slices(&many).len(), charts::SLICES);
+        assert_eq!(charts::percent(0.004), "<1%");
+        assert_eq!(charts::percent(0.0), "0%");
+    }
+
+    // A cell per row and column: its colour by value with the value in
+    // it, a shade without colour, and the scale under the rows.
+    #[test]
+    fn heatmaps_colour_each_cell_by_its_value() {
+        assert_eq!(
+            drawn(&grid(), 40, COLOUR),
+            [
+                "           00h    06h    12h    18h",
+                "Mon         0     25     50     100  ",
+                "Tue        75            10     60   ",
+                "         0%            100%",
+            ]
+        );
+        let lines = draw(&grid(), 40, COLOUR);
+        let hot = span_of(&lines[1], "100");
+        assert_eq!(
+            (hot.style.bg, hot.style.fg),
+            (
+                Some(Color::Rgb(0x3d, 0xe8, 0xcf)),
+                Some(Color::Rgb(0, 0, 0))
+            )
+        );
+        let cold = span_of(&lines[1], " 0 ");
+        assert_eq!(
+            (cold.style.bg, cold.style.fg),
+            (
+                Some(Color::Rgb(0x14, 0x2b, 0x3a)),
+                Some(Color::Rgb(255, 255, 255))
+            )
+        );
+        // A missing value has no colour.
+        assert!(
+            lines[2]
+                .spans
+                .iter()
+                .any(|span| span.content == "       " && span.style == Style::new())
+        );
+        // On the ANSI palette the scale takes the nearest colours.
+        let ansi = draw(&grid(), 40, ANSI);
+        assert!(matches!(
+            span_of(&ansi[1], "100").style.bg,
+            Some(Color::Indexed(_))
+        ));
+        // Cells too narrow for their values are colour alone.
+        assert_eq!(
+            drawn(&grid(), 12, COLOUR),
+            ["     0011", "Mon      ", "Tue      ", "     0%     "]
+        );
+        assert_eq!(
+            drawn(&grid(), 40, PLAIN),
+            [
+                "           00h    06h    12h    18h",
+                "Mon      ░░░░░░░▒▒▒▒▒▒▒▓▓▓▓▓▓▓███████",
+                "Tue      ▓▓▓▓▓▓▓       ░░░░░░░▓▓▓▓▓▓▓",
+                "         0% ░░▒▒▓▓██ 100%",
+            ]
+        );
+        let ascii = Look {
+            tones: Tones::None,
+            ..CLASSIC
+        };
+        assert_eq!(
+            drawn(&grid(), 40, ascii),
+            [
+                "           00h    06h    12h    18h",
+                "Mon      .......:::::::+++++++#######",
+                "Tue      +++++++       .......+++++++",
+                "         0% ..::++## 100%",
+            ]
+        );
+        // A heatmap takes more columns than a chart has series.
+        let wide = Spec {
+            kind: Some(Kind::Heatmap),
+            columns: (0..30).map(|i| format!("c{i}")).collect(),
+            rows: vec![(0..30).map(|i| n(f64::from(i))).collect()],
+            ..Spec::default()
+        };
+        assert_eq!(series_of(&wide), HEAT_COLUMNS);
+        // The label column and its gap, then two cells a column.
+        assert_eq!(
+            drawn(&wide, 80, PLAIN)[1].chars().count(),
+            9 + HEAT_COLUMNS * 2
+        );
+    }
+
+    // A large plot takes twice the rows, and a preview keeps a plot, a
+    // pie, and an image whole.
+    #[test]
+    fn a_large_plot_is_taller_and_previews_whole() {
+        let large = Spec {
+            large: true,
+            ..trend()
+        };
+        // The legend, the plot, the axis, and the x labels.
+        assert_eq!(drawn(&large, 40, COLOUR).len(), 1 + LARGE_PLOT_ROWS + 2);
+        assert_eq!(drawn(&trend(), 40, COLOUR).len(), 1 + PLOT_ROWS + 2);
+        let shown = card(Visual::running(large.clone()), 40, COLOUR);
+        assert_eq!(shown.len(), 1 + 1 + LARGE_PLOT_ROWS + 2);
+        assert!(!shown.iter().any(|line| line.contains("more row")));
+        assert_eq!(shown[0], "  ● Line chart  5 rows · 2 series");
+        for (spec, head) in [
+            (parts(), "  ● Stacked bar chart  3 rows · 3 series"),
+            (cloud(), "  ● Scatter chart  5 rows · 2 series"),
+            (shares(), "  ● Pie chart  5 rows"),
+            (grid(), "  ● Heatmap  2 rows · 4 columns"),
+        ] {
+            assert_eq!(card(Visual::running(spec), 60, PLAIN)[0], head);
+        }
+    }
+
     fn any_cell() -> impl Strategy<Value = Cell> {
         prop_oneof![
             any::<f64>().prop_map(|v| Number::new(v).map_or(Cell::Empty, Cell::Number)),
@@ -1909,7 +2531,12 @@ mod tests {
             prop_oneof![
                 Just(None),
                 Just(Some(Kind::Bar)),
+                Just(Some(Kind::Stacked)),
                 Just(Some(Kind::Line)),
+                Just(Some(Kind::Area)),
+                Just(Some(Kind::Scatter)),
+                Just(Some(Kind::Pie)),
+                Just(Some(Kind::Heatmap)),
                 Just(Some(Kind::Table))
             ],
             "\\PC{0,80}|[\\x00-\\x1f\\u{1b}\\[m0-9]{0,20}",
@@ -1917,9 +2544,10 @@ mod tests {
             prop::option::of(any::<f64>()),
             prop::option::of(any::<f64>()),
             "\\PC{0,20}",
-            prop::collection::vec(prop::collection::vec(any_cell(), 0..10), 0..40),
+            prop::collection::vec(prop::collection::vec(any_cell(), 0..30), 0..40),
+            any::<bool>(),
         )
-            .prop_map(|(kind, title, columns, min, max, unit, rows)| Spec {
+            .prop_map(|(kind, title, columns, min, max, unit, rows, large)| Spec {
                 kind,
                 title,
                 columns,
@@ -1927,6 +2555,7 @@ mod tests {
                 max: max.and_then(Number::new),
                 unit,
                 rows,
+                large,
                 ..Spec::default()
             })
     }

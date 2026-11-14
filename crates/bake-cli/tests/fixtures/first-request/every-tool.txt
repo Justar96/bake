@@ -696,7 +696,7 @@ Session started: <date> (UTC)
     {
       "type": "function",
       "name": "visualize",
-      "description": "Show the user a bar chart, line chart, table, or Mermaid diagram in the terminal. Use it for comparisons, trends, tables, or structure and flows the user should see at a glance. The user sees the drawing; you get a short confirmation, so do not repeat the data in prose.",
+      "description": "Show the user a chart, table, Mermaid diagram, or SVG image in the terminal. Use it to explain: comparisons (bar, stacked), trends (line, area), relationships (scatter), shares (pie), grids of values (heatmap), tables, structure and flows (diagram), or a picture you draw yourself (svg), such as an architecture sketch, a layout, a timeline, or an annotated illustration. The user sees the drawing as you write it; you get a short confirmation, with warnings about what will not show well, so do not repeat the data in prose. For svg, write one self-contained <svg> with a viewBox of about 960 by 400 (1440 by 640 with size large) and a full-size background rect. It draws sharp where the terminal shows images and in coloured blocks elsewhere, so prefer bold shapes, strong contrast, and text of at least 16 units at that scale; reuse shapes with <defs> and <use>. Linked images, scripts, and animation do not show. For a complex svg or diagram, set preview to get the drawing back and check it.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -704,23 +704,41 @@ Session started: <date> (UTC)
             "type": "string",
             "enum": [
               "bar",
+              "stacked",
               "line",
+              "area",
+              "scatter",
+              "pie",
+              "heatmap",
               "table",
-              "diagram"
+              "diagram",
+              "svg"
             ],
-            "description": "bar: a bar per row and series; line: series over the rows in order; table: rows and columns; diagram: Mermaid source."
+            "description": "bar: a bar per row and series; stacked: one bar per row, its series end to end; line: series over the rows in order; area: lines filled down to 0; scatter: points, the first column their x and the rest their y; pie: one series as shares of its total; heatmap: a cell per row and column, coloured by value; table: rows and columns; diagram: Mermaid source; svg: SVG source."
           },
           "title": {
             "type": "string",
             "maxLength": 120
           },
+          "size": {
+            "type": "string",
+            "enum": [
+              "normal",
+              "large"
+            ],
+            "description": "large: a taller plot for line, area, scatter, and pie, and an svg up to 144 by 32 cells instead of 96 by 20. Use it when detail needs the room."
+          },
+          "preview": {
+            "type": "boolean",
+            "description": "svg and diagram: true also returns the drawing to you, an svg as an image and a diagram as text, so you can check it and fix what is wrong."
+          },
           "columns": {
             "type": "array",
-            "maxItems": 8,
+            "maxItems": 25,
             "items": {
               "type": "string"
             },
-            "description": "Column names. The first labels each row (its category or x); for bar and line, the rest are numeric series."
+            "description": "Column names. The first labels each row (its category or x); for charts, the rest are numeric series: up to 7, one for pie, up to 24 for heatmap."
           },
           "y": {
             "type": "object",
@@ -736,7 +754,7 @@ Session started: <date> (UTC)
                 "maxLength": 12
               }
             },
-            "description": "bar and line: the value axis, when not taken from the data."
+            "description": "Charts: the value axis (a heatmap's colour scale), when not taken from the data, and the values' unit."
           },
           "rows": {
             "type": "array",
@@ -751,12 +769,12 @@ Session started: <date> (UTC)
                 ]
               }
             },
-            "description": "One array per row, in column order. Series values are numbers, or null when missing."
+            "description": "One array per row, in column order. Series values are numbers, or null when missing; a scatter's first value is its x, a number."
           },
           "source": {
             "type": "string",
-            "maxLength": 16384,
-            "description": "diagram: Mermaid flowchart, sequenceDiagram, stateDiagram-v2, classDiagram, or erDiagram."
+            "maxLength": 131072,
+            "description": "diagram: Mermaid flowchart, sequenceDiagram, stateDiagram-v2, classDiagram, or erDiagram, at most 16384 bytes. svg: an <svg> document with a viewBox, at most 131072 bytes."
           }
         },
         "required": [

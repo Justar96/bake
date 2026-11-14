@@ -12,6 +12,7 @@ members = [
     "crates/bake-process",
     "crates/bake-release",
     "crates/bake-sandbox",
+    "crates/bake-svg",
     "crates/bake-tui",
     "crates/bake-tui-view",
     "crates/bake-update",
@@ -38,6 +39,7 @@ bake-mcp = { path = "crates/bake-mcp" }
 bake-mermaid = { path = "crates/bake-mermaid" }
 bake-process = { path = "crates/bake-process" }
 bake-sandbox = { path = "crates/bake-sandbox" }
+bake-svg = { path = "crates/bake-svg" }
 bake-tui = { path = "crates/bake-tui" }
 bake-tui-view = { path = "crates/bake-tui-view" }
 bake-update = { path = "crates/bake-update" }
@@ -89,6 +91,12 @@ serde-saphyr = { version = "=2.0.0", default-features = false, features = ["dese
 # `windows-sys` (already in the lock for Tokio) gives the bash tool Win32 job
 # objects; MIT OR Apache-2.0.
 image = { version = "=0.25.10", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp"] }
+# `bake-svg` draws the `visualize` tool's SVG images: resvg parses (usvg),
+# shapes text (rustybuzz, fontdb with the system's fonts), and rasterizes
+# (tiny-skia). No raster-image decoding or svgz; the resolvers that would
+# read linked files are replaced. Apache-2.0 OR MIT; its dependencies are
+# MIT, Apache-2.0, BSD-3-Clause, or Zlib.
+resvg = { version = "=0.50.0", default-features = false, features = ["text", "system-fonts"] }
 icu_normalizer = { version = "=2.4.0", default-features = false, features = ["compiled_data"] }
 # TOML for the release tool alone (`bake-release`): it reads `Cargo.lock`,
 # `about.toml`, and `licenses/upstream.toml`. MIT OR Apache-2.0; not shipped,
@@ -163,6 +171,14 @@ opt-level = 3
 [profile.dev.package.image-webp]
 opt-level = 3
 [profile.dev.package.gif]
+opt-level = 3
+# resvg's parser and rasterizer draw the visualize tool's SVG images;
+# unoptimized, the view tests would wait on them.
+[profile.dev.package.tiny-skia]
+opt-level = 3
+[profile.dev.package.usvg]
+opt-level = 3
+[profile.dev.package.resvg]
 opt-level = 3
 # Cranelift and the Wasm parser compile plugin components in the helper;
 # unoptimized, the Wasm host tests would spend minutes compiling guests.

@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 98c4e613c79dcbea2af9e7c443cfd4860c98ed38602eb4d1541a6400ed3db05d # shrinks to source = "<'\"'><svg viewBox=\"0 0 8 8\">", cut = 28

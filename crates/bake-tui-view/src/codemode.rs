@@ -936,7 +936,7 @@ mod tests {
         let lines = render(stopped, 60, look);
         assert_eq!(
             lines[0],
-            "╭─ {} codemode  1 call · 1 cancelled   interrupted ───────╮"
+            "╭─ {} codemode  1 call · 1 cancelled   interrupted ─╮"
         );
         // A blinking head keeps its width while hidden.
         let mut running = script(CallState::Running);

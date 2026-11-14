@@ -2322,6 +2322,49 @@ fn tone_style(tone: Tone, tones: Tones) -> Style {
     }
 }
 
+/// The finished SVG images whose every row is among `screen`'s, which
+/// start at `x`, `y`.
+fn images_on(
+    view: &transcript::Transcript,
+    screen: &[(transcript::Anchor, Line<'static>)],
+    x: u16,
+    y: u16,
+) -> Vec<crate::state::ImagePlacement> {
+    let mut placed = Vec::new();
+    let mut seen = None;
+    for (i, (at, _)) in screen.iter().enumerate() {
+        if seen == Some(at.row) {
+            continue;
+        }
+        seen = Some(at.row);
+        let Some((line, column, image)) = view.image(at.row) else {
+            continue;
+        };
+        // The image's first row on screen, and every row after it.
+        let Some(first) = screen[i..]
+            .iter()
+            .position(|(other, _)| other.row == at.row && other.line == line)
+            .map(|offset| i + offset)
+        else {
+            continue;
+        };
+        let rows = usize::from(image.rows);
+        let whole = (0..rows).all(|k| {
+            screen
+                .get(first + k)
+                .is_some_and(|(other, _)| other.row == at.row && other.line == line + k)
+        });
+        if whole {
+            placed.push(crate::state::ImagePlacement {
+                x: x + column,
+                y: y + first as u16,
+                image,
+            });
+        }
+    }
+    placed
+}
+
 /// The transcript viewport, the activity under its newest line, and its
 /// scroll indicator.
 ///
@@ -2393,6 +2436,13 @@ fn render_transcript(
         0
     };
     let drawn = screen.len() as u16;
+    app.svg_images = if published.is_none() {
+        images_on(view, &screen, area.x, area.y + offset)
+    } else {
+        // Inline, rows pass into the scrollback, where an image placed
+        // over them would not follow.
+        Vec::new()
+    };
     for (i, (at, content)) in screen.into_iter().enumerate() {
         let y = area.y + offset + i as u16;
         // The cells a selection covers are drawn reversed, keeping their
@@ -4474,8 +4524,8 @@ mod tests {
             [
                 "  ○ deepseek-v4-flash high  ctx ~11%",
                 "  ○ deepseek-v4-flash high  ctx ~11%  …rojects/bake ⎇ main",
-                "  ○ deepseek-v4-flash high  ctx ▰▱▱▱▱ ~11% (15.2k/128k)  …projects/bake ⎇ main",
-                "  ○ deepseek-v4-flash high  ctx ▰▱▱▱▱ ~11% (15.2k/128k)  ~/projects/bake ⎇ main",
+                "  ○ deepseek-v4-flash high  ctx ~11% (15.2k/128k)  ~/projects/bake ⎇ main",
+                "  ○ deepseek-v4-flash high  ctx ~11% (15.2k/128k)  ~/projects/bake ⎇ main",
             ]
         );
         let (idle, _) = draw(&mut app, 80, 24);
@@ -4655,20 +4705,19 @@ mod tests {
             0,
             [rgb(0xfa, 0xcc, 0x15), Some(Color::Yellow), None],
         );
-        // The gauge's fill and the percentage, through the thresholds.
+        // The percentage, through the thresholds.
         let green = [rgb(0x4a, 0xde, 0x80), Some(Color::Green), None];
         let yellow = [rgb(0xfa, 0xcc, 0x15), Some(Color::Yellow), None];
         let orange = [rgb(0xfb, 0x92, 0x3c), Some(Color::LightRed), None];
         let red = [rgb(0xf8, 0x71, 0x71), Some(Color::Red), None];
-        for (percent, fill, text) in [
-            (23, green, None),
-            (65, yellow, Some(yellow)),
-            (75, yellow, Some(yellow)),
-            (85, orange, Some(orange)),
-            (95, red, Some(red)),
+        for (percent, text) in [
+            (23, None),
+            (65, Some(yellow)),
+            (75, Some(yellow)),
+            (85, Some(orange)),
+            (95, Some(red)),
         ] {
             update(&mut app, Msg::Runtime(status(percent, None, "high")));
-            check(&mut app, "ctx ▰", 4, fill);
             let reading = format!("~{percent}%");
             match text {
                 Some(want) => check(&mut app, &reading, 0, want),
@@ -4679,11 +4728,14 @@ mod tests {
                 ),
             }
         }
-        // The empty cells are dim.
+        // No gauge is drawn.
         update(&mut app, Msg::Runtime(status(23, None, "high")));
         let cells = status_cells(&mut app, 120);
-        let empty = style_at(&cells, "▱", 0);
-        assert_eq!((empty.fg, empty.add_modifier), (None, Modifier::DIM));
+        assert!(
+            !cells
+                .iter()
+                .any(|(symbol, _)| ["▰", "▱"].contains(&symbol.as_str()))
+        );
         // The cache's share, turned on, warms as it falls.
         for (hit, want) in [(99, green), (60, yellow), (12, orange)] {
             update(&mut app, Msg::Runtime(status(23, Some(hit), "high")));

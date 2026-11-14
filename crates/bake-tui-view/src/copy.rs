@@ -212,8 +212,18 @@ pub const MORE_ROW_NOUNS: (&str, &str) = ("more row", "more rows");
 /// its kind has arrived.
 pub const VISUAL_BAR: &str = "Bar chart";
 pub const VISUAL_LINE: &str = "Line chart";
+pub const VISUAL_STACKED: &str = "Stacked bar chart";
+pub const VISUAL_AREA: &str = "Area chart";
+pub const VISUAL_SCATTER: &str = "Scatter chart";
+pub const VISUAL_PIE: &str = "Pie chart";
+pub const VISUAL_HEATMAP: &str = "Heatmap";
+/// The slice a pie chart gathers its smallest rows into.
+pub const PIE_OTHER: &str = "other";
 pub const VISUAL_TABLE: &str = "Table";
 pub const VISUAL_DIAGRAM: &str = "Diagram";
+pub const VISUAL_SVG: &str = "SVG image";
+/// Before why an SVG image's complete source does not draw.
+pub const SVG_NOT_DRAWN: &str = "Not drawn:";
 pub const VISUALIZE: &str = "Visualize";
 /// A `visualize` diagram's status: the family its source's first line
 /// names.

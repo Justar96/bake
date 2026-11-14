@@ -2352,6 +2352,12 @@ impl AgentSession {
         self.questions.as_ref()
     }
 
+    /// Whether the session started with the tool `name` among its active
+    /// tools.
+    pub fn tool_active(&self, name: &str) -> bool {
+        self.active_tool_names.iter().any(|active| active == name)
+    }
+
     /// The session's telecom station: `None` when telecom is off,
     /// `Some(Err(_))` with why it did not start.
     pub fn telecom(&self) -> Option<Result<&crate::telecom::Station, &str>> {
@@ -2784,6 +2790,17 @@ impl AgentSession {
         self.run_change(move |control| async move {
             write_settings(&control.settings).telecom = on;
             Ok(control.save(move |store| store.set_telecom(on)).await)
+        })
+        .await
+    }
+
+    /// Sets `visualize`. A session's tools are chosen when it is built, so
+    /// the change applies from the next session (`/new`, `/resume`, or a
+    /// restart); this one keeps the tools it started with.
+    pub async fn set_visualize_setting(&self, on: bool) -> Result<DefaultSave, String> {
+        self.run_change(move |control| async move {
+            write_settings(&control.settings).visualize = on;
+            Ok(control.save(move |store| store.set_visualize(on)).await)
         })
         .await
     }

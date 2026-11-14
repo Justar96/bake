@@ -35,6 +35,7 @@ pub mod selection;
 pub mod shell_output;
 pub mod state;
 pub mod status;
+pub mod svg;
 pub mod syntax;
 pub mod tasks;
 pub mod tips;
