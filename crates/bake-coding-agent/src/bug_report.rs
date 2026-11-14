@@ -12,7 +12,7 @@
 //! transcript, when the person includes it, goes only into the local zip
 //! archive, with the working directory Pi lists beside it. The metadata keeps
 //! Pi's shape, with Bake's facts: the `bake` version and user agent, the
-//! `BAKE_`/`DSH_` variable names (never their values), and `settings.json`
+//! `BAKE_` variable names (never their values), and `settings.json`
 //! of the Bake home, which is Bake's only settings scope. Not ported: the
 //! model-written summary, crash records (`crashes` stays empty), extension
 //! listings, and the `runtime` member, which names Pi's JavaScript engine.
@@ -143,8 +143,8 @@ pub fn redact_settings(settings: &Value) -> Value {
 }
 
 /// Pi's `collectEnvironment` with Bake's facts, read through `env`; `names`
-/// are the environment's variable names, of which only the `BAKE_` and
-/// `DSH_` ones are listed, and never their values.
+/// are the environment's variable names, of which only the `BAKE_` ones
+/// are listed, and never their values.
 pub fn collect_environment(
     env: impl Fn(&str) -> Option<String>,
     names: impl IntoIterator<Item = String>,
@@ -153,7 +153,7 @@ pub fn collect_environment(
     let set = |name: &str| var(name).is_some();
     let mut listed: Vec<String> = names
         .into_iter()
-        .filter(|name| name.starts_with("BAKE_") || name.starts_with("DSH_"))
+        .filter(|name| name.starts_with("BAKE_"))
         .collect();
     listed.sort();
     listed.dedup();

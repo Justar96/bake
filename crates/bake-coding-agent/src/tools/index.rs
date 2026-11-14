@@ -13,12 +13,12 @@
 //! Bake adds the background-job tools ([`crate::tools::job_tools`]),
 //! built only with [`ToolsOptions::jobs`] ([`create_bake_tool_definitions`]),
 //! and makes them default tools ([`BAKE_DEFAULT_TOOL_NAMES`]): the owner
-//! decided on 2026-10-18 that background jobs are on by default, as in
-//! Bake 0.3's `standard` preset. The web tools
+//! decided on 2026-10-18 that background jobs are on by default. The web
+//! tools
 //! ([`crate::tools::web_tools`]) are defaults for the same reason, and
 //! [`crate::tools::codemode`] is one because the owner decided on
 //! 2026-10-20 that code mode is on by default, where Pi leaves it
-//! registered but inactive (D42). Pi's names, sets, and selection rules
+//! registered but inactive. Pi's names, sets, and selection rules
 //! are unchanged.
 //!
 //! Bake's [`crate::tools::visualize`] tool is registered with them. It is

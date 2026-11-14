@@ -5,10 +5,8 @@
 //! `--self-check` and must exit 0 within [`SELF_CHECK_TIMEOUT`] and print
 //! the record `crates/bake-cli/src/self_check.rs` writes, naming the
 //! version the manifest publishes and this host's release platform.
-//! Otherwise the pointer never moves. Bake 0.3's launch check
-//! (`packages/boot/updater/src/verify.ts`) is the reference; the native
-//! check needs no Node and no private home, because the record reads
-//! nothing.
+//! Otherwise the pointer never moves. The check needs no private home,
+//! because the record reads nothing.
 
 use std::path::Path;
 use std::process::{Command, Stdio};

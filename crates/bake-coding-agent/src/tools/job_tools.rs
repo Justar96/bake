@@ -1,16 +1,15 @@
 //! The model's background-job tools, `job_output`, `job_list`, and
 //! `job_kill`, over one session's [`JobRegistry`].
 //!
-//! Pi v1.3.0 (`71023aec`; MIT, see the crate `NOTICE`) has no job tools.
-//! Ported from Bake's TypeScript `packages/jobs/tool-jobs/src/index.ts`:
-//! the names, parameters, descriptions under `wakeup` delivery, the
-//! `[status: ...]` line, the still-running guidance, the list and kill
-//! texts, and the unknown-job explanation. Differences: the `job_id`
+//! Pi v1.3.0 (`71023aec`; MIT, see the crate `NOTICE`) has no job tools;
+//! these are Bake's own: the names, parameters, descriptions under `wakeup`
+//! delivery, the `[status: ...]` line, the still-running guidance, the
+//! list and kill texts, and the unknown-job explanation. The `job_id`
 //! description and the unknown-job text mention subagent ids only for a
 //! session that can start subagents
 //! ([`create_job_tool_definitions_with_subagents`]); terminal observations
-//! carry recovery metadata in result details; a `completing` job, which
-//! the TypeScript did not have, reads as `running`; output a stream dropped
+//! carry recovery metadata in result details; a `completing` job reads as
+//! `running`; output a stream dropped
 //! between reads is announced on its own line; and a read longer than
 //! Pi's output limits keeps its tail, as Pi's `bash` does, with a marker
 //! instead of a spill file.
@@ -98,8 +97,8 @@ fn observation(text: String, snapshot: &JobSnapshot) -> AgentToolResult {
     result
 }
 
-/// The status word the model sees: the TypeScript's five, with a
-/// `completing` job still `running`.
+/// The status word the model sees, with a `completing` job still
+/// `running`.
 fn public_status(status: JobStatus) -> &'static str {
     match status {
         JobStatus::Completing => "running",

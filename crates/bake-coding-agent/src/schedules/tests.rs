@@ -1,5 +1,4 @@
-//! Cases from Bake's TypeScript `packages/schedule/schedule/tests/domain.spec.ts`,
-//! and the fold over a Pi session file: its branches and a fork.
+//! The schedule rules and records, and the fold over a Pi session file: its branches and a fork.
 
 use serde_json::{Value, json};
 

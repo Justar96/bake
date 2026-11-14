@@ -1,11 +1,9 @@
-//! The Bake home, retained by D25 and D32.
+//! The Bake home.
 //!
-//! Bake's own rule, not Pi's: `BAKE_HOME`, then `DSH_HOME`, then `~/.bake`,
-//! a blank (empty or whitespace-only) variable counting as unset, as
-//! `scripts/release/bake` and `resolveDshHome` in
-//! `packages/util/home-paths/src/index.ts` apply it. A leading `~` in the
+//! Bake's own rule, not Pi's: `BAKE_HOME`, else `~/.bake`, a blank (empty
+//! or whitespace-only) variable counting as unset. A leading `~` in the
 //! value is expanded against the home directory, and the result is made
-//! absolute, as `resolveDshHome` does. Pi's equivalent is its agent
+//! absolute. Pi's equivalent is its agent
 //! directory, `~/.pi/agent` (`PI_CODING_AGENT_DIR`), which Bake does not read.
 //!
 //! A value that is not valid Unicode is used as the path it names, without
@@ -18,8 +16,6 @@ use crate::session::paths::{lexical_normalize, normalize_path};
 
 /// `BAKE_HOME`.
 pub const BAKE_HOME_ENV: &str = "BAKE_HOME";
-/// `DSH_HOME`, read when `BAKE_HOME` is unset or blank.
-pub const DSH_HOME_ENV: &str = "DSH_HOME";
 /// The default home's directory name under the user's home.
 pub const DEFAULT_HOME_DIR_NAME: &str = ".bake";
 
@@ -31,10 +27,7 @@ pub fn resolve_bake_home(
     user_home: Option<&Path>,
     current_dir: Option<&Path>,
 ) -> Option<PathBuf> {
-    let configured = [BAKE_HOME_ENV, DSH_HOME_ENV]
-        .into_iter()
-        .filter_map(&env)
-        .find(|value| !value.to_string_lossy().trim().is_empty());
+    let configured = env(BAKE_HOME_ENV).filter(|value| !value.to_string_lossy().trim().is_empty());
     let selected = match configured {
         Some(value) => match value.into_string() {
             Ok(value) => normalize_path(&value),
@@ -102,16 +95,13 @@ mod tests {
         let cwd = Path::new("/work");
         let resolve = |pairs: &[(&str, &str)]| resolve_bake_home(env(pairs), Some(user), Some(cwd));
         assert_eq!(resolve(&[]), Some(PathBuf::from("/home/u/.bake")));
+        assert_eq!(resolve(&[("BAKE_HOME", "/b")]), Some(PathBuf::from("/b")));
         assert_eq!(
-            resolve(&[("BAKE_HOME", "/b"), ("DSH_HOME", "/d")]),
-            Some(PathBuf::from("/b"))
+            resolve(&[("BAKE_HOME", "  ")]),
+            Some(PathBuf::from("/home/u/.bake"))
         );
         assert_eq!(
-            resolve(&[("BAKE_HOME", "  "), ("DSH_HOME", "/d")]),
-            Some(PathBuf::from("/d"))
-        );
-        assert_eq!(
-            resolve(&[("BAKE_HOME", ""), ("DSH_HOME", " ")]),
+            resolve(&[("BAKE_HOME", "")]),
             Some(PathBuf::from("/home/u/.bake"))
         );
         assert_eq!(

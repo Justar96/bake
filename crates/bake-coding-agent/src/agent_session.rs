@@ -2380,7 +2380,7 @@ impl AgentSession {
         self.permission.as_ref()
     }
 
-    /// The TypeScript `/permission` command's `apply`: switches the session
+    /// `/permission`: switches the session
     /// to preset `name`, writing the `bake.permission` entry for what
     /// changes ([`crate::permissions::state::preset_change`]) before the
     /// standing permission changes, so a resumed session keeps the switch.

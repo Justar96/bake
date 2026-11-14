@@ -90,8 +90,7 @@ pub struct ExecResult {
 /// Execute an argv without a shell, with closed stdin. By default
 /// ([`ExecEnv::Scrubbed`]) the child inherits the parent's environment
 /// except credential-shaped names (`KEY`, `PASSWORD`, `SECRET`, `TOKEN`,
-/// case-insensitive), per Bake's defensive rule and
-/// `packages/subprocess/subprocess/src/index.ts`'s `SENSITIVE_ENV_PATTERN`.
+/// case-insensitive), per Bake's defensive rule.
 /// This heuristic cannot identify every secret.
 ///
 /// Output has no memory limit: Pi v1.5.2's 256 MiB cap (`maxBuffer`) is

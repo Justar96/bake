@@ -161,7 +161,7 @@ impl Inline {
 }
 
 impl Inline {
-    /// The TypeScript `useRepaint` for a closing sheet: the held region
+    /// The repaint for a closing sheet: the held region
     /// grew for a dialog or an approval, which scrolled the transcript
     /// above it up; the terminal cannot pull those rows back down, so
     /// shrinking the region alone would leave its freed rows as a blank gap

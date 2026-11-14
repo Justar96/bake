@@ -1,6 +1,5 @@
-//! How far one mouse-wheel report scrolls. A port of the TypeScript
-//! `WheelSteps` (adapted there from the `WheelScrollAccelerator` of pi, MIT,
-//! Mario Zechner).
+//! How far one mouse-wheel report scrolls. Adapted from the
+//! `WheelScrollAccelerator` of Pi (MIT, Mario Zechner).
 //!
 //! Terminals report the wheel in one of two ways. A local macOS terminal
 //! sends one report per line, already accelerated by the system, so each

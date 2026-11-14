@@ -1,8 +1,7 @@
 //! HTML to Markdown for `web_fetch` results.
 //!
-//! Bake 0.3 converted fetched HTML with turndown and
-//! `@joplin/turndown-plugin-gfm` plus the rules in
-//! `packages/web/tool-web/src/fetch.ts`: ATX headings, fenced code, `-`
+//! The Markdown is what turndown with `@joplin/turndown-plugin-gfm` and
+//! Bake's rules gives: ATX headings, fenced code, `-`
 //! bullets, `_` and `**` emphasis, GitHub tables whose cells ignore span
 //! counts, and non-visible elements removed (`script`, `style`,
 //! `noscript`, `template`, `iframe`, `object`, `embed`, and any element
@@ -10,16 +9,16 @@
 //! `display: none` or `visibility: hidden` or `collapse`). This module is
 //! Bake's own single-pass converter producing that Markdown: a tokenizer
 //! and an explicit element stack, so no input nests a call stack, and the
-//! work is linear in the input. Its tests compare it with the 0.3
-//! converter's output for the same documents.
+//! work is linear in the input. Its tests compare it with turndown's
+//! output for the same documents.
 //!
 //! It is not a full HTML parser: implied end tags follow the common cases
 //! (`p`, `li`, `dt`, `dd`, table rows and cells, headings), entities are
 //! the common named ones and numeric references, and a `pre` without a
 //! `code` child stays a whitespace-preserving block as in turndown.
 //!
-//! [`exceeds_conversion_depth`] ports 0.3's lexical depth preflight, which
-//! omits deeply nested documents (`MAX_CONVERSION_DEPTH`).
+//! [`exceeds_conversion_depth`] is a lexical depth preflight, which omits
+//! deeply nested documents (`MAX_CONVERSION_DEPTH`).
 
 /// Nesting depth above which HTML is omitted rather than converted
 /// (`MAX_CONVERSION_DEPTH`).
@@ -806,7 +805,7 @@ fn push_inline(buffer: &mut String, text: &str) {
     buffer.push_str(text);
 }
 
-/// `renderTableCell` (0.3 `fetch.ts`).
+/// One table cell, with its leading separator.
 fn render_cell(content: &str, index: usize) -> String {
     let prefix = if index == 0 { "| " } else { " " };
     let mut escaped = String::new();
@@ -859,7 +858,7 @@ fn alignment(attributes: &[(String, String)]) -> Option<String> {
 }
 
 impl Table {
-    /// The table rule of the GFM plugin, with 0.3's row and cell rules.
+    /// The table rule of the GFM plugin, with Bake's row and cell rules.
     fn render(self) -> String {
         let columns = self
             .rows

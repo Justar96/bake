@@ -4,8 +4,6 @@ Bake is a keyboard-driven coding agent for the terminal. It streams the model's 
 
 > [!NOTE]
 > **Bake runs on Linux x86_64**, with glibc 2.34 or newer (RHEL 9 and its rebuilds, Amazon Linux 2023, Ubuntu 22.04, Debian 12, and newer), **and on Windows x64** from 0.4.7, without a sandbox for now (`irm https://bake.justar.dev/install.ps1 | iex`). Bake 0.4.6 was the last Linux arm64 release. **macOS support is coming in a later release.**
->
-> 0.4 is a new install, not an upgrade of Bake 0.3, the earlier TypeScript agent. A 0.3 install keeps working with its own files, but 0.3 receives no further fixes ([D10 and D13](docs/roadmap/rust-0.4/scope-00/support.md#decision-register)).
 
 - **Interactive sessions**, fullscreen or inline in your terminal's scrollback: steer a running turn, stop it with Esc, and pick models, thinking levels, sessions, and settings from slash commands.
 - **Sandboxed tools**: bash, file reads and edits, search, web search and fetch, and code mode, which runs a JavaScript program that calls the other tools, each gated by a permission preset and approvals.
@@ -25,7 +23,7 @@ The installer verifies the release manifest's Ed25519 signature and the archive'
 |---|---|
 | `~/.local/share/bake-native` | linked into `~/.local/bin` (add it to `PATH` if asked) |
 
-If `bake` already runs Bake 0.3, the installer takes that command over and records how to restore it; 0.3's `dsh` command is left alone. A `bake` command that no Bake installer made is left in place unless you pass `--replace-command`.
+A `bake` command that no Bake installer made is left in place unless you pass `--replace-command`.
 
 <details>
 <summary>Installer options</summary>
@@ -49,7 +47,7 @@ cd your-project
 bake
 ```
 
-Bake reaches models through your providers. Run `/login` in a session to connect a [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) account, or describe any OpenAI- or Anthropic-compatible provider in `~/.bake/models.json` with its key in `auth.json`; `bake docs models` shows both. If you used Bake 0.3, its CLIProxyAPI route, key, and default model are read from `~/.bake` without changing them. Then:
+Bake reaches models through your providers. Run `/login` in a session to connect a [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) account, or describe any OpenAI- or Anthropic-compatible provider in `~/.bake/models.json` with its key in `auth.json`; `bake docs models` shows both. Then:
 
 - Type a prompt and press Enter; `@` references a file and `/` lists the commands, such as `/model`, `/thinking`, `/resume`, `/compact`, and `/settings`.
 - `bake -p "explain this repository"` prints one answer and exits; from a script or another agent, `bake -p --output-format json "…"` prints one JSON result with the answer and the session to continue (`bake docs headless`).
@@ -57,7 +55,7 @@ Bake reaches models through your providers. Run `/login` in a session to connect
 - New sessions have full access and never ask, as in Pi. `bake --permission workspace-write`, or `/permission` in a session, keeps changes inside the project and asks before more; `bake docs permissions` explains the presets.
 - `bake docs` lists the built-in documentation, and `bake --help` the launch options.
 
-Bake keeps sessions, settings, and credentials in `~/.bake`. Set `BAKE_HOME` to use another directory; the earlier `DSH_HOME` name still works when `BAKE_HOME` is unset.
+Bake keeps sessions, settings, and credentials in `~/.bake`. Set `BAKE_HOME` to use another directory.
 
 ## Update
 
@@ -74,14 +72,14 @@ curl -fsSL https://bake.justar.dev/install.sh | sh -s -- --uninstall-links
 rm -rf ~/.local/share/bake-native
 ```
 
-The first command restores any `bake` command the installer replaced and removes the links it made. Delete `~/.bake` too to remove sessions and stored credentials; a Bake 0.3 install shares that directory.
+The first command restores any `bake` command the installer replaced and removes the links it made. Delete `~/.bake` too to remove sessions and stored credentials.
 
 ## Documentation
 
 - `bake docs <topic>`: the command line, the Bake home, models, settings, permissions, sessions, context files, skills, MCP, hooks, plugins, code mode, RPC, and updates.
 - [Safety](SAFETY.md): what the sandbox does and does not protect.
 - [Build and test Bake](docs/development.md): building from source with Cargo, the crates, and their checks.
-- [0.4 roadmap](docs/roadmap/rust-0.4/README.md): scopes, decisions, and evidence, and what the macOS and Windows releases still need.
+- [Direction](docs/direction.md): what Bake is working on next, and what it has decided not to do.
 - [Contributing](CONTRIBUTING.md) and the [changelog](CHANGELOG.md).
 
 ## License
@@ -90,7 +88,7 @@ The first command restores any `bake` command the installer replaced and removes
 
 ## Acknowledgements
 
-Bake ports [pi](https://github.com/earendil-works/pi), which is MIT-licensed: its agent loop, session format, tools, and coding agent are the foundation `bake` is built on, with Bake's own sandbox, permissions, terminal interface, and distribution. Bake began as a fork of [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness), DeepSeek's MIT-licensed agent harness, which the 0.3 TypeScript agent ran on.
+Bake ports [pi](https://github.com/earendil-works/pi), which is MIT-licensed: its agent loop, session format, tools, and coding agent are the foundation `bake` is built on, with Bake's own sandbox, permissions, terminal interface, and distribution. Bake began as a fork of [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness), DeepSeek's MIT-licensed agent harness.
 
 Thank you to the authors of both projects.
 

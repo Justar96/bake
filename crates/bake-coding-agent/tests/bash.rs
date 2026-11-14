@@ -97,8 +97,7 @@ async fn run(tool: &AgentTool, params: Value) -> Result<AgentToolResult, String>
     .await
 }
 
-/// Bake's `SENSITIVE_ENV_PATTERN` contract from
-/// `packages/subprocess/subprocess/src/index.ts`, through the real bash tool.
+/// Bake's credential-name scrub, through the real bash tool.
 /// The re-executed fixture owns its environment; parallel tests inherit none
 /// of these synthetic values.
 #[tokio::test]
@@ -373,7 +372,7 @@ fn definition_and_prompt_match_pi() {
     assert_eq!(declaration.parameters, definition["parameters"]);
 
     // Pi's one guideline names the `PI_*` variables, so Bake's tool
-    // contributes none (D33); the snippet is Pi's.
+    // contributes none; the snippet is Pi's.
     let prompt = bash_tool_prompt();
     assert_eq!(prompt.name, "bash");
     assert_eq!(

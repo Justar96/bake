@@ -6,7 +6,7 @@
 //! their tests from v1.2.0, revision
 //! `06a466935536f8c9bcacb2d5efc0fc021be1bdff`. Pi keeps credentials in
 //! `~/.pi/agent/auth.json`; Bake reads and writes `$BAKE_HOME/auth.json`
-//! ([`crate::home`]), never Bake 0.3's `.credentials.yaml` (D25). The file
+//! ([`crate::home`]). The file
 //! maps a provider id to a credential:
 //!
 //! ```json
@@ -157,8 +157,8 @@ const BOUND_PROVIDER: &str = "cliproxyapi";
 
 /// `provider`'s credential in `value`. A `cliproxyapi` record bound to the
 /// Bake account's route is no credential here: only a verified account
-/// read uses its key, so it never reaches another route of that provider,
-/// such as the 0.3 import. Other providers' records are read as Pi reads
+/// read uses its key, so it never reaches another route of that provider.
+/// Other providers' records are read as Pi reads
 /// them, whatever members they carry.
 fn parse_credential(provider: &str, value: &Value) -> Option<Credential> {
     let object = value.as_object()?;

@@ -22,7 +22,7 @@
 //! usually [`LineReader`] and [`LineWriter`] over a child's pipes. [`stdio`]
 //! spawns a server and owns its process, process tree, and standard error
 //! next to the client; the caller decides whether the server may run and
-//! confines it (D24), and gives it its environment. For a remote server,
+//! confines it, and gives it its environment. For a remote server,
 //! [`HttpTransport::start`] returns the transport owner and its message halves;
 //! the caller awaits [`HttpTransport::shutdown`] after the client.
 //! [`HttpTransport::start_with_client`] takes the HTTP client from the

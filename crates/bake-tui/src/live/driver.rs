@@ -419,8 +419,8 @@ pub(super) const INTERRUPTED_PROMPT: &str =
     "Stopped before it was sent; your prompt is back in the draft.";
 
 /// Why a composer slash prompt that names none of [`commands::COMMANDS`]
-/// is refused: it names one of [`DEFERRED_COMMANDS`], or another
-/// command-like word that is neither `/skill:name` nor one of `templates`.
+/// is refused: it names a command-like word that is neither `/skill:name`
+/// nor one of `templates`, so it never reaches the model.
 /// Text whose first word is not command-like, such as a path, goes to the
 /// model as Pi sends it. Interactive command-line prompts are checked by
 /// [`command_line_refusal`]; print and RPC mode check neither.
@@ -440,15 +440,7 @@ pub(super) fn refused_command(text: &str, templates: &[String]) -> Option<String
         && word
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
-    if DEFERRED_COMMANDS.contains(&word) {
-        Some(deferred_command(word))
-    } else if command_like {
-        Some(format!(
-            "/{word} is not a command or prompt template; your draft is kept."
-        ))
-    } else {
-        None
-    }
+    command_like.then(|| unknown_command(word))
 }
 
 /// Why an interactive command-line prompt is refused: as the composer's
@@ -463,9 +455,7 @@ pub(super) fn command_line_refusal(text: &str, templates: &[String]) -> Option<S
     refused_command(text, templates)
 }
 
-/// The refusal of a command in [`DEFERRED_COMMANDS`].
-pub(super) fn deferred_command(word: &str) -> String {
-    format!(
-        "/{word} is not available in bake yet; it is planned for a later 0.4.x release, and your draft is kept."
-    )
+/// The refusal of a command-like word that names no command or template.
+pub(super) fn unknown_command(word: &str) -> String {
+    format!("/{word} is not a command or prompt template; your draft is kept.")
 }

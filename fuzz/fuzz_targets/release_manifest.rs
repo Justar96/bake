@@ -19,8 +19,7 @@ use bake_update::version::{compare_versions, is_release_version};
 use libfuzzer_sys::fuzz_target;
 
 /// Whether no numeric prerelease identifier of `version` has a leading zero,
-/// as semantic versioning requires. `compare_versions` (like 0.3's
-/// `compareVersions`) stops at the first textually different identifiers
+/// as semantic versioning requires. `compare_versions` stops at the first textually different identifiers
 /// even when they are numerically equal, so `1` and `01` break transitivity:
 /// `0.4.0-rc.1.` = `0.4.0-rc.01` = `00.4.0-rc.1`, yet the first is greater
 /// than the last. Release tooling never writes such identifiers.

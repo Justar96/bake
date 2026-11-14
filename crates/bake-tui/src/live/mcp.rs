@@ -70,7 +70,7 @@ fn changed_rows(previous: &[McpServerStatus], current: &[McpServerStatus]) -> Ve
                 _ => return None,
             };
             // A server that requires authorization ends with the OAuth
-            // deferral (D48), Bake's own text, so it is shown as well.
+            // deferral, Bake's own text, so it is shown as well.
             if let McpServerState::Failed { error } | McpServerState::Disconnected { error } =
                 &status.state
                 && error.ends_with(OAUTH_DEFERRED)
@@ -145,7 +145,7 @@ mod tests {
         );
     }
 
-    // D48: a server that requires authorization says that OAuth is
+    // A server that requires authorization says that OAuth is
     // deferred, whether it never served or its connection ended; the rest
     // of its error, which a server can shape, stays out.
     #[test]

@@ -19,7 +19,11 @@ pub const ROOT_PACKAGE: &str = "bake-cli";
 ///
 /// When the manifest has none, or it is not a canonical release version.
 pub fn version(root: &Path) -> Result<String> {
-    let text = read_text(&root.join("Cargo.toml"))?;
+    version_in(&read_text(&root.join("Cargo.toml"))?)
+}
+
+/// [`version`] of the root manifest's text.
+pub fn version_in(text: &str) -> Result<String> {
     let table: toml::Table = text
         .parse()
         .map_err(|error| format!("Cargo.toml does not parse: {error}"))?;

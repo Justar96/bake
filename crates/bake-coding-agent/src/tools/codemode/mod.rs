@@ -34,7 +34,7 @@
 //! Differences from Pi:
 //!
 //! - Code mode is a default tool, by the owner's decision of 2026-10-20.
-//! - No `models` namespace and no grammar-constrained input (D42): the
+//! - No `models` namespace and no grammar-constrained input: the
 //!   description is Pi's with `models` off, and the tool has no constrained
 //!   sampling.
 //! - Bake has no tool exposures: every tool a session declares is `direct`,
@@ -77,8 +77,7 @@ use crate::session::SessionEntry;
 
 pub use execute::{
     BAKE_CODEMODE_MAX_WORKERS_ENV, CODEMODE_ABORT_MESSAGE, DEFAULT_MAX_OUTPUT_TOKENS,
-    DSH_CODEMODE_MAX_WORKERS_ENV, MAX_CONCURRENT_CODEMODE_SCRIPTS, MAX_CONCURRENT_NESTED_CALLS,
-    max_codemode_workers,
+    MAX_CONCURRENT_CODEMODE_SCRIPTS, MAX_CONCURRENT_NESTED_CALLS, max_codemode_workers,
 };
 
 /// The tool's name.
@@ -237,8 +236,7 @@ pub fn codemode_details(calls: &[CodemodeNestedCall], full_output_path: Option<&
 
 /// Pi's `codemodeToolSystemPromptContribution`. Its guideline stays as Pi
 /// wrote it: a model that sends one tool call a response batches through a
-/// script, and a narrower guideline cost GPT-6.1 Terra 31% more requests
-/// (`docs/roadmap/rust-0.4/system-prompt.md`, Later changes).
+/// script, and a narrower guideline cost GPT-6.1 Terra 31% more requests.
 pub fn codemode_tool_prompt() -> ToolPrompt {
     ToolPrompt {
         name: CODEMODE_TOOL_NAME.to_owned(),

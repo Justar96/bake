@@ -1,7 +1,6 @@
-//! The model-visible escalation vocabulary, from
-//! `packages/sandbox/sandbox/src/escalation.ts` and the runner-failure notice
-//! of `packages/shell/tool-bash/src/render.ts`. Every string here reaches the
-//! model and is part of the retained D24 surface: keep it byte for byte.
+//! The model-visible escalation vocabulary and the runner-failure notice.
+//! Every string here reaches the model and is part of the sandbox contract:
+//! keep it byte for byte.
 //!
 //! The approval itself (asking someone) lives above this crate; this module
 //! decides what a request means and words each outcome.
@@ -72,9 +71,7 @@ pub fn escalation_reason(mode: SandboxMode, justification: &str) -> String {
     format!("escalate sandbox to {mode}: {justification}")
 }
 
-/// The answer to an approval request (`EscalationOutcome`). The first
-/// four are the TypeScript vocabulary; Bake adds the two wider grants a
-/// person can give in its terminal.
+/// The answer to an approval request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EscalationOutcome {
     /// Granted for this one call.
@@ -148,8 +145,7 @@ pub fn escalation_hint_marker(subject: &str) -> String {
     )
 }
 
-/// The notice for a sandbox runner that failed before running the command
-/// (`render.ts`).
+/// The notice for a sandbox runner that failed before running the command.
 pub fn runner_failed_notice(mode: SandboxMode) -> String {
     format!(
         "[sandbox: the sandbox runner itself failed under {mode} mode — the command did not run; this is a sandbox problem, not a command failure]"
@@ -162,7 +158,7 @@ mod tests {
     use SandboxMode::*;
 
     #[test]
-    fn checks_follow_typescript() {
+    fn checks_accept_only_wider_targets() {
         assert_eq!(
             check_escalation(ReadOnly, "workspace-write"),
             EscalationCheck::Widen(WorkspaceWrite)
@@ -203,7 +199,7 @@ mod tests {
     }
 
     #[test]
-    fn texts_are_the_typescript_ones() {
+    fn texts_are_fixed() {
         assert_eq!(
             sandbox_denial_marker(WorkspaceWrite),
             "[sandbox: file access denied under workspace-write mode]"

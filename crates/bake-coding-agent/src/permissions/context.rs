@@ -1,23 +1,14 @@
 //! The model-facing statement of a session's permission.
 //!
-//! Bake's TypeScript added two contributions to its runtime-context
-//! snapshot, a message sent after retained history and replaced whole when
-//! it changed: `sandbox:policy` (`renderPolicyContext` in
-//! `packages/sandbox/sandbox-policy/src/index.ts`, order 110) and
-//! `approval:policy` (`ASK_SENTENCE`/`NEVER_SENTENCE` in
-//! `packages/interaction/user-approval/src/index.ts`, order 115), joined by
-//! a blank line.
-//!
-//! Pi has no runtime-context snapshot. Its nearest place is a named
-//! system-prompt section: a session records its sections in a system
+//! The statement is two sentences, the sandbox policy and the approval
+//! policy ([`ASK_SENTENCE`](super::ASK_SENTENCE)/[`NEVER_SENTENCE`](super::NEVER_SENTENCE)),
+//! joined by a blank line, in one named system-prompt section,
+//! [`PERMISSIONS_SECTION`], placed before the `environment` section
+//! ([`crate::system_prompt`]). A session records its sections in a system
 //! message and later sends only the sections that changed, as a new system
-//! message after the history (`diffSystemPromptSections`), so a permission
-//! change appends instead of rewriting the cached prompt prefix, which is
-//! what the TypeScript snapshot was for. The two sentences therefore form
-//! one section, [`PERMISSIONS_SECTION`], placed before the `environment`
-//! section ([`crate::system_prompt`]). The TypeScript snapshot's `Runtime
-//! context (replaces any earlier snapshot):` heading is not carried: Pi's
-//! section tag already says which text replaces which.
+//! message after the history (Pi's `diffSystemPromptSections`), so a
+//! permission change appends instead of rewriting the cached prompt
+//! prefix.
 
 use bake_sandbox::{SandboxMode, SandboxPolicy};
 
@@ -45,7 +36,7 @@ pub fn sandbox_policy_sentence(policy: &SandboxPolicy) -> String {
 }
 
 /// The [`PERMISSIONS_SECTION`] text: the sandbox sentence, then the approval
-/// sentence, in the TypeScript contributions' order.
+/// sentence.
 pub fn permissions_section_text(policy: &SandboxPolicy, approval: ApprovalPolicy) -> String {
     format!(
         "{}\n\n{}",

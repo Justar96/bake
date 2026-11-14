@@ -1,13 +1,8 @@
 //! The layered permission engine: resolves each tool call's
 //! [`SandboxPolicy`] before the tool runs.
 //!
-//! Bake's TypeScript resolved a call's policy in two fixed steps, the
-//! session's standing policy (`SandboxPolicyService.resolve` in
-//! `packages/sandbox/sandbox-policy/src/index.ts`) and a one-call escalation
-//! (`approveEscalation` in `packages/sandbox/sandbox/src/escalation.ts`, with
-//! the argument handling of `packages/shell/tool-bash/src/index.ts` and
-//! `packages/fs/tool-fs/src/sandbox.ts`). Here those steps are the two
-//! shipped [`PolicyLayer`]s, [`StandingModeLayer`] and [`EscalationLayer`],
+//! A call's policy is resolved in two steps, the session's standing policy
+//! and a one-call escalation. They are the two shipped [`PolicyLayer`]s, [`StandingModeLayer`] and [`EscalationLayer`],
 //! and the engine runs any ordered list of layers.
 //!
 //! # Adding a layer
@@ -324,7 +319,7 @@ impl PolicyLayer for StandingModeLayer {
 /// asks for a strictly wider mode for this call only. A request for access
 /// the call already has passes without approval or argument checks; the
 /// pairing is checked next; a strict widening needs approval; anything
-/// else is refused with the TypeScript text.
+/// else is refused.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct EscalationLayer;
 

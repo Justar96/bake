@@ -37,8 +37,7 @@ fn names(options: &SystemPromptOptions) -> Vec<String> {
 /// `bake -p` with Pi's four default tools and their guidelines
 /// (`tools/{read,edit,write}.ts`; `bash` contributes none), the
 /// `workspace-write` preset with no one to answer approvals, and the facts
-/// of a Linux repository: the example in
-/// `docs/roadmap/rust-0.4/system-prompt.md`.
+/// of a Linux repository.
 fn default_options() -> SystemPromptOptions {
     let mut options = options("/home/user/project", &["read", "bash", "edit", "write"]);
     options.tool_guidelines = vec![

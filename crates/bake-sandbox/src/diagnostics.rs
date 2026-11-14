@@ -1,6 +1,4 @@
-//! Runner-failure and denial classification, from
-//! `packages/sandbox/sandbox/src/diagnostics.ts` and `RunnerFailureRule` in
-//! `index.ts`.
+//! Runner-failure and denial classification.
 
 /// Evidence that a sandbox runner failed before it ran the wrapped command.
 /// A rule matches when the exit code is allowed (or no codes are listed),

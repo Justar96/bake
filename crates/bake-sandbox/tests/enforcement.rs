@@ -2,10 +2,9 @@
 //! `sh -c` command through [`LocalProvider`], spawns the confined argv, and
 //! inspects the filesystem afterwards.
 //!
-//! Ported from `packages/sandbox/sandbox-local/tests/{bwrap,landlock,
-//! seatbelt}.e2e.ts` and the scope-04 proof list (writes, renames, deletes,
-//! symlink escapes, and descendants inside and outside the writable roots),
-//! with the helper contract of `native/system/docs/cli-contract.md`.
+//! The scenarios cover writes, renames, deletes, symlink escapes, and
+//! descendants inside and outside the writable roots, with the Landlock
+//! helper's CLI contract.
 //!
 //! The binary has its own `main` (`harness = false`) so it can also serve as
 //! the Landlock helper: a first argument of `__bake-landlock-run` runs
@@ -23,11 +22,9 @@
 //!
 //! The Linux confinement contract is writes only: under `read-only` and
 //! `workspace-write` a confined command reads outside its roots and opens
-//! loopback connections, as 0.3's `sandbox-local` profiles allowed
-//! (`packages/sandbox/sandbox-local/src/profiles.ts`, which binds `/`
-//! read-only and shares the network), while every write, rename, and
-//! delete outside the writable roots is denied
-//! (`linux_contract_confines_writes_only`).
+//! loopback connections (`/` is bound read-only and the network is
+//! shared), while every write, rename, and delete outside the writable
+//! roots is denied (`linux_contract_confines_writes_only`).
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -1113,7 +1110,7 @@ fn read_only_leaves_host_dev_shm_untouched(backend: &Backend) {
 
 #[cfg(target_os = "linux")]
 fn bwrap_private_pid_namespace(backend: &Backend) {
-    // From `bwrap.e2e.ts`: a private PID namespace, and no write through
+    // A private PID namespace, and no write through
     // procfs root links.
     for mode in [SandboxMode::ReadOnly, SandboxMode::WorkspaceWrite] {
         let (workspace, outside, policy) = workspace_and_outside(mode);
@@ -1142,8 +1139,8 @@ fn bwrap_private_pid_namespace(backend: &Backend) {
 }
 
 /// The Linux contract, for both confined modes: a read outside the roots
-/// and a loopback connection succeed (no read or network confinement, as
-/// in 0.3), and every write, rename, and delete outside the writable roots
+/// and a loopback connection succeed (no read or network confinement),
+/// and every write, rename, and delete outside the writable roots
 /// is denied, leaving the files as they were.
 #[cfg(target_os = "linux")]
 fn linux_contract_confines_writes_only(backend: &Backend) {

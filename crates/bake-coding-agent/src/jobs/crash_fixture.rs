@@ -1,4 +1,4 @@
-//! A crash fixture for the scope 11 restart tests of jobs, subagents, and
+//! A crash fixture for the restart tests of jobs, subagents, and
 //! reminders: the test re-executes one of its own fixture tests as a child
 //! process, waits until the fixture reports its kill point, and kills it
 //! with `SIGKILL`, which bypasses every destructor, shutdown, and flush.

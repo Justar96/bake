@@ -1,5 +1,5 @@
 //! Plugin vetoes through a real session: the faux model asks for real
-//! `write` and `edit` calls under Bake's D24 file tools, and each case
+//! `write` and `edit` calls under Bake's sandboxed file tools, and each case
 //! checks the files, the approvals, the requests, and the session file on
 //! disk. The guard is the `protected-paths` port of Pi v1.3.0's
 //! `examples/extensions/protected-paths.ts`; the other plugins are scripted
@@ -136,7 +136,7 @@ impl Fixture {
         .expect("session")
     }
 
-    /// A session over Pi's file tools under D24 in `mode` with the `ask`
+    /// A session over Pi's file tools under Bake's permissions in `mode` with the `ask`
     /// policy, approvals answered by `outcome`.
     async fn session(
         &self,
@@ -321,7 +321,7 @@ fn protected_calls() -> Vec<(&'static str, Value, &'static str)> {
 }
 
 // Pi's protected-paths example through a real session under
-// danger-full-access, where D24 would allow every write: the guard alone
+// danger-full-access, where the permissions would allow every write: the guard alone
 // keeps `.env` unchanged, each block's decision is written before its
 // denial result, the allowed write lands with exactly the model's
 // arguments, and a resumed session replays the denials the model saw. The
@@ -426,12 +426,13 @@ async fn the_guard_blocks_protected_writes_and_records_each_decision_first() {
 }
 
 // A plugin's `continue` only lets the call reach the tool: under read-only
-// with `ask`, a plain write the guard allows is still denied by D24, an
+// with `ask`, a plain write the guard allows is still denied by the
+// permissions, an
 // escalated one still asks the user, and an escalated write to a protected
 // path is blocked before anyone is asked.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn an_allowed_call_still_goes_through_d24() {
-    let fx = Fixture::new("plugin-d24");
+async fn an_allowed_call_still_goes_through_the_permissions() {
+    let fx = Fixture::new("plugin-permissions");
     let escalate = |path: &str| {
         json!({
             "path": path,

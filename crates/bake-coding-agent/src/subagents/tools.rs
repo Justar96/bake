@@ -2,18 +2,13 @@
 //! `send_message`, `interrupt_agent`, and `list_agents` for a parent, and
 //! `send_message` alone for a child.
 //!
-//! Ported from Bake's TypeScript `packages/subagent/tool-subagent/src/{index,list-models}.ts`
-//! and `packages/subagent/tool-subagent-control/src/{index,list-agents}.ts`
-//! under the 0.3 default surface (`backgroundMode: continuable`): the
-//! names, parameters, descriptions, and result texts. Differences: the
-//! model-choice texts, which every request carries once more than one
+//! Children are continuable: a background child returns its id at once.
+//! The model-choice texts, which every request carries once more than one
 //! model is available, are cut to what the model needs, and say that
 //! omitted fields inherit the caller's route, since Bake has no task router
-//! yet; `interrupt_agent` drops "its own subagents keep running";
-//! `list_agents` has no `scope`, since with no nested children its
-//! `descendants` are its `children`, drops the depth-1 remark, and adds each
-//! child's route to its row; and a call with no calling agent cannot occur,
-//! so those errors are gone. The model-choice fields and
+//! yet; `list_agents` has no `scope`, since with no nested children its
+//! `descendants` are its `children`, and adds each child's route to its
+//! row. The model-choice fields and
 //! `list_subagent_models` are shown when more than one model is available.
 
 use bake_agent::{AgentTool, AgentToolResult, ToolReplay};

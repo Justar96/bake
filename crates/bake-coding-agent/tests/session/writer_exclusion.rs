@@ -1,5 +1,4 @@
-//! Writer exclusion and durable writes, which Pi does not have (scope 03 of
-//! the Rust 0.4 roadmap): one writer per session file, takeover after the
+//! Writer exclusion and durable writes, which Pi does not have: one writer per session file, takeover after the
 //! holder releases, exits, or is killed, torn tails, and rewrites that never
 //! leave a half-written file.
 

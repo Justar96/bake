@@ -1,7 +1,6 @@
-//! The registry's contract, over the production gate. Cases adapted from
-//! Bake's TypeScript `packages/jobs/jobs-local/tests/jobs.spec.ts` name the
-//! case they follow; the rest are Bake's own for what the Rust ownership
-//! adds (completing, resource settlement, held reports, retention). Every
+//! The registry's contract, over the production gate, including what the
+//! ownership adds (completing, resource settlement, held reports,
+//! retention). Every
 //! barrier is a channel or a hand-polled future; every bounded wait is for
 //! a state the test already caused, so the bound only stops a broken
 //! registry from hanging the suite.
@@ -149,7 +148,7 @@ async fn start_with_resource(registry: &JobRegistry) -> Resource {
     }
 }
 
-// jobs.spec.ts: "issues kind-prefixed ids from per-kind counters"; ids are
+// "issues kind-prefixed ids from per-kind counters"; ids are
 // parsed only as this registry issued them.
 #[tokio::test]
 async fn ids_are_numbered_per_kind_and_parsed_strictly() {
@@ -189,7 +188,7 @@ async fn ids_are_numbered_per_kind_and_parsed_strictly() {
     bounded("the close", registry.close()).await;
 }
 
-// jobs.spec.ts: "rejects an empty kind, empty label, and invalid output
+// "rejects an empty kind, empty label, and invalid output
 // limit": refused before the producer runs, with no id used.
 #[tokio::test]
 async fn invalid_specs_are_refused_before_the_producer_runs() {
@@ -240,7 +239,7 @@ async fn invalid_specs_are_refused_before_the_producer_runs() {
     bounded("the close", registry.close()).await;
 }
 
-// jobs.spec.ts: "rejects before producer start and id allocation, then
+// "rejects before producer start and id allocation, then
 // admits immediately after settlement" and "keeps a stopping job in the
 // bucket until producer settlement"; Bake adds that a completing job,
 // whose resources are still settling, keeps its place too.
@@ -353,7 +352,7 @@ async fn admission_racing_from_many_threads_admits_exactly_the_limit() {
     );
 }
 
-// jobs.spec.ts: "stream kinds read a consuming delta; terminal reads mark
+// "stream kinds read a consuming delta; terminal reads mark
 // reported" and "final-output kinds read empty while live, the outcome
 // output idempotently once settled".
 #[tokio::test]
@@ -478,7 +477,7 @@ async fn snapshots_are_fresh_copies() {
     bounded("the close", registry.close()).await;
 }
 
-// jobs.spec.ts: "cancels a live job with the forwarded reason and
+// "cancels a live job with the forwarded reason and
 // suppresses the notice" and "reports an already-finished job instead of
 // failing"; the request is idempotent and keeps the first reason.
 #[tokio::test]
@@ -629,7 +628,7 @@ async fn a_job_is_terminal_only_once_its_resources_settle() {
     bounded("the close", registry.close()).await;
 }
 
-// jobs.spec.ts: "rejects a non-positive or non-finite timeout", "returns
+// "rejects a non-positive or non-finite timeout", "returns
 // the live snapshot on timeout without marking reported", "unregisters
 // timed-out and aborted wait resolvers while the job remains live", "an
 // aborted signal rejects the wait only — the job stays alive", and
@@ -692,7 +691,7 @@ async fn waits_are_bounded_and_unregister_however_they_end() {
     drop(registry.close());
 }
 
-// jobs.spec.ts: "resolves with the terminal snapshot when the job
+// "resolves with the terminal snapshot when the job
 // settles, marked reported", "an abort racing settlement in the same tick
 // does not swallow the notice", and "an abort landing after settlement
 // still delivers the terminal snapshot it owes".
@@ -783,7 +782,7 @@ async fn an_unreported_settlement_is_announced_and_claimed_once() {
     bounded("the close", registry.close()).await;
 }
 
-// jobs.spec.ts: "fences read/kill/wait to the owning session" and
+// "fences read/kill/wait to the owning session" and
 // "isolates exact owners": two sessions' registries issue the same text
 // ids, and each refuses the other's; closing one leaves the other's jobs
 // running.
@@ -926,7 +925,7 @@ async fn retention_keeps_a_record_with_a_pending_wait() {
     bounded("the close", registry.close()).await;
 }
 
-// jobs.spec.ts: "cancels live jobs, awaits settlement, and silences
+// "cancels live jobs, awaits settlement, and silences
 // listeners" and "reports a teardown-cancelled record so completion
 // reporters stay quiet": close refuses at once, stops and claims every
 // job, closes subscriptions, and resolves only once every job's resources

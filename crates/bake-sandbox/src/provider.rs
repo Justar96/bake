@@ -1,6 +1,4 @@
-//! The provider seam, from `SandboxProvider`, `ConfinedArgv`,
-//! `SandboxEnforcement`, and `SandboxUnavailableError` in
-//! `packages/sandbox/sandbox/src/index.ts`.
+//! The provider seam: a provider confines an argv or refuses.
 
 use std::ffi::OsString;
 use std::fmt;
@@ -253,7 +251,7 @@ mod tests {
     }
 
     #[test]
-    fn the_unavailable_message_is_the_typescript_one() {
+    fn the_unavailable_message_is_fixed() {
         let error = SandboxUnavailable::new(SandboxMode::WorkspaceWrite, Some("bwrap: no".into()));
         assert_eq!(
             error.to_string(),

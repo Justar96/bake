@@ -30,8 +30,7 @@
 //! eight-hex-digit entry ids with `parentId` links, one `JSON.stringify` line
 //! per entry ending in `\n`, `<ISO timestamp with : and . as ->_<id>.jsonl`
 //! file names, and `--<encoded cwd>--` directories. Pi's own older versions
-//! (1 and 2) are migrated on open, and the file is rewritten, as Pi does. Bake
-//! Session logs of any format are not read (D32).
+//! (1 and 2) are migrated on open, and the file is rewritten, as Pi does.
 //!
 //! # Deviations from Pi
 //!
@@ -180,7 +179,7 @@ pub enum SessionError {
     /// A write after [`SessionManager::close_writer`].
     WriterClosed(PathBuf),
     /// No session directory was given and the Bake home is unknown: no
-    /// `BAKE_HOME` or `DSH_HOME` is set and the user's home directory cannot
+    /// `BAKE_HOME` is set and the user's home directory cannot
     /// be found.
     NoHome,
 }

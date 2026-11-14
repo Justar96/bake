@@ -1,26 +1,22 @@
 //! Pi's `write` and `edit` tools under the sandbox.
 //!
-//! Ported from Bake's TypeScript `packages/fs/fs-sandbox/src/index.ts`
-//! (`SandboxedFileSystem.checkedTarget`: `read-only` denies every
-//! mutation, `workspace-write` re-canonicalizes the target immediately
-//! before the mutation and requires it under a writable root,
-//! `danger-full-access` passes) and `packages/fs/tool-fs/src/{sandbox,write,edit}.ts`
-//! (`FsSandboxController`: the escalation parameters, the per-call policy,
-//! and `mapError`, which turns `FS_SANDBOX_DENIED` into the denial marker
-//! and the escalation hint). The parameters and the hint appear only when
-//! the session can reach a wider mode
+//! `read-only` denies every mutation; `workspace-write` re-canonicalizes
+//! the target immediately before the mutation and requires it under a
+//! writable root; `danger-full-access` passes. The tools take the
+//! escalation parameters and the per-call policy, and a denial becomes the
+//! denial marker and the escalation hint. The parameters and the hint
+//! appear only when the session can reach a wider mode
 //! ([`ToolPermissions::escalation_targets`], which a session refreshes at
-//! each prompt); TypeScript always added them.
+//! each prompt).
 //!
 //! The check runs inside the file's mutation queue, after Pi's first abort
 //! check and before any effect (for `edit`, before the file is checked or
 //! read), on the path's resolved form at that moment, so a link swapped
 //! before the queue admits the call is judged as it then is. Tool
 //! descriptions stay Pi's; the parameters gain the two escalation
-//! parameters with the `tool-fs` descriptions.
+//! parameters.
 //!
-//! Pi writes in place, following links, where the TypeScript fence writes a
-//! temporary file and renames it over the checked name. So the guard judges
+//! Pi writes in place, following links, so the guard judges
 //! the path the write will land on: it follows every link in the path,
 //! dangling ones included ([`write_target`]), and refuses a chain it cannot
 //! resolve. The call then mutates that checked target, not the path it was
@@ -28,7 +24,7 @@
 //! [`BeneathTarget`], which opens the file
 //! relative to the writable root without following any link, so a link
 //! swapped in between the check and the write is refused instead of
-//! followed (the TypeScript fence accepted that race). A link inside the
+//! followed. A link inside the
 //! workspace that points inside it still writes its target, which the check
 //! resolved first.
 //!
@@ -38,8 +34,7 @@
 //! leaving a link in its place does not redirect later writes.
 //!
 //! A hard link inside the workspace to a file outside it is still written
-//! through, as Pi's in-place write does; the TypeScript rename would have
-//! replaced the link instead. Creating such a link needs write access to
+//! through, as Pi's in-place write does. Creating such a link needs write access to
 //! both places, which confined bash lacks.
 
 use std::path::{Component, Path, PathBuf};

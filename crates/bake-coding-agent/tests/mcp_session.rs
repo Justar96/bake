@@ -1,11 +1,11 @@
 //! MCP servers a real `AgentSession` owns, over real stdio server processes
-//! and `bake-ai`'s faux model: D24 admission before spawn, tools declared,
+//! and `bake-ai`'s faux model: permission admission before spawn, tools declared,
 //! called, and logged, Esc ending one call, shutdown during `initialize`,
 //! failed discovery, tool-list refreshes with in-flight calls keeping their
 //! generation, a crashed server, a resumed session that declares no stale
 //! tool, the resource tools of a server that offers resources, the prompt
 //! section a server's instructions reach, and the replay class of every
-//! tool `bake` composes, which no request carries. Each case names the Pi v1.3.0 or Bake TypeScript case it follows,
+//! tool `bake` composes, which no request carries. Each case names the Pi v1.3.0 case it follows,
 //! where one exists.
 //!
 //! The binary is its own fixture server (`fixture.rs`), so it has its own
@@ -852,7 +852,7 @@ async fn tools_are_admitted_declared_called_and_logged(case: Arc<Case>) {
     assert!(servers.tool_names().is_empty());
 }
 
-// D24: nothing runs before admission, and a mode no backend enforces, a
+// Nothing runs before admission, and a mode no backend enforces, a
 // `url` the egress policy refuses, or an unresolvable value is refused.
 async fn denied_admission_starts_nothing(case: Arc<Case>) {
     let model = Model::new();
@@ -989,7 +989,7 @@ async fn shutdown_during_initialize_stops_the_server_and_its_tree(case: Arc<Case
     assert_eq!(servers.statuses()[0].state, McpServerState::Closed);
 }
 
-// Bake `mcp-client.spec.ts`: a discovery failure or an invalid listing
+// A discovery failure or an invalid listing
 // publishes nothing; Pi `runtime.ts` `connectOnce` closes the connection.
 async fn failed_discovery_publishes_nothing_and_stops_the_server(case: Arc<Case>) {
     let model = Model::new();
@@ -1054,7 +1054,7 @@ async fn failed_discovery_publishes_nothing_and_stops_the_server(case: Arc<Case>
 }
 
 // Pi `agent-session-mcp.test.ts`, "withdraws and restores direct MCP tools
-// the server changes"; Bake `mcp-client.spec.ts`: a re-listing that fails
+// the server changes"; a re-listing that fails
 // keeps the previous generation. A call in flight keeps the client of the
 // generation it was declared with, and its run keeps its tools.
 async fn a_refresh_publishes_a_whole_generation_and_calls_keep_theirs(case: Arc<Case>) {
@@ -1322,7 +1322,7 @@ async fn the_first_prompt_waits_for_startup_only_up_to_its_bound(case: Arc<Case>
     );
 }
 
-// D24 with a real backend: under `workspace-write` a server writes its
+// Permissions with a real backend: under `workspace-write` a server writes its
 // workspace and is denied a write elsewhere. Skipped where no backend is
 // usable, as `bake-sandbox`'s enforcement tests skip.
 async fn a_real_sandbox_confines_the_server(case: Arc<Case>) {
@@ -1383,11 +1383,8 @@ async fn a_real_sandbox_confines_the_server(case: Arc<Case>) {
 }
 
 // The lifetime boundary of the retained contract (`crate::mcp`'s module
-// documentation). Bake's TypeScript resolves the sandbox knob per call in
-// the shell, code mode, and file tools (`packages/shell/tool-bash/src/index.ts`
-// `resolveSandboxPolicy`, `packages/core/tools/src/ptc.ts`) and spawns MCP
-// servers outside it (`packages/mcp/mcp-client/src/transport.ts`), so a
-// permission change never reached a running server. Here a server is
+// documentation): a permission change never reaches a running server. A
+// server is
 // confined once, at its start, under the mode then in force: after the
 // session's standing permission is tightened it is the same process, with
 // the same tools declared, still under its start-time confinement, and it
@@ -1549,9 +1546,9 @@ async fn the_probe_observes_real_processes(_case: Arc<Case>) {
     assert!(probe::Process::observe(u32::MAX).is_err());
 }
 
-/// The replay class of every tool `bake` composes with every opt-in on
-/// (scope 08, D37): reads rerun, effects do not, and no MCP server's own
-/// read-only claim is trusted.
+/// The replay class of every tool `bake` composes with every opt-in on:
+/// reads rerun, effects do not, and no MCP server's own read-only claim is
+/// trusted.
 const REPLAY_CLASSES: [(&str, ToolReplay); 23] = [
     ("read", ToolReplay::Safe),
     ("bash", ToolReplay::Never),
@@ -1672,7 +1669,7 @@ async fn first_request(tools: Vec<Arc<AgentTool>>) -> Vec<String> {
     ]
 }
 
-// Scope 08: every tool `bake` composes, built through the CLI with the
+// Every tool `bake` composes, built through the CLI with the
 // task-document, schedule, and subagent opt-ins and an MCP server with
 // resources, has a replay class, the one recovery reads (`run_journal`):
 // every MCP tool is `Never`, and the three resource tools, whose MCP read
@@ -1740,8 +1737,6 @@ async fn every_composed_tool_has_a_replay_class_no_request_carries(case: Arc<Cas
             }),
             Some("test-key".into()),
         )],
-        imported_default_model: None,
-        imported_default_preset: None,
         sandbox_provider: Arc::new(UnavailableProvider::new(None)),
         approver: None,
         plugins: WasmSetup::default(),
@@ -2146,7 +2141,7 @@ async fn the_prompt_changes_only_for_a_server_that_reports_something(case: Arc<C
     );
 }
 
-// Scope 12: a resource call goes through the same pipeline as any other
+// A resource call goes through the same pipeline as any other
 // tool, so a plugin veto blocks it before the server is asked, with no
 // approval in between.
 async fn a_resource_call_runs_through_the_veto_pipeline(case: Arc<Case>) {

@@ -1,12 +1,9 @@
 //! The signed native release manifest: what `native/stable.json` may say,
 //! and proof that the release owner said it.
 //!
-//! The rules are Bake 0.3's (`packages/boot/updater/src/manifest.ts`)
-//! tightened for the native route: the schema and channel are named in the
-//! document, every member is known, and the manifest refuses anything else.
-//! The key is the native one, which no 0.3 updater carries ([D45]).
-//!
-//! [D45]: ../../../docs/roadmap/rust-0.4/scope-00/support.md
+//! The schema and channel are named in the document, every member is
+//! known, and the manifest refuses anything else. It is signed with the
+//! native release key every `bake` embeds.
 
 use std::collections::BTreeMap;
 
@@ -37,11 +34,9 @@ pub const TARGETS: [&str; 5] = [
     "win32-x64",
 ];
 
-/// The platforms Bake publishes native releases and updates for
-/// ([D47], amended by [D52] for 0.4.7); the rest of [`TARGETS`] arrive later.
-///
-/// [D47]: ../../../docs/roadmap/rust-0.4/scope-00/support.md
-/// [D52]: ../../../docs/roadmap/rust-0.4/scope-00/support.md
+/// The platforms Bake publishes native releases and updates for: Linux x64
+/// and, from 0.4.7, Windows x64; 0.4.6 was the last Linux arm64 release.
+/// The rest of [`TARGETS`] arrive later.
 pub const RELEASE_TARGETS: [&str; 2] = ["linux-x64", "win32-x64"];
 
 /// Largest manifest or signature that is read; a real one is a few
@@ -406,8 +401,8 @@ mod tests {
                 &manifest_text(&VALID.replace("\"0.4.0\"", "\"0.4\"")),
                 "invalid version",
             ),
-            // Non-canonical prereleases, which the 0.3 pattern accepted: a
-            // leading zero and an empty identifier.
+            // Non-canonical prereleases: a leading zero and an empty
+            // identifier.
             (
                 &manifest_text(&VALID.replace("\"0.4.0\"", "\"0.4.0-rc.01\"")),
                 "invalid version",
@@ -533,11 +528,6 @@ mod tests {
         let keys = release_keys();
         assert_eq!(keys.len(), 1);
         assert_eq!(ed25519_key(&keys[0]).map(|key| key.len()), Some(32));
-        // The 0.3 release key signs 0.3 manifests only; it is a different key.
-        assert_ne!(
-            keys[0],
-            "MCowBQYDK2VwAyEAG1Z33Mis04XnFsekLrnPDBwSgn26uNeLz3XtGal+xC4="
-        );
     }
 
     #[test]

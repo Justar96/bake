@@ -1,12 +1,10 @@
 //! Pasted images: reading a dropped file path out of a paste, and what a
 //! staged image shows in the attachments panel.
 //!
-//! Ports `imagePath` from the TypeScript `paste.ts` and `formatAttachment`
-//! from its `rows.ts`. Reading the image is the terminal owner's: this module
-//! only reads its header bytes for the type and size.
+//! Reading the image is the terminal owner's: this module only reads its
+//! header bytes for the type and size.
 
-/// Image types the preview stages, as the oracle's attachment admission
-/// accepts them.
+/// Image types the preview stages.
 const EXTENSIONS: &[(&str, &str)] = &[
     ("png", "image/png"),
     ("jpg", "image/jpeg"),
@@ -123,7 +121,7 @@ impl std::fmt::Debug for ImageData {
 
 impl Image {
     /// The panel's line for the image: `clipboard.png · image/png · 2048 B ·
-    /// 640×480`, as the oracle's `formatAttachment` reads.
+    /// 640×480`.
     pub fn summary(&self) -> String {
         let mut parts = vec![
             self.name.clone(),
@@ -176,7 +174,6 @@ mod tests {
 
     #[test]
     fn one_dropped_image_path_is_read_however_the_terminal_quotes_it() {
-        // The oracle's `imagePath` cases.
         let read = |text: &str| image_path(text);
         assert_eq!(read("/tmp/shot.png").as_deref(), Some("/tmp/shot.png"));
         assert_eq!(
@@ -217,7 +214,7 @@ mod tests {
     }
 
     #[test]
-    fn an_image_reads_as_the_oracle_lists_an_attachment() {
+    fn an_image_reads_as_an_attachment_line() {
         let image = Image {
             name: "clipboard.png".into(),
             media_type: "image/png",

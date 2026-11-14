@@ -4,7 +4,7 @@
 //! (`createMcpToolDefinition`, `convertMcpResult`, `toModelContent`,
 //! `limitMcpContent`, `toParameters`) and `packages/mcp/src/protocol/content.ts`
 //! (`toLlmContent`), with Bake's public names ([`super::names`]) and Bake's
-//! all-or-nothing tool list (`syncTools` in `packages/mcp/mcp-client`): a
+//! all-or-nothing tool list: a
 //! listing with a repeated name, a non-object input schema, or a definition
 //! over the bounds below is refused whole, so a server's tools are always one
 //! coherent generation.

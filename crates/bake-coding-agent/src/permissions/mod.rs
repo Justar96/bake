@@ -1,31 +1,25 @@
-//! Bake's permission layer over the sandbox contract (D24): permission
+//! Bake's permission layer over the sandbox contract: permission
 //! presets, the approval policy and answerers, a layered engine that
 //! resolves each tool call's [`SandboxPolicy`], and Pi's `bash`, `write`,
 //! and `edit` tools wrapped by it. `read`, `grep`, `find`, and `ls` are
-//! unchanged, as in Bake's TypeScript.
+//! unchanged.
 //!
-//! A retained Bake contract, ported from Bake's TypeScript and proved by
-//! fixture tests derived from its sources and specs (each test names the
-//! one it follows):
-//!
-//! | Module | TypeScript source |
+//! | Module | Contents |
 //! |---|---|
-//! | [`presets`] | `packages/interaction/permission-presets/src/{index,types}.ts` |
-//! | [`approval`] | `packages/interaction/user-approval/src/{index,types}.ts` |
-//! | [`broker`] | the approval half of `apps/tui/packages/app/src/interactions.ts` (`Interactions`) |
-//! | [`state`] | the `permission/preset`, `sandbox/mode`, and `approval/policy` events and their folds (`permission-presets/src/index.ts`, `packages/sandbox/sandbox-policy/src/session-mode.ts`, `user-approval/src/index.ts`) |
-//! | [`history`] | the `approval/asked` and `approval/decided` audit events (`ApprovalService.request` in `user-approval/src/index.ts`, their payloads in `user-approval/src/types.ts`), as `bake.approval` session entries, and their fold |
-//! | [`engine`] | `packages/sandbox/sandbox-policy/src/index.ts` (`resolve`), `packages/sandbox/sandbox/src/escalation.ts` (`approveEscalation`), the escalation steps of `packages/shell/tool-bash/src/index.ts` and `packages/fs/tool-fs/src/sandbox.ts` |
-//! | [`context`] | `renderPolicyContext` in `sandbox-policy/src/index.ts`, the `approval:policy` contribution in `user-approval/src/index.ts` |
-//! | [`bash`] | `packages/shell/bash-sandbox/src/{index,helpers}.ts`, the sandbox parts of `packages/shell/tool-bash/src/{index,render}.ts` |
-//! | [`fs`](mod@fs) | `packages/fs/fs-sandbox/src/index.ts`, the sandbox parts of `packages/fs/tool-fs/src/{sandbox,write,edit}.ts` |
-//! | [`beneath`] | Bake's own: the link-refusing open of a checked write target, closing the race `fs-sandbox/src/index.ts` accepted |
-//! | [`import`](mod@import) | the D25 read of `permission.defaultPreset` from the 0.3 `settings.yaml` |
+//! | [`presets`] | named presets of a sandbox mode and an approval policy |
+//! | [`approval`] | the approval policy and its answerers |
+//! | [`broker`] | the interactive approval queue |
+//! | [`state`] | the session's preset, sandbox-mode, and approval-policy entries and their fold |
+//! | [`history`] | the asked and decided approval records, as `bake.approval` session entries, and their fold |
+//! | [`engine`] | each call's policy: the standing mode, then a one-call escalation |
+//! | [`context`] | the model-facing statement of the permission |
+//! | [`bash`] | the sandboxed `bash` tool |
+//! | [`fs`](mod@fs) | the sandboxed `write` and `edit` tools |
+//! | [`beneath`] | the link-refusing open of a checked write target |
 //!
-//! Every model-visible string (tool parameters and the sandbox paragraph,
-//! denial and hint markers, refusals, and policy sentences) is the
-//! TypeScript text byte for byte; where it meets Pi's text, Pi's stays and
-//! Bake's is added as the TypeScript tool added it.
+//! Where a model-visible string (tool parameters and the sandbox paragraph,
+//! denial and hint markers, refusals, and policy sentences) meets Pi's
+//! text, Pi's stays and Bake's is added to it.
 //!
 //! # Fail closed
 //!
@@ -42,27 +36,18 @@
 //! A session's permission defaults to Pi's full access, the
 //! `danger-full-access` mode with the `never` policy
 //! ([`presets::KnobDefaults`], [`presets::PresetTable::default_preset`]).
-//! A running session switches presets through its [`LivePermission`]: the
-//! TypeScript `/permission` command's `apply`, written as the
+//! A running session switches presets through its [`LivePermission`],
+//! written as the
 //! `bake.permission` entry ([`state::preset_change`]) and applied to the
 //! [`StandingPermissions`] the engine reads, so the next call to resolve
 //! uses it and a call already resolved keeps its policy. At the next
 //! prompt the session restates the `permissions` system-prompt section and
 //! refreshes the tools' escalation offer ([`refresh_escalation_offer`]).
 //!
-//! Bake adds wider approval answers than the TypeScript one-call grant:
-//! a session grant of one tool for one mode, and a switch to full access
+//! Besides a one-call grant, an approval can answer with a session grant of one tool for one mode, and a switch to full access
 //! ([`ApprovalOffers`], [`history`]); and a rejection can carry a note the
-//! model reads ([`approval::with_note`]).
-//!
-//! # Not ported
-//!
-//! The "approval policy changed" notice `/permission` queued as a user
-//! message: the restated `permissions` section tells the model instead;
-//! the Auto review integration (`registerAuto`); background bash jobs and
-//! their `runnerFailed` notice; the Cordis projection, catalog, and
-//! invariant companions. The `approval/asked` and `approval/decided` audit
-//! events are ported, as session entries ([`history`]).
+//! model reads ([`approval::with_note`]). A policy change is not queued as
+//! a user message: the restated `permissions` section tells the model.
 
 pub mod approval;
 pub mod bash;
@@ -72,7 +57,6 @@ pub mod context;
 pub mod engine;
 pub mod fs;
 pub mod history;
-pub mod import;
 pub mod presets;
 pub mod state;
 
@@ -277,9 +261,9 @@ impl LivePermission {
 
 /// The modes a session can escalate a call to: those strictly wider than
 /// its standing `sandbox` mode, and none under the `never` approval policy,
-/// which rejects every request. Bake's TypeScript advertised every
-/// [`ESCALATION_TARGETS`](bake_sandbox::ESCALATION_TARGETS) mode whenever a tool confined; the Rust agent
-/// offers only what an approval could grant.
+/// which rejects every request: only what an approval could grant is
+/// offered, not every
+/// [`ESCALATION_TARGETS`](bake_sandbox::ESCALATION_TARGETS) mode.
 pub fn reachable_escalation_targets(
     sandbox: SandboxMode,
     approval: ApprovalPolicy,
@@ -361,8 +345,6 @@ pub fn sandboxed_bash_tool(
 pub struct PermissionInputs<'a> {
     /// `settings.json` `permission`: `presets` and `defaultPreset`.
     pub settings: Option<&'a Value>,
-    /// `permission.defaultPreset` imported from the 0.3 `settings.yaml`.
-    pub imported_default_preset: Option<&'a str>,
     /// `--permission`: the preset to select.
     pub preset: Option<&'a str>,
     /// `--sandbox`: the sandbox mode to set.
@@ -427,8 +409,7 @@ impl SessionPermission {
 
 /// Settles a session's permission at startup, writing any change to its
 /// session file: the table from `settings.json`; the default preset from
-/// `settings.json`, else the 0.3 import (a stale imported name is a
-/// warning), else the composition defaults' preset; then a fresh session
+/// `settings.json`, else the composition defaults' preset; then a fresh session
 /// pins `--permission` or that default, a resumed one keeps its own, and
 /// `--permission`, `--sandbox`, and `--approval` switch it in that order.
 pub fn prepare_session_permission(
@@ -437,20 +418,8 @@ pub fn prepare_session_permission(
 ) -> Result<SessionPermission, String> {
     let defaults = KnobDefaults::default();
     let table = PresetTable::from_settings(inputs.settings)?;
-    let mut warnings = Vec::new();
-    let mut configured = presets::settings_default_preset(inputs.settings)?;
-    if configured.is_none()
-        && let Some(imported) = inputs.imported_default_preset
-    {
-        if table.spec(imported).is_some() {
-            configured = Some(imported.to_owned());
-        } else {
-            warnings.push(format!(
-                "Ignoring the imported default permission preset \"{imported}\": it names no preset (available: {})",
-                table.names().join(", ")
-            ));
-        }
-    }
+    let warnings = Vec::new();
+    let configured = presets::settings_default_preset(inputs.settings)?;
     let default_preset = table.default_preset(configured.as_deref(), defaults)?;
     if let Some(preset) = inputs.preset
         && table.spec(preset).is_none()

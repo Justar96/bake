@@ -2,9 +2,6 @@
 //! `write` calls, and real `sh` hooks block, add context, continue, time
 //! out, and hang. Each case checks the files, the requests the model got,
 //! and the session file, whose decision entries precede what they decide.
-//! The scenarios follow 0.3's bridge tests
-//! (`packages/hooks/hooks-claude-code/tests/bridge.spec.ts`,
-//! `packages/hooks/hooks-codex/tests/bridge.spec.ts`).
 #![cfg(unix)]
 
 use std::future::Future;
@@ -307,8 +304,8 @@ fn llm(session: &AgentSession) -> Vec<Message> {
     convert_to_llm(&session.messages())
 }
 
-// 0.3: "a UserPromptSubmit hook that exits 2 closes a blocked turn without
-// a step". The prompt is refused with the hook's reason, nothing reaches
+// A UserPromptSubmit hook that exits 2 closes a blocked turn without a
+// step: the prompt is refused with the hook's reason, nothing reaches
 // the model, and the block is recorded; a steer is refused alike.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_user_prompt_submit_block_refuses_the_prompt() {
@@ -354,9 +351,9 @@ async fn a_user_prompt_submit_block_refuses_the_prompt() {
     session.shutdown().await;
 }
 
-// 0.3: "a matching PreToolUse hook that exits 2 denies the tool (isError
-// result), tool never runs"; Codex's matcher is an unanchored regex, and
-// its exit 2 without a reason gives 0.3's fallback text.
+// A matching PreToolUse hook that exits 2 denies the tool (an error
+// result), and the tool never runs; Codex's matcher is an unanchored
+// regex, and its exit 2 without a reason gives the fallback text.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_pre_tool_use_block_denies_the_call_with_the_text_the_model_sees() {
     for (dialect, matcher, hook, text) in [
@@ -425,7 +422,7 @@ async fn a_pre_tool_use_block_denies_the_call_with_the_text_the_model_sees() {
 }
 
 // Context from SessionStart, UserPromptSubmit (Claude Code JSON and Codex
-// plain output), and PostToolUse reaches the model where 0.3 put it, each
+// plain output), and PostToolUse reaches the model in its place, each
 // written before it is sent; a resumed session rebuilds the same context.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn added_context_reaches_the_model_and_survives_a_resume() {
@@ -525,8 +522,8 @@ async fn added_context_reaches_the_model_and_survives_a_resume() {
     resumed.shutdown().await;
 }
 
-// 0.3: "a Stop hook (exit 2) forces the turn to continue with the reason
-// as steering"; the second Stop sees `stop_hook_active` and lets the run
+// A Stop hook that exits 2 forces the turn to continue with the reason
+// as steering; the second Stop sees `stop_hook_active` and lets the run
 // settle. A `continue: false` overrides a Stop block.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_stop_block_continues_the_run_until_the_hook_lets_it_stop() {
@@ -654,9 +651,8 @@ async fn claude_tool_hooks_halt_the_run_and_replace_results() {
     session.shutdown().await;
 }
 
-// 0.3: "a PreToolUse permissionDecision:ask fails closed without an
-// approval service"; here it asks the session's approver, and only an
-// approval lets the call run.
+// A PreToolUse `permissionDecision: ask` asks the session's approver, and
+// only an approval lets the call run.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_claude_ask_runs_the_call_only_when_approved() {
     let ask = command(
@@ -852,8 +848,7 @@ impl Fixture {
     }
 }
 
-// 0.3 appended a prompt's UserPromptSubmit context in the step that took
-// the prompt (`hooks-claude-code`'s `agent/pre-step`). A steer or
+// A prompt's UserPromptSubmit context goes with that prompt. A steer or
 // follow-up queued while a request streams reaches the next request with
 // its context, in the default one-at-a-time mode, with no request for the
 // context alone; the file keeps the prompt, then its context.
@@ -965,8 +960,7 @@ async fn a_cleared_queue_hands_back_only_the_users_text() {
     session.shutdown().await;
 }
 
-// A decision entry names each hook by its place in the file, 0.3's
-// opaque `handlerId`, and keeps neither the command, which may hold a
+// A decision entry names each hook by its place in the file and keeps neither the command, which may hold a
 // secret, nor the `systemMessage` it printed.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn decision_records_name_each_hook_without_its_command() {
@@ -1111,7 +1105,7 @@ async fn a_replaced_result_keeps_no_observation_provenance_the_tool_claimed() {
     session.shutdown().await;
 }
 
-// 0.3's `TODO(stop-loop-guard)`: a Stop hook that always blocks continues
+// A Stop hook that always blocks continues
 // a prompt at most MAX_STOP_HOOK_CONTINUATIONS times. The next block is
 // recorded as `capped`, and the run ends with a note, written with that
 // decision and shown without a request, which the model gets with the

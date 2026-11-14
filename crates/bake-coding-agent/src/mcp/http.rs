@@ -22,20 +22,16 @@
 //! with bounded backoff) and reconnects its GET stream, but drops a
 //! connection whose session the server expired: its
 //! `packages/coding-agent/src/extensions/mcp/runtime.ts` closes the
-//! connection and unregisters the tools. Bake 0.3's supervisor
-//! (`packages/mcp/mcp-client/src/connection.ts`) does reconnect, with one
-//! attempt budget per outage, and the roadmap's connection-recovery row
-//! (`docs/roadmap/rust-0.4/pi-reference.md`) keeps Bake's budget where one
-//! exists: this module runs 0.3's policy over Pi's transport.
+//! connection and unregisters the tools. Bake reconnects, with one attempt
+//! budget per outage: this module runs that policy over Pi's transport.
 //!
 //! - A failed attempt or a lost connection waits
 //!   [`McpHttpOptions::reconnect_initial_delay`], doubling per consecutive
 //!   failure up to [`McpHttpOptions::reconnect_max_delay`], and gives up
-//!   after [`McpHttpOptions::max_reconnect_attempts`] consecutive failures,
-//!   as 0.3's `initialDelayMs`, `maxDelayMs`, and `maxAttempts` do.
+//!   after [`McpHttpOptions::max_reconnect_attempts`] consecutive failures.
 //! - A connection that served tools for longer than that ceiling ends the
 //!   outage, so the next disconnect starts a fresh budget while a server
-//!   that keeps dropping still exhausts it, as 0.3's stability window does.
+//!   that keeps dropping still exhausts it.
 //! - An HTTP 404 for a request that carried the session ID means the server
 //!   expired the session (`HttpError::SessionExpired`). An established
 //!   connection re-initializes at once, as the specification asks and Pi's
@@ -120,7 +116,7 @@ pub(super) async fn run(
             // once, as Pi's transport documents.
             Attempt::Expired(error) => (error, served),
         };
-        // 0.3's stability window: an attempt that served tools and lasted
+        // The stability window: an attempt that served tools and lasted
         // longer than the backoff ceiling closes the outage and starts a
         // fresh budget.
         if served && started.elapsed() > settings.reconnect_max_delay {
@@ -159,7 +155,7 @@ fn ended(ever_served: bool, error: String) -> McpServerState {
     }
 }
 
-/// 0.3's bounded exponential backoff: the initial delay doubled per
+/// Bounded exponential backoff: the initial delay doubled per
 /// consecutive failed attempt, capped at the ceiling.
 fn backoff(settings: McpHttpOptions, attempts: u32) -> Duration {
     let factor = 1_u32.checked_shl(attempts).unwrap_or(u32::MAX);

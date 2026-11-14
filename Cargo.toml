@@ -79,9 +79,8 @@ regex = { version = "=1.13.1", default-features = false, features = ["std", "uni
 # and serde_json.
 getrandom = { version = "=0.4.3", default-features = false }
 indexmap = { version = "=2.14.2", default-features = false, features = ["std"] }
-# The `bake-coding-agent` CLIProxyAPI import: a panic-free YAML reader with
-# built-in budgets (depth, aliases, nodes, input size) for the 0.3 home's
-# `settings.yaml` and `.credentials.yaml` (D25). MIT OR Apache-2.0.
+# The `bake-coding-agent` YAML reader (skill frontmatter): panic-free, with
+# built-in budgets (depth, aliases, nodes, input size). MIT OR Apache-2.0.
 serde-saphyr = { version = "=2.0.0", default-features = false, features = ["deserialize"] }
 # The `bake-coding-agent` file tools. `image` decodes, orients, resizes
 # (Lanczos3), and re-encodes images as Pi's Photon (itself built on `image`)
@@ -109,8 +108,8 @@ base64 = { version = "=0.23.1", default-features = false, features = ["std"] }
 libc = { version = "=0.2.191", default-features = false }
 windows-sys = { version = "=0.61.2", default-features = false }
 # The `bake-coding-agent` web fetch decodes a response's declared charset
-# with the WHATWG encodings `TextDecoder` used in 0.3; the version the lock
-# already carries through `serde-saphyr` and Wasmtime. (Apache-2.0 OR MIT)
+# with the WHATWG encodings; the version the lock already carries through
+# `serde-saphyr` and Wasmtime. (Apache-2.0 OR MIT)
 # AND BSD-3-Clause.
 encoding_rs = { version = "=0.8.42", default-features = false, features = ["alloc"] }
 # The `bake-sandbox` Windows runner: SHA-256 for the capability SIDs and the

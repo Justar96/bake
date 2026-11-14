@@ -1,18 +1,13 @@
 //! A session's permission, stored in its Pi session file.
 //!
-//! The TypeScript runtime kept three log-only events, `permission/preset`
-//! (`packages/interaction/permission-presets/src/index.ts`), `sandbox/mode`
-//! (`packages/sandbox/sandbox-policy/src/session-mode.ts`), and
-//! `approval/policy` (`packages/interaction/user-approval/src/index.ts`),
-//! and folded the last of each. Here each change is one Pi `custom` entry of
-//! type [`PERMISSION_CUSTOM_TYPE`] whose data holds the changed fields
-//! (`preset`, `sandbox`, `approval`), in that order. Pi's `custom` entries
-//! never reach the model, as the TypeScript events did not; the session
+//! Each change is one Pi `custom` entry of type [`PERMISSION_CUSTOM_TYPE`]
+//! whose data holds the changed fields (`preset`, `sandbox`, `approval`),
+//! in that order. Pi's `custom` entries never reach the model; the session
 //! file is the store, so a resumed session keeps its mode. The fold reads
 //! the current branch.
 //!
-//! [`pin_initial_permission`] is `pinInitialPermission` and [`set_preset`]
-//! is the preset service's `apply`, which `/permission` runs
+//! [`pin_initial_permission`] pins a new session's permission, and
+//! [`set_preset`] switches it, as `/permission` does
 //! ([`preset_change`] is the entry it writes). An approval's full-access
 //! answer writes the same entry, in one group with its decision
 //! ([`super::history`]).
@@ -35,9 +30,7 @@ pub struct PermissionState {
     pub knobs: KnobState,
     /// Whether the session had entries before its permission was pinned:
     /// a resumed session, which keeps its composition defaults rather than
-    /// taking the user's current default. TypeScript marks this with the
-    /// `session/end-seed` boundary; a Pi session has none, so any earlier
-    /// entry counts. The effect is the same: only an empty session takes
+    /// taking the user's current default. Any earlier entry counts: only an empty session takes
     /// the default preset whole.
     pub seeded: bool,
 }

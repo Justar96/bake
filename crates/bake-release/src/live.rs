@@ -4,24 +4,20 @@
 //! a client does, with `bake-update`'s own code: a signature from the
 //! committed native key, the manifest's rules, and every archive's size and
 //! hash, downloaded through the service, which redirects archives to the
-//! version's GitHub release. The frozen 0.3 route must still verify with its
-//! own key, the installers served must be the committed ones, and the health
-//! route must answer. A deploy that reports success is not a release until
+//! version's GitHub release. The installers served must be the committed
+//! ones, and the health route must answer. A deploy that reports success is not a release until
 //! this passes.
-//!
-//! Ported from Bake's `scripts/release/verify-live.ts` (revision
-//! 97ce6abba0).
 
 use std::path::Path;
 use std::time::{Duration, Instant};
 
 use bake_update::HostEffects;
-use bake_update::manifest::{Manifest, RELEASE_TARGETS, verify_signature};
+use bake_update::manifest::{Manifest, RELEASE_TARGETS};
 use bake_update::source::Source;
 
 use crate::http::{client, get, published_release, runtime};
 use crate::manifest::committed_key;
-use crate::util::{Result, Scratch, read_text};
+use crate::util::{Result, Scratch};
 
 /// How long the new deployment has to serve the version.
 pub const WAIT: Duration = Duration::from_secs(10 * 60);
@@ -29,9 +25,6 @@ pub const WAIT: Duration = Duration::from_secs(10 * 60);
 /// Verifies everything `base` serves for `version`.
 pub fn verify_live(root: &Path, base: &str, version: &str, complete: bool) -> Result<Manifest> {
     let keys = vec![committed_key(root)?];
-    let legacy_key = read_text(&root.join("distribution/host/release-key.pub"))?
-        .trim()
-        .to_owned();
     let runtime = runtime()?;
     runtime.block_on(async {
         let client = client(Duration::from_secs(60))?;
@@ -85,16 +78,6 @@ pub fn verify_live(root: &Path, base: &str, version: &str, complete: bool) -> Re
                 .download(&manifest.version, artifact, &path, &HostEffects)
                 .await
                 .map_err(|error| format!("{target}: {error}"))?;
-        }
-        // 0.3 installs keep updating from this route.
-        let (status, latest) = get(&client, &format!("{base}/latest.json")).await?;
-        let (sig_status, signature) = get(&client, &format!("{base}/latest.json.sig")).await?;
-        let signature = String::from_utf8_lossy(&signature).into_owned();
-        if status != 200
-            || sig_status != 200
-            || !verify_signature(&latest, signature.trim(), std::slice::from_ref(&legacy_key))
-        {
-            return Err("The frozen 0.3 route no longer verifies with its key".to_owned());
         }
         for installer in ["install.sh", "install.ps1"] {
             let (status, served) = get(&client, &format!("{base}/{installer}")).await?;

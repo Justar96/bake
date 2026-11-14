@@ -167,7 +167,7 @@ pub(in crate::backends) fn owned_handle(raw: HANDLE) -> OwnedHandle {
 }
 
 // ---------------------------------------------------------------------------
-// DACL grants (`acl.ts`).
+// DACL grants.
 
 /// An `EXPLICIT_ACCESS_W` naming `sid`, inheritable by containers and
 /// objects. The SID must outlive the entry's use.
@@ -416,7 +416,7 @@ pub(super) fn allow_aces_naming(path: &Path, sid: &str) -> Result<usize> {
 }
 
 // ---------------------------------------------------------------------------
-// The restricted token (`token.ts`).
+// The restricted token.
 
 /// A token information block, 8-byte aligned.
 pub(in crate::backends) fn token_information(
@@ -843,7 +843,7 @@ pub(in crate::backends) fn wait_for_exit(job: &Job, process: &OwnedHandle) -> Re
 }
 
 // ---------------------------------------------------------------------------
-// One run (`runner.ts` main).
+// One run.
 
 /// The run's private temp directory and its capability.
 struct PrivateTemp {
@@ -922,8 +922,7 @@ pub(super) fn run(cli: &Cli) -> i32 {
 /// One run. `settled` turns false when a process may still run: the Job
 /// existed and its drain could not prove it empty.
 fn run_inner(cli: &Cli, temp: &mut Option<PrivateTemp>, settled: &mut bool) -> Result<u32> {
-    // Ignore Ctrl+C so the runner survives to clean up (TypeScript's
-    // `setConsoleCtrlHandler(null, 1)`).
+    // Ignore Ctrl+C so the runner survives to clean up.
     // SAFETY: plain call with no handler routine.
     if unsafe { SetConsoleCtrlHandler(None, 1) } == 0 {
         return Err(last_error("SetConsoleCtrlHandler", "ignore Ctrl+C"));

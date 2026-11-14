@@ -1,23 +1,20 @@
 //! The opt-in schedule tools and the timer that delivers due reminders
 //! ([`crate::schedules`]).
 //!
-//! Ported from Bake's TypeScript `packages/schedule/schedule/src/{tools,runtime}.ts`:
-//! the three tools' names, parameters, descriptions, validation order,
-//! results, and error values; and the runtime's decision, one due one-shot
-//! or one batch of due fixed-rate reminders at a time, with a durable
-//! dispatch before delivery, so a reminder is delivered at most once.
-//! Differences, for Pi's loop:
+//! The timer delivers one due one-shot or one batch of due fixed-rate
+//! reminders at a time, with a durable dispatch before delivery, so a
+//! reminder is delivered at most once. In Pi's loop:
 //!
 //! - A reminder reaches the model as a session notice
 //!   ([`crate::jobs::JobRegistry::post`]): at the running turn's next step,
-//!   or in a turn it opens while idle, where 0.3 waited for idle. A
+//!   or in a turn it opens while idle. A
 //!   reminder is the user's own request arriving, so it restarts the
 //!   notices' wake allowance.
 //! - The timer sleeps at most [`RECHECK`] between looks at the wall clock,
 //!   so a clock moved forward is seen within it, and a clock moved back
 //!   never fires a reminder early.
 //! - A persistence failure stops the session's writes, as every write
-//!   failure does; 0.3's `persistence_uncertain` value reports it.
+//!   failure does; the `persistence_uncertain` value reports it.
 
 #[cfg(test)]
 use std::sync::Mutex;
@@ -184,8 +181,7 @@ fn safe_integer(value: &Value) -> Option<i64> {
     (float.fract() == 0.0 && float.abs() <= 9_007_199_254_740_991.0).then_some(float as i64)
 }
 
-/// The rule a create names, once its arguments pass 0.3's
-/// `validateCreateArgs`.
+/// The rule a create names, once its arguments pass validation.
 enum Selector {
     After(i64),
     At(Value),
@@ -252,7 +248,7 @@ fn validate_create(arguments: &Map<String, Value>) -> Result<(String, Selector),
     Ok((prompt.to_owned(), selector))
 }
 
-/// The fold for a tool, a corrupt log as 0.3's value.
+/// The fold for a tool, a corrupt log as the tool's error value.
 fn folded(session: &SessionManager) -> Result<Folded, Value> {
     schedules::fold(session).map_err(|_| corrupt_log())
 }

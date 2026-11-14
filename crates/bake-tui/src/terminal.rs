@@ -8,8 +8,7 @@
 //! A terminal that goes away ends the preview as a [`PreviewExit::Hangup`]:
 //! SIGHUP, a hangup the watcher thread sees on standard input or output, or a
 //! write that fails with EIO or EPIPE. Restoring a terminal that is gone
-//! fails, so those failures are dropped, as the TypeScript launcher's
-//! `tolerateLostTerminal` drops them.
+//! fails, so those failures are dropped.
 //!
 //! The loop owns the view's state and the terminal. An input thread, the
 //! runtime port's thread, and, on Unix, a signal thread and a hangup watcher
@@ -205,8 +204,8 @@ const PROGRESS: u16 = 1 << 10;
 const TITLE: u16 = 1 << 11;
 
 /// Report presses, releases, and the wheel (1000), and motion while a button
-/// is held (1002), in SGR encoding (1006), which has no coordinate limit; as
-/// the TypeScript TUI requests. Crossterm's own `EnableMouseCapture` also
+/// is held (1002), in SGR encoding (1006), which has no coordinate limit.
+/// Crossterm's own `EnableMouseCapture` also
 /// asks for every motion (1003), which floods the loop with reports. Native
 /// selection stays on Shift-drag, or Option-drag on macOS.
 const MOUSE_ON: &str = "\x1b[?1000h\x1b[?1002h\x1b[?1006h";

@@ -1,6 +1,5 @@
-//! Running one command hook, after Bake 0.3's
-//! `packages/hooks/hook-protocol/src/runner.ts`, over the session's owned
-//! processes and its D24 sandbox instead of 0.3's shell executor.
+//! Running one command hook over the session's owned processes and its
+//! sandbox.
 //!
 //! The command runs as `bash -c <command>` (Pi's shell resolution,
 //! [`get_shell_config`]) in the session's working directory, with Bake's
@@ -12,8 +11,7 @@
 //! the session's [`WorkGate`], so shutdown waits until it and its tree are
 //! settled, and it is killed with its tree on the caller's abort or at its
 //! timeout. The payload is written to its standard input, which is then
-//! closed. Each output stream keeps its first [`MAX_HOOK_OUTPUT_BYTES`],
-//! 0.3's executor default.
+//! closed. Each output stream keeps its first [`MAX_HOOK_OUTPUT_BYTES`].
 //!
 //! Every failure is an outcome, never a panic or an error to the caller:
 //! a hook that cannot be started, times out, or is killed has no exit code
@@ -35,11 +33,11 @@ use crate::owned_work::WorkGate;
 use crate::permissions::StandingPermissions;
 use crate::tools::bash::{CommandTransport, get_shell_config};
 
-/// The most bytes kept of each output stream (0.3's `maxOutputBytes`).
+/// The most bytes kept of each output stream.
 pub const MAX_HOOK_OUTPUT_BYTES: usize = 64_000;
 
-/// The timeout of a hook that sets none: 10 minutes, as in Claude Code,
-/// Codex, and 0.3 (`DEFAULT_HOOK_TIMEOUT_MS`).
+/// The timeout of a hook that sets none: 10 minutes, as in Claude Code and
+/// Codex.
 pub const DEFAULT_HOOK_TIMEOUT: Duration = Duration::from_secs(600);
 
 /// Where and how a session's hooks run.

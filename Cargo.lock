@@ -274,6 +274,7 @@ dependencies = [
  "bake-update",
  "base64",
  "flate2",
+ "proptest",
  "reqwest",
  "ring",
  "rustls",

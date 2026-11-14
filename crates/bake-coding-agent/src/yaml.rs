@@ -1,11 +1,9 @@
-//! A bounded, panic-free YAML reader for the 0.3 home's `settings.yaml` and
-//! `.credentials.yaml`, which are untrusted input.
+//! A bounded, panic-free YAML reader for untrusted documents, such as a
+//! skill's frontmatter ([`crate::skills`]).
 //!
-//! The TypeScript reads both with the `yaml` package's `parseDocument` and
-//! `toJS`: YAML 1.2 core schema, unique keys, no merge keys. This reads them
-//! with `serde-saphyr` set the same way (strict booleans, `<<` as an
-//! ordinary key, duplicate keys refused) into a `serde_json::Value`, under
-//! two sets of bounds:
+//! It reads YAML 1.2 core schema with unique keys and no merge keys, using
+//! `serde-saphyr` (strict booleans, `<<` as an ordinary key, duplicate keys
+//! refused), into a `serde_json::Value`, under two sets of bounds:
 //!
 //! - the parser's own budget: nesting depth, events, nodes, anchors,
 //!   aliases, and alias replay;
@@ -15,8 +13,7 @@
 //!   memory.
 //!
 //! Errors carry only a kind and a position. The parser's own messages quote
-//! the source, which in the credentials file is a secret, so they are never
-//! surfaced.
+//! the source, which may hold a secret, so they are never surfaced.
 
 use std::cell::Cell;
 use std::fmt;
@@ -26,8 +23,7 @@ use serde_json::{Map, Number, Value};
 use serde_saphyr::options::{AliasLimits, DuplicateKeyPolicy, MergeKeyPolicy};
 use serde_saphyr::{Budget, Options};
 
-/// The deepest nesting either document may use. The settings shape needs
-/// seven levels; the bound keeps the parser's recursion well inside a
+/// The deepest nesting a document may use. The bound keeps the parser's recursion well inside a
 /// 2 MiB thread stack even in a debug build, where each level costs tens of
 /// kilobytes.
 pub(crate) const MAX_DEPTH: usize = 32;
@@ -148,8 +144,7 @@ impl<'de> Visitor<'de> for ValueSeed<'_> {
 
     fn visit_f64<E: de::Error>(self, value: f64) -> Result<Value, E> {
         self.state.charge(0)?;
-        // JSON has no spelling for a non-finite number; `toJS` would give
-        // `Infinity`, which no field this import reads accepts.
+        // JSON has no spelling for a non-finite number, so one is refused.
         Number::from_f64(value)
             .map(Value::Number)
             .ok_or_else(|| self.state.fail(Breach::Limit))
@@ -247,7 +242,7 @@ fn options(max_bytes: usize) -> Options {
 }
 
 /// Parse one YAML document of at most `max_bytes` bytes into JSON values.
-/// An empty or comment-only document is `null`, as `toJS` gives.
+/// An empty or comment-only document is `null`.
 pub(crate) fn parse_document(bytes: &[u8], max_bytes: usize) -> Result<Value, YamlError> {
     parse_with(bytes, max_bytes, options(max_bytes))
 }
@@ -322,7 +317,7 @@ mod tests {
     }
 
     #[test]
-    fn reads_the_settings_shape_as_the_core_schema_reads_it() {
+    fn reads_nested_documents_with_the_core_schema() {
         let value = parse_document(
             b"llm-pi-ai:\n  providers:\n    cliproxyapi:\n      models:\n        - id: a\n          contextWindow: 272000\n          input: [text, image]\n          reasoningEfforts: {low: low, off: }\n          flag: yes\n          quoted: '12'\n          octal: 0o17\n          on: true\n          '<<': merge\n",
             CAP,

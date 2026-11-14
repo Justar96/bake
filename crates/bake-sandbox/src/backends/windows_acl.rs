@@ -3,16 +3,10 @@
 //! capability and a private-temp capability, granted on those directories'
 //! DACLs.
 //!
-//! A port of Bake's retained `packages/sandbox/sandbox-windows-acl`
-//! (`index.ts`, `runner.ts`, `token.ts`, `acl.ts`, `grant.ts`,
-//! `workspace-sid.ts`, `path-boundary.ts`, `win32-abi.ts`), its process
-//! primitives in `packages/subprocess/win32-process/src/process.ts`
-//! (`quoteArg`, `buildCommandLine`, the suspended-create, Job-assignment, and
-//! resume lifecycle), and the `windows-acl` rung of
-//! `packages/sandbox/sandbox-local/src/index.ts`. The mechanism is the one
-//! `huoyaoyuan/windows-acl-restrict-poc` (revision `10e4dfb`) demonstrates,
-//! with every Win32 call checked: a failure never starts the command
-//! unrestricted. Pi has no sandbox; nothing here comes from Pi.
+//! The mechanism is the one `huoyaoyuan/windows-acl-restrict-poc` (revision
+//! `10e4dfb`) demonstrates, with every Win32 call checked: a failure never
+//! starts the command unrestricted. Pi has no sandbox; nothing here comes
+//! from Pi.
 //!
 //! Bake serves as its own runner: `bake` dispatches a first
 //! argument of [`HELPER_ARG`] to [`helper_main`] before anything else runs.
@@ -56,14 +50,11 @@
 //! prints a `windows-acl-run: cleanup: ` line and keeps the command's exit
 //! code.
 //!
-//! # Differences from the TypeScript runner
+//! # Run lifetime
 //!
-//! - The TypeScript provider kept one private temp directory per live
-//!   session and workspace and passed its SIDs to the runner; this runner
-//!   always takes the TypeScript runner's agentless path, a private
-//!   directory per run, so the provider holds no grants and has nothing to
-//!   revoke at shutdown. Files a command leaves in `TEMP` do not survive
-//!   into the next command.
+//! - Each run gets its own private temp directory, so the provider holds
+//!   no grants and has nothing to revoke at shutdown. Files a command
+//!   leaves in `TEMP` do not survive into the next command.
 //! - The child is created inside its Job (`PROC_THREAD_ATTRIBUTE_JOB_LIST`)
 //!   in addition to being created suspended, and inherits only its three
 //!   standard handles (`PROC_THREAD_ATTRIBUTE_HANDLE_LIST`).
@@ -79,16 +70,13 @@
 //!   every reported process held by handle until signalled, with their
 //!   distinct number equal to the Job's lifetime count. The Job's active
 //!   count alone is never read as the end: it reaches 0 before a terminated
-//!   member's handle is signalled, which is how a count-only drain (the
-//!   TypeScript `isJobEmpty` in `packages/subprocess/win32-process/src/
-//!   process.ts`, and this runner's own until it shared the account) could
+//!   member's handle is signalled, which is how a count-only drain could
 //!   report an empty tree with a member still in rundown. When the account
 //!   does not settle within its bound (30 s) or contradicts itself, the
 //!   runner reports a failure and leaves the private directory and its temp
 //!   grant in place rather than remove them under a process that may still
 //!   run; the Job's kill-on-close handle then closes with the runner.
-//! - The environment is passed as an explicit block; TypeScript had to
-//!   rewrite its own environment because Koffi could not pass one.
+//! - The environment is passed to the command as an explicit block.
 //!
 //! # Deletion is not confined: the default provider refuses
 //!
@@ -111,27 +99,27 @@
 //!
 //! No change to this token closes that: removing the user's SID from the
 //! normal check, or dropping `WRITE_RESTRICTED`, also removes the user's
-//! reads, and a deny ACE would have to be written onto every path outside
-//! the workspace. The Windows default chain therefore leaves the runner
-//! out, and the default provider refuses every confined call there with
-//! [`DEFAULT_REFUSAL`]. The runner stays
-//! reachable through an explicit [`LocalProvider::with_chain`](super::LocalProvider::with_chain)
-//! for its qualification tests; that chain reports
-//! [`Enforcement::Partial`](crate::Enforcement::Partial), and deletion is
-//! one more effect it leaves unconfined. On 2026-10-17 the owner selected
-//! AppContainer with explicit read and network grants as the replacement
-//! (D24); its unqualified runner is [`super::windows_appcontainer`], which
-//! reuses this runner's DACL, Job, and process helpers. Whether a low level's no-write-up policy denies `DELETE` and the
-//! parent's `FILE_DELETE_CHILD` is not settled: Microsoft defines that
-//! policy over the generic-write mapping, which omits both. The mechanism
-//! probe in `tests/enforcement/windows_mechanisms.rs` measures both
-//! candidates against this token.
+//! reads, and a deny ACE would have to be written onto every path outside the
+//! workspace. The Windows default chain therefore leaves the runner out, and
+//! the default provider refuses every confined call there with
+//! [`DEFAULT_REFUSAL`]. The runner stays reachable through an explicit
+//! [`LocalProvider::with_chain`](super::LocalProvider::with_chain) for its
+//! qualification tests; that chain reports
+//! [`Enforcement::Partial`](crate::Enforcement::Partial), and deletion is one
+//! more effect it leaves unconfined. On 2026-10-17 the owner selected
+//! AppContainer with explicit read and network grants as the replacement for
+//! Windows; its unqualified runner is [`super::windows_appcontainer`], which
+//! reuses this runner's DACL, Job, and process helpers. Whether a low level's
+//! no-write-up policy denies `DELETE` and the parent's `FILE_DELETE_CHILD` is
+//! not settled: Microsoft defines that policy over the generic-write mapping,
+//! which omits both. The mechanism probe in
+//! `tests/enforcement/windows_mechanisms.rs` measures both candidates against
+//! this token.
 //!
 //! # Known limits
 //!
-//! These are the TypeScript package's verified boundaries, and with the
-//! deletion gap above the reason the rung reports
-//! [`Enforcement::Partial`](crate::Enforcement::Partial):
+//! These boundaries, with the deletion gap above, are the reason the rung
+//! reports [`Enforcement::Partial`](crate::Enforcement::Partial):
 //!
 //! - **Everyone stays in the restricting list** (without it, early DLL
 //!   initialization fails with `0xC0000142`), so a file or directory whose
@@ -167,8 +155,8 @@
 //!   never as a false empty tree. A reported pid that no longer opens, or
 //!   names a process outside the Job, is read as ended on the process-id
 //!   lifetime inference `bake-process` documents for its account.
-//! - **The runner ignores Ctrl+C** (`SetConsoleCtrlHandler(NULL, TRUE)`, as
-//!   TypeScript did) so it survives to clean up, and the command inherits
+//! - **The runner ignores Ctrl+C** (`SetConsoleCtrlHandler(NULL, TRUE)`)
+//!   so it survives to clean up, and the command inherits
 //!   that setting.
 
 use std::ffi::OsString;

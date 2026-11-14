@@ -229,8 +229,7 @@ fn mapped_pi_config() -> Value {
     })
 }
 
-// llm-pi-ai's `resolveRouteCatalog` and `resolveModelReasoning`
-// (packages/llm/llm-pi-ai/src/catalog.ts) as one Pi provider: each mapping
+// The route resolved as one Pi provider: each mapping
 // in the module documentation, the refused reasoning shapes, and a
 // duplicated id leaving both entries out.
 #[test]
@@ -368,7 +367,7 @@ fn refuses_a_malformed_route_by_path() {
 }
 
 // Pi v1.1.0 `resolve-config-value.ts` (`resolveConfigValue`, the header
-// path of `provider-composer.ts`): 0.3 sent route header values literally,
+// path of `provider-composer.ts`): the route sends header values literally,
 // so each is escaped until Pi's resolver yields it unchanged. The mapped
 // route's headers were resolved by Pi itself in the recorded check.
 #[test]

@@ -293,8 +293,7 @@ pub const NO_COMMANDS: &str = "Commands are not available in this preview";
 /// The attachments panel's title, before the count, and its footer.
 pub const ATTACHMENTS_TITLE: &str = "Staged attachments";
 pub const ATTACHMENTS_HELP: &str = "Erase a placeholder to unstage its image";
-/// The pending-input panel: its title, each item's target, and its footer,
-/// as the TypeScript copy names them.
+/// The pending-input panel: its title, each item's target, and its footer.
 pub const PENDING: &str = "Pending input";
 pub const NEXT_STEP: &str = "Next step";
 pub const NEXT_TURN: &str = "Next turn";
@@ -380,9 +379,8 @@ pub const JOB_EARLIER: &str = "earlier";
 pub const JOB_NO_OUTPUT: &str = "No output yet.";
 /// Shown while a first Ctrl+C is armed.
 pub const QUIT: &str = "Press Ctrl-C again to quit";
-/// A subagent's state words, which the tasks row counts by, after the 0.3
-/// terminal's subagent sheet: how its last run ended, then whether it is
-/// resident.
+/// A subagent's state words, which the tasks row counts by: how its last
+/// run ended, then whether it is resident.
 pub const AGENT_STARTING: &str = "starting";
 pub const AGENT_WORKING: &str = "working";
 pub const AGENT_IDLE: &str = "idle";
@@ -408,12 +406,11 @@ pub const COMPLETED: &str = "Completed";
 /// The activity's word after a compaction that was the work itself, as `/compact` is.
 pub const COMPACTED: &str = "Compacted";
 pub const INTERRUPTED: &str = "Interrupted";
-/// The approval panel's words: its title, before the tool's name; the
-/// heading over the call's arguments; its keys, as the TypeScript copy's
-/// `approval` and `approve`, with `y` choosing and Enter confirming, and
-/// the cancel key; the line once `y` has chosen; the scroll keys; and the
-/// line shown until the request is armed and keys can answer it.
-/// Between the tool and the access it asks for: `bash wants to run
+/// The approval panel's words: its title, before the tool's name; the heading
+/// over the call's arguments; its keys, with `y` choosing and Enter
+/// confirming, and the cancel key; the line once `y` has chosen; the scroll
+/// keys; and the line shown until the request is armed and keys can answer
+/// it. Between the tool and the access it asks for: `bash wants to run
 /// outside the sandbox`.
 pub const APPROVAL_WANTS: &str = "wants to";
 /// After the tool, for a call a hook asked to confirm.

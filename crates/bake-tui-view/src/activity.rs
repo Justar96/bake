@@ -12,9 +12,9 @@ use ratatui_core::style::{Color, Modifier, Style};
 use ratatui_core::text::Span;
 use unicode_segmentation::UnicodeSegmentation;
 
-/// Verbs for a turn in progress; one is chosen per turn. The TypeScript
-/// list, extended. Each names active work: none says the turn is resting or
-/// done, and "Laminating" stays with compaction.
+/// Verbs for a turn in progress; one is chosen per turn. Each names active
+/// work: none says the turn is resting or done, and "Laminating" stays with
+/// compaction.
 pub const WORDS: &[&str] = &[
     "Baking",
     "Kneading",
@@ -69,8 +69,8 @@ pub const RUNNING_ANSI: Color = Color::Yellow;
 /// What the activity line reports, which decides its colour.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Hue {
-    /// A turn: the TypeScript palette's `running` orange, brightening toward
-    /// its progress `glint`.
+    /// A turn: the palette's `running` orange, brightening toward its
+    /// progress `glint`.
     #[default]
     Running,
     /// History compaction: the palette's `compacting` blue, brightening
@@ -232,7 +232,7 @@ mod tests {
     }
 
     #[test]
-    fn elapsed_time_reads_like_the_typescript_header() {
+    fn elapsed_time_reads_in_minutes_and_seconds() {
         assert_eq!(format_elapsed(Duration::from_millis(8_999)), "8s");
         assert_eq!(format_elapsed(Duration::from_secs(65)), "1m 05s");
         assert_eq!(format_elapsed(Duration::from_secs(600)), "10m 00s");
@@ -245,7 +245,7 @@ mod tests {
             .map(|i| pick(WORDS, &format!("sample-{i}")))
             .collect();
         assert!(distinct.len() > 4);
-        // The hash matches the TypeScript one: 31 * 'a' + 'b' = 3105.
+        // The hash is the string hash: 31 * 'a' + 'b' = 3105.
         assert_eq!(pick(&["x", "y", "z"], "ab"), ["x", "y", "z"][3105 % 3]);
     }
 

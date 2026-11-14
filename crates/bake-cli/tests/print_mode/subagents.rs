@@ -361,7 +361,7 @@ fn has_final_answer(path: &Path) -> bool {
         })
 }
 
-// D38 through the binary: `bake -p` killed with SIGKILL while it waits
+// Subagents through the binary: `bake -p` killed with SIGKILL while it waits
 // for a background child whose request the server holds. Both files load;
 // `--continue` sends one provider-valid request that carries one
 // interrupted notice and never re-runs the child, and a second
@@ -444,12 +444,12 @@ fn a_killed_print_run_reports_its_running_subagent_once_after_continue() {
     }
 }
 
-// D48: goals are deferred, so no composition reaches a goal tool. With
+// Goals are deferred, so no composition reaches a goal tool. With
 // every opt-in on and goal-shaped settings present, neither the parent's
 // nor a child's request declares one, nor does the default composition;
 // RPC has no goal command. The task-document tool's `goal` document kind
-// is D37's opt-in goal document, which D48 does not defer, and is not
-// checked here.
+// is the opt-in goal document, which is not deferred, and is not checked
+// here.
 #[cfg(unix)]
 #[test]
 fn no_goal_surface_is_reachable_from_any_composition() {

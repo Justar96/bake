@@ -1,6 +1,4 @@
-//! The approval entry's data and the history fold, derived from Bake's
-//! TypeScript `packages/interaction/user-approval/tests/{approval,invariant}.spec.ts`;
-//! each test names the case it follows. The write path is tested through a
+//! The approval entry's data and the history fold. The write path is tested through a
 //! real session in `crate::agent_session::approval_tests`.
 
 use std::io::Write as _;
@@ -41,11 +39,11 @@ fn record(session: &mut SessionManager, entry: &ApprovalEntry) -> String {
     append(session, Some(entry.to_data()))
 }
 
-// approval.spec: "fails closed to unavailable when nobody listens, auditing
+// "fails closed to unavailable when nobody listens, auditing
 // the asked/decided pair" and "borrows the exact readonly request for
 // scoped dispatch and audit": every field of both events.
 #[test]
-fn every_field_round_trips_under_its_typescript_name() {
+fn every_field_round_trips_under_its_name() {
     let entry = asked("req-1", "call-1");
     let data = entry.to_data();
     assert_eq!(
@@ -75,7 +73,7 @@ fn every_field_round_trips_under_its_typescript_name() {
     }
 }
 
-// approval.spec: "omits absent optional fields from the asked audit event".
+// "omits absent optional fields from the asked audit event".
 #[test]
 fn absent_optional_fields_are_omitted_and_read_back_absent() {
     let entry = ApprovalEntry::Asked(ApprovalAsked {
@@ -121,7 +119,7 @@ fn an_unknown_or_missing_version_is_an_error() {
     );
 }
 
-// invariant.spec: "rejects malformed and unpaired audit events" (the empty
+// "rejects malformed and unpaired audit events" (the empty
 // toolName and the unknown outcome): a damaged entry is an error naming the
 // problem, never a panic.
 #[test]
@@ -206,7 +204,7 @@ fn malformed_data_is_an_error_naming_the_problem() {
     }
 }
 
-// approval.spec: "settles cancelled immediately on an already-aborted
+// "settles cancelled immediately on an already-aborted
 // signal" and "resolves cancelled when the signal aborts mid-question":
 // cancellation is linearized at the write's admission.
 #[test]
@@ -224,7 +222,7 @@ fn admission_turns_an_aborted_write() {
     }
 }
 
-// approval.spec: "issues a fresh id per request"; the fold pairs each
+// "issues a fresh id per request"; the fold pairs each
 // request with its answer by id, in the order asked.
 #[test]
 fn the_fold_pairs_requests_with_their_answers() {
@@ -278,7 +276,7 @@ fn the_fold_pairs_requests_with_their_answers() {
     assert_eq!(history.for_call("call-9").count(), 0);
 }
 
-// invariant.spec: "rejects malformed and unpaired audit events" (the
+// "rejects malformed and unpaired audit events" (the
 // repeated open id and the answer with no matching request), and a second
 // answer to one request. The fold skips each and reports it, and keeps the
 // rest.
@@ -326,7 +324,7 @@ fn the_fold_skips_and_reports_entries_out_of_order() {
     );
 }
 
-// approval.spec "folds to the last event" steps over unrelated events; so
+// "folds to the last event" steps over unrelated events; so
 // does this fold, and a damaged approval entry hides nothing else.
 #[test]
 fn the_fold_steps_over_other_entries_and_damaged_ones() {

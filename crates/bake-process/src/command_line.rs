@@ -1,8 +1,7 @@
 //! The Windows command line for an argument vector, as
 //! `CommandLineToArgvW` (and the Microsoft C runtime) reads it back. The
-//! rule is `bake-sandbox`'s `quote_arg` and `build_command_line`, from Bake's
-//! TypeScript `quoteArg` (`packages/subprocess/win32-process/src/process.ts`);
-//! it is kept here so the owner needs no sandbox dependency. Pure, so it is
+//! rule is `bake-sandbox`'s `quote_arg` and `build_command_line`; it is kept
+//! here so the owner needs no sandbox dependency. Pure, so it is
 //! compiled and tested on every platform. Public for the ConPTY test host
 //! (`examples/conpty`), which starts its pseudoconsole client with it.
 

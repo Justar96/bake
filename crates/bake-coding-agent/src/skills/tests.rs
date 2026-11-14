@@ -641,7 +641,7 @@ fn skill_commands_expand_to_the_skill_body() {
 }
 
 // Pi test/system-prompt.test.ts: describe("skills") and the hidden-tool
-// skill case. Bake's prompt is its own (D33), so the `skills` section, and
+// skill case. Bake's prompt is its own, so the `skills` section, and
 // whether there is one, is checked against the prompts recorded from Pi.
 
 /// The `name` section of a whole prompt Pi recorded, with its tags.

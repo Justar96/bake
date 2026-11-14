@@ -204,7 +204,7 @@ fn tool_sets_follow_pi_and_take_bash_from_its_slot() {
 /// Pi: `system-prompt.test.ts`'s rules for the sets the session builds:
 /// after Bake's own rules, the tool guidelines Pi lists, in Pi's order,
 /// from the tool definitions. Pi's last two rules and its `bash` guideline,
-/// which names the `PI_*` variables, are Pi's own and left out (D33), as
+/// which names the `PI_*` variables, are Pi's own and left out, as
 /// are the three `edit` guidelines Bake drops; Bake rewords Pi's first
 /// `edit` guideline and its `bash` rule, which keep Pi's places.
 #[test]

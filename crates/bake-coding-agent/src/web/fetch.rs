@@ -3,10 +3,6 @@
 //! bounds, and text decoding. Requests carry no cookies or ambient
 //! credentials.
 //!
-//! Ported from `packages/web/web-fetch-http/src/{provider,network,index}.ts`
-//! (Bake 0.3): `HttpFetchProvider`, `resolvePublicAddresses`, and the
-//! plugin's default limits. Every message is the TypeScript's.
-//!
 //! Each hostname is resolved once, on Tokio's blocking pool and owned by
 //! the session's [`WorkGate`] when one is given, and the whole answer set
 //! is refused when any address is not public, including an IPv6 answer
@@ -17,11 +13,10 @@
 //! redirect hop is validated and resolved the same way; a cross-origin
 //! redirect is refused, so a new origin needs a new tool call.
 //!
-//! Differences from 0.3: no proxy route (Bake's HTTP
-//! clients connect directly, `no_proxy`); a failed DNS64 discovery lookup
-//! counts as no active prefix instead of failing the fetch; and the
-//! character cap counts UTF-16 code units, as the TypeScript did, cutting
-//! only between characters.
+//! There is no proxy route (Bake's HTTP clients connect directly,
+//! `no_proxy`); a failed DNS64 discovery lookup counts as no active prefix
+//! instead of failing the fetch; and the character cap counts UTF-16 code
+//! units, cutting only between characters.
 //!
 //! [`resolve_addresses`] and [`pinned_client_builder`] are the resolution
 //! and pinning halves without the public-address rule, which

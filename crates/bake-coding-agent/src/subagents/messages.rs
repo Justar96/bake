@@ -1,8 +1,7 @@
 //! The text a model sees from subagent orchestration, and the custom
 //! messages that carry it.
 //!
-//! Ported from Bake's TypeScript `packages/subagent/subagent/src/continuation-messages.ts`:
-//! the `Agent {id} sent a message: ` prefix, the continuable return guidance
+//! The texts: the `Agent {id} sent a message: ` prefix, the continuable return guidance
 //! appended to a child's task, and the settlement summaries by stop reason
 //! with `Its closing message:` or `It left no closing message.` An agent's
 //! message and the runtime's account of a settled child are different
@@ -21,8 +20,8 @@ pub const MESSAGE_TYPE: &str = "bake.agent.message";
 /// The `customType` of the runtime's notice that a child's run ended.
 pub const NOTICE_TYPE: &str = "bake.subagent.notice";
 
-/// How a child's run ended, 0.3's `SubagentResult['stopReason']` with
-/// Bake's `interrupted` for a run the process did not survive.
+/// How a child's run ended, with `interrupted` for a run the process did
+/// not survive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StopReason {
     /// The child finished its turn.
@@ -129,8 +128,7 @@ pub fn settlement_notice(
     )
 }
 
-/// The foreground failure headline, 0.3 `tool-subagent`'s
-/// `stopReasonError`; `None` for a completed run.
+/// The foreground failure headline; `None` for a completed run.
 pub fn foreground_error(stop: StopReason) -> Option<&'static str> {
     match stop {
         StopReason::Completed => None,

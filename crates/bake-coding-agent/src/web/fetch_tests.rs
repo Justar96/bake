@@ -1,7 +1,5 @@
-//! Ports of `packages/web/web-fetch-http/tests/fetch-http.spec.ts`
-//! against a loopback server. Most tests inject a resolver that answers
-//! with the loopback address, as the TypeScript stubbed
-//! `publicHttpNetwork.resolve`; the policy tests use the real one.
+//! The public fetcher against a loopback server. Most tests inject a
+//! resolver that answers with the loopback address; the policy tests use the real one.
 
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::atomic::{AtomicUsize, Ordering};

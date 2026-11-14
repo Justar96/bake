@@ -1,5 +1,4 @@
-//! The job tools' texts over a real registry, against Bake's TypeScript
-//! `packages/jobs/tool-jobs/tests/` cases for the list, read, wait, and
+//! The job tools' texts over a real registry: the list, read, wait, and
 //! kill results and the unknown-job explanation.
 
 use std::time::Duration;

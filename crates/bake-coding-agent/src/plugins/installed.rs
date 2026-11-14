@@ -1,7 +1,6 @@
 //! The Wasm plugins a Bake home installs and enables, and what a session
 //! loads from them: the owner-controlled configuration of the native
-//! plugin design (`docs/roadmap/rust-0.4/native-plugins.md`, "Inspection
-//! and management"). Bake's own; Pi loads extensions from directories it
+//! plugin design. Bake's own; Pi loads extensions from directories it
 //! discovers, which Bake does not.
 //!
 //! Under `$BAKE_HOME/plugins/` ([`PluginHome`]):

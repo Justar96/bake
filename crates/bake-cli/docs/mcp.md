@@ -37,7 +37,7 @@ A server name may use letters, digits, `_`, and `-`, up to 32 characters. bake r
 
 ## Environment and credentials
 
-A server starts with bake's environment minus the variables that look like credentials (names containing `KEY`, `PASSWORD`, `SECRET`, or `TOKEN`, in any case), every `DSH_*` variable, and the `BAKE_*` variables Bake manages, such as `BAKE_HOME`. A variable named in `env` is passed even when it would be removed, so `"FILES_TOKEN": "${FILES_TOKEN}"` hands that one credential to that one server. Because of that, bake reads `mcp.json` only when its owner alone can change it, and otherwise starts none of its servers:
+A server starts with bake's environment minus the variables that look like credentials (names containing `KEY`, `PASSWORD`, `SECRET`, or `TOKEN`, in any case) and the `BAKE_*` variables Bake manages, such as `BAKE_HOME`. A variable named in `env` is passed even when it would be removed, so `"FILES_TOKEN": "${FILES_TOKEN}"` hands that one credential to that one server. Because of that, bake reads `mcp.json` only when its owner alone can change it, and otherwise starts none of its servers:
 
 - `mcp.json` must be a regular file, not a link or a FIFO, of at most 1 MiB.
 - On Unix it and every directory above it must belong to you or root, and other users must not be able to write them (`chmod go-w`); a directory with the sticky bit, such as `/tmp`, is allowed.

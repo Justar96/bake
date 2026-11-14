@@ -1,6 +1,5 @@
 //! Pi v1.3.0 `test/mcp-extension.test.ts`, "MCP tools", and the
-//! all-or-nothing listing of Bake's `packages/mcp/mcp-client`
-//! (`tests/mcp-client.spec.ts`, "syncTools").
+//! Bake's all-or-nothing listing.
 
 use serde_json::json;
 

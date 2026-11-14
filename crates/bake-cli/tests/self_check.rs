@@ -50,7 +50,6 @@ fn command(home: &Path, path: &Path) -> Command {
         .env("HOME", home)
         .env("USERPROFILE", home)
         .env("BAKE_HOME", home.join(".bake"))
-        .env("DSH_HOME", home.join(".dsh"))
         .stdin(Stdio::null());
     command
 }
@@ -83,20 +82,17 @@ fn snapshot(root: &Path) -> BTreeMap<PathBuf, (Vec<u8>, Option<SystemTime>)> {
     out
 }
 
-/// A user home whose Bake 0.4 and 0.3 settings and credentials are all
-/// unreadable as what they claim to be.
+/// A user home whose Bake settings and credentials are all unreadable as
+/// what they claim to be.
 fn broken_home(root: &Path) {
-    for dir in [".bake", ".dsh"] {
-        fs::create_dir(root.join(dir)).expect("home");
-        for (file, text) in [
-            ("settings.json", "{ not json"),
-            ("auth.json", "[\"not an object\""),
-            ("models.json", "\u{0}\u{1}"),
-            ("settings.yaml", "providers: [unclosed"),
-            (".credentials.yaml", "key: *missing-anchor"),
-        ] {
-            fs::write(root.join(dir).join(file), text).expect("seed");
-        }
+    let dir = root.join(".bake");
+    fs::create_dir(&dir).expect("home");
+    for (file, text) in [
+        ("settings.json", "{ not json"),
+        ("auth.json", "[\"not an object\""),
+        ("models.json", "\u{0}\u{1}"),
+    ] {
+        fs::write(dir.join(file), text).expect("seed");
     }
 }
 

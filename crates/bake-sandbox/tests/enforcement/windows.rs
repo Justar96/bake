@@ -1,7 +1,4 @@
-//! Real enforcement through the Windows restricted-token runner, derived
-//! from `packages/sandbox/sandbox-windows-acl/tests/runner.spec.ts` and
-//! `acl.spec.ts`, `packages/subprocess/subprocess-local/tests/
-//! windows-job.spec.ts`, and the scope-04 proof list.
+//! Real enforcement through the Windows restricted-token runner.
 //!
 //! This binary is also the confined program: a first argument of
 //! [`PROBE_ARG`] runs [`probe_main`], which performs one exact filesystem

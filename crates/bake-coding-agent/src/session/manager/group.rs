@@ -1,9 +1,8 @@
 //! Group appends: entries that belong together, written in order.
 //!
 //! Pi appends one line per entry, so a crash can leave any prefix of
-//! entries that belong together. Bake keeps Pi's lines (D32) and adds the
-//! recoverable group of the durable-execution direction (rule 4, scope 03
-//! of the Rust 0.4 roadmap): [`SessionManager::append_group`] checks every
+//! entries that belong together. Bake keeps Pi's lines and adds the
+//! recoverable group: [`SessionManager::append_group`] checks every
 //! entry before it writes any, writes them in order under one hold of the
 //! manager, and reports how far a failed write got. A group is never
 //! atomic: loading reads every prefix of one, as Pi's loader reads any

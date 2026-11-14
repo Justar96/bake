@@ -1,11 +1,10 @@
-//! Approvals over the RPC protocol (D24): a tool call that escalates the
+//! Approvals over the RPC protocol: a tool call that escalates the
 //! sandbox reaches the client as Pi's `extension_ui_request`, its answer
 //! decides the one call, and both are in the session file before the call
 //! runs or is refused.
 //!
-//! The fixture follows `agent_session/approval_tests.rs`, whose rules come
-//! from Bake's TypeScript `ApprovalService.request`
-//! (`packages/interaction/user-approval/src/index.ts`): an `asked` entry
+//! The fixture follows `agent_session/approval_tests.rs`, whose rules are
+//! an `asked` entry
 //! before anyone is asked and one `decided` entry per request. Here the
 //! answerer is the RPC client, and the broker is the terminal's
 //! ([`crate::permissions::ApprovalBroker`]).
@@ -204,7 +203,7 @@ async fn asked(out: &Output) -> String {
     request["id"].as_str().expect("an id").to_owned()
 }
 
-// Bake (D24): `confirmed: true` lets the one call run, and the session
+// Bake: `confirmed: true` lets the one call run, and the session
 // file holds `asked` then `decided` with `allowed-once` before it did.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn an_approved_call_runs_after_its_answer_is_written() {
@@ -232,7 +231,7 @@ async fn an_approved_call_runs_after_its_answer_is_written() {
     assert_eq!(approvals[0]["id"], approvals[1]["id"]);
 }
 
-// Bake (D24): `confirmed: false` refuses the call, which leaves no effect.
+// Bake: `confirmed: false` refuses the call, which leaves no effect.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_denied_call_is_refused_and_recorded() {
     let case = case("rpc-deny", ApprovalBroker::new()).await;
@@ -255,7 +254,7 @@ async fn a_denied_call_is_refused_and_recorded() {
     assert_eq!(approvals[1]["outcome"], json!("rejected"));
 }
 
-// Bake (D24): a client that disconnects without answering leaves the call
+// Bake: a client that disconnects without answering leaves the call
 // refused, never run, and the refusal is recorded.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_disconnected_client_leaves_the_call_refused() {
@@ -269,7 +268,7 @@ async fn a_disconnected_client_leaves_the_call_refused() {
     assert_eq!(approvals[1]["outcome"], json!("cancelled"));
 }
 
-// Bake (D24) with Pi's `teardownCurrent`, which aborts the run before it
+// Bake with Pi's `teardownCurrent`, which aborts the run before it
 // disposes the session: a command that replaces the session withdraws the
 // questions the replaced session asked, so each is decided and recorded
 // while that session still admits writes, and its call never runs. The

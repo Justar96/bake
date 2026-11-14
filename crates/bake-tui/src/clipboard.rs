@@ -1,5 +1,4 @@
-//! Puts selected text on the clipboard, as the TypeScript
-//! `writeClipboardText` does.
+//! Puts selected text on the clipboard.
 //!
 //! Over SSH the terminal's own clipboard is the user's, so OSC 52 goes first.
 //! Otherwise macOS uses `pbcopy`, Windows `clip`, Wayland `wl-copy`, and X11
@@ -110,19 +109,17 @@ impl Clipboard {
     }
 }
 
-/// Image types the clipboard is asked for, in the oracle's preference order.
+/// Image types the clipboard is asked for, in order of preference.
 const IMAGE_TYPES: &[&str] = &["image/png", "image/jpeg", "image/webp", "image/gif"];
 
-/// Largest clipboard image read; the oracle's attachment admission refuses
-/// larger ones anyway.
+/// Largest clipboard image read.
 const MAX_IMAGE: usize = 64 * 1024 * 1024;
 
 impl Clipboard {
-    /// Reads the clipboard's image, if it holds one, as the TypeScript
-    /// `readClipboardImage` does: `wl-paste` on Wayland, then `xclip`;
-    /// AppleScript writing PNG data to a private file on macOS; and
-    /// PowerShell's clipboard bitmap as PNG on Windows. A missing tool reads
-    /// as no image.
+    /// Reads the clipboard's image, if it holds one: `wl-paste` on Wayland,
+    /// then `xclip`; AppleScript writing PNG data to a private file on macOS;
+    /// and PowerShell's clipboard bitmap as PNG on Windows. A missing tool
+    /// reads as no image.
     pub fn read_image(self) -> Option<Image> {
         let (data, media_type) = match self.platform {
             Platform::MacOs => (read_mac_image()?, "image/png"),

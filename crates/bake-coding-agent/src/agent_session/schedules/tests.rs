@@ -1,8 +1,6 @@
-//! The schedule tools and timer through a session. Cases from Bake's
-//! TypeScript `packages/schedule/schedule/tests/{tools,runtime}.spec.ts`:
-//! tool results and errors, delivery at most once with the dispatch
+//! The schedule tools and timer through a session: tool results and errors, delivery at most once with the dispatch
 //! durable first, overdue delivery on resume, a clock moved back, and a
-//! fork that adopts nothing; and Bake's shutdown during a look. Time is a test clock the timer is woken for,
+//! fork that adopts nothing; and shutdown during a look. Time is a test clock the timer is woken for,
 //! so no case waits on the wall clock.
 
 use std::sync::atomic::{AtomicI64, Ordering};

@@ -1,6 +1,5 @@
-//! Path discovery for `@` mentions, rooted at the working directory: a port
-//! of `WorkspaceFileSearch` in `bake-file-reference-local`. It lists paths
-//! only and never reads a file.
+//! Path discovery for `@` mentions, rooted at the working directory. It
+//! lists paths only and never reads a file.
 //!
 //! A query naming a directory, or an empty one, lists that directory as it
 //! is now. A bare name is ranked against one bounded traversal of the tree,
@@ -22,12 +21,12 @@ use std::thread::{self, JoinHandle};
 
 use bake_tui_view::mention::{Candidate, PathKind};
 
-/// Candidates listed for one query: the oracle's `maxResults` default.
+/// Candidates listed for one query.
 pub const MAX_RESULTS: usize = 20;
-/// Paths one traversal keeps: the oracle's `maxEntries` default.
+/// Paths one traversal keeps.
 pub const MAX_ENTRIES: usize = 50_000;
 /// Directories never traversed or offered: version-control and dependency
-/// stores and build output, as the oracle's defaults name them. `lib` is not
+/// stores and build output. `lib` is not
 /// one, since many projects keep their sources there.
 pub const EXCLUDED: &[&str] = &[
     ".git",
@@ -247,7 +246,7 @@ fn kind_rank(kind: PathKind) -> u8 {
     }
 }
 
-/// The oracle's score: the name equal to, starting with, or holding the
+/// A path's score: the name equal to, starting with, or holding the
 /// query, then the path holding it, then its letters in order, closer
 /// together scoring higher; a directory a little ahead of a file.
 fn score(candidate: &Candidate, query: &str) -> Option<u32> {
@@ -467,7 +466,7 @@ mod tests {
     }
 
     #[test]
-    fn a_bare_query_ranks_the_tree_as_the_oracle_does() {
+    fn a_bare_query_ranks_the_tree() {
         let tree = Tree::new(
             "rank",
             &[

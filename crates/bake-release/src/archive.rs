@@ -19,8 +19,6 @@ pub const NATIVE_EXECUTABLES: [&str; 2] = ["bin/bake", "bin/bake.exe"];
 pub const NATIVE_INVENTORY: &str = "licenses/inventory.json";
 /// Where a native archive keeps the linked Bake crates' NOTICE files.
 pub const NATIVE_NOTICES_DIR: &str = "notices/";
-/// Files only a 0.3 TypeScript archive holds, which a native one must not.
-pub const TYPESCRIPT_MARKERS: [&str; 2] = ["apps/cli/lib/bin.js", "package.json"];
 
 /// The group and other write bits.
 pub const SHARED_WRITE: u32 = 0o022;
@@ -190,22 +188,6 @@ pub fn assert_native(archive: &Path, layout: &Layout) -> Result<()> {
         .iter()
         .map(|entry| entry.path.as_str())
         .collect();
-    if let Some(marker) = TYPESCRIPT_MARKERS
-        .iter()
-        .find(|marker| paths.contains(marker))
-        .copied()
-        .or_else(|| {
-            paths
-                .iter()
-                .any(|path| path.starts_with("node_modules/"))
-                .then_some("node_modules/")
-        })
-    {
-        return Err(format!(
-            "{} holds {marker} of a TypeScript release; a native archive carries no Node runtime or TypeScript product code",
-            archive.display()
-        ));
-    }
     let native = NATIVE_EXECUTABLES.iter().any(|exe| paths.contains(exe))
         && paths.contains(&NATIVE_INVENTORY)
         && paths
@@ -380,11 +362,6 @@ mod tests {
         });
         write_tar_gz(&extra, &path, 0).expect("write");
         assert!(verify(&path, &members()).is_err());
-        assert!(
-            assert_native(&path, &read_layout(&path).expect("layout"))
-                .expect_err("typescript")
-                .contains("package.json")
-        );
         let mut writable = members();
         writable[1].mode = 0o666;
         write_tar_gz(&writable, &path, 0).expect("write");

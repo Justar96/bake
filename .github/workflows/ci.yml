@@ -3,17 +3,15 @@ name: Bake
 on:
   # Bake's CI runs locally (AGENTS.md), so this workflow runs only by hand,
   # when the owner asks for a check of a platform not at hand. Linux x86_64
-  # is checked before every push, so a manual run leaves it out unless
-  # asked. Windows and macOS are not released yet and run only when a
-  # manual run names them.
+  # is checked before every push, so a manual run checks Windows x64, the
+  # other released platform, unless it names another.
   workflow_dispatch:
     inputs:
       platforms:
         description: Platforms to check
         type: choice
-        default: linux-arm64
+        default: windows
         options:
-          - linux-arm64
           - linux
           - windows-and-macos
           - windows
@@ -27,20 +25,17 @@ concurrency:
   group: bake-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# A release pull request validates the Cargo workspace on the released
-# platforms, Linux x86_64 and arm64, before main merges it. Windows and macOS
-# are off there until Bake releases them; a manual run validates only the
-# platforms it names.
+# A manual run validates only the platforms it names.
 jobs:
   rust:
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ fromJSON('{"all":["ubuntu-latest","ubuntu-24.04-arm","windows-latest","macos-latest"],"linux":["ubuntu-latest","ubuntu-24.04-arm"],"windows-and-macos":["windows-latest","macos-latest"],"windows":["windows-latest"],"macos":["macos-latest"],"linux-arm64":["ubuntu-24.04-arm"]}')[inputs.platforms || 'linux'] }}
+        os: ${{ fromJSON('{"all":["ubuntu-latest","windows-latest","macos-latest"],"linux":["ubuntu-latest"],"windows-and-macos":["windows-latest","macos-latest"],"windows":["windows-latest"],"macos":["macos-latest"]}')[inputs.platforms || 'windows'] }}
     name: bake (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    # Cold Wasmtime builds need extra time on Windows and arm64.
-    timeout-minutes: ${{ matrix.os == 'ubuntu-latest' && 30 || matrix.os == 'ubuntu-24.04-arm' && 45 || 60 }}
+    # Cold Wasmtime builds need extra time on Windows and macOS.
+    timeout-minutes: ${{ matrix.os == 'ubuntu-latest' && 30 || 60 }}
     steps:
       - uses: actions/checkout@v4
       # Defender scans every file Cargo creates, which makes small-file I/O
@@ -63,7 +58,7 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq ripgrep bubblewrap
           bwrap --version
-      # On Linux, the platform 0.4.0 releases, a sandbox backend or kernel
+      # On Linux, a sandbox backend or kernel
       # fault check that cannot run fails the job instead of skipping itself.
       - name: Require the Linux sandbox backends and kernel fault checks
         if: runner.os == 'Linux'
@@ -75,12 +70,10 @@ jobs:
         run: brew install ripgrep fd
       - name: Install the pinned Rust toolchain
         run: rustup toolchain install --no-self-update
-      # Stable rustc links through its own rust-lld by default only on x86_64.
-      # On the arm64 runner the link otherwise leaves the GLIBC_2.39 need of
-      # the weakly bound pidfd functions unmarked, as GNU ld does, so the
-      # binary would not start below glibc 2.39 (release dry run
-      # 39801454576). rust-lld marks that need weak, so every Linux build
-      # links with the pinned toolchain's own rust-lld.
+      # rust-lld marks the GLIBC_2.39 need of the weakly bound pidfd functions
+      # weak, where GNU ld leaves it unmarked and the binary would not start
+      # below glibc 2.39, so every Linux build links with the pinned
+      # toolchain's own rust-lld, as the release build does.
       - name: Link with the toolchain's rust-lld
         if: runner.os == 'Linux'
         run: |

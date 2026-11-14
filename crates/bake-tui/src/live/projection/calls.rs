@@ -197,8 +197,7 @@ fn lead(tool: &str, args: &Value, labels: &Labels) -> Option<String> {
             }
             lead
         }),
-        // 0.3 `presentation.ts`: a subagent by its label and route, a
-        // message by its first line.
+        // A subagent by its label and route, a message by its first line.
         "subagent" => field("description").map(|label| {
             let label = clip(first_line(&label), 80);
             match (field("provider"), field("model")) {
@@ -207,7 +206,7 @@ fn lead(tool: &str, args: &Value, labels: &Labels) -> Option<String> {
             }
         }),
         "send_message" => Some(clip(first_line(&field("message").unwrap_or_default()), 48)),
-        // 0.3 `tool-web`: a fetch by its URL, a search by its queries.
+        // A fetch by its URL, a search by its queries.
         "web_fetch" => field("url"),
         "web_search" => args
             .get("queries")

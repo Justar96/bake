@@ -14,11 +14,9 @@
 //! and Bake's own `permission` section ([`crate::permissions`]),
 //! `terminal.notifications`, `statusLine` (the status line's optional
 //! readings), `webSearch.model` ([`crate::web::search`]), and
-//! `maxToolArgumentWhitespace` (Bake's route option in
-//! `packages/llm/llm-pi-ai/src/config.ts`). Pi reads `~/.pi/agent/settings.json` and
+//! `maxToolArgumentWhitespace` (Bake's route option). Pi reads `~/.pi/agent/settings.json` and
 //! merges a project's `.pi/settings.json` over it; Bake reads
-//! `$BAKE_HOME/settings.json` only. Bake 0.3's `settings.yaml` beside it is
-//! a different file, which this module does not read (D25).
+//! `$BAKE_HOME/settings.json` only.
 //!
 //! [`SettingsStore`] writes the file, porting the global-scope saves of
 //! `SettingsManager` (Pi v1.2.0, `06a466935536f8c9bcacb2d5efc0fc021be1bdff`)
@@ -183,12 +181,10 @@ pub struct Settings {
 
 /// The `cliproxyapi` member of `settings.json`, which `bake` owns: a
 /// login writes the route there, a logout writes `null`, and a refresh
-/// replaces its `models`. Any present value, `null` included, takes the
-/// route's place in the read-only 0.3 import (D25), so a signed-out route
-/// is not imported again.
+/// replaces its `models`.
 #[derive(Clone, Default, PartialEq)]
 pub enum CliProxySetting {
-    /// No member: the 0.3 import applies.
+    /// No member: never signed in.
     #[default]
     Absent,
     /// `null`: signed out; no route.
@@ -897,7 +893,7 @@ fn queue_mode_name(mode: QueueMode) -> &'static str {
 /// read as a JSON object is left untouched and the setter fails. A setter
 /// error for which [`StoreError::is_committed`] holds means the change was
 /// written but may not survive a power loss; [`SettingsStore::load`] reads
-/// it back. Setters block, and never touch Bake 0.3's `settings.yaml` (D25).
+/// it back. Setters block.
 #[derive(Debug, Clone)]
 pub struct SettingsStore {
     file: JsonFileStore,
@@ -1253,7 +1249,7 @@ mod tests {
         assert_eq!(read("{}"), (None, None));
     }
 
-    // Bake `packages/llm/llm-pi-ai/src/config.ts`: a positive integer.
+    // A positive integer.
     #[test]
     fn reads_the_tool_argument_whitespace_bound() {
         let read =

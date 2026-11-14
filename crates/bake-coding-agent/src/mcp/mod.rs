@@ -3,8 +3,7 @@
 //! Adapted from Pi v1.3.0's MCP integration (`src/extensions/mcp/index.ts`,
 //! `runtime.ts`, `tools.ts`, `config.ts`, and `src/core/mcp-servers.ts`; MIT,
 //! see the crate `NOTICE`) over `bake-mcp`'s client and stdio owner, with
-//! Bake's retained contracts: public tool names from Bake's
-//! `packages/mcp/mcp-client` ([`names`]), the D24 sandbox, and the session's
+//! Bake's own contracts: public tool names ([`names`]), the sandbox, and the session's
 //! [`WorkGate`].
 //!
 //! `bake` reads its servers from `$BAKE_HOME/mcp.json` once the file
@@ -15,7 +14,7 @@
 //! starts each enabled server of an [`McpOptions`] as a task the session's
 //! gate owns. For a stdio server (`server`) the task, in order:
 //!
-//! 1. admits the server under D24 before anything runs: its command is
+//! 1. admits the server under Bake's permissions before anything runs: its command is
 //!    wrapped by the session's sandbox provider for the
 //!    standing sandbox mode, or refused when no backend can enforce it. Its
 //!    environment is Bake's scrubbed environment with the entry's `env` set
@@ -40,16 +39,16 @@
 //!    then, so session shutdown returns after every server is gone.
 //!
 //! A `url` server (`http`) runs the same steps 3 to 5 over `bake-mcp`'s
-//! Streamable HTTP transport, with [`egress`]' D24 network admission in
+//! Streamable HTTP transport, with [`egress`]' network admission in
 //! place of the sandbox and spawn: the owner's `mcp.json` authorizes the
 //! configured origin, whose host is resolved once per connection and
 //! pinned, redirects stay same-origin, and the entry's `headers` are its
 //! only credentials. Unlike a stdio server it reconnects: an expired HTTP
-//! session re-initializes, and a lost connection is retried within Bake
-//! 0.3's reconnect budget, each connection publishing its tools as one new
+//! session re-initializes, and a lost connection is retried within Bake's
+//! reconnect budget ([`McpHttpOptions`]), each connection publishing its tools as one new
 //! generation and the retired client drained before the next one serves.
 //! The connection is the `bake` process's own, not a sandboxed child's,
-//! so, like the web tools (D40), it is allowed in every sandbox mode.
+//! so, like the web tools, it is allowed in every sandbox mode.
 //!
 //! # Lifetime and permission boundaries
 //!
@@ -58,16 +57,8 @@
 //! confinement until it ends; nothing restarts or reconnects it, and the
 //! configuration is read only by the caller, before the start. A later
 //! [`StandingPermissions::set`] reaches the calls that resolve a policy per
-//! call (`bash`, `write`, `edit`), not a running server, as in Bake's
-//! TypeScript, where the sandbox knob is resolved per call by the shell,
-//! code mode, and file tools (`packages/shell/tool-bash/src/index.ts`
-//! `resolveSandboxPolicy`, `packages/core/tools/src/ptc.ts`) and MCP servers
-//! are spawned outside it (`packages/mcp/mcp-client/src/transport.ts`).
-//! Confining a server at its start is Bake's native D24 admission; there
-//! the TypeScript ran servers unconfined. MCP calls have no approval step:
-//! no terminal permission package gates `mcp__` tools in the TypeScript's
-//! `tools/pre-execute` pipeline (`packages/core/tools/src/index.ts`), and
-//! MCP tools take no `sandbox_permissions` to escalate. A native plugin
+//! call (`bash`, `write`, `edit`), not a running server. MCP calls have no
+//! approval step, and MCP tools take no `sandbox_permissions` to escalate. A native plugin
 //! (`crate::plugins`) whose manifest names an MCP tool's public name may
 //! veto its calls, as for any tool.
 //!
@@ -159,7 +150,7 @@ pub const MCP_SERVERS_SECTION: &str = "mcp_servers";
 
 /// How the failure of a server that requires authorization (HTTP 401, or
 /// 403 with an `insufficient_scope` challenge) ends: OAuth for MCP servers
-/// is deferred (D48). Frontends show it after the server's name; it never
+/// is deferred. Frontends show it after the server's name; it never
 /// reaches the model, which sees only connected servers.
 pub const OAUTH_DEFERRED: &str = "OAuth sign-in for MCP servers is not available in bake yet and is planned for a later release, so give the server a credential in its \"headers\" in mcp.json";
 
@@ -210,9 +201,8 @@ impl Default for McpTimings {
 /// What a Streamable HTTP server connects with: the bounds of one
 /// connection and the reconnect budget of one outage.
 ///
-/// The defaults are Bake 0.3's reconnect policy
-/// (`RECONNECT_DEFAULTS` in `packages/mcp/mcp-client/src/connection.ts`:
-/// 500 ms doubling to 30 s, 10 attempts per outage) over Pi v1.3.0's
+/// The defaults are Bake's reconnect policy (500 ms doubling to 30 s, 10
+/// attempts per outage) over Pi v1.3.0's
 /// message limit and connect deadline (`packages/mcp/src/transports/streamable-http.ts`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct McpHttpOptions {
@@ -222,13 +212,12 @@ pub struct McpHttpOptions {
     /// Each connection's TCP and TLS deadline. Default: 10 s, as Pi.
     pub connect_timeout: Duration,
     /// The delay before the first reconnect of an outage, doubled per
-    /// consecutive failed attempt. Default: 500 ms, as 0.3.
+    /// consecutive failed attempt. Default: 500 ms.
     pub reconnect_initial_delay: Duration,
     /// The backoff ceiling, and the time a connection must serve to end the
-    /// outage and restore the budget. Default: 30 s, as 0.3.
+    /// outage and restore the budget. Default: 30 s.
     pub reconnect_max_delay: Duration,
-    /// Consecutive failed attempts before the server gives up. Default: 10,
-    /// as 0.3.
+    /// Consecutive failed attempts before the server gives up. Default: 10.
     pub max_reconnect_attempts: u32,
 }
 
@@ -287,7 +276,7 @@ pub struct McpOptions {
     /// never started.
     pub servers: Vec<McpServerEntry>,
     /// The session's standing permission: its sandbox mode at each server's
-    /// start decides how that server is confined (D24).
+    /// start decides how that server is confined.
     pub standing: Arc<StandingPermissions>,
     /// The provider that confines each server under that mode; the one the
     /// session's `bash` uses.
@@ -1043,7 +1032,7 @@ mod tests {
         }
     }
 
-    // Bake `mcp-client.spec.ts`: an update that conflicts with a registered
+    // An update that conflicts with a registered
     // name is rejected whole and the earlier tools stay.
     #[test]
     fn a_generation_with_a_taken_name_is_refused_whole() {

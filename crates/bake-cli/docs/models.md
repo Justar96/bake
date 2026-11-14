@@ -11,7 +11,7 @@ bake has no built-in model catalog: every model comes from `models.json` in the 
 - `--thinking <level>` sets the thinking level: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. It wins over a suffix. A level the model does not support is clamped to one it does.
 - `--list-models [search]` lists the available models (provider, model id, context window, max output tokens, thinking support, and image support), optionally filtered by a fuzzy search pattern, and exits.
 
-Without `--model`, a resumed session keeps the model it last used while that model's provider has a key. Otherwise bake uses `defaultProvider` and `defaultModel` from `settings.json` (else the default model imported from Bake 0.3) when that provider has a key, else another model whose provider has one. A run with no usable model fails before sending anything. The ids `--model` accepts are the `id` members in `models.json` and the ids the imported route saved; `--list-models` prints them.
+Without `--model`, a resumed session keeps the model it last used while that model's provider has a key. Otherwise bake uses `defaultProvider` and `defaultModel` from `settings.json` when that provider has a key, else another model whose provider has one. A run with no usable model fails before sending anything. The ids `--model` accepts are the `id` members in `models.json` and the ids of the signed-in CLIProxyAPI route; `--list-models` prints them.
 
 ## models.json
 
@@ -35,7 +35,7 @@ Without `--model`, a resumed session keeps the model it last used while that mod
 - A provider holds `baseUrl`, `api`, `apiKey`, `headers`, `authHeader` (when `true`, sends `Authorization: Bearer <key>`), `compat`, `models`, and `modelOverrides` (changes to models by id).
 - `api` is `openai-completions`, `openai-responses`, or `anthropic-messages`, set on the provider or on a model. A provider that defines models needs `baseUrl`.
 - A model needs `id`. It may set `name`, `api`, `baseUrl`, `reasoning`, `input` (`text` and `image`), `contextWindow`, `maxTokens`, `cost` (`input`, `output`, `cacheRead`, `cacheWrite`), `headers`, `compat`, and `thinkingLevelMap`.
-- A provider with the id `cliproxyapi` changes the imported CLIProxyAPI route: its members, models, and key win over the route's.
+- A provider with the id `cliproxyapi` changes the signed-in CLIProxyAPI route: its members, models, and key win over the route's.
 
 ## auth.json
 
@@ -45,7 +45,7 @@ Without `--model`, a resumed session keeps the model it last used while that mod
 { "my-gateway": { "type": "api_key", "key": "!pass show gateway" } }
 ```
 
-A request's key is the first of: `--api-key`, the provider's key in `auth.json`, its `apiKey` in `models.json`, then the imported CLIProxyAPI key. The CLIProxyAPI account's key is the exception: it is used only with its own route (see below). A credential may carry `env`, values that its key and headers read before the process environment.
+A request's key is the first of: `--api-key`, the provider's key in `auth.json`, then its `apiKey` in `models.json`. The CLIProxyAPI account's key is the exception: it is used only with its own route (see below). A credential may carry `env`, values that its key and headers read before the process environment.
 
 ## Keys and header values
 
@@ -62,8 +62,8 @@ In an interactive session, `/login` signs in to a CLIProxyAPI proxy. It asks for
 
 - The key goes to `auth.json`, as the `cliproxyapi` record. The route (address and models) goes to the `cliproxyapi` member of `settings.json`. Both carry the same `account` value, a random tag each sign-in draws.
 - bake uses the route only with the key whose tag matches. When they do not match, for example after another program replaced the key or after a crash between the two writes, the account is off: a startup note says so, there is no `cliproxyapi` provider, and `/login` recovers. The account's key is never sent to another route.
-- `/refresh-models` reads the model list again and saves it, keeping the current model and the default model. Each interactive session also refreshes the list once at start, quietly, unless a saved list may not survive a power loss, which it reports. `--offline`, `BAKE_OFFLINE=1`, or `DSH_OFFLINE=1` leaves that refresh out, and the update check a native install makes at most once a day (`bake docs update`): they are the only network operations a session makes before its first prompt, so with it an offline session starts entirely from files. `/login` and `/refresh-models`, which you ask for, still reach the proxy.
-- `/logout` sets the route to `null` and removes the key. A signed-out home no longer imports the route Bake 0.3 saved.
+- `/refresh-models` reads the model list again and saves it, keeping the current model and the default model. Each interactive session also refreshes the list once at start, quietly, unless a saved list may not survive a power loss, which it reports. `--offline` or `BAKE_OFFLINE=1` leaves that refresh out, and the update check a native install makes at most once a day (`bake docs update`): they are the only network operations a session makes before its first prompt, so with it an offline session starts entirely from files. `/login` and `/refresh-models`, which you ask for, still reach the proxy.
+- `/logout` sets the route to `null` and removes the key.
 - `--api-key` still comes first for requests and for `/refresh-models`.
 
 ## Checking and printing credentials
@@ -79,7 +79,3 @@ bake auth print-api-key --provider cliproxyapi  # the key, on standard output
 - `bake auth print-bearer-token` is not available yet: bearer tokens belong to OAuth providers, which are planned for a later release, so it always fails with that reason. `--min-expiry <30m|1h|…>` is checked and then unused.
 - `--no-refresh` is accepted and changes nothing: nothing to refresh, and these commands never write. All three read `models.json`, `auth.json`, and `settings.json` only, reach no network, and accept no flag but `--provider` and `--model`; `--api-key` is refused. `bake auth` prints their help.
 - A key is printed only by `print-api-key` and by `check --credentials`, whose purpose is to print it; no error message or status line carries one.
-
-## The route Bake 0.3 saved
-
-While `settings.json` has no `cliproxyapi` member, a CLIProxyAPI route that Bake 0.3's login saved becomes the `cliproxyapi` provider with the models saved with it. Its key is `CLIPROXYAPI_API_KEY` when that environment variable is set and not empty, else the key in `.credentials.yaml`. Signing in replaces it; the 0.3 files are never changed. `bake docs home` lists what else bake imports.

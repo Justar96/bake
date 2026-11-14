@@ -19,9 +19,6 @@ download_url=${BAKE_DOWNLOAD_URL:-https://bake.justar.dev}
 download_url=${download_url%/}
 native_root=${BAKE_NATIVE_ROOT:-"$HOME/.local/share/bake-native"}
 bin_dir=${BAKE_BIN_DIR:-"$HOME/.local/bin"}
-# The 0.3 TypeScript install, which this installer reads to recognize a
-# Bake-managed `bake` and never writes to.
-legacy_root=${BAKE_INSTALL_ROOT:-"$HOME/.local/share/bake"}
 replace_command=${BAKE_REPLACE_COMMAND:-}
 # The native release key (distribution/host/native-release-key.pub), base64
 # DER SubjectPublicKeyInfo. A release test holds every copy equal. Tests
@@ -654,8 +651,8 @@ check_members() {
     || fail "the archive unpacks to $unpacked bytes, more than the $max_unpacked_bytes an install accepts"
 }
 
-# Where `<bin>/bake` points, as far as the takeover is concerned:
-# `none`, `native`, `legacy` (a Bake-managed 0.3 link), or `foreign`.
+# Where `<bin>/bake` points: `none`, `native` (this install's link), or
+# `foreign`.
 command_owner() {
   path=$1
   if [ -L "$path" ]; then
@@ -666,7 +663,6 @@ command_owner() {
     esac
     case $target in
       "$native_root"/*) printf 'native' ;;
-      "$legacy_root"/*) printf 'legacy' ;;
       *) printf 'foreign' ;;
     esac
     return 0
@@ -697,22 +693,11 @@ uninstall_links() {
           restored=$((restored + 1))
         fi
         ;;
-      *'"kind":"symlink"'*)
-        target=$(json_path "$(printf '%s' "$line" | cut -d '"' -f 14)")
-        # Only this install's own command is put back, as for a command it
-        # created: a `bake` the user has replaced since is left alone.
-        if [ "$(command_owner "$path")" = native ]; then
-          rm -f "$path"
-          ln -s "$target" "$path"
-          step "Restored $path -> $target"
-          restored=$((restored + 1))
-        else
-          step "Left $path alone; it is no longer the command this installer made"
-        fi
-        ;;
       *'"kind":"file"'*)
         backup=$(json_path "$(printf '%s' "$line" | cut -d '"' -f 14)")
         [ -e "$backup" ] || fail "the backup $backup recorded for $path is gone"
+        # Only this install's own command is put back, as for a command it
+        # created: a `bake` the user has replaced since is left alone.
         if [ "$(command_owner "$path")" = native ]; then
           rm -f "$path"
           mv -f "$backup" "$path"
@@ -868,9 +853,8 @@ write_command_link() {
   mv $pointer_mv "$command_temp" "$1"
 }
 
-# Create `<bin>/bake`, taking over a Bake-managed 0.3 command and recording
-# every command this installer created or replaced in links.json. `dsh` and
-# the 0.3 install are never touched.
+# Create `<bin>/bake` and record in links.json whether it replaced a
+# command, and where that command's backup is.
 link_command() {
   command_path="$bin_dir/bake"
   case $command_path in
@@ -881,8 +865,8 @@ link_command() {
     # A rerun of this installer, which is how an install is updated. The
     # command already leads to `current`, and links.json still records what
     # the first run replaced; recording this install's own link instead
-    # would lose the 0.3 command `--uninstall-links` has to restore. The
-    # link is rewritten only when the release renamed its executable.
+    # would lose the backup `--uninstall-links` has to restore. The link is
+    # rewritten only when the release renamed its executable.
     if [ "$(readlink "$command_path")" != "$native_root/current/bin/$executable_name" ]; then
       write_command_link "$command_path"
     fi
@@ -892,10 +876,6 @@ link_command() {
   replaced='null'
   case $owner in
     none) ;;
-    legacy)
-      step "Taking over $command_path from the Bake 0.3 install"
-      replaced="{\"kind\":\"symlink\",\"target\":\"$(json_value "$(readlink "$command_path")")\"}"
-      ;;
     foreign)
       if [ -z "$replace_command" ]; then
         printf 'Bake install: %s exists and no Bake installer made it, so it was left alone.\n' "$command_path" >&2

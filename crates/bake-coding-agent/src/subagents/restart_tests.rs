@@ -1,12 +1,10 @@
-//! Scope 11 restart proofs for subagents ([D38]): a parent process killed
+//! Restart proofs for subagents: a parent process killed
 //! with `SIGKILL` from the test while a background child runs, once the
 //! child's settlement is posted and not yet delivered, once its notice is
 //! synced, and while a foreground child runs. The child is a session in
 //! the parent's process, so the kill ends both; the test reopens both
 //! files, resumes the parent in this process, and checks the next request,
 //! the notices, the child's requests, and continuing the child.
-//!
-//! [D38]: ../../../../docs/roadmap/rust-0.4/scope-00/support.md
 
 use bake_agent::{AgentEvent, AgentMessage};
 use tokio::sync::Notify;

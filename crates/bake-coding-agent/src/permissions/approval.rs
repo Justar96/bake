@@ -1,13 +1,9 @@
-//! Approval policy and answerers, ported from Bake's TypeScript
-//! `packages/interaction/user-approval/src/{index,types}.ts`: the
-//! `ApprovalPolicy` knob, the model-facing policy sentences, and the
+//! Approval policy and answerers: the `ApprovalPolicy` knob, the model-facing policy sentences, and the
 //! service's `decide` step, which applies the policy before any answerer is
 //! asked and fails closed when none can answer.
 //!
-//! The TypeScript service dispatched an `approval/request` waterfall to
-//! composed answerers; here an answerer is one [`Approver`], and
-//! [`PolicyApprover`] is the service in front of it. The `approval/asked`
-//! and `approval/decided` audit events are written around it by the engine
+//! An answerer is one [`Approver`], and [`PolicyApprover`] applies the
+//! policy in front of it. The asked and decided audit records are written around it by the engine
 //! ([`super::history`]).
 //!
 //! Bake adds three answers a person can give in its terminal
@@ -83,9 +79,8 @@ impl FromStr for ApprovalPolicy {
     }
 }
 
-/// The model-facing statement for `never` (`NEVER_SENTENCE`), without the
-/// TypeScript clause forbidding `sandbox_permissions`: under `never` the
-/// tools do not advertise it ([`super::reachable_escalation_targets`]).
+/// The model-facing statement for `never`. It does not mention
+/// `sandbox_permissions`: under `never` the tools do not advertise it ([`super::reachable_escalation_targets`]).
 pub const NEVER_SENTENCE: &str =
     "Approval prompts: disabled. Actions that need approval are rejected automatically.";
 /// The model-facing statement for `ask` (`ASK_SENTENCE`).
@@ -242,8 +237,7 @@ impl Approver for NeverApprover {
 }
 
 /// No one can answer: every request is `unavailable`, which fails closed.
-/// The terminal answerer of a headless composition, as the TypeScript
-/// waterfall's default was.
+/// The answerer of a headless composition.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct NoApprover;
 

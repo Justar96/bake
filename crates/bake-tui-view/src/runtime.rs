@@ -17,8 +17,7 @@ use crate::status::{CacheReading, ContextUsage, TokenTotals};
 use crate::transcript::Row;
 
 /// A prompt the user sent, and how it reaches the agent: chosen from the
-/// composer's mode, as the TypeScript `submitInput` chooses from the agent's
-/// status.
+/// composer's mode.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Submission {
     /// Starts a turn while the agent is idle.
@@ -73,7 +72,7 @@ pub struct SessionStatus {
     pub name: Option<String>,
 }
 
-/// When a waiting prompt is admitted, as the TypeScript inbox targets it.
+/// When a waiting prompt is admitted.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Target {
     /// At the running turn's next step.

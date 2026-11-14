@@ -1,5 +1,5 @@
 //! Writer exclusion and durable writes for session files. Pi has neither;
-//! both are Bake design rules (scope 03 of the Rust 0.4 roadmap).
+//! both are Bake design rules.
 //!
 //! # Writer exclusion
 //!

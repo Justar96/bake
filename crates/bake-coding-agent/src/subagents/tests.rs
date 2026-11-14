@@ -392,7 +392,7 @@ fn tool_results(session: &AgentSession, name: &str) -> Vec<(String, bool, serde_
         .collect()
 }
 
-// 0.3 `continuable` default: a background child returns its id at once,
+// The `continuable` default: a background child returns its id at once,
 // runs on the route it was given, and its single settlement notice opens
 // the idle parent's next turn with its closing message.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -879,7 +879,7 @@ async fn a_resumed_parent_reports_lost_runs_and_resumes_children() {
 
 // At the limit the least recently used idle child is evicted to `ready`
 // and stays continuable from its file; with every child running, a start
-// is refused with 0.3's limit text.
+// is refused with the limit text.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn the_limit_evicts_idle_children_and_refuses_when_all_run() {
     let h = harness("subagent-limit");
@@ -996,7 +996,7 @@ async fn a_dropped_start_leaves_no_child() {
     work.close().await;
 }
 
-// Scope 08: a subagent's tools carry the replay class recovery reads,
+// A subagent's tools carry the replay class recovery reads,
 // the child's `send_message` included, which a parent never composes.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn every_subagent_tool_has_a_replay_class() {

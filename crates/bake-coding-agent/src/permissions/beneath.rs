@@ -1,7 +1,6 @@
 //! Opening a checked write target without following links, so a link
 //! swapped in between the containment check and the write cannot redirect
-//! it. Bake's own; the TypeScript fence accepted this race
-//! (`packages/fs/fs-sandbox/src/index.ts`).
+//! it.
 //!
 //! A [`BeneathTarget`] is a writable root and the link-free components of
 //! the file under it, both as the guard checked them. Every open starts at

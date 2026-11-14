@@ -167,7 +167,7 @@ description; and the cases of test/rpc-jsonl.test.ts,
 test/rpc-prompt-response-semantics.test.ts, test/rpc.test.ts,
 test/rpc-client-clear-queue.test.ts, test/rpc-client-clone.test.ts, and
 test/rpc-client-process-exit.test.ts that src/rpc/ and
-crates/bake-cli/tests/rpc.rs name. Approvals (D24) are Bake's own, carried
+crates/bake-cli/tests/rpc.rs name. Approvals are Bake's own, carried
 over Pi's extension_ui_request.
 
 From release v1.4.0, revision 4a080252f06caf63a525d7873c5d94d3c23887e0:

@@ -18,9 +18,6 @@
 //! and the next run clears the staging directory; an interruption between
 //! the two pointer moves leaves both naming the old release, which the
 //! next update replaces and a rollback reports as nothing to return to.
-//!
-//! Bake 0.3's `packages/boot/updater/src/{install,rollback}.ts` is the
-//! reference for the order of these steps.
 
 use std::io::Write;
 use std::path::Path;

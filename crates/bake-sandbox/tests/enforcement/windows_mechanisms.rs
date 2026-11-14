@@ -1,6 +1,6 @@
 //! A mechanism probe, not a qualification: real Windows effects under the
 //! retained `WRITE_RESTRICTED` token and two candidate replacements, so the
-//! roadmap's Windows confinement decision rests on measured behaviour.
+//! Windows confinement decision rests on measured behaviour.
 //!
 //! - **`write-restricted`** is the shipped runner, reached through the same
 //!   explicit chain as the other scenarios in [`super`].

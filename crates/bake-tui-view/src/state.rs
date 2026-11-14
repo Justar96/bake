@@ -227,8 +227,7 @@ impl Spot {
     }
 }
 
-/// How long a first Ctrl+C waits for a second before the quit is disarmed:
-/// the TypeScript `doubleInterruptMs` default.
+/// How long a first Ctrl+C waits for a second before the quit is disarmed.
 pub const QUIT_WINDOW: Duration = Duration::from_millis(2000);
 
 /// The slash menu as drawn: the matching commands and the selected one.
@@ -1193,7 +1192,7 @@ fn apply(state: &mut State, msg: Msg) -> Vec<Effect> {
             // A terminal pastes nothing for a clipboard that holds only an
             // image, and a dropped file arrives as its path; either is read
             // as an image. Other text goes in, a long paste collapsed into a
-            // placeholder, as the oracle's does.
+            // placeholder.
             Focus::Composer if text.is_empty() => {
                 return vec![Effect::ReadImage(ImageSource::Clipboard)];
             }
@@ -1203,8 +1202,7 @@ fn apply(state: &mut State, msg: Msg) -> Vec<Effect> {
                 }
                 paste_text(state, &text);
             }
-            // The list's keys are on the bar; a paste there is ignored, as
-            // the oracle ignores one while a sheet is open.
+            // The list's keys are on the bar; a paste there is ignored.
             Focus::Tasks | Focus::Shell => {}
             Focus::Inspect => state.notice = Some(Notice::ReadOnly),
         },
@@ -1951,20 +1949,19 @@ fn edit_note(state: &mut State, input: KeyInput) {
 /// A key while an approval request waits; `burst` when it was read in one
 /// sweep with other keys.
 ///
-/// The panel lists its answers ([`approval_choices`]): ↑↓ or an answer's
-/// key (`y` once, `a` session, `f` full access) chooses one, and Enter
-/// confirms it, so a terminal that repeats a held key as fresh presses can
-/// repeat a choice into no grant, and Enter alone never allows. `n`, or
-/// Enter on Deny, starts a note to the model: printable keys and pastes
-/// type it, Backspace erases, Enter sends the rejection with it, and Esc
-/// goes back to the answers. Elsewhere Esc withdraws the request, as the
-/// TypeScript controller's cancel does. Only keys read alone after the
-/// input thread armed the request ([`Msg::ApprovalArmed`]) choose, confirm,
-/// or send, so a key typed before the prompt appeared, still waiting, or
-/// one inside a burst of typed or pasted text decides nothing; it says how
-/// to answer instead. The page keys scroll the request's detail. Nothing
-/// touches the draft, its caret, or its staged images, and Ctrl+C keeps
-/// its quit gesture.
+/// The panel lists its answers ([`approval_choices`]): ↑↓ or an answer's key
+/// (`y` once, `a` session, `f` full access) chooses one, and Enter confirms
+/// it, so a terminal that repeats a held key as fresh presses can repeat a
+/// choice into no grant, and Enter alone never allows. `n`, or Enter on Deny,
+/// starts a note to the model: printable keys and pastes type it, Backspace
+/// erases, Enter sends the rejection with it, and Esc goes back to the
+/// answers. Elsewhere Esc withdraws the request. Only keys read alone after
+/// the input thread armed the request ([`Msg::ApprovalArmed`]) choose,
+/// confirm, or send, so a key typed before the prompt appeared, still
+/// waiting, or one inside a burst of typed or pasted text decides nothing; it
+/// says how to answer instead. The page keys scroll the request's detail.
+/// Nothing touches the draft, its caret, or its staged images, and Ctrl+C
+/// keeps its quit gesture.
 fn approval_key(state: &mut State, input: KeyInput, burst: bool) -> Vec<Effect> {
     let bound = keys::action(state.focus.scope(), input);
     if let Some(effects) = quit_key(state, bound) {
@@ -2161,10 +2158,10 @@ fn menu_key(state: &mut State, bound: Option<Action>) -> bool {
     }
 }
 
-/// Up, Down, and Tab while the file menu is open, as the oracle's composer
-/// takes them: the arrows cycle the selection and Tab puts in the selected
-/// mention; with nothing listed yet they do nothing. Enter is not the
-/// menu's, so it sends the draft as typed. Returns `false` without a menu.
+/// Up, Down, and Tab while the file menu is open: the arrows cycle the
+/// selection and Tab puts in the selected mention; with nothing listed yet
+/// they do nothing. Enter is not the menu's, so it sends the draft as typed.
+/// Returns `false` without a menu.
 fn file_key(state: &mut State, bound: Option<Action>) -> bool {
     let Some(menu) = state.file_menu() else {
         return false;
@@ -2264,7 +2261,7 @@ fn composer_key(state: &mut State, bound: Option<Action>, input: KeyInput) -> Ve
             open_tasks(state, Group::Agents);
             return Vec::new();
         }
-        // Without a menu, Tab types a tab, as the oracle's composer does.
+        // Without a menu, Tab types a tab.
         Some(Action::Complete) => draft.type_text("\t"),
         // Esc asks the runtime to stop its turn, which ends when it says so.
         Some(Action::Interrupt) if running => {
@@ -2442,7 +2439,7 @@ fn composer_key(state: &mut State, bound: Option<Action>, input: KeyInput) -> Ve
 }
 
 /// The prompts the session holds, newest first, as Up recalls them: the
-/// TypeScript `inputHistory` over the transcript's user rows. The preview
+/// transcript's user rows. The preview
 /// has no pending input or commands to recall.
 fn input_history(transcript: &Transcript) -> Vec<String> {
     transcript
@@ -2726,7 +2723,7 @@ mod tests {
         assert_eq!((state.draft.text(), state.notice), ("", None));
         // The prompt shows only once the runtime commits it.
         assert_eq!(state.transcript.rows.len(), rows);
-        // Undo brings a sent draft back, as the oracle's does.
+        // Undo brings a sent draft back.
         chord(&mut state, Key::Char('-'), Mods::CTRL);
         assert_eq!(state.draft.text(), "hello");
     }
@@ -4002,7 +3999,7 @@ mod tests {
     }
 
     #[test]
-    fn readline_keys_move_kill_and_yank_as_the_oracle_does() {
+    fn readline_keys_move_kill_and_yank() {
         let mut state = State::default();
         let caret_at = |state: &State| {
             let (text, caret) = (state.draft.text(), state.draft.caret());
@@ -4190,7 +4187,7 @@ mod tests {
     }
 
     #[test]
-    fn the_slash_menu_selects_completes_and_closes_as_the_oracle_does() {
+    fn the_slash_menu_selects_completes_and_closes() {
         let mut state = State::default();
         type_str(&mut state, "/lo");
         assert_eq!(menu_names(&state), Some((vec!["login", "logout"], "login")));
@@ -4577,8 +4574,7 @@ mod tests {
 
     // ---- Approvals ----
     //
-    // The keys follow the TypeScript `ApprovalView`
-    // (`apps/tui/packages/ui/src/interaction.tsx`): `n` rejects, a paste
+    // The approval keys: `n` rejects, a paste
     // is dropped, Ctrl and Alt chords decide nothing; `y` then Enter
     // allows, and only once the input thread has armed the request.
 

@@ -1,31 +1,24 @@
 //! The model's web tools, `web_search` and `web_fetch`, over
 //! [`crate::web`].
 //!
-//! Pi v1.3.0 (`71023aec`; MIT, see the crate `NOTICE`) has no web tools.
-//! Ported from Bake 0.3's `packages/web/tool-web/src/{index,search,fetch,trust}.ts`:
-//! the names, descriptions, parameters, limits (at most 4 queries and 8
-//! sources a search, a 200,000-character fetch output), the untrusted
-//! content notice, the result text, and the structured result
-//! (`structured_content`, with the output schemas of `defineTool`) and its
-//! presentation meta (`details`). A search's `details` also hold the
-//! secret-free requests it sent (`searchRequests`), which 0.3 recorded as
-//! `web/deepseek-search-llm-request` session events.
+//! Pi v1.3.0 (`71023aec`; MIT, see the crate `NOTICE`) has no web tools;
+//! these are Bake's own. Their limits are at most 4 queries and 8 sources
+//! a search and a 200,000-character fetch output. A result carries the
+//! untrusted content notice, the result text, the structured result
+//! (`structured_content`, with its output schema), and its presentation
+//! meta (`details`). A search's `details` also hold the secret-free
+//! requests it sent (`searchRequests`).
 //!
 //! The tools describe their whole contract and add nothing to the system
 //! prompt. `web_search` names `web_fetch` as its follow-up only when the
 //! session's tools include it ([`web_search_tool_definition`]).
 //!
-//! Both are default tools of every session, subagents included, as 0.3's
-//! `standard` agent preset mounted `tool-web` for each session it built
-//! (`packages/preset/agent-presets/presets/standard/agent.cordis.yml`).
-//! Neither asks for approval, in any sandbox mode or approval policy: 0.3's
-//! shipped presets exposed them "in every sandbox and approval mode
-//! without per-call confirmation" (`docs/subsystems/web.md`), and the
-//! sandbox modes bound file writes, not the network.
+//! Both are default tools of every session, subagents included. Neither
+//! asks for approval, in any sandbox mode or approval policy: the sandbox
+//! modes bound file writes, not the network.
 //!
-//! The tool-call timeouts of 0.3's `bake-tool-call-timeout-policy` are the
-//! fetch's own 30-second bound and, for a search, 60 seconds (0.3's
-//! shipped `searchTimeoutMs`), after which the call fails with
+//! The tool-call timeouts are the fetch's own 30-second bound and, for a
+//! search, 60 seconds, after which the call fails with
 //! `tool call timed out after 60000ms`.
 
 use std::future::Future;
@@ -217,7 +210,7 @@ pub fn web_search_tool_definition(search: CliProxySearch, fetch_offered: bool) -
         },
     );
     tool.output_schema = Some(search_output_schema());
-    // 0.3's `isConcurrencySafe`: a provider read changes no session state.
+    // Concurrency-safe: a provider read changes no session state.
     tool.read_only = true;
     // A request leaves the machine (a search is a paid model call), so a
     // recovered run never repeats it: reconciliation decides.
@@ -256,7 +249,7 @@ pub fn web_fetch_tool_definition(fetcher: HttpFetcher) -> ToolDefinition {
         },
     );
     tool.output_schema = Some(fetch_output_schema());
-    // 0.3's `isConcurrencySafe`: a provider read changes no session state.
+    // Concurrency-safe: a provider read changes no session state.
     tool.read_only = true;
     // A request leaves the machine (a search is a paid model call), so a
     // recovered run never repeats it: reconciliation decides.

@@ -17,7 +17,7 @@
 //! Differences from Pi, each refused with a message rather than ignored:
 //!
 //! - Server names follow Bake's tool-name contract,
-//!   `[A-Za-z0-9_-]{1,32}` (`packages/mcp/mcp-client`).
+//!   `[A-Za-z0-9_-]{1,32}`.
 //! - The only exposures are `direct` (the default here; Pi's is
 //!   `codemode`) and `hidden`: Pi's `codemode`, `codemode-deferred`, and
 //!   `deferred` are not supported yet.
@@ -26,10 +26,7 @@
 //!   Pi's config values do, but never run a command (`!cmd`). A server's
 //!   environment is Bake's scrubbed environment, which drops credential-like
 //!   and Bake-managed names, with the entry's `env` over it, so naming a
-//!   scrubbed variable here passes it: the file's owner authorizes it, as an
-//!   explicit `env` overrides the scrub in Bake's TypeScript
-//!   (`packages/mcp/mcp-client/src/transport.ts` `buildChildEnv`, and
-//!   `scrubbedParentEnv` in `packages/subprocess/subprocess/src/index.ts`).
+//!   scrubbed variable here passes it: the file's owner authorizes it.
 //!   Only an owner-controlled file may therefore be loaded. A sandbox
 //!   runner's own variables still go over the entry's, so `env` cannot
 //!   forge them.

@@ -1,8 +1,7 @@
 //! `@` file mentions: the token at the caret, the text a chosen path puts in
 //! the draft, and the file menu's choices.
 //!
-//! Ports the `@` grammar of `bake-file-reference/grammar` and the file half
-//! of the TypeScript `completion.ts`. Discovery is the terminal owner's: the
+//! Discovery is the terminal owner's: the
 //! view asks for a query with [`crate::state::Effect::FindFiles`] and lists
 //! what comes back for it. Paths only; no file is read.
 

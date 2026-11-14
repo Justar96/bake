@@ -138,8 +138,8 @@ Options:
                             danger-full-access
       --sandbox <mode>      read-only, workspace-write, or danger-full-access
       --approval <policy>   ask or never
-      --offline             Run no startup network operation (BAKE_OFFLINE,
-                            then DSH_OFFLINE, set to 1, true, or yes)
+      --offline             Run no startup network operation (or set
+                            BAKE_OFFLINE to 1, true, or yes)
       --verbose             Accepted and without effect: bake has no quiet
                             startup to force, and always reports its startup
   -a, --approve             Refused, with the reason: Pi's project trust is
@@ -170,7 +170,7 @@ Ctrl+C twice quits. Slash commands such as /model are not available yet;
 /skill:name and prompt templates work.
 
 Models come from models.json and keys from auth.json in the Bake home
-(BAKE_HOME, then DSH_HOME, then ~/.bake), which also holds settings.json, the
+(BAKE_HOME, else ~/.bake), which also holds settings.json, the
 saved sessions, and mcp.json, the stdio MCP servers each session starts under
 its sandbox mode; bake refuses an mcp.json that other users, the working
 directory, or a git repository could change. Instructions come from ~/.agents/AGENTS.md and the
@@ -359,24 +359,13 @@ fn main() -> ExitCode {
 }
 
 /// `bake auth <command>`: Pi's `runAuthCommand` over the Bake home,
-/// reading its files and reaching no network. The Bake 0.3 route is
-/// imported as a run imports it (D25), so a provider it contributes is
-/// checked too.
+/// reading its files and reaching no network.
 fn run_auth(args: &[String]) -> ExitCode {
     let stdout: SharedWriter = Arc::new(Mutex::new(io::stdout()));
     let stderr: SharedWriter = Arc::new(Mutex::new(io::stderr()));
     let home = bake_coding_agent::home::bake_home();
-    let imported = match &home {
-        Some(home) => cli::import_startup(home, &|name| std::env::var_os(name)),
-        None => cli::ImportedStartup::default(),
-    };
-    let code = cli::auth_command::run_auth_command(
-        args,
-        home.as_deref(),
-        imported.providers,
-        &stdout,
-        &stderr,
-    );
+    let code =
+        cli::auth_command::run_auth_command(args, home.as_deref(), Vec::new(), &stdout, &stderr);
     // `parse` sends only `auth` commands here.
     exit_code(code.unwrap_or(1))
 }
@@ -578,7 +567,7 @@ fn agent(args: &[String]) -> ExitCode {
                     return 1;
                 }
             };
-            // The client answers the session's approval requests (D24)
+            // The client answers the session's approval requests
             // over the protocol, as the terminal answers them interactively.
             let approvals = ApprovalBroker::new();
             let mut environment = environment(
@@ -611,10 +600,6 @@ fn environment(
     approvals: Option<ApprovalBroker>,
 ) -> CliEnvironment {
     let home = bake_coding_agent::home::bake_home();
-    let imported = match &home {
-        Some(home) => cli::import_startup(home, &|name| std::env::var_os(name)),
-        None => cli::ImportedStartup::default(),
-    };
     CliEnvironment {
         cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
         home,
@@ -624,9 +609,7 @@ fn environment(
         stdin: Box::new(io::stdin()),
         stdout: Arc::new(Mutex::new(io::stdout())),
         stderr,
-        extra_providers: imported.providers,
-        imported_default_model: imported.default_model,
-        imported_default_preset: imported.default_preset,
+        extra_providers: Vec::new(),
         sandbox_provider: sandbox_provider(),
         approver: approvals.map(|broker| Arc::new(broker) as Arc<dyn Approver>),
         // This executable is the plugin helper; one compile queue serves
@@ -635,7 +618,7 @@ fn environment(
             command: bake_coding_agent::plugins::wasm::HelperCommand::current_exe().ok(),
             ..Default::default()
         },
-        warnings: imported.warnings,
+        warnings: Vec::new(),
         interrupt,
     }
 }
@@ -647,7 +630,7 @@ fn environment(
 /// and SIGHUP itself, shutting the session down before it restores the
 /// terminal.
 fn interactive(runtime: &tokio::runtime::Runtime, args: cli::Args, stderr: SharedWriter) -> i32 {
-    // `--offline`, or BAKE_OFFLINE then DSH_OFFLINE: the terminal starts
+    // `--offline`, or BAKE_OFFLINE: the terminal starts
     // the session without the CLIProxyAPI catalog refresh.
     let offline = cli::offline_mode(&args, |name| std::env::var_os(name));
     let screen = if args.inline {
@@ -655,7 +638,7 @@ fn interactive(runtime: &tokio::runtime::Runtime, args: cli::Args, stderr: Share
     } else {
         ScreenMode::Fullscreen
     };
-    // The terminal answers the session's approval requests (D24); until it
+    // The terminal answers the session's approval requests; until it
     // is connected, and once it is gone, nobody can, so they fail closed.
     let approvals = ApprovalBroker::new();
     let started = runtime.block_on(async {
@@ -796,7 +779,7 @@ fn exit_status(exit: PreviewExit) -> i32 {
     match exit {
         PreviewExit::Quit => 0,
         // The terminal is gone, so there is nowhere to report anything; 129
-        // is the SIGHUP status the TypeScript launcher reports too.
+        // is the SIGHUP status.
         PreviewExit::Hangup => 129,
         PreviewExit::Signal(signal) => 128 + signal,
     }

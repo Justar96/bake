@@ -1,5 +1,4 @@
-//! Ports of `packages/web/tool-web/tests/tool-web.spec.ts`: the
-//! model-facing declarations, argument validation, result text, merging,
+//! The web tools: the model-facing declarations, argument validation, result text, merging,
 //! and both tools run through their `AgentTool` against loopback servers.
 
 use std::net::{IpAddr, Ipv4Addr};
@@ -117,7 +116,7 @@ fn declares_0_3s_names_descriptions_and_parameters() {
             .all(|definition| definition.prompt_snippet.is_none()
                 && definition.prompt_guidelines.is_none())
     );
-    // 0.3 marked both `isConcurrencySafe`; read-only batching follows it.
+    // Both are concurrency-safe, so read-only batching runs them together.
     assert!(
         definitions
             .iter()

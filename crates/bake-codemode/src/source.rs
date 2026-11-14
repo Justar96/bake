@@ -8,7 +8,7 @@
 //! text(JSON.parse(text).name);
 //! ```
 //!
-//! Pi's Lark grammar for grammar-constrained input is not ported (D42).
+//! Pi's Lark grammar for grammar-constrained input is not ported.
 
 use std::fmt;
 

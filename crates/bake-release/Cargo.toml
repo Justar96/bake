@@ -29,3 +29,7 @@ reqwest.workspace = true
 rustls.workspace = true
 webpki-roots.workspace = true
 tokio = { workspace = true, features = ["rt", "time", "macros", "net", "io-util"] }
+
+[dev-dependencies]
+# Property tests of the changelog and Cargo.toml edits `prepare` makes.
+proptest.workspace = true

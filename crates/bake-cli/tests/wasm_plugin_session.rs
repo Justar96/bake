@@ -150,8 +150,8 @@ impl Fixture {
         Arc::new(tool)
     }
 
-    /// A session over Pi's file tools under danger-full-access, where D24
-    /// allows every write, and the `markers`, with the plugins the home
+    /// A session over Pi's file tools under danger-full-access, where the
+    /// permissions allow every write, and the `markers`, with the plugins the home
     /// enables now, loaded as `bake` loads them.
     async fn session(&self, store: SessionManager, markers: &[&str]) -> AgentSession {
         let loaded = self

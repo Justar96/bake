@@ -2,23 +2,22 @@
 
 Bake is an independent, MIT-licensed terminal coding agent. Its product is the `bake` executable built from the Cargo workspace at the repository root. User-facing text calls it Bake. The repository contains Rust, its embedded assets and test fixtures, documentation, and Cargo-based CI. Linux x86_64 and Windows x64 are released from 0.4.7 (Windows without a qualified sandbox); 0.4.6 was the last Linux arm64 release, and macOS support follows later.
 
-Use the current source, [development guide](docs/development.md), and [contribution guide](CONTRIBUTING.md) for implementation and commands. The [0.4 roadmap](docs/roadmap/rust-0.4/README.md) and [support register](docs/roadmap/rust-0.4/scope-00/support.md) retain design decisions and qualification history. Historical commands, deleted tooling, and linked Git snapshots do not define the current development workflow.
+Use the current source, [development guide](docs/development.md), and [contribution guide](CONTRIBUTING.md) for implementation and commands. [Direction](docs/direction.md) holds the current priorities and the rules Bake keeps. Historical commands, deleted tooling, and linked Git snapshots do not define the current development workflow. Bake 0.3, the earlier TypeScript agent, is removed: do not add compatibility with its files, commands, `DSH_*` variables, or download route.
 
 ## Workspace
 
 - `crates/`: agent, model adapters, tools, session services, sandbox, terminal, and executable.
 - `plugins/`: Wasm plugin SDK examples and hostile fixtures.
 - `fuzz/`: parser fuzz targets with a separate nightly toolchain and lockfile.
-- `probes/`: standalone research crates; they are outside the main workspace checks.
 - `crates/bake-cli/docs/`: user documentation embedded in `bake`.
-- `docs/`: architecture, development guidance, and roadmap documentation.
+- `docs/`: architecture, development and testing guidance, and the development direction.
 - `.github/workflows/`: Cargo CI, optional Rust quality checks, and the `main` branch source check.
 
 Keep development Cargo-based; do not reintroduce a JavaScript package workspace, Bun wrappers, or the retired tooling and archive directories. JavaScript, HTML, CSS, Wasm, and data files embedded by Rust or consumed by its tests are product inputs: preserve their include paths, provenance, and licenses. Keep them inside their owning Rust crate or the plugin fixtures. [Plugin build instructions](plugins/README.md) describe how to rebuild the committed components.
 
-Run Cargo from the repository root so `rust-toolchain.toml` applies. Keep builds locked. `Cargo.lock` and `fuzz/Cargo.lock` own separate dependency graphs; standalone probes also own their locks. Pin external dependencies exactly, document their purpose and licensing, and keep test-only dependencies in `[dev-dependencies]`.
+Run Cargo from the repository root so `rust-toolchain.toml` applies. Keep builds locked. `Cargo.lock` and `fuzz/Cargo.lock` own separate dependency graphs. Pin external dependencies exactly, document their purpose and licensing, and keep test-only dependencies in `[dev-dependencies]`.
 
-Inspect the working tree before editing and preserve unrelated changes. Never overwrite sessions, credentials, or user settings while checking behavior. Bake defaults to `~/.bake`; `BAKE_HOME` takes precedence over `DSH_HOME`. Preserve the existing environment fallbacks and user-owned command links.
+Inspect the working tree before editing and preserve unrelated changes. Never overwrite sessions, credentials, or user settings while checking behavior. Bake defaults to `~/.bake`, or `BAKE_HOME` when set. Preserve user-owned command links.
 
 ## Code ownership
 
@@ -49,15 +48,15 @@ Before pushing to `develop`, run format, Clippy, workspace tests, and build on L
 
 ## Branches and releases
 
-`origin` is Bake's repository. Work lands directly on an up-to-date `develop`, rebased on `origin/develop`; no pull requests go into `develop`, and it is never force-pushed. `main` accepts only merge-commit release pull requests from `develop`. Never commit directly to `main` or `release/0.3`. Do not restore the retired runtime or merge `release/0.3` into `develop` or `main`. Do not merge from or push to an upstream reference automatically.
+`origin` is Bake's repository. Work lands directly on an up-to-date `develop`, rebased on `origin/develop`; no pull requests go into `develop`, and it is never force-pushed. `main` accepts only merge-commit release pull requests from `develop`. Never commit directly to `main`. Do not restore the retired TypeScript runtime or merge its history into `develop` or `main`. Do not merge from or push to an upstream reference automatically.
 
-Releases and their tags require an explicit request from the owner. A release is built, signed, and published locally, following [Release steps by hand](distribution/README.md#release-steps-by-hand): build and pack the release `bake` with `bake-release` on each released Linux platform, check its glibc floor, and rehearse its install. Then create the version's GitHub release by hand, with its `v<version>` tag and the archives. Assemble and sign the manifest with the owner's local key, deploy the download service from `distribution/host` directly, and check what it serves with `bake-release verify-live`. The service redirects archive downloads to the GitHub release, so that release must be public before the deploy. A deploy is not a release until `verify-live` passes. The Rust updater remains part of the product. Keep existing deployed download routes intact unless changing them is explicitly requested.
+Releases and their tags require an explicit request from the owner. A release is built, signed, and published locally, following [Release steps](distribution/README.md#release-steps): `bake-release prepare <version>` sets the version, lockfiles, and changelog on `develop` for the release pull request; after the merge, build, pack, check the glibc floor of, and rehearse the release `bake` on Linux x64, and pack it on Windows x64; then `bake-release publish <version>` tags `main`, creates the GitHub release with the archives, signs the manifest with the owner's local key, deploys the download service, and runs `verify-live`. Run `publish --dry-run` first. The service redirects archive downloads to the GitHub release, so that release must be public before the deploy. A deploy is not a release until `verify-live` passes. The Rust updater remains part of the product. Keep existing deployed download routes intact unless changing them is explicitly requested.
 
 ## Agent contracts
 
-Port primarily from Pi's latest official release. Re-check it when starting a scope, record the revision and adapted files, preserve its MIT notice, and port its tests. Bake keeps the CLIProxyAPI route, sandbox/approvals/permission presets, and the Bake home and its settings and credentials. Retained contracts name their original source revision in fixture provenance. The [Pi-first plan](docs/roadmap/rust-0.4/pi-first-plan.md) governs where older scope text conflicts. Bake reads and writes Pi sessions; it does not migrate, read, or lock the retired agent's Session logs. Its system prompt is Bake's own.
+Port primarily from Pi's latest official release. Re-check it when starting a port, record the revision and adapted files, preserve its MIT notice, and port its tests. Bake keeps the CLIProxyAPI route, sandbox/approvals/permission presets, and the Bake home and its settings and credentials. Ported fixtures name their Pi source revision. Bake reads and writes Pi sessions. Its system prompt is Bake's own.
 
-With a public API change, update the crate row and test paragraph in `docs/development.md`, and the roadmap Dev Note.
+With a public API change, update the crate row and test paragraph in `docs/development.md`, and `docs/direction.md` when it changes a rule or priority.
 
 ## Evaluation and documentation
 

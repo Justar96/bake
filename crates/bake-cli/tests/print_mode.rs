@@ -348,7 +348,6 @@ impl Workspace {
             .args(args)
             .current_dir(self.project())
             .env("BAKE_HOME", self.home())
-            .env_remove("DSH_HOME")
             .env_remove("CLIPROXYAPI_API_KEY")
             .env("HOME", self.root.join("user"))
             .env("USERPROFILE", self.root.join("user"))
@@ -601,7 +600,7 @@ fn print_mode_answers_saves_and_continues() {
             "message:assistant",
         ]
     );
-    // D24: a new session pins the default preset, Pi's full access, outside
+    // A new session pins the default preset, Pi's full access, outside
     // the model's view.
     assert_eq!(entries[1]["customType"], "bake.permission");
     assert_eq!(
@@ -1175,31 +1174,63 @@ fn a_session_whose_working_directory_is_gone_is_refused() {
     assert_eq!(std::fs::read_to_string(&files[0]).expect("read"), rewritten);
 }
 
-/// D25: with no `models.json` and no Pi settings, the 0.3 home's CLIProxyAPI
-/// route, key, and default model run the turn, and neither 0.3 file changes.
-#[test]
-fn the_imported_cliproxyapi_route_runs_a_turn() {
-    let server = Server::start(Reply::sse());
-    let workspace = Workspace::new("cliproxyapi", server.port);
-    std::fs::remove_file(workspace.home().join("models.json")).expect("remove models.json");
-    let settings = format!(
-        "llm-pi-ai:\n  providers:\n    cliproxyapi:\n      displayName: CLIProxyAPI\n      apiKeyEnv: CLIPROXYAPI_API_KEY\n      api: openai-responses\n      baseURL: http://127.0.0.1:{}/v1\n      models:\n        - id: proxy-model\n          name: Proxy Model\n          contextWindow: 200000\n          maxTokens: 32000\n          input: [text]\n          reasoningEfforts: {{low: low, medium: medium, high: high}}\nagent-default-model:\n  provider: cliproxyapi\n  model: proxy-model\n  reasoningEffort: high\n",
-        server.port
-    );
-    let credentials = "version: 1\nrefs:\n  CLIPROXYAPI_API_KEY: proxy-test-key\n";
-    std::fs::write(workspace.home().join("settings.yaml"), &settings).expect("settings.yaml");
-    std::fs::write(workspace.home().join(".credentials.yaml"), credentials)
-        .expect(".credentials.yaml");
-    // The importer refuses a credentials file others can read, as 0.3 does.
+/// Writes a signed-in CLIProxyAPI account to `home`: the route in
+/// `settings.json` and its key in `auth.json`, bound by one generation, with
+/// the route's `model` at `high` as the default.
+fn sign_in(home: &Path, route: serde_json::Value, model: &str) {
+    let mut route = route;
+    route["account"] = json!("print-mode-test-generation");
+    let settings = json!({
+        "cliproxyapi": route,
+        "defaultProvider": "cliproxyapi",
+        "defaultModel": model,
+        "defaultThinkingLevel": "high",
+    });
+    std::fs::write(home.join("settings.json"), settings.to_string()).expect("settings.json");
+    let auth = json!({
+        "cliproxyapi": {
+            "type": "api_key",
+            "key": "proxy-test-key",
+            "account": "print-mode-test-generation",
+        },
+    });
+    std::fs::write(home.join("auth.json"), auth.to_string()).expect("auth.json");
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(
-            workspace.home().join(".credentials.yaml"),
+            home.join("auth.json"),
             std::fs::Permissions::from_mode(0o600),
         )
         .expect("chmod 600");
     }
+}
+
+/// With no `models.json`, the signed-in CLIProxyAPI route, its key, and the
+/// default model run the turn.
+#[test]
+fn the_signed_in_cliproxyapi_route_runs_a_turn() {
+    let server = Server::start(Reply::sse());
+    let workspace = Workspace::new("cliproxyapi", server.port);
+    std::fs::remove_file(workspace.home().join("models.json")).expect("remove models.json");
+    sign_in(
+        &workspace.home(),
+        json!({
+            "displayName": "CLIProxyAPI",
+            "apiKeyEnv": "CLIPROXYAPI_API_KEY",
+            "api": "openai-responses",
+            "baseURL": format!("http://127.0.0.1:{}/v1", server.port),
+            "models": [{
+                "id": "proxy-model",
+                "name": "Proxy Model",
+                "contextWindow": 200000,
+                "maxTokens": 32000,
+                "input": ["text"],
+                "reasoningEfforts": { "low": "low", "medium": "medium", "high": "high" },
+            }],
+        }),
+        "proxy-model",
+    );
 
     let output = workspace.run(&["-p", "Say hi"], None);
     assert_eq!(text(&output.stderr), "");
@@ -1218,14 +1249,6 @@ fn the_imported_cliproxyapi_route_runs_a_turn() {
     assert_eq!(entries[2]["provider"], "cliproxyapi");
     assert_eq!(entries[2]["modelId"], "proxy-model");
     assert_eq!(entries[3]["thinkingLevel"], "high");
-    assert_eq!(
-        std::fs::read_to_string(workspace.home().join("settings.yaml")).expect("settings"),
-        settings
-    );
-    assert_eq!(
-        std::fs::read_to_string(workspace.home().join(".credentials.yaml")).expect("creds"),
-        credentials
-    );
 }
 
 /// A reasoning Chat-Completions-family model on the CLIProxyAPI route is
@@ -1238,25 +1261,25 @@ fn the_cliproxyapi_route_sends_a_kimi_model_the_system_role() {
     let server = Server::start(Reply::completions_sse());
     let workspace = Workspace::new("cliproxyapi-kimi", server.port);
     std::fs::remove_file(workspace.home().join("models.json")).expect("remove models.json");
-    let settings = format!(
-        "llm-pi-ai:\n  providers:\n    cliproxyapi:\n      displayName: CLIProxyAPI\n      apiKeyEnv: CLIPROXYAPI_API_KEY\n      api: openai-responses\n      baseURL: http://127.0.0.1:{}/v1\n      models:\n        - id: kimi-k2.7-code\n          name: Kimi K2.7 Code\n          api: openai-completions\n          contextWindow: 200000\n          maxTokens: 32000\n          input: [text]\n          reasoningEfforts: {{low: low, medium: medium, high: high}}\nagent-default-model:\n  provider: cliproxyapi\n  model: kimi-k2.7-code\n  reasoningEffort: high\n",
-        server.port
+    sign_in(
+        &workspace.home(),
+        json!({
+            "displayName": "CLIProxyAPI",
+            "apiKeyEnv": "CLIPROXYAPI_API_KEY",
+            "api": "openai-responses",
+            "baseURL": format!("http://127.0.0.1:{}/v1", server.port),
+            "models": [{
+                "id": "kimi-k2.7-code",
+                "name": "Kimi K2.7 Code",
+                "api": "openai-completions",
+                "contextWindow": 200000,
+                "maxTokens": 32000,
+                "input": ["text"],
+                "reasoningEfforts": { "low": "low", "medium": "medium", "high": "high" },
+            }],
+        }),
+        "kimi-k2.7-code",
     );
-    std::fs::write(workspace.home().join("settings.yaml"), &settings).expect("settings.yaml");
-    std::fs::write(
-        workspace.home().join(".credentials.yaml"),
-        "version: 1\nrefs:\n  CLIPROXYAPI_API_KEY: proxy-test-key\n",
-    )
-    .expect(".credentials.yaml");
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(
-            workspace.home().join(".credentials.yaml"),
-            std::fs::Permissions::from_mode(0o600),
-        )
-        .expect("chmod 600");
-    }
 
     let output = workspace.run(&["-p", "Say hi"], None);
     assert_eq!(text(&output.stderr), "");
@@ -1632,10 +1655,9 @@ fn sent_tool_output(request: &Request) -> String {
     }
 }
 
-/// D24 through `bake -p --permission workspace-write`: the model's
+/// Permissions through `bake -p --permission workspace-write`: the model's
 /// `write` outside the project is refused before any effect, and the tool
-/// result sent back is the denial marker (`packages/fs/tool-fs/src/sandbox.ts`
-/// `mapError`), without the escalation hint, since `-p` has no one to
+/// result sent back is the denial marker, without the escalation hint, since `-p` has no one to
 /// approve one. The target lives under
 /// Cargo's per-target temporary directory, outside the project and outside
 /// the temporary directories `workspace-write` also allows.
@@ -1714,7 +1736,7 @@ fn print_mode_refuses_a_write_outside_the_project() {
     assert_eq!(result["isError"], true);
 }
 
-/// D24 through `bake -p` on a real backend: under `workspace-write`, a
+/// Permissions through `bake -p` on a real backend: under `workspace-write`, a
 /// bash write outside the project and the temporary directories is denied by
 /// the kernel, nothing is created, and the result carries the denial marker
 /// without the escalation hint.

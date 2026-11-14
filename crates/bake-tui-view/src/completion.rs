@@ -1,11 +1,9 @@
 //! The slash-command menu: a sample catalog, the matches for the draft at the
 //! caret, and the drafts a choice makes.
 //!
-//! Ports the slash half of the TypeScript `completion.ts`. The preview has no
-//! command service, so its catalog is a fixed sample of the 0.3 runtime's
+//! The preview has no command service, so its catalog is a fixed sample of
 //! commands, with their names, hints, and descriptions; none of them runs.
-//! It samples only commands a live session also runs, so it advertises
-//! none that D48 defers. A live session lists [`LIVE_CATALOG`], the
+//! It samples only commands a live session also runs. A live session lists [`LIVE_CATALOG`], the
 //! commands it runs.
 
 /// One command in the sample catalog.
@@ -29,8 +27,7 @@ const fn command(
     }
 }
 
-/// The 0.3 runtime's commands as its command plugins describe them, for
-/// those a live session runs.
+/// The preview's sample of the commands a live session runs.
 pub const CATALOG: &[Command] = &[
     command("compact", None, "Compact older conversation history"),
     command("login", Some("[target]"), "Sign in or set up CLIProxyAPI"),
@@ -106,11 +103,10 @@ pub const LIVE_CATALOG: &[Command] = &[
     ),
 ];
 
-/// Commands listed ahead of the rest, in this order, as the oracle ranks them.
+/// Commands listed ahead of the rest, in this order.
 const FREQUENT: &[&str] = &["model", "resume", "new", "clear"];
 
-/// Rows the menu lists before it counts the rest: the oracle's
-/// `completionLimit` default.
+/// Rows the menu lists before it counts the rest.
 pub const MENU_ROWS: usize = 8;
 
 fn rank(command: &Command) -> usize {
@@ -238,9 +234,7 @@ mod tests {
         assert_eq!(matches_preview("", 0), None);
     }
 
-    /// D48: the preview advertises no deferred command, so each command it
-    /// samples is one a live session runs. `bake-tui`'s live tests check
-    /// both catalogs against its list of deferred commands.
+    /// Each command the preview samples is one a live session runs.
     #[test]
     fn the_preview_lists_only_commands_a_live_session_runs() {
         for command in CATALOG {

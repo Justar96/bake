@@ -116,9 +116,9 @@ pub fn replay_compacted(messages: &[AgentMessage]) -> Vec<Row> {
 /// subagent's settlement as the cards of the work they report
 /// ([`job_notice`], [`agent_notice`]), or as information when their text
 /// cannot be read that way; a subagent's message as `← agent {id}: {first
-/// line}`, its first line kept to 48 characters as 0.3's `presentation.ts`
-/// keeps titles; and a schedule reminder as `reminder {id}: {first line}`,
-/// or a batch as `reminders {id}, {id}`; and the note of a run its `Stop`
+/// line}`, its first line kept to 48 characters; and a schedule reminder
+/// as `reminder {id}: {first line}`, or a batch as `reminders {id}, {id}`;
+/// and the note of a run its `Stop`
 /// hooks kept going too often, as its text.
 pub(super) fn notice_row(message: &AgentMessage, labels: &Labels) -> Option<Row> {
     let custom = message.as_custom()?;
@@ -175,10 +175,10 @@ pub(super) fn notice_row(message: &AgentMessage, labels: &Labels) -> Option<Row>
     Some(Row::Info(info))
 }
 
-/// A background job's notice as the card of the job, 0.3's `jobDone`: the
-/// title of its kind, its label, its id, and how it ended, read from
-/// `background job {id} ({kind}: {label}) … [status: {status}]`. A job an
-/// earlier process ran says so.
+/// A background job's notice as the card of the job: the title of its kind,
+/// its label, its id, and how it ended, read from `background job {id}
+/// ({kind}: {label}) … [status: {status}]`. A job an earlier process ran says
+/// so.
 fn job_notice(text: &str) -> Option<Row> {
     let rest = text.strip_prefix("background job ")?;
     let (id, rest) = rest.split_once(" (")?;

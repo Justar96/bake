@@ -864,9 +864,6 @@ fn independent_processes_with_stale_copies_lose_no_update() {
         r#"{"theme":"dark","packages":["npm:x"],"modelThinkingLevels":{"keep/me":"high"}}"#,
     )
     .expect("write settings");
-    let yaml = b"provider: cliproxyapi\n";
-    fs::write(home.join("settings.yaml"), yaml).expect("yaml");
-    fs::write(home.join(".credentials.yaml"), yaml).expect("credentials yaml");
 
     let mut children: Vec<ChildProcess> = (0..CHILDREN)
         .map(|index| ChildProcess::spawn("writer", &home, index))
@@ -914,11 +911,6 @@ fn independent_processes_with_stale_copies_lose_no_update() {
     assert_eq!(
         loaded.model_thinking_level("child3", "model14"),
         Some(ModelThinkingLevel::Low)
-    );
-    assert_eq!(fs::read(home.join("settings.yaml")).expect("yaml"), yaml);
-    assert_eq!(
-        fs::read(home.join(".credentials.yaml")).expect("yaml"),
-        yaml
     );
     let mut names = entries(&home);
     names.retain(|name| name.ends_with(".tmp"));

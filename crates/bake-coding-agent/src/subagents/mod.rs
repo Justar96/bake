@@ -21,7 +21,7 @@
 //!   being started), `idle` when resident between runs, and `ready` when
 //!   saved in its file and not resident. At [`MAX_ACTIVE`] resident
 //!   children the least recently used idle one with a file is evicted to
-//!   `ready`; with none, the start is refused with 0.3's limit text.
+//!   `ready`; with none, the start is refused with the limit text.
 //! - **Intercom.** A message is a [`messages::MESSAGE_TYPE`] custom message
 //!   posted to the recipient's registry ([`JobRegistry::post`]), which the
 //!   session delivers as it delivers job notices: inside a run at its next
@@ -42,12 +42,10 @@
 //!   prompt, or, with no settlement recorded, one lost-run notice
 //!   ([`lost_runs`]); it is never re-run.
 //!
-//! Ported from Bake's TypeScript `packages/subagent/subagent/src/{continuation,
-//! continuation-activation,lifecycle,inbox,list-children,depth}.ts` and
-//! `index.ts` (`maxActiveSubagents` 8, `maxDepth` 1). Differences: one
-//! process-local host per parent session instead of a service with
-//! activations and lineage records; children live in Pi session files;
-//! eviction of idle children rather than refusal at the cap; a message is
+//! At most [`MAX_ACTIVE`] children are resident, at depth 1. There is one
+//! process-local host per parent session; children live in Pi session
+//! files; idle children are evicted rather than refused at the cap; a
+//! message is
 //! logged by the sender's tool call and by the recipient's custom message
 //! when delivered, with no inbox file in between; and a child may run on
 //! any available model ([`models`]).
@@ -76,7 +74,7 @@ use models::ChildRoute;
 
 pub use tools::{CHILD_TOOL_NAMES, PARENT_TOOL_NAMES, child_tools, parent_tools};
 
-/// Resident children at once, 0.3's `maxActiveSubagents`.
+/// Resident children at once.
 pub const MAX_ACTIVE: usize = 8;
 
 /// The longest message one agent may send another, in bytes.

@@ -22,8 +22,8 @@
 //!   and its whole error, and all of the output, each part within
 //!   [`EXPANDED_ROWS`] rows.
 //!
-//! Pi's model-call costs are left out: Bake's code mode has no `models`
-//! (D42). Nothing here keeps a clock, so a running block shows no `Elapsed`
+//! Pi's model-call costs are left out: Bake's code mode has no `models`.
+//! Nothing here keeps a clock, so a running block shows no `Elapsed`
 //! time; the activity row carries the seconds.
 
 use std::time::Duration;
@@ -667,7 +667,7 @@ mod tests {
     }
 
     // Pi's "shows the cost of model calls and their total" is not ported:
-    // Bake's code mode has no `models` (D42), so no call has a cost.
+    // Bake's code mode has no `models`, so no call has a cost.
 
     // Pi: "shows results without a header, such as rejected options".
     #[test]

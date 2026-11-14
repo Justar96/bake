@@ -8,13 +8,12 @@
 //! (`packages/coding-agent/src/modes/rpc/rpc-client.ts`), which these
 //! cases follow: `test/rpc-client-clear-queue.test.ts`,
 //! `test/rpc-client-clone.test.ts`, and
-//! `test/rpc-client-process-exit.test.ts`. The rest are scope 13's proofs
-//! through the real binary: D24 approvals answered, refused, and left
+//! `test/rpc-client-process-exit.test.ts`. The rest are Bake's proofs
+//! through the real binary: approvals answered, refused, and left
 //! unanswered, each against the session file; `abort` and read-only
 //! commands answered while a turn runs; and shutdown on end of input and
 //! on `SIGTERM`, `SIGINT`, and `SIGHUP` with no process left behind. The
-//! approval and shutdown cases run on Linux, the platform 0.4.0 qualifies
-//! (D47).
+//! approval and shutdown cases run on Linux, the platform 0.4.0 qualifies.
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -195,7 +194,7 @@ fn answer(mut socket: TcpStream, replies: &[Reply], requests: &AtomicUsize, stop
     }
 }
 
-/// The custom entry type of a D24 approval record.
+/// The custom entry type of an approval record.
 #[cfg(target_os = "linux")]
 const APPROVAL: &str = bake_coding_agent::permissions::APPROVAL_CUSTOM_TYPE;
 
@@ -209,7 +208,7 @@ fn entries(file: &std::path::Path) -> Vec<Value> {
         .collect()
 }
 
-/// The D24 approval records in `entries`, in order.
+/// The approval records in `entries`, in order.
 #[cfg(target_os = "linux")]
 fn approvals(entries: &[Value]) -> Vec<Value> {
     entries
@@ -263,7 +262,6 @@ impl Workspace {
             .args(args)
             .current_dir(self.root.join("project"))
             .env("BAKE_HOME", self.root.join("home"))
-            .env_remove("DSH_HOME")
             .env_remove("CLIPROXYAPI_API_KEY")
             .env("HOME", self.root.join("user"))
             .env("USERPROFILE", self.root.join("user"))
@@ -726,7 +724,7 @@ fn decision(file: &std::path::Path) -> (Vec<Value>, Vec<Value>, Option<usize>) {
     (approvals, entries, result)
 }
 
-// Scope 13 and D24 through the binary: `confirmed: true` lets the one call
+// Through the binary: `confirmed: true` lets the one call
 // run, and the session file holds `asked` then `decided` with
 // `allowed-once`, written before the call's result.
 #[cfg(target_os = "linux")]
@@ -756,7 +754,7 @@ fn an_approved_write_runs_after_its_decision_is_recorded() {
     assert_eq!(server.requests(), 2);
 }
 
-// Scope 13 and D24: `confirmed: false` refuses the call, which writes
+// `confirmed: false` refuses the call, which writes
 // nothing, and the refusal is recorded before the call's result.
 #[cfg(target_os = "linux")]
 #[test]
@@ -778,7 +776,7 @@ fn a_denied_write_is_refused_and_recorded() {
     assert_eq!(result["isError"], json!(true), "{result}");
 }
 
-// Scope 13 and D24: a client that disconnects without answering leaves the
+// A client that disconnects without answering leaves the
 // call refused, never run, and the process exits 0 once the session has
 // recorded the cancellation.
 #[cfg(target_os = "linux")]
@@ -795,7 +793,7 @@ fn a_client_that_disconnects_unanswered_leaves_the_write_refused() {
     assert_eq!(approvals[1]["outcome"], json!("cancelled"));
 }
 
-// Scope 13 and Pi `rpc-mode.ts` `handleInputLine`: while a turn waits on a
+// Pi `rpc-mode.ts` `handleInputLine`: while a turn waits on a
 // model that never answers, `get_state`, `get_messages`, and
 // `get_session_stats` are answered, and `abort` ends the turn.
 #[test]
@@ -953,7 +951,7 @@ fn ends_with_no_process_left(ending: Ending, expected: i32) {
     assert!(marked_tree(&marker).is_empty(), "{ending:?}");
 }
 
-// Scope 13 and Pi `docs/rpc.md`, "Shutdown": end of input while a tool
+// Pi `docs/rpc.md`, "Shutdown": end of input while a tool
 // runs shuts the session down, which stops the call, and exits 0.
 #[cfg(target_os = "linux")]
 #[test]
@@ -961,7 +959,7 @@ fn end_of_input_during_a_bash_call_exits_with_no_process_left() {
     ends_with_no_process_left(Ending::EndOfInput, 0);
 }
 
-// Scope 13 and Pi `rpc-mode.ts`'s signal handlers: `SIGTERM`, `SIGINT`,
+// Pi `rpc-mode.ts`'s signal handlers: `SIGTERM`, `SIGINT`,
 // and `SIGHUP` during a `bash` call shut the session down, which stops the
 // call, and exit with 143, 130, and 129.
 #[cfg(target_os = "linux")]

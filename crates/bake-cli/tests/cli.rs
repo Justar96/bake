@@ -1,9 +1,9 @@
 //! Runs the built binary with piped, non-terminal standard streams, and,
-//! for the interactive `--offline` case, on a pseudo-terminal. Scope 13's
+//! for the interactive `--offline` case, on a pseudo-terminal. Its
 //! command-line proofs live here: `--export` never writes its input,
 //! `--offline` makes no startup connection, keys are printed only by the
 //! commands that print one, excluded flags are unknown options, and no
-//! built-in model catalog or provider route is reachable (D48). Every
+//! built-in model catalog or provider route is reachable. Every
 //! server a case uses binds 127.0.0.1 and belongs to that case.
 
 use std::process::{Command, Output, Stdio};
@@ -354,7 +354,6 @@ fn export_writes_one_page_and_exits() {
             .args(args)
             .current_dir(&root.0)
             .env_remove("BAKE_HOME")
-            .env_remove("DSH_HOME")
             .stdin(Stdio::null())
             .output()
             .expect("bake runs")
@@ -415,7 +414,6 @@ fn auth_commands_report_a_provider_and_print_its_key() {
         Command::new(env!("CARGO_BIN_EXE_bake"))
             .args(args)
             .env("BAKE_HOME", &home)
-            .env_remove("DSH_HOME")
             .current_dir(&root.0)
             .stdin(Stdio::null())
             .output()
@@ -466,7 +464,7 @@ fn auth_commands_report_a_provider_and_print_its_key() {
     );
     assert!(stderr.contains("bake auth check --provider"), "{stderr}");
 
-    // OAuth providers are deferred (D8 and D48), so there is no bearer
+    // OAuth providers are deferred, so there is no bearer
     // token to print, and the key is not offered in its place.
     let bearer = auth(&[
         "auth",
@@ -488,7 +486,7 @@ fn auth_commands_report_a_provider_and_print_its_key() {
     assert!(!text(&bearer.stderr).contains("sk-faux-stored"));
 }
 
-/// Scope 13: `--export` reads its input without the session's lock and
+/// `--export` reads its input without the session's lock and
 /// writes only the page. The session file and its directory are made
 /// read-only and dated in the past, and after the export the file is byte
 /// for byte the same, with the same modification time, and the directory
@@ -540,7 +538,6 @@ fn export_never_writes_its_input() {
         .arg(&page)
         .current_dir(&pages)
         .env_remove("BAKE_HOME")
-        .env_remove("DSH_HOME")
         .stdin(Stdio::null())
         .output()
         .expect("bake runs");
@@ -561,7 +558,7 @@ fn export_never_writes_its_input() {
     assert_eq!(listing(&sessions), names);
 }
 
-/// Scope 13 and D43: Pi's extension and theme flags and `--tui-mode` are
+/// Pi's extension and theme flags and `--tui-mode` are
 /// not `bake` options, so each is refused as an unknown option before
 /// anything starts, and nothing is written to standard output.
 #[test]
@@ -592,9 +589,9 @@ struct KeyHome {
 }
 
 /// The stored key, which only the commands that print a key may show.
-const STORED_KEY: &str = "sk-scope13-stored-secret";
+const STORED_KEY: &str = "sk-cli-stored-secret";
 /// The key `models.json` gives a provider inline.
-const INLINE_KEY: &str = "sk-scope13-inline-secret";
+const INLINE_KEY: &str = "sk-cli-inline-secret";
 
 impl KeyHome {
     fn new(name: &str) -> Self {
@@ -638,7 +635,6 @@ impl KeyHome {
             .args(args)
             .current_dir(self.root.0.join("project"))
             .env("BAKE_HOME", self.root.0.join("home"))
-            .env_remove("DSH_HOME")
             .env_remove("CLIPROXYAPI_API_KEY")
             .env("HOME", self.root.0.join("user"))
             .stdin(Stdio::null());
@@ -665,7 +661,7 @@ impl KeyHome {
     }
 }
 
-/// Scope 13: a key reaches standard output only from `auth print-api-key`
+/// A key reaches standard output only from `auth print-api-key`
 /// and `auth check --credentials`, the commands whose purpose is to print
 /// one. Help, listings, checks, failed prompts in every output mode, RPC
 /// state and model listings, and every error leave both keys out of both
@@ -923,9 +919,7 @@ fn home_command(root: &TempDir, args: &[&str]) -> Command {
         .args(args)
         .current_dir(root.0.join("project"))
         .env("BAKE_HOME", root.0.join("home"))
-        .env_remove("DSH_HOME")
         .env_remove("BAKE_OFFLINE")
-        .env_remove("DSH_OFFLINE")
         .env_remove("CLIPROXYAPI_API_KEY")
         .env("HOME", root.0.join("user"));
     // The terminal running the tests chooses no status indicators or
@@ -943,7 +937,7 @@ fn home_command(root: &TempDir, args: &[&str]) -> Command {
     command
 }
 
-/// Scope 13 and Pi's `offlineMode`: print and RPC mode start no network
+/// Pi's `offlineMode`: print and RPC mode start no network
 /// operation of their own, with `--offline` or without it. Each run reads
 /// the signed-in account (RPC mode lists its model) and the proxy sees no
 /// connection.
@@ -1144,7 +1138,7 @@ impl Drop for Terminal {
     }
 }
 
-/// Scope 13 and Pi's `offlineMode`, end to end in a terminal: an
+/// Pi's `offlineMode`, end to end in a terminal: an
 /// interactive launch signed in to a loopback CLIProxyAPI refreshes its
 /// catalog at startup, which is the control, and with `--offline` it
 /// does not, though the session still reaches the proxy for its prompt.
@@ -1294,7 +1288,7 @@ fn ghostty_and_herdr_follow_a_named_session_through_a_turn() {
     );
 }
 
-/// D8 and D48: `bake` carries no built-in model catalog and no provider
+/// `bake` carries no built-in model catalog and no provider
 /// route of its own. With an empty home nothing is listed, a catalog
 /// provider's model does not resolve, and an auth check does not find the
 /// provider: only `models.json` and the CLIProxyAPI account add routes.

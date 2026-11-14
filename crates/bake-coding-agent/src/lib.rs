@@ -4,16 +4,16 @@
 //! revision `abe508e1b89912adde45528136c3221eb69acdd7`, MIT; see the crate's
 //! `NOTICE`). It holds Pi's session store, Pi's built-in tools (the file
 //! tools and bash) with their output handling and file-mutation ordering, and
-//! the headless agent runtime that `bake -p` uses, plus the retained
+//! the headless agent runtime that `bake -p` uses, plus Bake's
 //! CLIProxyAPI route. [`session`] reads and writes Pi's session format and
-//! [`home`] places it under the Bake home (D25, D32).
+//! [`home`] places it under the Bake home.
 //!
 //! | Module | Source |
 //! |---|---|
 //! | [`session`] | Pi `src/core/session-manager.ts`, `session-cwd.ts`, `messages.ts`, `src/utils/paths.ts` |
 //! | [`tools`] | Pi `src/core/tools/*.ts` (see the module's table), `src/utils/{output-files,shell,child-process}.ts` |
 //! | [`exec`] | Pi `src/core/exec.ts`; shares `src/utils/child-process.ts` handling with bash |
-//! | [`home`] | Bake: `scripts/release/bake`, `packages/util/home-paths` |
+//! | [`home`] | Bake: the Bake home (`BAKE_HOME`, else `~/.bake`) |
 //! | [`agent_session`] | Pi `src/core/agent-session.ts`, `src/core/sdk.ts`, with auto-compaction, manual `compact`, and auto-retry |
 //! | [`compaction`] | Pi `src/core/compaction/{compaction,branch-summarization,utils}.ts` |
 //! | [`system_prompt`] | Pi `src/core/system-prompt.ts`, `src/core/resource-loader.ts` (context files) |
@@ -25,19 +25,19 @@
 //! | [`config_value`] | Pi `src/core/resolve-config-value.ts` |
 //! | [`settings`] | Pi `src/core/settings-manager.ts` (default model, thinking level, tools, images, compaction with per-model overrides, branch-summary reserve, and retry; the global-scope setters from v1.2.0) |
 //! | [`print_mode`], [`json_event`] | Pi `src/modes/print-mode.ts`, `src/modes/json-event.ts` |
-//! | [`rpc`] | Pi v1.3.0 `src/modes/rpc/{rpc-mode,rpc-types,jsonl}.ts`; approvals over Pi's `extension_ui_request` (D24) |
+//! | [`rpc`] | Pi v1.3.0 `src/modes/rpc/{rpc-mode,rpc-types,jsonl}.ts`; approvals over Pi's `extension_ui_request` |
 //! | [`cli`] | Pi `src/main.ts`, `src/cli/args.ts`, `src/cli/initial-message.ts`, `src/cli/file-processor.ts`, `src/cli/list-models.ts`, `packages/tui/src/fuzzy.ts` |
-//! | [`mcp`] | Pi v1.3.0 `src/extensions/mcp/{index,runtime,tools,config}.ts`, `src/core/mcp-servers.ts`; Bake's tool names (`packages/mcp/mcp-client`) and D24 admission |
-//! | [`hooks`] | Bake 0.3: `packages/hooks/{hook-protocol,hooks-claude-code,hooks-codex}`, run at Pi v1.3.0's extension events (`src/core/extensions/types.ts`, `runner.ts`) |
+//! | [`mcp`] | Pi v1.3.0 `src/extensions/mcp/{index,runtime,tools,config}.ts`, `src/core/mcp-servers.ts`; Bake's tool names and permission admission |
+//! | [`hooks`] | Bake: Claude Code and Codex `hooks.json` hooks, run at Pi v1.3.0's extension events (`src/core/extensions/types.ts`, `runner.ts`) |
 //! | [`owned_work`] | Bake: a session's owner of its tasks, blocking work, and background lifetime, which shutdown cancels and drains |
 //! | [`questions`] | Bake: the `ask_user` tool and the queue a frontend answers it from, after the approval broker |
 //! | [`spawned`] | Bake: headless `bake --mode rpc` agents a session starts, owns, and follows |
 //! | [`telecom`] | Bake: the sessions of one repository as a team, after pi-telecom 0.8.0 (`Justar96/pi-telecom` `b6fe4d8`, MIT) `src/{tool,callsign,transport}.ts`, over Bake's own socket protocol |
-//! | [`subagents`] | Bake: continuable children on any available model, in Pi session files (`packages/subagent/{subagent,tool-subagent,tool-subagent-control}`) |
-//! | [`jobs`] | Bake: a session's background-job registry over its owned work (`packages/jobs/{jobs,jobs-local}`, `packages/shell/tool-bash/src/background.ts`), structured after Pi v1.3.0 `packages/durable` task states |
+//! | [`subagents`] | Bake: continuable children on any available model, in Pi session files |
+//! | [`jobs`] | Bake: a session's background-job registry over its owned work, structured after Pi v1.3.0 `packages/durable` task states |
 //! | [`plugins`] | Bake's trusted compiled-in plugins and their ordered tool-call veto, after Pi v1.3.0 `src/core/extensions/runner.ts` (`emitToolCall`), `agent-session.ts` (`_beforeToolCall`), and `examples/extensions/protected-paths.ts` |
-//! | [`permissions`] | Bake: the D24 permission presets, approvals, policy engine, and sandboxed `bash`, `write`, and `edit` (see the module's table) |
-//! | [`cliproxyapi`] | Bake: `apps/tui/packages/app/src/cliproxyapi.ts`, the retained CLIProxyAPI route and its read-only D25 import |
+//! | [`permissions`] | Bake: the permission presets, approvals, policy engine, and sandboxed `bash`, `write`, and `edit` (see the module's table) |
+//! | [`cliproxyapi`] | Bake: the CLIProxyAPI route and its sign-in account |
 
 pub mod agent_session;
 pub mod auth_storage;
@@ -77,3 +77,4 @@ pub mod telecom;
 mod test_support;
 pub mod tools;
 pub mod web;
+pub(crate) mod yaml;

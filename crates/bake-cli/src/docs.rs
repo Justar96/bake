@@ -29,7 +29,7 @@ pub const TOPICS: &[Topic] = &[
     },
     Topic {
         name: "home",
-        summary: "The Bake home, what it holds, and what is read from Bake 0.3",
+        summary: "The Bake home and what it holds",
         text: include_str!("../docs/home.md"),
     },
     Topic {

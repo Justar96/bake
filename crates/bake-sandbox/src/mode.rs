@@ -1,5 +1,4 @@
-//! Sandbox modes, from `SandboxMode` and `WIDER_MODES` in
-//! `packages/sandbox/sandbox/src/{index,escalation}.ts`.
+//! Sandbox modes and the strict-widening order between them.
 
 use std::fmt;
 use std::str::FromStr;
@@ -26,7 +25,7 @@ impl SandboxMode {
         SandboxMode::DangerFullAccess,
     ];
 
-    /// The wire name, as the TypeScript runtime and the model see it.
+    /// The wire name, as settings and the model see it.
     pub fn as_str(self) -> &'static str {
         match self {
             SandboxMode::ReadOnly => "read-only",
@@ -98,7 +97,7 @@ mod tests {
     }
 
     #[test]
-    fn widening_is_strict_and_matches_typescript() {
+    fn widening_is_strict() {
         use SandboxMode::*;
         assert!(ReadOnly.is_widened_by(WorkspaceWrite));
         assert!(ReadOnly.is_widened_by(DangerFullAccess));

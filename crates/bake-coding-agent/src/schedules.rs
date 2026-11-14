@@ -1,24 +1,21 @@
 //! Session-local reminders: the durable records, their strict decoding and
 //! fold over a Pi session file, time validation, and the reminder framing.
 //!
-//! Ported from Bake's TypeScript `packages/schedule/schedule/src/{domain,types}.ts`
-//! (version 1): the record shapes, the create, delete, and dispatch
-//! changes, the fold, id allocation, the `after`, `at`, and `every` rules
-//! with their errors, fixed-rate catch-up, the management view, and the
-//! injection-resistant framing, whose texts are kept. Pi has no
-//! schedules. Differences, for Pi's session file:
+//! Version 1 of Bake's schedule contract: the record shapes, the create,
+//! delete, and dispatch changes, the fold, id allocation, the `after`,
+//! `at`, and `every` rules with their errors, fixed-rate catch-up, the
+//! management view, and the injection-resistant framing. Pi has no
+//! schedules. In Pi's session file:
 //!
 //! - A change is a Pi `custom` entry ([`CHANGE_TYPE`]) whose data is the
-//!   0.3 change. A create also names the session that made it
-//!   (`sessionId`): a `/fork` copies entries into a new session, which keeps
-//!   them as history but adopts none of their reminders, as a 0.3 fork
-//!   folded only its own suffix.
+//!   change. A create also names the session that made it (`sessionId`): a
+//!   `/fork` copies entries into a new session, which keeps them as history
+//!   but adopts none of their reminders.
 //! - Reminders belong to the session, not to a branch of it: the fold reads
 //!   every change in the file, in file order, since a dispatch cannot be
 //!   undone by moving the leaf.
 //! - A change naming a reminder another session made is history and is
-//!   skipped; one naming this session's reminder must be valid, as 0.3
-//!   required of every change.
+//!   skipped; one naming this session's reminder must be valid.
 //! - Time zones come from `jiff`'s bundled tz database, so a local time
 //!   never depends on the host's zone files.
 //!
@@ -48,7 +45,7 @@ pub const REMINDER_TYPE: &str = "bake.schedule.reminder";
 pub const CHANGE_VERSION: u64 = 1;
 /// The shortest fixed-rate interval.
 pub const MIN_EVERY_INTERVAL_SECONDS: i64 = 300;
-/// JavaScript's `Number.MAX_SAFE_INTEGER`, the bound 0.3's integer rules use.
+/// JavaScript's `Number.MAX_SAFE_INTEGER`, the bound the integer rules use.
 const MAX_SAFE_INTEGER: i64 = 9_007_199_254_740_991;
 /// `0001-01-01T00:00:00.000Z` and `9999-12-31T23:59:59.999Z` in epoch
 /// milliseconds: the four-digit-year range of a canonical instant.
@@ -96,7 +93,7 @@ pub struct Record {
 }
 
 impl Record {
-    /// The 0.3 record shape: `id`, `kind`, `prompt`, the rule's seconds,
+    /// The record shape: `id`, `kind`, `prompt`, the rule's seconds,
     /// and `scheduledAt` as a canonical UTC instant.
     pub fn to_json(&self) -> Value {
         let mut object = Map::new();
@@ -189,7 +186,7 @@ fn corrupt(message: impl Into<String>) -> LogError {
     LogError(message.into())
 }
 
-/// A model-supplied rule that cannot become a record, with 0.3's code and
+/// A model-supplied rule that cannot become a record, with its code and
 /// message.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InputError {
@@ -205,7 +202,7 @@ impl InputError {
         }
     }
 
-    /// The 0.3 error value: `{ code, message }`.
+    /// The error value: `{ code, message }`.
     pub fn to_json(&self) -> Value {
         json!({ "code": self.code, "message": self.message })
     }

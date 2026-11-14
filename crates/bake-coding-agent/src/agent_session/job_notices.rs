@@ -1,10 +1,8 @@
 //! Completion notices for a session's background jobs, and what a resumed
 //! session learns from its file about jobs an earlier process ran.
 //!
-//! Ported from Bake's TypeScript `packages/jobs/tool-jobs/src/index.ts`
-//! (`fitCompletionNotice`, `onJobDone`): a job that settles unreported
-//! becomes a notice to its session. Where the TypeScript queued a user
-//! message, the session queues Pi's custom message (`custom_message` entry,
+//! A job that settles unreported becomes a notice to its session: Pi's
+//! custom message (`custom_message` entry,
 //! [`NOTICE_TYPE`]), which reaches the model as a user message and records
 //! the job in its details, so recovery can tell which jobs were reported.
 //! When the notice is delivered is the session's ([`super::AgentSession`]):

@@ -1215,8 +1215,7 @@ fn tools_that_change_files_or_run_commands_run_in_order() {
     }
 }
 
-// Bake `packages/llm/llm-pi-ai/src/config.ts` `maxToolArgumentWhitespace`:
-// the setting fills each request's bound unless the request sets one.
+// `maxToolArgumentWhitespace`: the setting fills each request's bound unless the request sets one.
 #[test]
 fn the_tool_argument_whitespace_setting_reaches_each_request() {
     let h = harness();

@@ -1,9 +1,8 @@
 // The native release gate of the download service's deploy: the native
 // manifest must be signed by the committed native key and describe the
-// archives the service holds. It mirrors verify-manifest.mjs for the native
-// route, which no 0.3 updater reads, and trusts the native key alone. The
+// archives the service holds, and it trusts the native key alone. The
 // grammar names all five platforms so a release can add one; Bake publishes
-// linux-x64 and win32-x64 alone (D47, D52), so a manifest naming any other
+// linux-x64 and win32-x64 alone, so a manifest naming any other
 // platform is refused whatever the flags, and --complete requires exactly
 // linux-x64 and win32-x64.
 import { createHash, createPublicKey, verify } from 'node:crypto'

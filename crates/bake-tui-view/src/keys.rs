@@ -228,7 +228,7 @@ pub const BINDINGS: &[Binding] = &[
     bind(S::Composer, K::Char('_'), Mods::CTRL, Mods::ALT, A::Undo),
     bind(S::Composer, K::Char('/'), Mods::CTRL, Mods::ALT, A::Undo),
     bind(S::Composer, K::Char('7'), Mods::CTRL, Mods::ALT, A::Undo),
-    // Readline editing, as the TypeScript composer's `editKey` binds it.
+    // Readline editing.
     bind(S::Composer, K::Backspace, Mods::ALT, ANY, A::KillWordLeft),
     bind(S::Composer, K::Delete, Mods::ALT, ANY, A::KillWordRight),
     bind(S::Composer, K::Delete, Mods::CTRL, ANY, A::KillWordRight),
@@ -322,7 +322,7 @@ pub const BINDINGS: &[Binding] = &[
         A::ToggleDetail,
     ),
     // After Ctrl+↑ and Ctrl+↓, which move the transcript. Alt+↑ sends the
-    // waiting prompts, as the oracle's does, so neither arrow moves with Alt.
+    // waiting prompts, so neither arrow moves with Alt.
     bind(S::Composer, K::Up, Mods::ALT, ANY, A::SendPending),
     bind(S::Composer, K::Up, ANY, Mods::ALT, A::CaretUp),
     bind(S::Composer, K::Down, ANY, Mods::ALT, A::CaretDown),

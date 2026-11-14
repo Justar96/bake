@@ -2,10 +2,9 @@
 //! comparison, content-type and charset handling, and the public-address
 //! classification with its NAT64 translation check.
 //!
-//! Ported from `packages/web/web-fetch-http/src/policy.ts` and the address
-//! half of `network.ts` (Bake 0.3), whose `isPublicIpAddress` is
-//! `ipaddr.js` 2.5.0's `range() === 'unicast'`: the special ranges below
-//! are that library's table. One rule is Bake's own and stricter: an IPv6
+//! An address is public when `ipaddr.js` 2.5.0's `range()` would call it
+//! `unicast`: the special ranges below are that library's table. One rule
+//! is stricter: an IPv6
 //! address outside the global unicast block `2000::/3`, such as the
 //! deprecated IPv4-compatible form `::127.0.0.1`, is not public.
 
@@ -50,7 +49,7 @@ pub fn parse_fetch_url(input: &str) -> Result<Url, WebError> {
 }
 
 /// `validateFetchUrl`: the length bound, then [`parse_fetch_url`]. The
-/// bound counts UTF-16 code units, as the TypeScript's `length` did.
+/// bound counts UTF-16 code units, as a JavaScript `length` does.
 pub fn validate_fetch_url(input: &str) -> Result<Url, WebError> {
     if super::utf16_len(input) > WEB_FETCH_MAX_URL_LENGTH {
         return Err(WebError::new(
@@ -337,8 +336,7 @@ pub fn translated_ipv4(address: IpAddr, prefixes: &[Nat64Prefix]) -> Option<Ipv4
 mod tests {
     use super::*;
 
-    // fetch-http.spec.ts: "policy helpers" > "validates scheme,
-    // credentials, and length".
+    // The policy helpers validate scheme, credentials, and length.
     #[test]
     fn validates_scheme_credentials_and_length() {
         assert_eq!(

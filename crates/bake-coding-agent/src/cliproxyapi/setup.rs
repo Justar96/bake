@@ -1,12 +1,8 @@
 //! Interactive setup, model refresh, and route-upgrade notices for the
-//! CLIProxyAPI route: `configureCliProxyApi`, `refreshCliProxyModels`,
-//! `withSavedCapabilities`, `cliProxyModelsInUse`, `upgradeCliProxyRoute`,
-//! and `cliProxyUpgradeNotice` in `apps/tui/packages/app/src/cliproxyapi.ts`,
-//! with the English copy from `apps/tui/packages/ui/src/copy.ts`.
+//! CLIProxyAPI route.
 //!
-//! The TypeScript reads and writes through async settings and credential
-//! services; these functions take synchronous callbacks instead and do no
-//! file I/O themselves. A caller on an async runtime must not do blocking
+//! These functions read and write settings and credentials through
+//! synchronous callbacks and do no file I/O themselves. A caller on an async runtime must not do blocking
 //! disk I/O inside a callback: hand it to `tokio::task::spawn_blocking` (or
 //! an equivalent) rather than stalling the executor.
 
@@ -21,7 +17,7 @@ use serde_json::{Map, Value, json};
 use super::catalog::CliProxyModel;
 use super::endpoints::{CliProxyUrlError, cli_proxy_endpoints, js_trim};
 use super::fetch::{CheckField, FetchCliProxyModelsError, fetch_cli_proxy_models};
-use super::import::{ApiKey, KeyRejection, normalize_api_key};
+use super::key::{ApiKey, KeyRejection, normalize_api_key};
 use super::route::{CliProxyRoute, CliProxyRouteChange, plan_cli_proxy_route_upgrade};
 use super::{CLIPROXYAPI_DEFAULT_URL, CLIPROXYAPI_ID, CLIPROXYAPI_KEY};
 
@@ -135,8 +131,8 @@ const LISTED_CAPABILITIES: [&str; 5] = [
     "compat",
 ];
 
-/// An empty array or mapping. JSON `null` is a value, as in the TypeScript,
-/// whose emptiness test only drops `undefined` and empty containers.
+/// An empty array or mapping. JSON `null` is a value, not an empty
+/// capability.
 fn is_empty_capability(value: &Value) -> bool {
     match value {
         Value::Array(items) => items.is_empty(),
@@ -242,8 +238,7 @@ impl From<FetchCliProxyModelsError> for RefreshCliProxyModelsError {
 /// capabilities a listing leaves out.
 ///
 /// Returns whether the saved list changed. A refusal from `mutate` is
-/// returned as [`RefreshCliProxyModelsError::SettingsWrite`], as the
-/// TypeScript lets the settings rejection propagate. `mutate` runs
+/// returned as [`RefreshCliProxyModelsError::SettingsWrite`]. `mutate` runs
 /// synchronously; on an async runtime it must not block on disk I/O (see the
 /// module docs).
 pub async fn refresh_cli_proxy_models(
@@ -382,8 +377,7 @@ pub struct LoginPromptStep {
     pub count: usize,
 }
 
-/// One question asked during [`configure_cli_proxy_api`], matching
-/// `LoginPrompt` in `apps/tui/packages/app/src/login.ts`.
+/// One question asked during [`configure_cli_proxy_api`].
 ///
 /// A secret prompt's `initial` can hold the key typed before an address
 /// failure, so its `Debug` output redacts `initial`.
@@ -430,8 +424,8 @@ impl fmt::Debug for LoginPrompt {
 /// Error returned by [`configure_cli_proxy_api`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConfigureCliProxyError<P> {
-    /// The saved route's `baseURL` is not a proxy URL; the TypeScript's
-    /// `cliProxyEndpoints` throws before any prompt.
+    /// The saved route's `baseURL` is not a proxy URL, found before any
+    /// prompt.
     InvalidSavedUrl(CliProxyUrlError),
     /// The caller's [`AbortSignal`] aborted.
     Aborted,
@@ -464,12 +458,11 @@ enum SetupStep {
 ///
 /// `saved_base_url` is the saved route's `baseURL` when it is a string; one
 /// that is not a proxy URL ends the setup with
-/// [`ConfigureCliProxyError::InvalidSavedUrl`], as the TypeScript throws.
-/// After the check passes, `read_credential` returns the key stored now (the
-/// TypeScript's `credentials.resolve`), read just before `set_credential`
+/// [`ConfigureCliProxyError::InvalidSavedUrl`].
+/// After the check passes, `read_credential` returns the key stored now,
+/// read just before `set_credential`
 /// overwrites it; settings refusal restores it, or calls `unset_credential`
-/// when there was none. `mutate_settings` receives the route for
-/// `llm-pi-ai.providers.cliproxyapi`.
+/// when there was none. `mutate_settings` receives the route to save.
 ///
 /// The callbacks run synchronously; on an async runtime they must not block
 /// on disk I/O (see the module docs).
@@ -526,8 +519,8 @@ pub struct CheckedLogin {
     pub models: Vec<CliProxyModel>,
 }
 
-/// The asking and checking half of `configureCliProxyApi`: prompts for the
-/// address and key, re-asking with the TypeScript's messages until the
+/// The asking and checking half of [`configure_cli_proxy_api`]: prompts for
+/// the address and key, re-asking until the
 /// proxy's model list accepts them, and writes nothing. The caller commits
 /// the result, as [`configure_cli_proxy_api`] does through its callbacks
 /// and `cliproxyapi::account` does through the Bake home's files.

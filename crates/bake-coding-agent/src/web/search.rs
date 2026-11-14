@@ -4,13 +4,11 @@
 //! `web_search_tool_result` blocks. A response without one is an error,
 //! never a source list scraped from prose.
 //!
-//! Ported from `packages/web/web-search-deepseek/src/{provider,types}.ts`
-//! (Bake 0.3): the request body, its limits (`max_tokens` 4096, `max_uses`
-//! 5, `anthropic-version` 2023-06-01), the `x-api-key` and bearer headers,
-//! `citationSnippets`, and `mapAnthropicResponse`. By the owner's decision
-//! the request goes to the session's CLIProxyAPI route, at
-//! `<model base URL>/v1/messages` with the route's key and headers, rather
-//! than to DeepSeek's endpoint; [`select_search_model`] picks the model.
+//! The request's limits are `max_tokens` 4096, `max_uses` 5, and
+//! `anthropic-version` 2023-06-01, with the `x-api-key` and bearer headers.
+//! It goes to the session's CLIProxyAPI route, at
+//! `<model base URL>/v1/messages` with the route's key and headers;
+//! [`select_search_model`] picks the model.
 //! The request a search sends, without its key, is returned with the
 //! result ([`SearchRequest`]) so the tool records it in the session.
 

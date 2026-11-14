@@ -31,7 +31,7 @@ Bake publishes native releases for Linux x64 and Windows x64. Bake 0.4.6 was the
 update needs a native install, and Bake publishes native updates for linux-x64 and win32-x64 only; native updates for darwin-arm64 arrive in a later release
 ```
 
-With `BAKE_NATIVE_ROOT` naming an install root, the line is the same without its first clause. The installers refuse macOS too, so there is no native install there to update. A Bake 0.3 install keeps working with its own data and its own `dsh` command.
+With `BAKE_NATIVE_ROOT` naming an install root, the line is the same without its first clause. The installers refuse macOS too, so there is no native install there to update.
 
 On Windows, Bake runs without confinement: Windows sandboxing is not qualified yet, so commands under `read-only` and `workspace-write` are refused there; `danger-full-access` runs them (`bake docs permissions`).
 
@@ -41,7 +41,7 @@ Bake 0.4.7 is signed with a new native release key. Bake 0.4.6 and earlier trust
 
 ## What an update does
 
-1. It fetches `stable.json` and its signature over HTTPS, limiting each response to 64 KiB while it streams, and refuses the manifest unless Bake's native release key signed exactly those bytes. Bake 0.3's release key cannot sign it, and its `latest.json` route is never read.
+1. It fetches `stable.json` and its signature over HTTPS, limiting each response to 64 KiB while it streams, and refuses the manifest unless Bake's native release key signed exactly those bytes.
 2. It installs only a version newer than the installed one. A manifest naming an older version is refused; `--force <version>` installs that published version anyway.
 3. It streams the archive into a staging directory inside the install, hashing it as it arrives, and refuses it as soon as it is larger than, shorter than, or hashed differently from what the manifest states.
 4. It unpacks the archive, refusing a member that is absolute, that leaves the release directory, that is a link or a device, or that would unpack to more than 512 MiB.
@@ -57,4 +57,4 @@ Every install, update, and rollback holds the install's lock, so two of them nev
 
 ## Where it installs
 
-The install root is `~/.local/share/bake-native`, or `%LOCALAPPDATA%\bake-native` on Windows; `BAKE_NATIVE_ROOT` names another one. It is separate from a Bake 0.3 install, which keeps working with its own data and its own `dsh` command. The commands the installer links live in `~/.local/bin`, or wherever `BAKE_BIN_DIR` names, and point at the current release, so an update does not touch them.
+The install root is `~/.local/share/bake-native`, or `%LOCALAPPDATA%\bake-native` on Windows; `BAKE_NATIVE_ROOT` names another one. The commands the installer links live in `~/.local/bin`, or wherever `BAKE_BIN_DIR` names, and point at the current release, so an update does not touch them.

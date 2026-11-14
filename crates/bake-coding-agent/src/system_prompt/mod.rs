@@ -1,7 +1,6 @@
 //! The structured system prompt and the context files it includes.
 //!
-//! The prompt's text is Bake's own (D33,
-//! `docs/roadmap/rust-0.4/system-prompt.md`); its mechanism is ported from
+//! The prompt's text is Bake's own; its mechanism is ported from
 //! Pi `packages/coding-agent/src/core/system-prompt.ts` (v1.1.0), and from
 //! `resource-loader.ts` the loading of `AGENTS.md` context files and of
 //! the `--system-prompt` and `--append-system-prompt` inputs ([`context`]). The tools contribute their guidelines, which follow Pi.
@@ -187,22 +186,21 @@ fn render_project_context(files: &[ContextFile]) -> String {
 /// The preamble of Bake's default prompt.
 pub const PREAMBLE: &str = "You are Bake, a coding agent that works in the user's workspace by reading code, running commands, and editing files.";
 
-/// Bake's first rules, from Bake 0.3's headless prompt
-/// (`packages/bundle/headless/cordis.patch.yml`); the precedence sentence
+/// Bake's first rules; the precedence sentence
 /// follows Codex CLI's base instructions.
 const LEADING_RULES: [&str; 2] = [
     "Follow the conventions of the surrounding code and the project's instructions. The user's requests take precedence over project instructions.",
     "Commit or push only when the task requests it, and do not discard changes you did not make.",
 ];
 
-/// Bake 0.3's round-trip paragraph, for a session with tools, without the
+/// Bake's round-trip paragraph, for a session with tools, without the
 /// sentence `edit`'s own guideline states. Calls in one response do run
 /// in order: the session makes the tools that change files or run commands
 /// sequential (`agent_session::ORDERED_TOOLS`), and a failed file change
 /// stops the commands after it (`agent_session::FILE_CHANGE_TOOLS`).
 const ROUND_TRIP_RULE: &str = "Work in as few model round trips as you can. Put independent tool calls in one response: read the files you need together, and send an edit with the command that checks it, since calls in one response run in order and the command is skipped if the edit fails. Do not re-read a file to confirm an edit that succeeded.";
 
-/// Bake 0.3's last rules, before the tool-contributed guidelines.
+/// Bake's last rules, before the tool-contributed guidelines.
 const TRAILING_RULES: [&str; 2] = [
     "Report results and verification accurately, including failures and skipped checks.",
     "Keep the final answer concise, factual, and neutral.",

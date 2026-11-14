@@ -1,10 +1,7 @@
 //! Which model and thinking level a child runs on, and the discovery the
 //! `list_subagent_models` tool answers.
 //!
-//! Ported from Bake's TypeScript `packages/subagent/tool-subagent/src/model-selection.ts`
-//! (`withoutBlankRoute`, `requestedAgentOptions`, `assertAllowedModelSelection`,
-//! `preflightChildLlmRoute`) and `list-models.ts`: blank fields count as
-//! omitted, `provider` and `model` go together, a route outside the allowed
+//! Blank fields count as omitted, `provider` and `model` go together, a route outside the allowed
 //! list is refused naming the allowed routes, and a changed route without
 //! `reasoning_effort` takes the new model's default level. Differences: the
 //! allowed routes are the models with credentials
@@ -86,7 +83,7 @@ fn allowed_routes(available: &[Model]) -> String {
     }
 }
 
-/// The 0.3 refusal; when the model id is available under another
+/// The refusal of a route outside the allowed list; when the model id is available under another
 /// provider, Bake adds those routes first, since models often guess the
 /// vendor for a gateway's model.
 fn not_allowed(provider: &str, model: &str, available: &[Model]) -> String {

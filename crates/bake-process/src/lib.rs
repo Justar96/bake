@@ -52,7 +52,7 @@
 //! (`PROC_THREAD_ATTRIBUTE_JOB_LIST`), with only its standard handles
 //! inherited and overlapped named pipes connected before creation. A Unix
 //! descendant that leaves the tree (`setsid`) is outside this ownership:
-//! the tree is cleanup, not containment, and D24's sandbox is the
+//! the tree is cleanup, not containment, and Bake's sandbox is the
 //! boundary. One Linux exception: the init of a PID namespace a member
 //! started, such as bubblewrap's, is pinned by a pidfd (by a kill, or by
 //! the `SIGTERM` request before one), killed with the tree, and awaited,

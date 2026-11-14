@@ -9,9 +9,6 @@
 //! The key reaches the installer by replacing the one embedded line in a
 //! private copy, never through its environment: the published installer
 //! trusts exactly the key it carries.
-//!
-//! Ported from Bake's `scripts/release/native-rehearsal.native.ts` and
-//! `native-install-fixture.ts` (revision 97ce6abba0).
 
 use std::collections::{BTreeMap, HashMap};
 use std::io::{BufRead as _, BufReader, Write as _};

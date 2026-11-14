@@ -10,7 +10,7 @@
 //! The model-visible text (name, description, schemas, results, exit-code,
 //! timeout, abort, and truncation notices) is Pi's byte for byte;
 //! `tests/fixtures/pi-bash/` records it from Pi's own code. Three
-//! deviations name Bake where Pi names itself (D33): the session's details
+//! deviations name Bake where Pi names itself: the session's details
 //! reach commands as `BAKE_*` variables where Pi exports `PI_*`, spill
 //! files are named `bake-bash-…` where Pi's are `pi-bash-…`, and the tool
 //! contributes no prompt guideline, since Pi's names the `PI_*` variables.
@@ -19,7 +19,7 @@
 //! final command, directory, and environment, and a wrapper can refuse or
 //! rewrite the spawn there, and [`LocalShellOperations::exec_prepared`]
 //! lets it spawn a wrapped argv (a sandbox runner) with Pi's own process
-//! handling. Sandboxing and approvals (D24) live in
+//! handling. Sandboxing and approvals live in
 //! [`crate::permissions`], which wraps this tool. Pi's `powershell` tool is not ported: Pi's default tools are
 //! `read`, `bash`, `edit`, and `write` on every platform, Windows included.
 //!
@@ -252,7 +252,7 @@ impl std::fmt::Debug for BashToolOptions {
 /// The key of a background start's `details`: `{ "id", "label" }`.
 pub const BACKGROUND_JOB_DETAIL: &str = "backgroundJob";
 
-/// Bake's TypeScript `bashDescription` sentence for background runs, after
+/// Bake's sentence for background runs, after
 /// Pi's description when the tool takes `run_in_background`.
 pub const BASH_BACKGROUND_DESCRIPTION: &str =
     " Use `run_in_background` for long builds and tests, then `job_output` and `job_kill`.";

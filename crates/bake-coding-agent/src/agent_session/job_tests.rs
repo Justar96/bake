@@ -1,8 +1,6 @@
 //! Background job notices through a session: delivered once, inside a
 //! run or by a turn they open while the wake budget lasts, then kept for
-//! the next prompt. Bake's TypeScript `packages/jobs/tool-jobs/src/index.ts`
-//! `onJobDone` and `maxConsecutiveWakes`; waits are on job state, never on
-//! time.
+//! the next prompt. Waits are on job state, never on time.
 
 use std::time::Duration;
 

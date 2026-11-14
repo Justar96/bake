@@ -1,5 +1,4 @@
-//! Ports of `packages/web/web-search-deepseek/tests/deepseek.spec.ts`
-//! (the response mapping and the request), the model selection over a
+//! The search's response mapping and request, the model selection over a
 //! fake route catalog, and a response the CLIProxyAPI gateway returned
 //! to a live `web_search_20250305` probe on 2026-10-19
 //! (`fixtures/cliproxyapi-web-search.json`, its `encrypted_content`

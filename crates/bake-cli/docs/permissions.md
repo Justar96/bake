@@ -12,7 +12,7 @@ New sessions have full access, as in Pi: the `danger-full-access` mode with the 
 | `workspace-write` | Tools can change files under the session's working directory, `/tmp` (on Unix), and the system temporary directory |
 | `danger-full-access` | File changes are not restricted, and `bash` runs unconfined |
 
-`read`, `grep`, `find`, and `ls` are never restricted, and neither are the web tools: `web_search` and `web_fetch` run in every mode and under either approval policy without asking, as in Bake 0.3. The sandbox modes bound file writes, not the network; `web_fetch` reaches only public addresses (`bake docs cli`).
+`read`, `grep`, `find`, and `ls` are never restricted, and neither are the web tools: `web_search` and `web_fetch` run in every mode and under either approval policy without asking. The sandbox modes bound file writes, not the network; `web_fetch` reaches only public addresses (`bake docs cli`).
 
 ## Presets
 
@@ -37,10 +37,9 @@ A preset names a sandbox mode and an approval policy. The built-in presets are:
 Each preset needs `sandbox` and `approval`; `name` and `description` are optional. `custom` and `auto` are reserved names. The default for new sessions is, in order:
 
 1. `defaultPreset`, which must name a preset in the table;
-2. the 0.3 home's saved preset, when it names a preset in the table;
-3. the first preset that pairs `danger-full-access` with `never`;
-4. the first preset that pairs `workspace-write` with `ask`, the default through Bake 0.4.5;
-5. the table's first preset.
+2. the first preset that pairs `danger-full-access` with `never`;
+3. the first preset that pairs `workspace-write` with `ask`, the default through Bake 0.4.5;
+4. the table's first preset.
 
 A table with no preset is an error.
 

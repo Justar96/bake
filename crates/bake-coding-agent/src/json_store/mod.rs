@@ -56,9 +56,7 @@
 //!     ACL when it has none, so an ACL a default ACL of the directory gave
 //!     the temporary file is removed.
 //!   - macOS: its ACL, copied by `fcopyfile(3)` with `COPYFILE_ACL`.
-//!   - Windows: its DACL is copied onto the temporary file. This adapts
-//!     Bake's `writeFileAtomic` in `packages/fs/fs-local/src/fsio.ts` and
-//!     `src/win32.ts`. The DACL is read by path when the replacement is
+//!   - Windows: its DACL is copied onto the temporary file. The DACL is read by path when the replacement is
 //!     prepared, not from the handle the update read, so it is whatever
 //!     object holds the name then.
 //!
@@ -806,9 +804,7 @@ mod platform {
     }
 }
 
-/// Windows DACL copying, adapted from Bake's
-/// `packages/fs/fs-local/src/win32.ts` (`copyFileDaclWin32`) and its use in
-/// `fsio.ts` `writeFileAtomic`. Publication uses the same rename as Unix.
+/// Windows DACL copying. Publication uses the same rename as Unix.
 #[cfg(windows)]
 mod platform {
     use std::ffi::OsStr;

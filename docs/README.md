@@ -6,6 +6,5 @@ The [user guide](../crates/bake-cli/docs/) is embedded in the executable: `bake 
 - [Development](development.md): build, run, and workspace layout.
 - [Testing](testing.md): local checks and behavioral evidence.
 - [Contributing](../CONTRIBUTING.md): branches and platform checks.
-- [Roadmap and decisions](roadmap/rust-0.4/README.md): implementation history and remaining qualification work.
-
-Roadmap documents record implementation decisions. Historical source and qualification references may point to Git history; current commands are in the development and testing guides.
+- [Direction](direction.md): current priorities, Bake's own contracts, and what is out of scope.
+- [Releases](../distribution/README.md): the signed channel, the installers, and the release steps.

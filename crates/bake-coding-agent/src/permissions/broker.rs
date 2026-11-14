@@ -1,9 +1,7 @@
 //! The interactive answerer: approval requests wait in order for a person
 //! to answer them through a terminal.
 //!
-//! Adapted from Bake's TypeScript `Interactions` queue
-//! (`apps/tui/packages/app/src/interactions.ts`), the approval half: each
-//! request takes a fresh identity, the oldest is the one displayed and a
+//! Each request takes a fresh identity, the oldest is the one displayed and a
 //! later request cannot replace it, an answer settles only the displayed
 //! request it names, so a stale answer settles nothing, a request's own
 //! cancellation withdraws it, [withdrawing the

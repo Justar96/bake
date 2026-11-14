@@ -69,22 +69,20 @@
 //! job registry; its `packages/durable` task states give the structure
 //! here: a `completing` task's outcome is decided but it becomes terminal
 //! only once the work it owns is done, a background task is outside a
-//! conversation's aborts, and cancelling a wait cancels only the wait. The
-//! retained contract is Bake's TypeScript `packages/jobs/jobs/src/{types,index}.ts`,
-//! `packages/jobs/jobs-local/src/index.ts`, and the process outcome of
-//! `packages/shell/tool-bash/src/background.ts` ([`process`]): `<kind>-N`
+//! conversation's aborts, and cancelling a wait cancels only the wait.
+//! Bake's job contract, with the process outcome in [`process`]: `<kind>-N`
 //! ids, the per-owner limit of 10 checked before the producer starts, the
 //! `running`/`stopping`/terminal statuses with first-wins settlement, the
 //! consuming stream cursor beside idempotent final output, bounded waits
 //! whose cancellation rejects only a live job, the `reported` claim, and
 //! teardown that cancels, claims, and awaits.
 //!
-//! Differences from the TypeScript: one registry per session rather than
-//! per process, so there are no owner scopes or controller layers; no
-//! listener callbacks ([`JobEvents`] instead); a `Completing` state, and
-//! terminal only after the job's resources settle, where the TypeScript
-//! trusted the producer's `done`; cancellation that cannot throw, so no
-//! record is force-failed; and bounded retention of terminal records.
+//! There is one registry per session, so there are no owner scopes or
+//! controller layers; no listener callbacks ([`JobEvents`] instead); a
+//! `Completing` state, and terminal only after the job's resources settle,
+//! not when the producer says it is done; cancellation that cannot throw,
+//! so no record is force-failed; and bounded retention of terminal
+//! records.
 //! The session's model tools and background `bash` share this registry.
 //! Its journal preserves lifecycle facts, not processes or output bytes.
 //!
@@ -137,8 +135,8 @@ pub const MAX_KIND_BYTES: usize = 32;
 /// The registry's bounds.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JobLimits {
-    /// Live jobs (`running`, `stopping`, or `completing`) at once. The
-    /// TypeScript default, 10.
+    /// Live jobs (`running`, `stopping`, or `completing`) at once; 10 by
+    /// default.
     pub max_active: usize,
     /// Terminal jobs kept for reads.
     pub max_retained: usize,
@@ -146,7 +144,7 @@ pub struct JobLimits {
     pub stream_bytes: usize,
     /// Final output kept per job (its tail).
     pub final_output_bytes: usize,
-    /// The longest wait. The TypeScript job tools' cap, 60 s.
+    /// The longest wait. Default: 60 s.
     pub max_wait: Duration,
 }
 
@@ -239,7 +237,7 @@ impl JobStatus {
         matches!(self, Self::Completed | Self::Killed | Self::Failed)
     }
 
-    /// The TypeScript status word: `running`, `stopping`, `completing`,
+    /// The status word: `running`, `stopping`, `completing`,
     /// `completed`, `killed`, or `failed`.
     pub fn as_str(self) -> &'static str {
         match self {

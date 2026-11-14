@@ -1,12 +1,5 @@
-//! Pi's `bash`, `write`, and `edit` tools under Bake's permission layer
-//! (D24). Fixture tests derived from Bake's TypeScript specs, each naming
-//! the case it follows:
-//!
-//! - `packages/fs/fs-sandbox/tests/{fs-sandbox,containment}.spec.ts`
-//! - `packages/fs/tool-fs/tests/tools.spec.ts` (`sandbox escalation API`)
-//! - `packages/shell/bash-sandbox/tests/{sandbox,foreground-timeout,partial-landlock}.spec.ts`
-//! - `packages/shell/tool-bash/tests/tools.spec.ts` (`sandbox escalation`,
-//!   `renderResult`)
+//! Pi's `bash`, `write`, and `edit` tools under Bake's permission layer:
+//! containment, escalation, and the sandboxed bash runner's results.
 //!
 //! Bash runs through `bake_sandbox::testing::RecordingProvider` and local
 //! doubles; real confinement is the backends' to test. The file tests keep
@@ -229,7 +222,7 @@ fn offering_nothing(root: &Path) -> [(&'static str, ToolPermissions); 3] {
     ]
 }
 
-// tool-fs.spec: "advertises the closed target vocabulary on write and edit
+// "advertises the closed target vocabulary on write and edit
 // under a confining backend", narrowed to the modes an approval could
 // grant; Pi's descriptions and parameters otherwise.
 #[test]
@@ -302,11 +295,11 @@ fn file_tools_add_the_escalation_parameters() {
     }
 }
 
-// fs-sandbox.spec (workspace-write containment): "a write under the
+// "a write under the
 // workspace lands", "an absolute path outside the workspace is denied, no
 // file created", "a `..` traversal out of the workspace is denied", "an edit
 // outside the workspace is denied; the original is untouched", "an edit
-// inside the workspace lands"; tool-fs.spec: "a denied write maps to the
+// inside the workspace lands"; "a denied write maps to the
 // shared marker plus the escalation hint (isError)".
 #[tokio::test]
 async fn workspace_write_contains_writes_and_edits() {
@@ -388,7 +381,7 @@ async fn workspace_write_contains_writes_and_edits() {
     );
 }
 
-// fs-sandbox.spec: "a write to the platform temp area lands (parity with the
+// "a write to the platform temp area lands (parity with the
 // bash runner grant)".
 #[tokio::test]
 async fn workspace_write_allows_the_temporary_directory() {
@@ -443,7 +436,7 @@ async fn a_denial_hints_only_at_an_offered_escalation() {
     assert!(!escape.exists());
 }
 
-// fs-sandbox.spec (read-only): "denies write, leaving no file on disk" and
+// "denies write, leaving no file on disk" and
 // "denies edit of an existing file (the content is unchanged)".
 #[tokio::test]
 async fn read_only_refuses_every_mutation() {
@@ -478,7 +471,7 @@ async fn read_only_refuses_every_mutation() {
     assert_eq!(text(&read), "original");
 }
 
-// fs-sandbox.spec (danger-full-access): "writes anywhere, unfenced".
+// "writes anywhere, unfenced".
 #[tokio::test]
 async fn danger_full_access_writes_anywhere() {
     let Some(dirs) = Dirs::new("danger") else {
@@ -496,9 +489,9 @@ async fn danger_full_access_writes_anywhere() {
     assert_eq!(std::fs::read_to_string(&target).expect("read"), "free");
 }
 
-// fs-sandbox.spec (the per-call policy override): "a workspace-write stamp
+// "a workspace-write stamp
 // on a read-only default lets a contained write land for that call only";
-// tool-fs.spec: "an approved escalation stamps the granted mode onto that
+// "an approved escalation stamps the granted mode onto that
 // write" and "a rejected escalation fails closed with its own text and never
 // mutates".
 #[tokio::test]
@@ -577,7 +570,7 @@ async fn an_approved_escalation_widens_one_mutation() {
     );
 }
 
-// fs-sandbox.spec: "a symlinked directory inside the workspace pointing OUT
+// "a symlinked directory inside the workspace pointing OUT
 // is denied" and "a NEW file created under a symlinked-out directory is
 // denied (deepest-ancestor realpath)".
 #[cfg(unix)]
@@ -602,9 +595,7 @@ async fn links_out_of_the_workspace_are_refused() {
     assert!(!dirs.out().join("newdir").exists());
 }
 
-// Not a TypeScript case: the TypeScript fence renames a temporary file over
-// the checked name, so a dangling link is replaced, never followed. Pi's
-// in-place write follows it, so the guard must judge the file the link
+// Pi's in-place write follows a dangling link, so the guard must judge the file the link
 // names, however it is spelled and however many links lead there.
 #[cfg(unix)]
 #[tokio::test]
@@ -662,7 +653,7 @@ async fn dangling_links_are_judged_by_where_they_land() {
     assert!(!dirs.out().join("abs.txt").exists());
 }
 
-// fs-sandbox.spec: "mutates the freshly checked identity, not a stale
+// "mutates the freshly checked identity, not a stale
 // outside targetKey (TOCTOU direction)". The link points inside when the
 // call starts and is swapped out after the call holds its mutation queue,
 // just before the check; the check reads the link as it then is.
@@ -831,7 +822,7 @@ impl Drop for Cleanup {
     }
 }
 
-// tool-bash.spec: "advertises the sandbox fields and validates their
+// "advertises the sandbox fields and validates their
 // pairing" (the description and parameters of a confining composition),
 // with only the modes an approval could grant.
 #[test]
@@ -889,9 +880,9 @@ fn bash_adds_the_sandbox_paragraph_and_parameters() {
     assert_eq!(bash.output_schema, pi.output_schema);
 }
 
-// bash-sandbox.spec: "hands the provider the exact bash argv and the
+// "hands the provider the exact bash argv and the
 // per-call policy, and runs the returned argv"; "reports a real permission
-// failure as a sandbox denial with the mode it ran under"; tool-bash.spec
+// failure as a sandbox denial with the mode it ran under";
 // renderResult: "reports sandbox denials before exit status and hints only
 // when escalation is advertised".
 #[tokio::test]
@@ -989,9 +980,9 @@ async fn a_denied_bash_write_shows_the_markers() {
     );
 }
 
-// bash-sandbox.spec: "a foreground runner failure throws the fail-closed
+// "a foreground runner failure throws the fail-closed
 // error, never a task result" and "a foreground runner failure outranks
-// denial: runner error text may contain denial words"; partial-landlock.spec:
+// denial: runner error text may contain denial words";
 // "keeps a Landlock fatal line at exit %i as insufficient runner-failure
 // evidence" (an exit code the rule does not allow).
 #[tokio::test]
@@ -1038,7 +1029,7 @@ async fn a_runner_failure_outranks_a_denial() {
     );
 }
 
-// partial-landlock.spec: "classifies a %s configured runner through the
+// "classifies a %s configured runner through the
 // direct spawn error channel".
 #[tokio::test]
 async fn a_runner_that_cannot_start_fails_closed() {
@@ -1063,7 +1054,7 @@ async fn a_runner_that_cannot_start_fails_closed() {
     );
 }
 
-// bash-sandbox.spec (fail closed): "propagates the provider's structured
+// "propagates the provider's structured
 // SANDBOX_UNAVAILABLE"; the command never runs.
 #[tokio::test]
 async fn an_unavailable_sandbox_runs_nothing() {
@@ -1089,9 +1080,9 @@ async fn an_unavailable_sandbox_runs_nothing() {
     assert!(!root.join("ran.txt").exists());
 }
 
-// bash-sandbox.spec (danger-full-access): "runs unwrapped: the provider is
+// "runs unwrapped: the provider is
 // never consulted"; "escalating to danger-full-access bypasses the provider
-// entirely"; tool-bash.spec: "runs a granted foreground ... call under the
+// entirely"; "runs a granted foreground ... call under the
 // approved mode".
 #[tokio::test]
 async fn full_access_and_grants_choose_the_run() {
@@ -1144,7 +1135,7 @@ async fn full_access_and_grants_choose_the_run() {
     assert_eq!(provider.modes(), [WW, RO]);
     assert_eq!(asked.load(Ordering::SeqCst), 2);
 
-    // tool-bash.spec: "maps an approval rejected to its distinct failure".
+    // "maps an approval rejected to its distinct failure".
     let rejecting = permissions(
         &root,
         RO,
@@ -1169,8 +1160,8 @@ async fn full_access_and_grants_choose_the_run() {
     assert!(!root.join("ran.txt").exists());
 }
 
-// bash-sandbox.spec (the provider hand-off): "cancels run while confinement
-// is pending without spawning"; foreground-timeout.spec: "preserves
+// "cancels run while confinement
+// is pending without spawning"; "preserves
 // upstream cancellation when it wins during preparation".
 #[tokio::test]
 async fn an_abort_while_confining_spawns_nothing() {
@@ -1207,7 +1198,7 @@ async fn an_abort_while_confining_spawns_nothing() {
     assert!(!root.join("ran.txt").exists());
 }
 
-// foreground-timeout.spec: "times out unresolved preparation and prevents
+// "times out unresolved preparation and prevents
 // late success from spawning". Paused time advances to the deadline once
 // the call can only wait.
 #[tokio::test(start_paused = true)]
@@ -1237,7 +1228,7 @@ async fn the_timeout_covers_confinement() {
     assert!(!root.join("ran.txt").exists());
 }
 
-// tool-bash.spec: "rejects an explicit mode with blank justification %j
+// "rejects an explicit mode with blank justification %j
 // before execution" and "runs without escalation for justification %j",
 // through the tool.
 #[tokio::test]
@@ -1276,7 +1267,7 @@ async fn bash_escalation_arguments_follow_tool_bash() {
     assert_eq!(provider.modes(), [WW, WW]);
 }
 
-// Bake: a sandboxed bash call whose owner is closing is refused before any
+// A sandboxed bash call whose owner is closing is refused before any
 // runner probe starts, and reports Pi's abort, with no sandbox text: the
 // session is shutting down, so nothing new reaches the model.
 #[tokio::test]

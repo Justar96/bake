@@ -1,12 +1,10 @@
 //! Pi's bash tool under the sandbox.
 //!
-//! Ported from Bake's TypeScript `packages/shell/bash-sandbox/src/{index,helpers}.ts`
-//! (`SandboxBashExecutor.run`: wrap the exact shell argv through the
-//! provider, fail closed when it cannot, classify a runner failure before a
-//! denial) and the sandbox parts of `packages/shell/tool-bash/src/index.ts`
-//! (`bashDescription`, the `sandbox_permissions` and `justification`
-//! parameters, the escalation step) and `render.ts` (`renderResult`'s
-//! denial marker and escalation hint).
+//! Each call wraps the exact shell argv through the sandbox provider, fails
+//! closed when it cannot, and classifies a runner failure before a denial.
+//! The tool takes the `sandbox_permissions` and `justification`
+//! parameters and the escalation step, and a denied run gains the denial
+//! marker and escalation hint.
 //!
 //! The wrapped tool is Pi's: [`SandboxedBashOperations`] is a
 //! [`BashOperations`] that runs Pi's local shell through
@@ -14,13 +12,10 @@
 //! abort, and process-tree ownership stay Pi's. Each call resolves its
 //! policy through the [`PermissionEngine`](super::PermissionEngine) first.
 //!
-//! Where Pi's text and the sandbox's meet: Pi's description gains the
-//! TypeScript sandbox paragraph; Pi's parameters gain the two escalation
-//! parameters; a denied run's output gains the TypeScript markers before
-//! Pi's exit status, as `renderResult` put them before its exit marker. A
-//! runner failure fails the call with the `SandboxUnavailable` text, as a
-//! TypeScript foreground run did (the `runner_failed_notice` belonged to
-//! background jobs, which Pi does not have).
+//! Where Pi's text and the sandbox's meet: Pi's description gains Bake's
+//! sandbox paragraph; Pi's parameters gain the two escalation parameters;
+//! a denied run's output gains Bake's markers before Pi's exit status. A
+//! runner failure fails the call with the `SandboxUnavailable` text.
 
 use std::collections::VecDeque;
 use std::ffi::OsString;

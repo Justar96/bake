@@ -5,7 +5,7 @@
 //! `readPipedStdin`, `resolveAppMode`, `createSessionManager`,
 //! `resolveSessionPath`, `buildSessionOptions`, and the print-mode branch of
 //! `main`, and from `src/cli/initial-message.ts`. Settings, `models.json`,
-//! `auth.json`, and sessions come from the Bake home (D25), the one
+//! `auth.json`, and sessions come from the Bake home, the one
 //! [`CliEnvironment::home`] names, never the process's own. The global
 //! `AGENTS.md` and the user's skills come from the universal `~/.agents`
 //! under [`CliEnvironment::user_home`], and a project's `AGENTS.md` files
@@ -18,7 +18,7 @@
 //! working directory is gone), and every failure exits with code 1, as in
 //! Pi.
 //!
-//! Bake composes its permission layer (D24, [`crate::permissions`]) here:
+//! Bake composes its permission layer ([`crate::permissions`]) here:
 //! the session's permission is settled and stored in its session file
 //! before the agent starts, `bash`, `write`, and `edit` are wrapped by the
 //! permission engine over [`CliEnvironment::sandbox_provider`], approvals
@@ -168,20 +168,14 @@ pub struct CliEnvironment {
     pub stdout: SharedWriter,
     /// Standard error.
     pub stderr: SharedWriter,
-    /// Providers to add below `models.json`, the CLIPROXY seam
+    /// Providers to add below `models.json`
     /// ([`ModelRegistry::add_provider_config`]): id, config, and key.
     pub extra_providers: Vec<(String, serde_json::Value, Option<String>)>,
-    /// The default model the 0.3 home saved (D25), used only when
-    /// `settings.json` names neither a default provider nor a default model.
-    pub imported_default_model: Option<crate::cliproxyapi::DefaultModel>,
-    /// The default permission preset the 0.3 home saved (D25), used only
-    /// when `settings.json` names none.
-    pub imported_default_preset: Option<String>,
-    /// Confines bash under each call's policy (D24): the binary passes
+    /// Confines bash under each call's policy: the binary passes
     /// [`bake_sandbox::default_provider`], which fails every confined call
     /// closed on a host without a backend.
     pub sandbox_provider: Arc<dyn SandboxProvider>,
-    /// Who answers approval requests (D24): interactive mode passes its
+    /// Who answers approval requests: interactive mode passes its
     /// terminal's [`crate::permissions::ApprovalBroker`]; `None`, as in
     /// print mode, means nobody can, so every escalation fails closed and
     /// the system prompt states the `never` policy.
@@ -196,71 +190,6 @@ pub struct CliEnvironment {
     /// Resolves with an exit code when the process should stop, such as on
     /// `SIGTERM`; print mode then shuts the session down and returns it.
     pub interrupt: Interrupt,
-}
-
-/// What the 0.3 home's CLIProxyAPI route contributes to a run (D25).
-#[derive(Debug, Default)]
-pub struct ImportedStartup {
-    /// For [`CliEnvironment::extra_providers`].
-    pub providers: Vec<(String, serde_json::Value, Option<String>)>,
-    /// For [`CliEnvironment::imported_default_model`].
-    pub default_model: Option<crate::cliproxyapi::DefaultModel>,
-    /// For [`CliEnvironment::imported_default_preset`].
-    pub default_preset: Option<String>,
-    /// For [`CliEnvironment::warnings`]; never holds the key.
-    pub warnings: Vec<String>,
-}
-
-/// Reads the CLIProxyAPI route, key, and default model from the Bake home
-/// at `home`, read-only, through
-/// [`import_cliproxyapi`](crate::cliproxyapi::import_cliproxyapi), and the
-/// default permission preset through
-/// [`import_default_preset`](crate::permissions::import::import_default_preset).
-/// A home without them contributes nothing; an unreadable one contributes
-/// a warning, so a `models.json` route still runs.
-///
-/// A `bake` sign-in ([`crate::cliproxyapi::account`]) comes first:
-/// while `settings.json` has a `cliproxyapi` member, the 0.3 route and key
-/// are not imported. The account itself is applied to the registry later,
-/// from its own read ([`apply_account`]).
-pub fn import_startup(
-    home: &std::path::Path,
-    env: &dyn Fn(&str) -> Option<std::ffi::OsString>,
-) -> ImportedStartup {
-    use crate::cliproxyapi::account::{AccountView, read_account};
-    use crate::cliproxyapi::{CLIPROXYAPI_ID, import_cliproxyapi};
-    let mut startup = ImportedStartup::default();
-    let owned = !matches!(read_account(home), AccountView::Absent);
-    match import_cliproxyapi(home, env) {
-        Ok(imported) => {
-            startup.default_model = imported.default_model;
-            if let (false, Some(route)) = (owned, imported.route) {
-                let key = route.key.map(|key| key.key.expose().to_owned());
-                let mut config = route.provider.config;
-                // The config names the key's variable (`$CLIPROXYAPI_API_KEY`),
-                // which outranks a literal key; the importer has already
-                // resolved it from the environment or the credentials file.
-                if key.is_some()
-                    && let Some(config) = config.as_object_mut()
-                {
-                    config.remove("apiKey");
-                }
-                startup
-                    .providers
-                    .push((CLIPROXYAPI_ID.to_owned(), config, key));
-            }
-        }
-        Err(error) => startup
-            .warnings
-            .push(format!("Could not import the CLIProxyAPI route: {error}")),
-    }
-    match crate::permissions::import::import_default_preset(home) {
-        Ok(preset) => startup.default_preset = preset,
-        Err(error) => startup.warnings.push(format!(
-            "Could not import the default permission preset: {error}"
-        )),
-    }
-    startup
 }
 
 /// Applies the home's CLIProxyAPI account to `registry`, from one
@@ -721,18 +650,15 @@ enum SessionStartError {
 /// and its `.bake/prompts` ([`crate::prompt_templates`]) are always
 /// loaded, and it reads no project settings ([`crate::settings`]) and no
 /// project `mcp.json` ([`crate::mcp`]). Bake's `--approval` is a different
-/// thing: the session's approval policy (D24).
+/// thing: the session's approval policy.
 pub const PROJECT_TRUST_REFUSED: &str = "--approve and --no-approve need project trust, which bake does not have: a project's AGENTS.md, .agents/skills, and .bake/prompts are always loaded, and no project settings or mcp.json is read. For the session's approval policy, see --approval";
 
-/// `BAKE_OFFLINE`, read before [`DSH_OFFLINE_ENV`].
+/// `BAKE_OFFLINE`.
 pub const BAKE_OFFLINE_ENV: &str = "BAKE_OFFLINE";
-/// `DSH_OFFLINE`, read when `BAKE_OFFLINE` is unset or blank.
-pub const DSH_OFFLINE_ENV: &str = "DSH_OFFLINE";
 
 /// Pi's `offlineMode`: `--offline`, or a truthy environment setting. Where
-/// Pi reads `PI_OFFLINE`, Bake reads [`BAKE_OFFLINE_ENV`] and then
-/// [`DSH_OFFLINE_ENV`], as it reads its home ([`crate::home`]); a blank
-/// value counts as unset. The value's test is Pi's `isTruthyEnvFlag`: `1`,
+/// Pi reads `PI_OFFLINE`, Bake reads [`BAKE_OFFLINE_ENV`]; a blank value
+/// counts as unset. The value's test is Pi's `isTruthyEnvFlag`: `1`,
 /// `true`, or `yes`, ignoring case.
 ///
 /// `bake` runs one startup network operation, the interactive
@@ -747,11 +673,8 @@ pub fn offline_mode(args: &Args, env: impl Fn(&str) -> Option<std::ffi::OsString
     if args.offline {
         return true;
     }
-    [BAKE_OFFLINE_ENV, DSH_OFFLINE_ENV]
-        .into_iter()
-        .filter_map(env)
+    env(BAKE_OFFLINE_ENV)
         .map(|value| value.to_string_lossy().trim().to_ascii_lowercase())
-        .find(|value| !value.is_empty())
         .is_some_and(|value| matches!(value.as_str(), "1" | "true" | "yes"))
 }
 
@@ -1080,7 +1003,7 @@ pub fn run_export(
 /// servers connect in the background, as in Pi, and then
 /// [`crate::rpc::run_rpc_mode`] serves the protocol on the environment's
 /// standard input and output until that input ends or a stop request
-/// arrives. `approvals` is the queue the client answers (D24); without one
+/// arrives. `approvals` is the queue the client answers; without one
 /// every escalation fails closed. Must run inside a multi-threaded Tokio
 /// runtime.
 pub async fn run_rpc(
@@ -1185,7 +1108,7 @@ struct Resources {
     hooks: Vec<crate::hooks::HookFile>,
 }
 
-/// Settles `session`'s permission (D24), writing any change to its file
+/// Settles `session`'s permission, writing any change to its file
 /// before anything can run, and loads the resources for its working
 /// directory. `permission_flags` applies `--permission`, `--sandbox`, and
 /// `--approval`; a resumed session leaves them out and keeps its own.
@@ -1201,7 +1124,6 @@ fn load_resources(
     args: &Args,
     home: &Path,
     user_home: Option<PathBuf>,
-    imported_default_preset: Option<&str>,
     plugins: &WasmSetup,
     permission_flags: bool,
     warnings: &mut Vec<String>,
@@ -1214,7 +1136,6 @@ fn load_resources(
         session,
         &PermissionInputs {
             settings: settings.permission.as_ref(),
-            imported_default_preset,
             preset: args.permission.as_deref().filter(|_| permission_flags),
             sandbox: args.sandbox.filter(|_| permission_flags),
             approval: args.approval.filter(|_| permission_flags),
@@ -1455,7 +1376,6 @@ fn build_child(
                     &args,
                     &factory.home,
                     factory.user_home.clone(),
-                    factory.imported_default_preset.as_deref(),
                     &factory.plugins,
                     true,
                     &mut warnings,
@@ -1875,7 +1795,7 @@ async fn build_session(args: &Args, build: Build) -> Result<Built, String> {
     }
     system_prompt.context_files = context_files;
     system_prompt.skills = skills;
-    // Without an approver, escalations fail closed (D24), and the prompt
+    // Without an approver, escalations fail closed, and the prompt
     // states the `never` policy whatever the session's.
     system_prompt.permissions = permission.prompt_text(Path::new(&session_cwd), can_ask);
     system_prompt.run_mode = run_mode;
@@ -2059,7 +1979,6 @@ pub struct SessionFactory {
     docs_command: String,
     sandbox_provider: Arc<dyn SandboxProvider>,
     approver: Option<Arc<dyn Approver>>,
-    imported_default_preset: Option<String>,
     plugins: WasmSetup,
     /// The interactive terminal shows its sessions ([`Build::drawn`]).
     drawn: bool,
@@ -2078,7 +1997,7 @@ impl SessionFactory {
     /// credentials from `home`, bash confined by `sandbox_provider`, and
     /// approvals asked of `approver` (none fails them closed). The
     /// command line's own setup ([`start_interactive`]) also names the
-    /// user's home and the 0.3 home's imported default preset.
+    /// user's home.
     pub fn new(
         args: Args,
         home: PathBuf,
@@ -2093,7 +2012,6 @@ impl SessionFactory {
             docs_command,
             sandbox_provider,
             approver,
-            imported_default_preset: None,
             plugins: WasmSetup::default(),
             drawn: false,
         }
@@ -2181,7 +2099,6 @@ impl SessionFactory {
                 &factory.args,
                 &factory.home,
                 factory.user_home.clone(),
-                factory.imported_default_preset.as_deref(),
                 &factory.plugins,
                 !resume,
                 &mut warnings,
@@ -2271,8 +2188,6 @@ async fn start_with(
         stdout,
         stderr,
         extra_providers,
-        imported_default_model,
-        imported_default_preset,
         sandbox_provider,
         approver,
         plugins,
@@ -2294,7 +2209,6 @@ async fn start_with(
         docs_command: docs_command.clone(),
         sandbox_provider: Arc::clone(&sandbox_provider),
         approver: approver.clone(),
-        imported_default_preset: imported_default_preset.clone(),
         plugins: plugins.clone(),
         drawn: kind == StartKind::Interactive,
     };
@@ -2304,16 +2218,7 @@ async fn start_with(
         let cwd = cwd.clone();
         let args = args.clone();
         tokio::task::spawn_blocking(move || {
-            let mut settings = Settings::load(&home);
-            if settings.default_provider.is_none()
-                && settings.default_model.is_none()
-                && let Some(imported) = imported_default_model
-            {
-                settings.default_provider = Some(imported.provider);
-                settings.default_model = Some(imported.model);
-                settings.default_thinking_level =
-                    settings.default_thinking_level.or(imported.thinking_level);
-            }
+            let settings = Settings::load(&home);
             let mut registry = ModelRegistry::load(&home);
             let mut warnings = startup_warnings;
             warnings.extend(settings.warnings.iter().cloned());
@@ -2355,7 +2260,6 @@ async fn start_with(
                     &args,
                     &home,
                     user_home,
-                    imported_default_preset.as_deref(),
                     &plugins,
                     true,
                     &mut warnings,
@@ -2809,9 +2713,8 @@ mod tests {
         }
     }
 
-    // Pi's `offlineMode`, with Bake's variable names: the flag, then
-    // `BAKE_OFFLINE`, then `DSH_OFFLINE`, each read as Pi's
-    // `isTruthyEnvFlag` reads `PI_OFFLINE`.
+    // Pi's `offlineMode`, with Bake's variable name: the flag, then
+    // `BAKE_OFFLINE`, read as Pi's `isTruthyEnvFlag` reads `PI_OFFLINE`.
     #[test]
     fn offline_comes_from_the_flag_or_the_environment() {
         let none = |_: &str| None;
@@ -2825,10 +2728,6 @@ mod tests {
                 offline_mode(&parse_args(&[]), set(BAKE_OFFLINE_ENV, value)),
                 "{value:?}"
             );
-            assert!(
-                offline_mode(&parse_args(&[]), set(DSH_OFFLINE_ENV, value)),
-                "{value:?}"
-            );
         }
         for value in ["", "   ", "0", "no", "false", "on"] {
             assert!(
@@ -2836,21 +2735,6 @@ mod tests {
                 "{value:?}"
             );
         }
-        // A blank `BAKE_OFFLINE` falls through to `DSH_OFFLINE`, as the
-        // home does.
-        let blank_then_set = |asked: &str| match asked {
-            BAKE_OFFLINE_ENV => Some(std::ffi::OsString::from("  ")),
-            DSH_OFFLINE_ENV => Some(std::ffi::OsString::from("1")),
-            _ => None,
-        };
-        assert!(offline_mode(&parse_args(&[]), blank_then_set));
-        // A set `BAKE_OFFLINE` decides, whatever `DSH_OFFLINE` says.
-        let both = |asked: &str| match asked {
-            BAKE_OFFLINE_ENV => Some(std::ffi::OsString::from("0")),
-            DSH_OFFLINE_ENV => Some(std::ffi::OsString::from("1")),
-            _ => None,
-        };
-        assert!(!offline_mode(&parse_args(&[]), both));
     }
 
     // Pi's `createSessionManager` reaches `--resume` only after
@@ -3309,8 +3193,6 @@ mod tests {
             stdout: sink().0,
             stderr,
             extra_providers: Vec::new(),
-            imported_default_model: None,
-            imported_default_preset: None,
             sandbox_provider: Arc::new(bake_sandbox::provider::UnavailableProvider::new(None)),
             approver: None,
             warnings: Vec::new(),

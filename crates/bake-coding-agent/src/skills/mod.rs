@@ -378,7 +378,7 @@ pub fn parse_frontmatter(content: &str) -> Result<(Value, String), String> {
         return Ok((Value::Object(serde_json::Map::new()), body));
     };
     let max = usize::try_from(MAX_SKILL_FILE_BYTES).unwrap_or(usize::MAX);
-    let parsed = crate::cliproxyapi::yaml::parse_document(yaml.as_bytes(), max)
+    let parsed = crate::yaml::parse_document(yaml.as_bytes(), max)
         .map_err(|error| format!("Frontmatter {error}"))?;
     let parsed = if parsed.is_null() {
         Value::Object(serde_json::Map::new())

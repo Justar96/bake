@@ -1,11 +1,5 @@
-//! Fixture tests for the permission layer, derived from Bake's TypeScript
-//! specs; each names the case it follows:
-//!
-//! - `packages/interaction/permission-presets/tests/{permission-presets,projection,invariant}.spec.ts`
-//! - `packages/interaction/user-approval/tests/{approval,invariant}.spec.ts`
-//! - `packages/sandbox/sandbox-policy/tests/policy.spec.ts`
-//! - `packages/shell/tool-bash/tests/tools.spec.ts` and
-//!   `packages/fs/tool-fs/tests/tools.spec.ts` (the escalation cases)
+//! Fixture tests for the permission layer: presets, approvals, the policy,
+//! and the escalation cases of `bash` and the file tools.
 //!
 //! The tools themselves are tested in `tests/permissions.rs`.
 
@@ -32,11 +26,11 @@ const DFA: SandboxMode = SandboxMode::DangerFullAccess;
 const ASK: ApprovalPolicy = ApprovalPolicy::Ask;
 const NEVER: ApprovalPolicy = ApprovalPolicy::Never;
 
-/// The composition defaults the TypeScript cases ran under, `workspace-write`
-/// with `ask`; Bake's own default after 0.4.5 is Pi's full access
+/// The composition defaults most cases run under, `workspace-write` with
+/// `ask`; Bake's own default after 0.4.5 is Pi's full access
 /// ([`KnobDefaults::PI`]), which the Bake cases below name.
 fn defaults() -> KnobDefaults {
-    KnobDefaults::TYPESCRIPT
+    KnobDefaults::WORKSPACE_ASK
 }
 
 fn spec(sandbox: SandboxMode, approval: ApprovalPolicy) -> PresetSpec {
@@ -94,10 +88,10 @@ fn current(session: &SessionManager, table: &PresetTable) -> String {
     table.derive(&permission_state(session).expect("state").knobs, defaults())
 }
 
-// permission-presets.spec: "advertises the preset table in declaration
+// "advertises the preset table in declaration
 // order and resolves bundles".
 #[test]
-fn the_default_table_is_the_typescript_table() {
+fn the_default_table_has_two_presets() {
     let table = PresetTable::default();
     assert_eq!(table.names(), ["workspace-write", "danger-full-access"]);
     let danger = table.resolve("danger-full-access").expect("known");
@@ -113,7 +107,7 @@ fn the_default_table_is_the_typescript_table() {
     );
 }
 
-// permission-presets.spec: "optionOf() presents shipped labels/descriptions,
+// "optionOf() presents shipped labels/descriptions,
 // falls back to the raw key, and fixes custom".
 #[test]
 fn options_present_labels_and_custom() {
@@ -152,7 +146,7 @@ fn options_present_labels_and_custom() {
     assert!(table.option_of("plan").is_err());
 }
 
-// permission-presets.spec: "rejects a table entry named custom" and
+// "rejects a table entry named custom" and
 // "reserves auto for an integration contribution".
 #[test]
 fn reserved_names_are_refused() {
@@ -169,7 +163,7 @@ fn reserved_names_are_refused() {
     assert!(PresetTable::from_settings(Some(&settings)).is_err());
 }
 
-// Bake: the table under `settings.json` `permission.presets`, in file
+// The table under `settings.json` `permission.presets`, in file
 // order, and malformed tables refused.
 #[test]
 fn the_table_reads_from_settings() {
@@ -228,7 +222,7 @@ fn the_table_reads_from_settings() {
     assert!(settings_default_preset(Some(&json!({ "defaultPreset": 1 }))).is_err());
 }
 
-// permission-presets.spec: "current() derives from the effective knobs" and
+// "current() derives from the effective knobs" and
 // "a knob state matching no table entry derives custom".
 #[test]
 fn derive_follows_the_effective_knobs() {
@@ -256,7 +250,7 @@ fn derive_follows_the_effective_knobs() {
     assert_eq!(table.derive(&KnobState::default(), never), CUSTOM_PRESET);
 }
 
-// permission-presets.spec: "the fold breaks bundle ties; a stale fold no
+// "the fold breaks bundle ties; a stale fold no
 // longer matching falls back to table order".
 #[test]
 fn a_matching_selection_breaks_ties() {
@@ -274,7 +268,7 @@ fn a_matching_selection_breaks_ties() {
     assert_eq!(current(&session, &table), "danger-full-access");
 }
 
-// permission-presets.spec: "requires an explicit default when composition
+// "requires an explicit default when composition
 // defaults match no preset"; Bake: the default is checked against the table.
 #[test]
 fn the_default_preset_resolves_against_the_table() {
@@ -291,8 +285,8 @@ fn the_default_preset_resolves_against_the_table() {
         sandbox: WW,
         approval: NEVER,
     };
-    // Bake: composition defaults that match no preset fall back to the
-    // 0.4.5 default, where the TypeScript constructor refused them.
+    // Composition defaults that match no preset fall back to the
+    // 0.4.5 default.
     assert_eq!(
         table.default_preset(None, never),
         Ok("workspace-write".into())
@@ -300,7 +294,7 @@ fn the_default_preset_resolves_against_the_table() {
     assert!(table.default_preset(Some("yolo"), defaults()).is_err());
 }
 
-// permission-presets.spec: "set() writes through: one preset event plus
+// "set() writes through: one preset event plus
 // both knob events" (one entry here) and "set() to the current preset is a
 // no-op when the knobs already match".
 #[test]
@@ -322,7 +316,7 @@ fn set_writes_only_what_changes() {
     assert_eq!(permission_entries(&session).len(), 1);
 }
 
-// permission-presets.spec: "re-asserting a preset from a drifted (custom)
+// "re-asserting a preset from a drifted (custom)
 // state re-records the choice and repairs the knob".
 #[test]
 fn reasserting_from_a_drifted_state_repairs_the_knob() {
@@ -338,8 +332,8 @@ fn reasserting_from_a_drifted_state_repairs_the_knob() {
     );
 }
 
-// sandbox-policy.spec: "setSandboxMode appends exactly one sandbox/mode
-// event per switch"; user-approval.spec: "folds to the last event".
+// "setSandboxMode appends exactly one sandbox/mode
+// event per switch"; "folds to the last event".
 #[test]
 fn knob_switches_append_one_entry_each() {
     let mut session = session();
@@ -358,8 +352,8 @@ fn knob_switches_append_one_entry_each() {
     assert_eq!((knobs.sandbox, knobs.approval), (Some(DFA), Some(ASK)));
 }
 
-// permission-presets.spec: "folds the latest preset selection and steps over
-// unrelated events"; user-approval.spec "folds to the last event".
+// "folds the latest preset selection and steps over
+// unrelated events"; "folds to the last event".
 #[test]
 fn the_fold_steps_over_other_entries() {
     let mut session = session();
@@ -374,7 +368,7 @@ fn the_fold_steps_over_other_entries() {
     assert_eq!(knobs.sandbox, None);
 }
 
-// user-approval invariant.spec: "approval/policy carries unknown policy";
+// "approval/policy carries unknown policy";
 // sandbox-policy rejects an unknown mode. A damaged entry fails closed
 // instead of reading as the default.
 #[test]
@@ -396,7 +390,7 @@ fn damaged_entries_are_errors() {
     assert!(permission_state(&missing).is_err());
 }
 
-// permission-presets.spec (new-session default): "pins the current setting
+// "pins the current setting
 // into each new session without changing earlier sessions".
 #[test]
 fn a_new_session_pins_the_default_and_keeps_it() {
@@ -420,7 +414,7 @@ fn a_new_session_pins_the_default_and_keeps_it() {
     assert_eq!(current(&again, &table), "danger-full-access");
 }
 
-// permission-presets.spec: "preserves a seeded legacy session instead of
+// "preserves a seeded legacy session instead of
 // applying the latest user default" and "preserves existing knob overrides".
 #[test]
 fn a_resumed_session_keeps_its_composition_defaults() {
@@ -446,7 +440,7 @@ fn a_resumed_session_keeps_its_composition_defaults() {
     assert_eq!(current(&custom, &table), CUSTOM_PRESET);
 }
 
-// permission-presets.spec: "fills only missing legacy facts and preserves an
+// "fills only missing legacy facts and preserves an
 // unmatched seeded combination" and "materializes ask when a legacy seed
 // omits the policy".
 #[test]
@@ -462,8 +456,8 @@ fn a_resumed_session_gains_only_missing_facts() {
     );
 }
 
-// Bake: `--permission`, `--sandbox`, and `--approval` at startup, the
-// full-access default, the imported default, and a stale imported name.
+// `--permission`, `--sandbox`, and `--approval` at startup, and the
+// full-access default.
 #[test]
 fn startup_settles_the_permission() {
     let mut plain = session();
@@ -479,53 +473,6 @@ fn startup_settles_the_permission() {
             json!({ "preset": "danger-full-access", "sandbox": "danger-full-access", "approval": "never" })
         ]
     );
-    // A 0.3 home's saved preset still comes before the default.
-    let mut fresh = session();
-    let settled = prepare_session_permission(
-        &mut fresh,
-        &PermissionInputs {
-            imported_default_preset: Some("workspace-write"),
-            ..PermissionInputs::default()
-        },
-    )
-    .expect("settled");
-    assert_eq!(
-        (settled.sandbox, settled.approval, settled.preset.as_str()),
-        (WW, ASK, "workspace-write")
-    );
-    assert!(settled.warnings.is_empty());
-
-    // settings.json wins over the import.
-    let mut configured = session();
-    let settings = json!({ "defaultPreset": "workspace-write" });
-    let settled = prepare_session_permission(
-        &mut configured,
-        &PermissionInputs {
-            settings: Some(&settings),
-            imported_default_preset: Some("danger-full-access"),
-            ..PermissionInputs::default()
-        },
-    )
-    .expect("settled");
-    assert_eq!(settled.preset, "workspace-write");
-
-    let mut stale = session();
-    let settled = prepare_session_permission(
-        &mut stale,
-        &PermissionInputs {
-            imported_default_preset: Some("read-only"),
-            ..PermissionInputs::default()
-        },
-    )
-    .expect("settled");
-    assert_eq!(settled.preset, "danger-full-access");
-    assert_eq!(
-        settled.warnings,
-        [
-            "Ignoring the imported default permission preset \"read-only\": it names no preset (available: workspace-write, danger-full-access)"
-        ]
-    );
-
     // `--permission` pins a new session once; on a resumed one it switches.
     let mut flagged = session();
     prepare_session_permission(
@@ -572,37 +519,10 @@ fn startup_settles_the_permission() {
     assert!(permission_entries(&unknown).is_empty());
 }
 
-// Bake (D25): `permission.defaultPreset` from the 0.3 `settings.yaml`.
-#[test]
-fn the_default_preset_imports_from_the_old_home() {
-    let home = crate::test_support::TempDir::new("permission-import");
-    assert_eq!(import::import_default_preset(home.path()), Ok(None));
-    let settings = "agent-default-model:\n  provider: x\n  model: y\npermission:\n  defaultPreset: danger-full-access\n";
-    crate::test_support::write(&home.join("settings.yaml"), settings);
-    assert_eq!(
-        import::import_default_preset(home.path()),
-        Ok(Some("danger-full-access".into()))
-    );
-    // Read-only: the file is unchanged.
-    assert_eq!(
-        std::fs::read_to_string(home.join("settings.yaml")).expect("read"),
-        settings
-    );
-    crate::test_support::write(&home.join("settings.yaml"), "permission: []\n");
-    assert!(import::import_default_preset(home.path()).is_err());
-    crate::test_support::write(
-        &home.join("settings.yaml"),
-        "permission:\n  defaultPreset: 3\n",
-    );
-    assert!(import::import_default_preset(home.path()).is_err());
-    crate::test_support::write(&home.join("settings.yaml"), "other: 1\n");
-    assert_eq!(import::import_default_preset(home.path()), Ok(None));
-}
-
-// sandbox-policy.spec: "renders the exact %s policy without a capability
+// "renders the exact %s policy without a capability
 // inventory", with the root spelled as the session recorded it.
 #[test]
-fn the_policy_sentences_are_the_typescript_ones() {
+fn the_policy_sentences_are_exact() {
     let root = "/projects/../projects/current";
     let sentence = |mode| sandbox_policy_sentence(&SandboxPolicy::new(mode, root));
     assert_eq!(
@@ -621,9 +541,9 @@ fn the_policy_sentences_are_the_typescript_ones() {
         sandbox_policy_sentence(&SandboxPolicy::new(WW, "C:\\work \"q\"")),
         "File sandbox: workspace-write. Sandboxed tools can modify files under \"C:\\\\work \\\"q\\\"\", and possibly in some temporary directories."
     );
-    // user-approval.spec: "contributes the complete current ask or never
-    // policy as cache-safe context". The never sentence drops TypeScript's
-    // clause about `sandbox_permissions`, which no tool advertises then.
+    // "contributes the complete current ask or never
+    // policy as cache-safe context". The never sentence does not mention
+    // `sandbox_permissions`, which no tool advertises then.
     assert_eq!(
         permissions_section_text(&SandboxPolicy::new(DFA, root), NEVER),
         "File sandbox: danger-full-access. File changes are not restricted.\n\nApproval prompts: disabled. Actions that need approval are rejected automatically."
@@ -682,7 +602,7 @@ fn only_reachable_escalations_are_offered() {
     assert_eq!(permission.stated_approval(false), NEVER);
 }
 
-// user-approval.spec: "rejects a policy outside the closed vocabulary".
+// "rejects a policy outside the closed vocabulary".
 #[test]
 fn approval_policies_parse_strictly() {
     assert_eq!("ask".parse::<ApprovalPolicy>(), Ok(ASK));
@@ -695,7 +615,7 @@ fn approval_policies_parse_strictly() {
     );
 }
 
-// sandbox-policy.spec: "resolves each session mode and cwd together".
+// "resolves each session mode and cwd together".
 #[test]
 fn the_standing_policy_carries_root_and_session() {
     let standing = StandingPermissions::new(
@@ -813,7 +733,7 @@ fn request() -> ApprovalRequest {
     }
 }
 
-// user-approval.spec: "fails closed to unavailable when nobody listens", "a
+// "fails closed to unavailable when nobody listens", "a
 // never config rejects deterministically without consulting any answerer",
 // "a session override outranks the configured default", and "resolves the
 // answer when the signal never aborts".
@@ -850,7 +770,7 @@ async fn the_policy_decides_before_the_answerer() {
     assert_eq!(asked.load(Ordering::SeqCst), 1);
 }
 
-// user-approval.spec: "settles cancelled immediately on an already-aborted
+// "settles cancelled immediately on an already-aborted
 // signal without asking anyone" and "resolves cancelled when the signal
 // aborts mid-question and discards the late answer".
 #[tokio::test]
@@ -891,7 +811,7 @@ async fn cancellation_withdraws_the_question() {
     assert_eq!(dropped.load(Ordering::SeqCst), 1);
 }
 
-// user-approval.spec: "contains a throwing answerer as unavailable".
+// "contains a throwing answerer as unavailable".
 #[tokio::test]
 async fn a_panicking_answerer_fails_closed() {
     for answerer in [
@@ -951,8 +871,8 @@ async fn resolve(
 const BASH: BlankJustification = BlankJustification::IgnoredAlone;
 const FS: BlankJustification = BlankJustification::Checked;
 
-// tool-bash.spec: "runs without escalation for justification %j" and
-// "runs a repeated %s request without a reason or approval"; tool-fs.spec:
+// "runs without escalation for justification %j" and
+// "runs a repeated %s request without a reason or approval";
 // "a plain write stamps the default mode with the calling session root" and
 // "ignores a request that does not widen the standing mode".
 #[tokio::test]
@@ -1010,8 +930,8 @@ async fn escalation_without_a_policy_names_the_missing_sandbox() {
     );
 }
 
-// tool-bash.spec: "advertises the sandbox fields and validates their
-// pairing", "rejects an explicit mode with blank justification"; tool-fs.spec:
+// "advertises the sandbox fields and validates their
+// pairing", "rejects an explicit mode with blank justification";
 // "rejects the escalation argument pairing".
 #[tokio::test]
 async fn bad_pairings_are_refused_before_asking() {
@@ -1059,7 +979,7 @@ async fn bad_pairings_are_refused_before_asking() {
     assert_eq!(asked.load(Ordering::SeqCst), 0);
 }
 
-// tool-bash.spec: "rejects injected escalation ... not strictly wider".
+// "rejects injected escalation ... not strictly wider".
 #[tokio::test]
 async fn an_unknown_target_is_not_wider() {
     let (engine, asked) = engine(WW, EscalationOutcome::AllowedOnce);
@@ -1070,10 +990,10 @@ async fn an_unknown_target_is_not_wider() {
     assert_eq!(asked.load(Ordering::SeqCst), 0);
 }
 
-// tool-bash.spec: "runs a granted foreground ... call under the approved
+// "runs a granted foreground ... call under the approved
 // mode" and "uses the session override for ordinary calls and evaluates
-// widening against it"; sandbox-policy.spec: "lets an approved mode outrank
-// the session mode while retaining its root"; tool-fs.spec: "an approved
+// widening against it"; "lets an approved mode outrank
+// the session mode while retaining its root"; "an approved
 // escalation stamps the granted mode onto that write".
 #[tokio::test]
 async fn an_approved_widening_applies_to_that_call_only() {
@@ -1098,8 +1018,8 @@ async fn an_approved_widening_applies_to_that_call_only() {
     );
 }
 
-// tool-bash.spec: "maps an approval %s to its distinct failure" and "fails
-// closed when approval cannot be routed"; tool-fs.spec: "a rejected
+// "maps an approval %s to its distinct failure" and "fails
+// closed when approval cannot be routed"; "a rejected
 // escalation fails closed with its own text".
 #[tokio::test]
 async fn each_refused_outcome_has_its_text() {
@@ -1153,7 +1073,7 @@ async fn each_refused_outcome_has_its_text() {
     );
 }
 
-// Bake: an approval withdrawn by the call's abort is `cancelled`.
+// An approval withdrawn by the call's abort is `cancelled`.
 #[tokio::test]
 async fn an_aborted_call_cancels_its_approval() {
     let entered = Arc::new(Notify::new());
@@ -1232,7 +1152,7 @@ impl PolicyLayer for Narrow {
     }
 }
 
-// Bake: layers run in order; a refusal stops the rest; a later layer sees
+// Layers run in order; a refusal stops the rest; a later layer sees
 // the earlier policy; and an engine whose layers set no policy refuses.
 #[tokio::test]
 async fn layers_compose_in_order() {
@@ -1273,7 +1193,7 @@ async fn layers_compose_in_order() {
 
 // ---- Bake: full access by default, session grants, and deny notes ----
 
-// Bake: new sessions default to Pi's full access. A configured name wins; a
+// New sessions default to Pi's full access. A configured name wins; a
 // table without a full-access preset falls back to the 0.4.5 default of
 // `workspace-write` with `ask`, then to its first preset; an empty table has
 // no default.
@@ -1286,8 +1206,8 @@ fn new_sessions_default_to_full_access_as_in_pi() {
     );
     assert_eq!(
         (
-            KnobDefaults::TYPESCRIPT.sandbox,
-            KnobDefaults::TYPESCRIPT.approval
+            KnobDefaults::WORKSPACE_ASK.sandbox,
+            KnobDefaults::WORKSPACE_ASK.approval
         ),
         (WW, ASK)
     );
@@ -1471,7 +1391,7 @@ async fn a_session_grant_answers_its_tool_and_mode_under_ask_only() {
     assert_eq!(asked.load(Ordering::SeqCst), 2);
 }
 
-// Bake: a grant for one mode does not decide a request for another.
+// A grant for one mode does not decide a request for another.
 #[tokio::test]
 async fn a_grant_for_one_mode_does_not_cover_another() {
     let (engine, standing, asked) = answering(EscalationOutcome::AllowedSession, None, true);
@@ -1490,7 +1410,7 @@ async fn a_grant_for_one_mode_does_not_cover_another() {
     assert_eq!(asked.load(Ordering::SeqCst), 2);
 }
 
-// Bake: the full-access answer runs the call and switches the session to
+// The full-access answer runs the call and switches the session to
 // the table's full-access preset; where the table has none it is not
 // offered, and such an answer fails closed as `unavailable`.
 #[tokio::test]
@@ -1516,7 +1436,7 @@ async fn a_full_access_answer_switches_only_where_offered() {
     assert_eq!((standing.sandbox(), standing.approval()), (WW, ASK));
 }
 
-// Bake: a rejection's note follows the refusal the model reads; a note with
+// A rejection's note follows the refusal the model reads; a note with
 // any other answer is dropped.
 #[tokio::test]
 async fn a_rejections_note_follows_its_refusal() {
@@ -1553,7 +1473,7 @@ fn a_note_is_trimmed_cleaned_and_bounded() {
     );
 }
 
-// Bake: an answer the request did not offer fails closed as `unavailable`,
+// An answer the request did not offer fails closed as `unavailable`,
 // so no answerer can grant more than the prompt showed.
 #[tokio::test]
 async fn the_policy_gate_maps_an_answer_not_offered_to_unavailable() {

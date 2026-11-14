@@ -393,7 +393,7 @@ async fn stop_process(context: &ServerContext, process: &StdioProcess) {
     }
 }
 
-/// D24 admission: the command the server runs, or why it may not run. A
+/// permission admission: the command the server runs, or why it may not run. A
 /// stdio server runs under the session's standing sandbox mode, wrapped by
 /// the provider, and is refused when the mode confines and no backend can
 /// enforce it.

@@ -1,6 +1,5 @@
 //! Native plugins: the ordered tool-call veto of the proposed native plugin
-//! design under D6 (`docs/roadmap/rust-0.4/native-plugins.md`, in review),
-//! for trusted plugins compiled into `bake` and for third-party Wasm
+//! design, for trusted plugins compiled into `bake` and for third-party Wasm
 //! plugins ([`wasm`]) that the Bake home installs and enables
 //! ([`installed`]). The other contributions, plugin tools, model-visible
 //! management tools, and restart policy are not here.
@@ -23,7 +22,7 @@
 //! - A plugin sees the call's arguments read-only: there is no allow and no
 //!   argument rewrite (Pi's handlers may mutate `event.input`), so the
 //!   persisted assistant `toolCall` is what runs. A plugin can only add a
-//!   denial; the D24 permission checks inside the tool still decide whatever
+//!   denial; the permission checks inside the tool still decide whatever
 //!   it lets through.
 //! - A plugin that returns an error, panics, misses its deadline, or
 //!   returns an oversized reason is failed: that call is blocked, and every

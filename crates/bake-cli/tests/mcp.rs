@@ -4,8 +4,8 @@
 //! MCP servers. A configured server's tools are declared, called, and
 //! logged; `--no-mcp` and a missing file start nothing; refused entries and
 //! files are reported, terminal-safe and without their values, while valid
-//! entries still start; the scrub and an entry's explicit `env`; D24
-//! admission under the session's sandbox; and no server process outlives a
+//! entries still start; the scrub and an entry's explicit `env`;
+//! permission admission under the session's sandbox; and no server process outlives a
 //! normal exit, a setup that fails after the servers started, or a stop
 //! request during setup. Cases that start a server run on Unix: elsewhere
 //! an existing `mcp.json` is refused unread until its owner can be checked,
@@ -334,7 +334,6 @@ impl Case {
             .args(args)
             .current_dir(self.project())
             .env("BAKE_HOME", self.home())
-            .env_remove("DSH_HOME")
             .env_remove("CLIPROXYAPI_API_KEY")
             .env("HOME", self.root.join("user"))
             .env("USERPROFILE", self.root.join("user"))
@@ -1198,7 +1197,7 @@ fn refused_entries_are_reported_and_valid_servers_start(case: &Arc<Case>) {
     assert_eq!(declared(&model.requests()[1]), BUILTIN);
 }
 
-// D24: a server starts under the session's sandbox mode. Where a backend
+// A server starts under the session's sandbox mode. Where a backend
 // enforces `workspace-write`, the server cannot write outside the project
 // and the temporary directories; on a local host without one, it is
 // refused before anything runs and the model gets none of its tools (CI

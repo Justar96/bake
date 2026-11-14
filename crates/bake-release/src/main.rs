@@ -4,16 +4,21 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::SystemTime;
 
+use bake_release::runner::System;
 use bake_release::util::{Result, repository_root};
 use bake_release::{
-    assemble, glibc, http, licenses, live, manifest, pack, preflight, rehearse, workspace,
+    assemble, glibc, http, licenses, live, manifest, pack, preflight, prepare, publish, rehearse,
+    workspace,
 };
 
 const USAGE: &str = "\
 bake-release <command>
 
-  preflight [--tag v<version>] [--notes <file>] [--offline] [--retry] [--dry-run]
-      check that the workspace is ready to release the tag; write its notes
+  prepare <version> [--date YYYY-MM-DD] [--dry-run]
+      on develop: set the version, refresh both lockfiles, date the
+      changelog's Unreleased entries, and run the preflight; commits nothing
+  preflight [--tag v<version>] [--offline]
+      check that the workspace is ready to release the tag
   licenses [--out <dir>]
       generate the third-party license bundle (needs cargo-about 0.9.2)
   pack [--binary <path>] [--out <dir>]
@@ -26,8 +31,13 @@ bake-release <command>
       stage the archives under distribution/host/public and sign the manifest
   verify-live <version> [--complete]
       check what the download service serves, as a client does
+  publish <version> [--key-file <pem>] [--offline] [--dry-run] [--from <step>]
+      with every archive packed: tag, gh-release, assemble, upload, verify,
+      deploy, verify-live; each step skips what is already done
 
-The host is BAKE_RELEASE_BASE_URL, or https://bake.justar.dev.";
+The host is BAKE_RELEASE_BASE_URL, or https://bake.justar.dev. The signing
+key is --key-file, BAKE_NATIVE_RELEASE_SIGNING_KEY_FILE, or
+~/.config/bake/native-release-signing-key.pem for publish.";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -70,6 +80,20 @@ fn positional(args: &[String], takes_value: &[&str]) -> Option<String> {
     None
 }
 
+/// The signing key `--key-file` or BAKE_NATIVE_RELEASE_SIGNING_KEY_FILE names.
+fn key_file(args: &[String]) -> Option<PathBuf> {
+    value(args, "--key-file")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("BAKE_NATIVE_RELEASE_SIGNING_KEY_FILE").map(PathBuf::from))
+}
+
+/// Where the release owner keeps the signing key.
+fn default_key_file() -> Result<PathBuf> {
+    std::env::var_os("HOME")
+        .map(|home| PathBuf::from(home).join(".config/bake/native-release-signing-key.pem"))
+        .ok_or_else(|| "HOME is not set; name the signing key with --key-file".to_owned())
+}
+
 /// The live channel's version, checked with the committed key.
 fn live_version(root: &Path) -> Result<Option<String>> {
     let keys = vec![manifest::committed_key(root)?];
@@ -88,47 +112,46 @@ fn live_version(root: &Path) -> Result<Option<String>> {
 fn run(args: &[String]) -> Result<ExitCode> {
     let root = repository_root();
     match args.first().map(String::as_str) {
+        Some("prepare") => {
+            let version = positional(args, &["--date"]).ok_or(USAGE)?;
+            let date = value(args, "--date").map_or_else(
+                || manifest::published_at(SystemTime::now())[..10].to_owned(),
+                str::to_owned,
+            );
+            let options = prepare::Options {
+                root,
+                version,
+                date,
+                dry_run: flag(args, "--dry-run"),
+            };
+            prepare::prepare(&options, &mut System)?;
+            Ok(ExitCode::SUCCESS)
+        }
         Some("preflight") => {
-            let dry_run = flag(args, "--dry-run");
-            let live = if dry_run || flag(args, "--offline") {
+            let live = if flag(args, "--offline") {
                 None
             } else {
                 live_version(&root)?
             };
-            let tag = if dry_run { None } else { value(args, "--tag") };
-            let ready = preflight::preflight(&root, tag, live.as_deref(), flag(args, "--retry"));
-            let (version, notes) = match ready {
-                Ok(ready) => {
-                    println!("Bake {} is ready to release", ready.version);
-                    (ready.version, ready.notes)
-                }
-                Err(problems) if dry_run => {
-                    let version = workspace::version(&root)?;
-                    println!(
-                        "A dry run builds Bake {version}; a release tag would be refused:\n{problems}"
-                    );
-                    let notes = workspace::changelog_section(
-                        &bake_release::util::read_text(&root.join("CHANGELOG.md"))?,
-                        &version,
-                    )
-                    .unwrap_or_default();
-                    (version, notes)
-                }
-                Err(problems) => return Err(problems),
+            let version = preflight::preflight(&root, value(args, "--tag"), live.as_deref())?;
+            println!("Bake {version} is ready to release");
+            Ok(ExitCode::SUCCESS)
+        }
+        Some("publish") => {
+            let version = positional(args, &["--key-file", "--from"]).ok_or(USAGE)?;
+            let from = value(args, "--from").map_or(Ok(0), publish::step_index)?;
+            let options = publish::Options {
+                root,
+                version,
+                key_file: key_file(args).map_or_else(default_key_file, Ok)?,
+                offline: flag(args, "--offline"),
+                dry_run: flag(args, "--dry-run"),
+                from,
+                exe: std::env::current_exe()
+                    .map_err(|error| format!("Could not name this executable: {error}"))?,
+                base: http::base_url(),
             };
-            if let Some(file) = value(args, "--notes") {
-                std::fs::write(file, format!("{notes}\n"))
-                    .map_err(|error| format!("{file}: {error}"))?;
-            }
-            if let Ok(output) = std::env::var("GITHUB_OUTPUT") {
-                use std::io::Write as _;
-                let mut file = std::fs::OpenOptions::new()
-                    .append(true)
-                    .create(true)
-                    .open(&output)
-                    .map_err(|error| format!("{output}: {error}"))?;
-                writeln!(file, "version={version}").map_err(|error| error.to_string())?;
-            }
+            publish::publish(&options, &mut System)?;
             Ok(ExitCode::SUCCESS)
         }
         Some("licenses") => {
@@ -193,13 +216,10 @@ fn run(args: &[String]) -> Result<ExitCode> {
         Some("assemble") => {
             let version = positional(args, &["--key-file"]).ok_or(USAGE)?;
             let source = assemble::source_dir(&root, &version);
-            let key_file = value(args, "--key-file").map(PathBuf::from).or_else(|| {
-                std::env::var_os("BAKE_NATIVE_RELEASE_SIGNING_KEY_FILE").map(PathBuf::from)
-            });
             let key = assemble::signing_key(
                 &root,
                 flag(args, "--ephemeral-key"),
-                key_file.as_deref(),
+                key_file(args).as_deref(),
                 &source,
             )?;
             let live = if flag(args, "--offline") {
@@ -228,7 +248,7 @@ fn run(args: &[String]) -> Result<ExitCode> {
             let base = http::base_url();
             let manifest = live::verify_live(&root, &base, &version, flag(args, "--complete"))?;
             println!(
-                "Verified live Bake {} at {base}: {}, with the 0.3 route intact",
+                "Verified live Bake {} at {base}: {}",
                 manifest.version,
                 manifest
                     .artifacts

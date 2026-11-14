@@ -1,4 +1,4 @@
-//! Keeps the Linux executable within its glibc floor, GLIBC_2.34 (D50).
+//! Keeps the Linux executable within its glibc floor, GLIBC_2.34.
 //!
 //! glibc 2.35 gave `hypotf` a new symbol version, and glibc 2.43 gave
 //! `acosf` and `atan2f` theirs. A build linked on a newer host binds those

@@ -1,6 +1,6 @@
 //! The Windows AppContainer runner: an **unqualified prototype** of the
-//! confinement D24 selects for Windows since its 2026-10-17 amendment
-//! (AppContainer with explicit read and network grants). No default chain
+//! confinement Bake selected for Windows on 2026-10-17 (AppContainer with
+//! explicit read and network grants). No default chain
 //! selects it; [`LocalProvider::with_chain`](super::LocalProvider::with_chain)
 //! reaches it for native tests, and it reports
 //! [`Enforcement::Partial`](crate::Enforcement::Partial) until a native
@@ -9,8 +9,7 @@
 //! Pi has no sandbox; nothing here comes from Pi. The runner reuses the
 //! retained restricted-token runner's seams ([`super::windows_acl`]: the
 //! command-line quoting, the per-path DACL lock and merge, the kill-on-close
-//! Job given at creation, and the drain before cleanup), which port Bake's
-//! TypeScript `packages/sandbox/sandbox-windows-acl`. The AppContainer
+//! Job given at creation, and the drain before cleanup). The AppContainer
 //! launch follows Microsoft's "Launch an AppContainer" sequence and the
 //! mechanism probe in `tests/enforcement/windows_mechanisms.rs`.
 //!

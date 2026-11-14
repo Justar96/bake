@@ -25,10 +25,6 @@
 //! without the license file their repository keeps, `licenses/upstream.toml`
 //! names a reviewed copy vendored under `licenses/`, used only where
 //! cargo-about found none and every pin matches.
-//!
-//! Ported from Bake's `scripts/release/native-licenses.ts` (revision
-//! 97ce6abba0), which generated the 0.4.0 bundle; the rules and the output
-//! format are its own.
 
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};

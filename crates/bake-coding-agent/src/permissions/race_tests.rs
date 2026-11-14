@@ -1,8 +1,7 @@
 //! The swap race between the containment check and the write, made
 //! deterministic by the test seam in [`super::fs::seam`]: a hook swaps a
 //! link in after the guard has checked the target and before the call
-//! touches it. Not a TypeScript case: `fs-sandbox/src/index.ts` accepted
-//! this race; Bake's write closes it ([`super::beneath`]).
+//! touches it. Bake's write closes it ([`super::beneath`]).
 //!
 //! Each case runs twice on Linux, through `openat2` and through the
 //! per-component walk that stands in where the kernel lacks it. The

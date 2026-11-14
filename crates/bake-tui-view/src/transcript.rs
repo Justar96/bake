@@ -54,7 +54,7 @@ use crate::visual::{self, Visual};
 /// Column a user's words, reasoning, answers, and call marks start at.
 pub const RAIL: usize = 2;
 /// Output lines a call's preview draws, first and last, around a count of
-/// the rest; the TypeScript `resultLines` default.
+/// the rest.
 pub const RESULT_LINES: usize = 4;
 /// Rows one output line of a call's preview wraps to before it is cut with
 /// `…`, so one long line, such as minified JSON, never fills the screen.
@@ -912,8 +912,8 @@ impl Default for Look {
     }
 }
 
-/// How long a running call's mark is shown, and then as long hidden; the
-/// TypeScript `PULSE_MS`, four of its 150 ms beats.
+/// How long a running call's mark is shown, and then as long hidden: four
+/// 150 ms beats.
 pub const PULSE: Duration = Duration::from_millis(600);
 
 /// Whether a running call's mark is shown at `now`. Every running mark blinks

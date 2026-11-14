@@ -450,14 +450,14 @@ mod tests {
             &Outcome::Updated {
                 from: Some("0.4.0".to_owned()),
                 to: "0.4.1".to_owned(),
-                pruned: vec!["0.3.9".to_owned()],
+                pruned: vec!["0.4.0-rc.1".to_owned()],
             },
         );
         assert!(
             text.contains("Bake 0.4.1 is installed and current"),
             "{text}"
         );
-        assert!(text.contains("Removed Bake 0.3.9."), "{text}");
+        assert!(text.contains("Removed Bake 0.4.0-rc.1."), "{text}");
         assert_eq!(code, ExitCode::SUCCESS);
         let (text, _) = message(
             &Request::Rollback,
