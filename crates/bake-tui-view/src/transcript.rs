@@ -686,9 +686,11 @@ pub fn edge_colour(state: CallState, tones: Tones) -> Option<Color> {
 /// scrollbar: a short call's box ends near its text. Its first row rides in
 /// the top edge after `╭─`, so the state mark sits at column 3; every other
 /// row moves one cell right too, behind `│`, which keeps the output under
-/// the tool's name and a wrapped argument under its first row. A row's
-/// trailing blanks without a background do not widen the box; a coloured
-/// row, such as a diff's, counts whole. A call of one row, such as a read,
+/// the tool's name and a wrapped argument under its first row. The rows'
+/// text keeps as many cells before the right edge as it has after the left
+/// one. A row's trailing blanks without a background do not widen the box;
+/// a coloured row, such as a diff's, counts whole and keeps its colour to
+/// the edge. A call of one row, such as a read,
 /// stays one row, unboxed, so a run of them reads as a list; it moves one
 /// cell right as well, so every call's mark is at column 3.
 fn frame(lines: &mut Vec<Line<'static>>, width: usize, edge: Color) {
@@ -720,12 +722,22 @@ fn frame(lines: &mut Vec<Line<'static>>, width: usize, edge: Color) {
         rows.push(row);
     }
     let used = |row: &Vec<Span<'static>>| -> usize { row.iter().map(Span::width).sum() };
-    // The head needs a space, one `─`, and `╮` after it; a row a space and
+    // The rows' text keeps as much room before the right edge as the output
+    // has after the left one; a wrapped argument's deeper indent does not
+    // count.
+    let gap = rows
+        .iter()
+        .skip(1)
+        .filter_map(|row| lead(&row[1..]))
+        .min()
+        .unwrap_or(BODY)
+        .clamp(1, BODY);
+    // The head needs a space, one `─`, and `╮` after it; a row its gap and
     // `│`.
     let needed = rows
         .iter()
         .enumerate()
-        .map(|(index, row)| used(row) + if index == 0 { 3 } else { 2 })
+        .map(|(index, row)| used(row) + if index == 0 { 3 } else { gap + 1 })
         .max()
         .unwrap_or(0);
     let right = needed.min(width - 1);
@@ -736,7 +748,14 @@ fn frame(lines: &mut Vec<Line<'static>>, width: usize, edge: Color) {
             row.push(pad(1));
             row.push(Span::styled(format!("{}╮", "─".repeat(fill)), edge));
         } else {
-            row.push(pad(right.saturating_sub(taken + 1)));
+            // A coloured row, such as a diff's, keeps its colour to the edge.
+            let rest = right.saturating_sub(taken + 1);
+            match row.last().map(|span| span.style) {
+                Some(style) if style.bg.is_some_and(|bg| bg != Color::Reset) => {
+                    row.push(Span::styled(" ".repeat(rest), style));
+                }
+                _ => row.push(pad(rest)),
+            }
             row.push(Span::styled("│", edge));
         }
         line.spans = row;
@@ -745,6 +764,23 @@ fn frame(lines: &mut Vec<Line<'static>>, width: usize, edge: Color) {
         format!("╰{}╯", "─".repeat(right.saturating_sub(2))),
         edge,
     )));
+}
+
+/// The blank cells without a background that open `spans`, or `None` for a
+/// row with nothing else.
+fn lead(spans: &[Span<'static>]) -> Option<usize> {
+    let mut cells = 0;
+    for span in spans {
+        if span.style.bg.is_some_and(|bg| bg != Color::Reset) {
+            return Some(cells);
+        }
+        let blank = span.content.len() - span.content.trim_start_matches(' ').len();
+        cells += blank;
+        if blank < span.content.len() {
+            return Some(cells);
+        }
+    }
+    None
 }
 
 /// Removes the blank cells that end `spans` where no background shows.
@@ -918,9 +954,10 @@ pub const TOOL_WIDTH: usize = 6;
 /// gutter.
 pub const BODY: usize = 4;
 /// Cells a call's box takes beyond its text: the edges, the cell the first
-/// row moves right, a cell of clearance before the right edge, and the cell
-/// kept clear of the scrollbar.
-pub const BOX_PAD: usize = 5;
+/// row moves right, the cell kept clear of the scrollbar, and [`BODY`]
+/// cells of clearance before the right edge, as many as the text has
+/// after the left one.
+pub const BOX_PAD: usize = 4 + BODY;
 
 /// `text` wrapped at `width` less `indent`; each row after the first opens
 /// with `rest`, the first with `first`.
@@ -3914,25 +3951,27 @@ mod tests {
             ..PLAIN
         };
         let lines = present(&rows, 0, 20, look);
-        // Text wraps short of the box's right edge, which ends a cell after
-        // the widest row and stays a cell clear of the scrollbar.
+        // Text wraps short of the box's right edge, as far from it as from
+        // the left one, and the box stays a cell clear of the scrollbar.
         assert_eq!(
             text(&lines),
             [
                 "╭─ ✓ Bash: x ────╮",
-                "│    0123456789a │",
-                "│    bcdefghij   │",
+                "│    01234567    │",
+                "│    89abcdef    │",
+                "│    ghij        │",
                 "╰────────────────╯"
             ]
         );
         assert!(lines.iter().all(|l| l.width() == 18));
-        // On a wide screen, the box still ends at its content.
+        // On a wide screen, the box still ends at its content, with the
+        // same gap.
         assert_eq!(
             text(&present(&rows, 0, 100, look)),
             [
-                "╭─ ✓ Bash: x ─────────────╮",
-                "│    0123456789abcdefghij │",
-                "╰─────────────────────────╯"
+                "╭─ ✓ Bash: x ────────────────╮",
+                "│    0123456789abcdefghij    │",
+                "╰────────────────────────────╯"
             ]
         );
     }
@@ -4003,7 +4042,7 @@ mod tests {
         let lines = present(
             &rows,
             0,
-            27,
+            30,
             Look {
                 tones: Tones::TrueColor,
                 ..PLAIN
@@ -4513,8 +4552,8 @@ mod tests {
                 .trim_end()
                 .to_owned()
         };
-        // 107 columns leave the call 102 cells; each side takes 47.
-        let wide = present(&rows, index, 107, look);
+        // 110 columns leave the call 102 cells; each side takes 47.
+        let wide = present(&rows, index, 110, look);
         let side =
             |left: &str, right: &str| format!("    {left:<47} │ {right}").trim_end().to_owned();
         let shown: Vec<String> = text(&wide)[2..7].iter().map(inside).collect();
@@ -4537,7 +4576,7 @@ mod tests {
         assert!(
             wide[1..]
                 .iter()
-                .all(|l| l.width() == wide[1].width() && l.width() <= 106),
+                .all(|l| l.width() == wide[1].width() && l.width() <= 109),
             "the box closes every row at one edge"
         );
         // The removed side keeps its tint beside the added side's wrap.
@@ -4546,7 +4585,7 @@ mod tests {
         // The wrapped part of the added line is all changed text.
         assert_eq!(cell(&wide[5], 61).bg, Some(Color::Rgb(0x2a, 0x5e, 0x3f)));
         // Narrower, the same edit is unified.
-        let narrow = text(&present(&rows, index, 104, look));
+        let narrow = text(&present(&rows, index, 107, look));
         assert_eq!(
             inside(&narrow[4]),
             "    42 ▎   if (quote) fields.push(rest);"
