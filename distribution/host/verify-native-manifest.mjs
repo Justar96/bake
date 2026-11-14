@@ -2,10 +2,10 @@
 // manifest must be signed by the committed native key and describe the
 // archives the service holds. It mirrors verify-manifest.mjs for the native
 // route, which no 0.3 updater reads, and trusts the native key alone. The
-// grammar names all five platforms so a 0.4.x release can add one; Bake 0.4.0
-// publishes Linux alone (D47), so a manifest naming any other platform is
-// refused whatever the flags, and --complete requires exactly linux-arm64 and
-// linux-x64.
+// grammar names all five platforms so a release can add one; Bake publishes
+// linux-x64 and win32-x64 alone (D47, D52), so a manifest naming any other
+// platform is refused whatever the flags, and --complete requires exactly
+// linux-x64 and win32-x64.
 import { createHash, createPublicKey, verify } from 'node:crypto'
 import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs'
 
@@ -54,7 +54,7 @@ if (typeof manifest.published !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\
   || Number.isNaN(Date.parse(manifest.published))
   || `${new Date(manifest.published).toISOString().slice(0, 19)}Z` !== manifest.published) throw new Error('Invalid native release published time')
 const supported = ['darwin-arm64', 'darwin-x64', 'linux-arm64', 'linux-x64', 'win32-x64']
-const releaseTargets = ['linux-arm64', 'linux-x64']
+const releaseTargets = ['linux-x64', 'win32-x64']
 const complete = process.argv.includes('--complete')
 const artifacts = manifest.artifacts
 if (artifacts === null || typeof artifacts !== 'object' || Array.isArray(artifacts)
@@ -62,7 +62,7 @@ if (artifacts === null || typeof artifacts !== 'object' || Array.isArray(artifac
 const available = Object.keys(artifacts)
 for (const target of available) {
   if (!supported.includes(target)) throw new Error(`Unsupported native release target: ${target}`)
-  if (!releaseTargets.includes(target)) throw new Error(`Bake 0.4.0 releases linux-arm64 and linux-x64 only; native ${target} releases arrive in Bake 0.4.x`)
+  if (!releaseTargets.includes(target)) throw new Error(`Bake releases linux-x64 and win32-x64 only; native ${target} releases are not published`)
 }
 const targets = complete ? releaseTargets : available
 // The service holds no archives; it redirects each to the GitHub release.

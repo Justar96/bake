@@ -1,6 +1,6 @@
 # Bake releases and the download service
 
-Bake is published as native archives on a signed channel that https://bake.justar.dev serves. The [installers](#installers) install from it and `bake update` updates and rolls back through it. Releases are built, signed, and published locally, by the [release steps](#release-steps-by-hand), which are `bake-release` ([`crates/bake-release`](../crates/bake-release/)), a build tool that is never shipped. Every artifact it writes is checked by `bake-update`, the code a user's `bake update` runs. Bake 0.4 publishes `linux-x64` and `linux-arm64`; macOS and Windows follow in 0.4.x ([D47](../docs/roadmap/rust-0.4/scope-00/support.md#decision-register)).
+Bake is published as native archives on a signed channel that https://bake.justar.dev serves. The [installers](#installers) install from it and `bake update` updates and rolls back through it. Releases are built, signed, and published locally, by the [release steps](#release-steps-by-hand), which are `bake-release` ([`crates/bake-release`](../crates/bake-release/)), a build tool that is never shipped. Every artifact it writes is checked by `bake-update`, the code a user's `bake update` runs. From 0.4.7 Bake publishes `linux-x64` and `win32-x64`; 0.4.6 was the last `linux-arm64` release, and macOS follows later ([D47 and D52](../docs/roadmap/rust-0.4/scope-00/support.md#decision-register)).
 
 ## Contents
 
@@ -123,7 +123,7 @@ The install root, `$BAKE_NATIVE_ROOT` (default `~/.local/share/bake-native`), ho
 
 `<bin>/bake` links to `current/bin/bake`, in `$BAKE_BIN_DIR` (default `~/.local/bin`). A Bake-managed 0.3 `bake` is taken over and restorable with `--uninstall-links`. A `bake` no Bake installer made is left alone unless `--replace-command` is given.
 
-Unix needs `curl` or `wget`, `tar`, and `sha256sum` or `shasum`. The signature is verified by an OpenSSL with Ed25519, proven on RFC 8032's vector first. Where no OpenSSL passes, as on a stock Mac, it is verified by the JavaScript verifier `install.sh` embeds, run with `osascript`. Bake 0.4 publishes Linux alone, so the installers stop on macOS and Windows before they download anything.
+Unix needs `curl` or `wget`, `tar`, and `sha256sum` or `shasum`. The signature is verified by an OpenSSL with Ed25519, proven on RFC 8032's vector first. Where no OpenSSL passes, as on a stock Mac, it is verified by the JavaScript verifier `install.sh` embeds, run with `osascript`. `install.sh` stops on macOS and Linux arm64 before it downloads anything.
 
 `bake-release`'s tests run the shipped `install.sh` against a loopback host: it installs a release the trusted key signed and refuses one another key signed. Its `version_newer` is checked against `compare_versions` on every pair of the table. `bake-release rehearse` installs the real archive this way, as the workflow does on both Linux platforms.
 
@@ -174,7 +174,7 @@ git commit -am "release: $NEXT" && git push origin HEAD:develop
 gh pr create --base main --head develop     # merge it with a merge commit
 ```
 
-Run the checks locally on Linux x86_64 and arm64 before the merge. Then, on each Linux platform:
+Run the checks locally on Linux x86_64 before the merge. Then, on Linux x64:
 
 ```sh
 cargo build --release --locked -p bake-cli -p bake-release
@@ -182,6 +182,8 @@ target/release/bake-release pack
 target/release/bake-release glibc-floor target/release/bake
 target/release/bake-release rehearse --archive .artifacts/bake-native-release/<version>/bake-v<version>-<platform>.tar.gz
 ```
+
+On Windows x64, from a clone of the release commit, run `cargo build --release --locked -p bake-cli -p bake-release` and `target\release\bake-release pack` (it needs cargo-about 0.9.2 there too), and copy its archive beside the Linux one. `rehearse` drives only `install.sh`, so check the Windows install with `install.ps1` once the release is live.
 
 With both archives in `.artifacts/bake-native-release/<version>/`, create the version's GitHub release by hand, tagged on `main`'s merge commit, so the archives the service redirects to are public:
 
@@ -200,5 +202,7 @@ node distribution/host/verify-native-manifest.mjs --complete --required
 (cd distribution/host && npm run deploy -- --message "Bake <version>")
 target/release/bake-release verify-live <version> --complete
 ```
+
+A release that rotates the native key, as 0.4.7 did ([D52](../docs/roadmap/rust-0.4/scope-00/support.md#decision-register)), cannot have the live channel checked with the committed key, which did not sign it: confirm by hand that the live `stable.json` names an older version, then pass `--offline` to `preflight` and `assemble`.
 
 Generated paths (`.artifacts/`, `distribution/host/public/`, `site/`, `.wrangler/`) are ignored by Git. A deploy that reports success is not a release until `verify-live` passes.

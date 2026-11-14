@@ -4,25 +4,19 @@
 #
 #   irm https://bake.justar.dev/install.ps1 | iex
 #
-# Bake 0.4.0 publishes Linux releases only, so this script stops at its start,
-# before it reads any setting or downloads anything; native Windows releases
-# arrive in 0.4.x, and the rest of this script is the installer they use.
+# Bake publishes Windows x64 releases from 0.4.7. They run without
+# confinement: the confined sandbox modes are refused on Windows until its
+# sandbox is qualified.
 #
 # See distribution/README.md, "Native installers", for the route, the install
 # layout, the `bake` takeover, and the lock these steps take.
 $ErrorActionPreference = 'Stop'
 
-# BEGIN 0.4.0 PLATFORM REFUSAL
-# Thrown, not `exit`: under `irm | iex` an exit would close the user's shell.
-# The tests run the installer below through a copy without this block.
-throw 'Bake install: Bake 0.4.0 runs on Linux only; Windows support is coming in a later 0.4 release. Until then, use WSL.'
-# END 0.4.0 PLATFORM REFUSAL
-
 # The native release key (distribution/host/native-release-key.pub), base64
 # DER SubjectPublicKeyInfo. A release test holds every copy equal. Tests
 # replace this one line in a private copy of the installer, so the published
 # installer takes no key from its environment.
-$nativeReleaseKey = 'MCowBQYDK2VwAyEAYHdFEaVkRABjXEFzF1WnfoX1MJUcwzgB9oS9kyzF9hY='
+$nativeReleaseKey = 'MCowBQYDK2VwAyEA0uOxgWuZgiLw8suSdS25NRq9J/ZLphquWexGoJf1CJw='
 
 # BEGIN ED25519 VERIFIER
 # Ed25519 verification (RFC 8032 section 5.1.7) in PowerShell, because neither

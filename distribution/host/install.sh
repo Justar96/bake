@@ -1,8 +1,8 @@
 #!/bin/sh
 # The Bake native installer: it installs the Rust agent, `bake`, from the
-# signed native release channel. Bake 0.4.0 publishes Linux x64 and arm64
-# releases only; on macOS an install stops before it downloads anything, since
-# those releases arrive in 0.4.x. POSIX sh only, and the host needs no Node or
+# signed native release channel. Bake publishes Linux x64 releases (and
+# Windows x64, through install.ps1); on macOS and Linux arm64 an install stops
+# before it downloads anything. POSIX sh only, and the host needs no Node or
 # Bun: it needs curl or wget, tar, and sha256sum or shasum. The manifest
 # signature is verified by an OpenSSL with Ed25519 (1.1.1 or newer) where the
 # host has one, and otherwise, where `osascript` exists, by the Ed25519
@@ -27,7 +27,7 @@ replace_command=${BAKE_REPLACE_COMMAND:-}
 # DER SubjectPublicKeyInfo. A release test holds every copy equal. Tests
 # replace this one line in a private copy of the installer, so the published
 # installer takes no key from its environment.
-native_release_key='MCowBQYDK2VwAyEAYHdFEaVkRABjXEFzF1WnfoX1MJUcwzgB9oS9kyzF9hY='
+native_release_key='MCowBQYDK2VwAyEA0uOxgWuZgiLw8suSdS25NRq9J/ZLphquWexGoJf1CJw='
 
 mode=install
 while [ $# -gt 0 ]; do
@@ -503,7 +503,7 @@ probe_verifier() {
 }
 
 # Set `target` to this host's release platform, or stop on a platform Bake
-# 0.4.0 does not release for.
+# does not release for.
 set_platform() {
   case "$(uname -s)-$(uname -m)" in
     Darwin-arm64) target=darwin-arm64 ;;
@@ -512,14 +512,15 @@ set_platform() {
     Linux-x86_64) target=linux-x64 ;;
     *) fail "this platform has no Bake native release archive" ;;
   esac
-  # BEGIN 0.4.0 PLATFORM REFUSAL
-  # Bake 0.4.0 releases Linux alone (D47); the macOS archives arrive in 0.4.x.
-  # The tests run the install path on macOS through a copy without this block.
+  # BEGIN PLATFORM REFUSAL
+  # Bake releases linux-x64 here (D47, D52); 0.4.6 was the last linux-arm64
+  # release, and the macOS archives arrive later.
   case $target in
-    linux-*) ;;
-    *) fail "Bake 0.4.0 runs on Linux only; macOS support is coming in a later 0.4 release." ;;
+    linux-x64) ;;
+    linux-arm64) fail "Bake publishes Linux x64 releases only; Bake 0.4.6 was the last Linux arm64 release." ;;
+    *) fail "Bake runs on Linux and Windows only; macOS support is coming in a later release." ;;
   esac
-  # END 0.4.0 PLATFORM REFUSAL
+  # END PLATFORM REFUSAL
 }
 
 # The release `current` names, or empty when the install has no pointer yet.

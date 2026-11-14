@@ -1,6 +1,6 @@
 # Bake development
 
-This workspace builds `bake`, Bake's terminal coding agent. Run Cargo from the repository root so the toolchain pinned in `rust-toolchain.toml` applies. The product ships as one executable with embedded user documentation and needs no Node or Bun at runtime. Bake 0.4.0 releases Linux x86_64 and arm64; macOS and Windows support follows in 0.4.x.
+This workspace builds `bake`, Bake's terminal coding agent. Run Cargo from the repository root so the toolchain pinned in `rust-toolchain.toml` applies. The product ships as one executable with embedded user documentation and needs no Node or Bun at runtime. Bake releases Linux x86_64 and Windows x64 from 0.4.7; 0.4.6 was the last Linux arm64 release, and macOS support follows later.
 
 ## Run
 

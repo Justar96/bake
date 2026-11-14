@@ -98,7 +98,7 @@ impl Fixture {
 
     /// An updater for this install, running `running`. It names the
     /// fixture's target explicitly, so these tests run on the hosts Bake
-    /// 0.4.0 publishes no native update for, where `Updater::new` refuses.
+    /// publishes no native update for, where `Updater::new` refuses.
     fn updater(&self, running: &str) -> Updater {
         Updater::for_target(self.root(), self.source(), self.target, running)
     }
@@ -703,8 +703,8 @@ async fn forcing_a_version_reinstalls_only_what_is_published() {
     assert_eq!(fixture.run_current(), "bake 1.0.0");
 }
 
-/// Bake 0.4.0 publishes native updates for Linux alone, so `Updater::new`
-/// refuses on macOS and Windows; the fixture's explicit target keeps this
+/// Bake publishes native updates for Linux x64 and Windows x64 alone, so
+/// `Updater::new` refuses elsewhere; the fixture's explicit target keeps this
 /// suite running there. Each platform's archive is updated to and rolled
 /// back from here, whatever this host is.
 #[tokio::test]

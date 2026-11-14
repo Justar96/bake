@@ -23,15 +23,21 @@ A session started from a native install also checks for a published release in t
 
 The check installs nothing and takes no install lock. It remembers the version it found, and when, in `update-check.json` in the Bake home, and reuses that answer for a day, so most launches make no request for it. A failed check shows nothing and is tried again at the next launch. `--offline`, `BAKE_OFFLINE=1`, or `DSH_OFFLINE=1` leaves the check out, and a `bake` built from source, which has no native install, never checks.
 
-## On macOS and Windows
+## Platforms
 
-Bake 0.4.0 publishes native releases for Linux alone, x64 and arm64. On macOS and Windows every `bake update` run refuses with exit status 1 before it reaches the network or changes anything, including `--check`, `--force`, and `--rollback`, and names the release that brings those platforms:
+Bake publishes native releases for Linux x64 and Windows x64. Bake 0.4.6 was the last release for Linux arm64. On macOS and Linux arm64, every `bake update` run refuses with exit status 1 before it reaches the network or changes anything, including `--check`, `--force`, and `--rollback`:
 
 ```
-update needs a native install, and Bake 0.4.0 publishes native updates for linux-arm64 and linux-x64 only; native updates for darwin-arm64 arrive in Bake 0.4.x
+update needs a native install, and Bake publishes native updates for linux-x64 and win32-x64 only; native updates for darwin-arm64 arrive in a later release
 ```
 
-With `BAKE_NATIVE_ROOT` naming an install root, the line is the same without its first clause. The installers refuse those platforms too, so there is no native install there to update: wait for Bake 0.4.x, whose installer brings the macOS and Windows releases. A Bake 0.3 install keeps working with its own data and its own `dsh` command.
+With `BAKE_NATIVE_ROOT` naming an install root, the line is the same without its first clause. The installers refuse macOS too, so there is no native install there to update. A Bake 0.3 install keeps working with its own data and its own `dsh` command.
+
+On Windows, Bake runs without confinement: Windows sandboxing is not qualified yet, so commands under `read-only` and `workspace-write` are refused there; `danger-full-access` runs them (`bake docs permissions`).
+
+## The 0.4.7 signing key
+
+Bake 0.4.7 is signed with a new native release key. Bake 0.4.6 and earlier trust only the previous key, so `bake update` on those installs refuses the 0.4.7 manifest as signed by an untrusted key. Install 0.4.7 once with the installer, which carries the new key; `bake update` works from then on.
 
 ## What an update does
 

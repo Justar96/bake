@@ -5,8 +5,8 @@
 //! version even when it is not newer, and `--rollback` returns to the
 //! release the last update replaced. Every run takes the install lock and
 //! needs a native install: this executable's own root, or the one
-//! `BAKE_NATIVE_ROOT` names. Bake 0.4.0 publishes native updates for Linux
-//! alone, so on macOS and Windows every run says that those arrive in 0.4.x.
+//! `BAKE_NATIVE_ROOT` names. Bake publishes native updates for Linux x64
+//! and Windows x64 alone; elsewhere every run says that those arrive later.
 //!
 //! An interactive session on such an install also checks for a published
 //! release when it starts ([`startup_check`]) and says when one is newer;
@@ -324,13 +324,13 @@ mod tests {
         );
         assert_eq!(
             no_install(release_target(Some("darwin-arm64"))),
-            "update needs a native install, and Bake 0.4.0 publishes native updates for \
-             linux-arm64 and linux-x64 only; native updates for darwin-arm64 arrive in Bake 0.4.x"
+            "update needs a native install, and Bake publishes native updates for \
+             linux-x64 and win32-x64 only; native updates for darwin-arm64 arrive in a later release"
         );
         assert_eq!(
-            no_install(release_target(Some("win32-x64"))),
-            "update needs a native install, and Bake 0.4.0 publishes native updates for \
-             linux-arm64 and linux-x64 only; native updates for win32-x64 arrive in Bake 0.4.x"
+            no_install(release_target(Some("linux-arm64"))),
+            "update needs a native install, and Bake publishes native updates for \
+             linux-x64 and win32-x64 only; native updates for linux-arm64 arrive in a later release"
         );
         // With an install root named, the updater itself refuses the platform.
         let root = Root::new(std::env::temp_dir().join("bake-update-platform-unused"));
