@@ -67,7 +67,7 @@ fn written(args: &Value) -> Vec<String> {
 
 /// A tool's card title: its entry in [`copy::TOOL_TITLES`]; for an MCP
 /// tool, its server and its own name; or its name with the first letter
-/// capitalized.
+/// capitalized and underscores read as spaces.
 pub(super) fn display_name(tool: &str) -> String {
     if let Some((_, title)) = copy::TOOL_TITLES.iter().find(|(name, _)| *name == tool) {
         return (*title).to_owned();
@@ -83,7 +83,13 @@ pub(super) fn display_name(tool: &str) -> String {
     {
         return format!("{server}{}{name}", copy::MCP_TOOL_SEP);
     }
-    let mut chars = tool.chars();
+    // A name with `__`, such as a malformed MCP name, stays as written.
+    let spaced = if tool.contains("__") {
+        tool.to_owned()
+    } else {
+        tool.replace('_', " ")
+    };
+    let mut chars = spaced.chars();
     match chars.next() {
         Some(first) => first.to_uppercase().chain(chars).collect(),
         None => String::new(),
@@ -214,6 +220,80 @@ fn lead(tool: &str, args: &Value, labels: &Labels) -> Option<String> {
                     .join(", ")
             }),
         "job_output" | "job_kill" | "interrupt_agent" => label(),
+        "telecom" => telecom_lead(args),
+        // A task document by what is done to which document.
+        "task_document" => field("operation").map(|operation| {
+            let document = args.get("document");
+            let part = |name: &str| {
+                document
+                    .and_then(|document| document.get(name))
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            };
+            [
+                Some(operation),
+                field("id").or_else(|| part("id")),
+                part("kind"),
+                part("state"),
+            ]
+            .into_iter()
+            .flatten()
+            .filter(|part| !part.is_empty())
+            .map(|part| clip(first_line(&part), 32))
+            .collect::<Vec<_>>()
+            .join(copy::STATUS_SEP)
+        }),
+        // A reminder by its prompt and when it is due.
+        "schedule_create" => field("prompt").map(|prompt| {
+            let seconds = |name: &str| args.get(name).and_then(Value::as_u64).map(span);
+            let when = seconds("after_seconds")
+                .map(|after| format!("in {after}"))
+                .or_else(|| seconds("every_seconds").map(|every| format!("every {every}")))
+                .or_else(|| {
+                    let at = args.get("at")?;
+                    let part = |name| at.get(name).and_then(Value::as_str);
+                    Some(format!(
+                        "at {} {}",
+                        part("date")?,
+                        part("time").unwrap_or_default()
+                    ))
+                });
+            let prompt = clip(first_line(&prompt), 48);
+            match when {
+                Some(when) => format!("{prompt}{}{}", copy::STATUS_SEP, when.trim_end()),
+                None => prompt,
+            }
+        }),
+        "schedule_delete" => field("id"),
+        "list_mcp_resources" | "list_mcp_resource_templates" => field("server"),
+        "read_mcp_resource" => field("uri").map(|uri| match field("server") {
+            Some(server) => format!("{uri}{}{server}", copy::STATUS_SEP),
+            None => uri,
+        }),
+        "spawn_agent" => field("task").map(|task| {
+            let task = clip(first_line(&task), 80);
+            match field("model") {
+                Some(model) => format!("{task} · {model}"),
+                None => task,
+            }
+        }),
+        "stop_agent" => field("agent").map(|agent| {
+            if args.get("interrupt") == Some(&Value::Bool(true)) {
+                format!("{agent} · interrupt")
+            } else {
+                agent
+            }
+        }),
+        // The first question, and how many follow it.
+        "ask_user" => {
+            let questions = args.get("questions").and_then(Value::as_array)?;
+            let first = questions.first()?.get("question").and_then(Value::as_str)?;
+            let first = clip(first_line(first), 80);
+            Some(match questions.len() {
+                0 | 1 => first,
+                n => format!("{first} · +{} more", n - 1),
+            })
+        }
         "list_agents" | "list_subagent_models" => Some(field("agent_id").unwrap_or_else(|| {
             [field("provider"), field("model"), field("scope")]
                 .into_iter()
@@ -223,6 +303,44 @@ fn lead(tool: &str, args: &Value, labels: &Labels) -> Option<String> {
         })),
         _ => None,
     }
+}
+
+/// `seconds` as the largest whole unit it is: `90s`, `10m`, `2h`, `1d`.
+fn span(seconds: u64) -> String {
+    match seconds {
+        s if s >= 86_400 && s % 86_400 == 0 => format!("{}d", s / 86_400),
+        s if s >= 3_600 && s % 3_600 == 0 => format!("{}h", s / 3_600),
+        s if s >= 60 && s % 60 == 0 => format!("{}m", s / 60),
+        s => format!("{s}s"),
+    }
+}
+
+/// A `telecom` call as its action and what it acts on, read as a phrase:
+/// `board`, `send to bravo · the tests pass`, `ask alpha · which port?`,
+/// `reply a1 · 8080`, `broadcast · rebasing now`, `status · fixing CI`.
+fn telecom_lead(args: &Value) -> Option<String> {
+    let field = |name: &str| {
+        args.get(name)
+            .and_then(Value::as_str)
+            .map(first_line)
+            .filter(|text| !text.is_empty())
+    };
+    let action = field("action")?;
+    let text = field("message").map(|text| clip(text, 48));
+    let target = match action.as_str() {
+        "send" => field("to").map(|to| format!("send to {to}")),
+        "ask" => field("to").map(|to| format!("ask {to}")),
+        "reply" => Some(match field("askId") {
+            Some(id) => format!("reply {id}"),
+            None => "reply".to_owned(),
+        }),
+        _ => None,
+    }
+    .unwrap_or_else(|| clip(action, 16));
+    Some(match text {
+        Some(text) => format!("{target}{}{text}", copy::STATUS_SEP),
+        None => target,
+    })
 }
 
 /// Most characters the phase naming a running call shows, `…` included.

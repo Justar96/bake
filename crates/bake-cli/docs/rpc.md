@@ -17,7 +17,7 @@ Four kinds of record cross the pipes:
 | stdin | Command | Prompt, inspect state, change settings, or manage the session |
 | stdout | `response` | Whether one command succeeded, with its data or its error |
 | stdout | Session event | The same events `--mode json` writes |
-| Both | `extension_ui_request` and `extension_ui_response` | Approval questions and their answers |
+| Both | `extension_ui_request` and `extension_ui_response` | Approval questions, the model's questions, and their answers |
 
 Framing is strict JSONL: one complete JSON object per record, terminated by a line feed. Split stdout on `\n` only. A line reader that also splits on U+2028 or U+2029 will break records, because those characters are valid inside JSON strings. An optional carriage return before the line feed is accepted on input. Standard output carries protocol records only; warnings and diagnostics go to standard error, and are never records.
 
@@ -42,6 +42,8 @@ A `prompt` response reports what happened to the prompt, not the end of the mode
 - `started`: a turn is running. Follow the events, and wait for `agent_settled` to learn that nothing more follows automatically.
 - `queued`: the prompt waits for the running turn. A `prompt` with `streamingBehavior` set to `steer` or `followUp` queues while a turn runs, as `steer` and `follow_up` always do.
 - A `prompt` sent while a turn runs without `streamingBehavior` is refused, with the reason to pass one.
+
+A session can also start a turn with no `prompt`: when a message from another Bake agent (`bake docs team`), or the notice that a spawned agent finished a run, arrives while the session is idle, a turn starts for it and its events follow as for a prompt. A `prompt` sent meanwhile is refused as it is during any turn, unless it passes `streamingBehavior`.
 
 Pi's third disposition, `handled`, reports an extension consuming the prompt; `bake` has no extensions, so it never answers `handled`. `/skill:<name>` prompts and prompt templates are expanded as everywhere else and start a turn.
 
@@ -87,7 +89,7 @@ These Pi commands are refused with a reason, because `bake` has no equivalent:
 - `bash` and `abort_bash`: there is no shell execution outside the model's `bash` tool.
 - `set_auto_retry`: automatic retry follows `settings.json`'s `retry.enabled`, which no command changes.
 - `new_session` with `parentSession`: use `fork` or `clone`.
-- Pi's extension commands, extension UI methods other than the approval question below, and its theme commands do not exist here; their records are unknown commands.
+- Pi's extension commands, extension UI methods other than the approval and question requests below, and its theme commands do not exist here; their records are unknown commands.
 
 ## Approvals
 
@@ -108,6 +110,26 @@ Under `--approval ask`, a tool call that asks for wider access than the session'
 - `cancelled: true` withdraws the question; the call is refused.
 
 Requests are decided oldest first, and only the oldest is announced. An answer for a request already decided or withdrawn settles nothing. Every request and its answer are written to the session file before the call runs, exactly as in an interactive session. A client that disconnects or never answers leaves the call refused: the pending question is cancelled when the session stops, and the call runs nothing. See [Permissions](permissions.md#approvals).
+
+## Questions
+
+The model's `ask_user` tool (`bake docs team`) puts its questions to the client one at a time, as Pi's `extension_ui_request`: `select` with the option labels when a question offers options, and `input` when it takes a typed answer.
+
+```json
+{"type":"extension_ui_request","id":"question-1-0-3c1d7e0a-5b9e-4c1f-9a51-2f3e8d6c4b10","method":"select","title":"Which database should the service use?","options":["Postgres","SQLite"],"question":{"header":"Database","question":"Which database should the service use?","options":[{"label":"Postgres","description":"The shared server"},{"label":"SQLite"}],"multiSelect":false,"index":0,"count":2,"from":null,"callId":"call_4"}}
+```
+
+`question` is Bake's addition, which a Pi client ignores: the whole question with each option's description, whether several options may be chosen, its `index` among the `count` questions of the call, and `from`, the spawned agent asking through this session, or `null` when this session's model asks. Answer with the request's `id`:
+
+```json
+{"type":"extension_ui_response","id":"question-1-0-3c1d7e0a-5b9e-4c1f-9a51-2f3e8d6c4b10","value":"Postgres"}
+```
+
+- `value` is the answer: an option's label, or any text the person typed instead.
+- `values`, Bake's addition, is a list of answers, for a question with `multiSelect`.
+- `cancelled: true` declines all of the call's questions, and the model is told the person declined.
+
+Once a question is answered, the next one of the same call is put with a fresh `id`; the tool returns when the last is answered. A spawned agent's approval question arrives the same way, as a `select` between `Allow once` and `Reject`. A question still waiting when the session stops is declined.
 
 ## Errors
 

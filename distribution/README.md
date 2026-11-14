@@ -1,6 +1,6 @@
 # Bake releases and the download service
 
-Bake is published as native archives on a signed channel that https://bake.justar.dev serves. The [installers](#installers) install from it and `bake update` updates and rolls back through it. Releases are built, signed, and published by the [release workflow](#release-with-github-actions), whose steps are `bake-release` ([`crates/bake-release`](../crates/bake-release/)), a build tool that is never shipped. Every artifact it writes is checked by `bake-update`, the code a user's `bake update` runs. Bake 0.4 publishes `linux-x64` and `linux-arm64`; macOS and Windows follow in 0.4.x ([D47](../docs/roadmap/rust-0.4/scope-00/support.md#decision-register)).
+Bake is published as native archives on a signed channel that https://bake.justar.dev serves. The [installers](#installers) install from it and `bake update` updates and rolls back through it. Releases are built, signed, and published locally, by the [release steps](#release-steps-by-hand), which are `bake-release` ([`crates/bake-release`](../crates/bake-release/)), a build tool that is never shipped. Every artifact it writes is checked by `bake-update`, the code a user's `bake update` runs. From 0.4.7 Bake publishes `linux-x64` and `win32-x64`; 0.4.6 was the last `linux-arm64` release, and macOS follows later ([D47 and D52](../docs/roadmap/rust-0.4/scope-00/support.md#decision-register)).
 
 ## Contents
 
@@ -10,7 +10,7 @@ Bake is published as native archives on a signed channel that https://bake.justa
 - [Dependency licenses](#dependency-licenses)
 - [The glibc floor](#the-glibc-floor)
 - [Installers](#installers)
-- [Release with GitHub Actions](#release-with-github-actions)
+- [The release workflow](#the-release-workflow)
 - [The download service](#the-download-service)
 - [Release steps by hand](#release-steps-by-hand)
 
@@ -123,46 +123,25 @@ The install root, `$BAKE_NATIVE_ROOT` (default `~/.local/share/bake-native`), ho
 
 `<bin>/bake` links to `current/bin/bake`, in `$BAKE_BIN_DIR` (default `~/.local/bin`). A Bake-managed 0.3 `bake` is taken over and restorable with `--uninstall-links`. A `bake` no Bake installer made is left alone unless `--replace-command` is given.
 
-Unix needs `curl` or `wget`, `tar`, and `sha256sum` or `shasum`. The signature is verified by an OpenSSL with Ed25519, proven on RFC 8032's vector first. Where no OpenSSL passes, as on a stock Mac, it is verified by the JavaScript verifier `install.sh` embeds, run with `osascript`. Bake 0.4 publishes Linux alone, so the installers stop on macOS and Windows before they download anything.
+Unix needs `curl` or `wget`, `tar`, and `sha256sum` or `shasum`. The signature is verified by an OpenSSL with Ed25519, proven on RFC 8032's vector first. Where no OpenSSL passes, as on a stock Mac, it is verified by the JavaScript verifier `install.sh` embeds, run with `osascript`. `install.sh` stops on macOS and Linux arm64 before it downloads anything.
 
 `bake-release`'s tests run the shipped `install.sh` against a loopback host: it installs a release the trusted key signed and refuses one another key signed. Its `version_newer` is checked against `compare_versions` on every pair of the table. `bake-release rehearse` installs the real archive this way, as the workflow does on both Linux platforms.
 
-## Release with GitHub Actions
+## The release workflow
 
-```sh
-# on an up-to-date develop, once the release's changes are pushed:
-NEXT=0.4.2
-# set [workspace.package] version in Cargo.toml, then refresh both lockfiles:
-cargo update --workspace --offline && (cd fuzz && cargo update --workspace --offline)
-# turn CHANGELOG.md's [Unreleased] entries into a "## [$NEXT] - <date>" section, then:
-cargo run --locked -p bake-release -- preflight --offline --tag "v$NEXT"
-git commit -am "release: $NEXT" && git push origin HEAD:develop
-gh pr create --base main --head develop     # CI runs here; fix failures on develop
-# once that pull request merges with a merge commit:
-git fetch origin && git tag -a "v$NEXT" origin/main -m "Bake $NEXT" && git push origin "v$NEXT"
-```
+Releases no longer run on GitHub Actions: a pushed tag starts no workflow, and the [release steps](#release-steps-by-hand) run locally. [`release.yml`](../.github/workflows/release.yml) runs only by hand, as a dry run of what a release builds:
 
-The pushed tag starts the [release workflow](../.github/workflows/release.yml):
-
-1. **preflight** checks the tag and records the version and its notes. The tag must point to a commit on the default branch and name the workspace version, which must be stable with a written changelog section. The version must be newer than the release the download service publishes, verified with the committed key.
+1. **preflight** checks the workspace version and records its notes, as it would check a tag.
 2. **build** runs on `ubuntu-24.04` for `linux-x64` and `ubuntu-24.04-arm` for `linux-arm64`. Each runner:
    - links with the toolchain's rust-lld and builds cargo-about 0.9.2;
    - builds the release `bake` and `bake-release`;
    - packs the archive and checks its glibc floor;
    - rehearses its install with the shipped `install.sh`.
 3. **assemble** puts both archives through `assemble --complete` with a throwaway key, so their names, layouts, and platforms are checked together before anything is signed.
-4. **publish** runs in the `release` environment, which holds the secrets and is limited to `v*` tags. In order, it:
-   - signs the manifest with `assemble --complete`;
-   - runs the deploy's gate, `verify-native-manifest.mjs --complete --required`;
-   - carries the served 0.3 route forward unchanged, checked with the 0.3 key;
-   - uploads the archives, the manifest, its signature, and both installers to a draft GitHub release;
-   - downloads them again to compare every byte, and publishes the draft as the latest release;
-   - deploys the download service;
-   - runs `verify-live <version> --complete`. It waits for the service to serve the version and checks it as `bake update` does, through `bake-update`'s download client: the signature, both archives' sizes and hashes through the redirect, the 0.3 route, the served installers against the committed ones, and `/health`.
 
-A manual run from the Actions tab is a dry run. It builds, packs, rehearses, and assembles both platforms at whatever version the workspace holds, reports what would refuse a tag, and publishes nothing.
+Its **publish** job, which signs the manifest, drafts and publishes the GitHub release, deploys the download service, and runs `verify-live`, runs only on a tag push, so it no longer runs; the release steps do the same by hand.
 
-If a tagged run fails, rerun it. Before the GitHub release is public nothing has been served. After, the publish job stages that release's own signed assets instead of signing again.
+A dry run builds, packs, rehearses, and assembles both platforms at whatever version the workspace holds, reports what would refuse a tag, and publishes nothing. The publish job read these `release` environment secrets:
 
 | `release` environment secret | Value |
 |---|---|
@@ -183,7 +162,19 @@ The Worker reports active installs to gissx.org when it has the `GISSX_ACTIVITY_
 
 ## Release steps by hand
 
-The workflow's steps run locally the same way. On each Linux platform:
+Prepare the release on an up-to-date `develop`, once its changes are pushed:
+
+```sh
+NEXT=0.4.7
+# set [workspace.package] version in Cargo.toml, then refresh both lockfiles:
+cargo update --workspace --offline && (cd fuzz && cargo update --workspace --offline)
+# turn CHANGELOG.md's [Unreleased] entries into a "## [$NEXT] - <date>" section, then:
+cargo run --locked -p bake-release -- preflight --offline --tag "v$NEXT"
+git commit -am "release: $NEXT" && git push origin HEAD:develop
+gh pr create --base main --head develop     # merge it with a merge commit
+```
+
+Run the checks locally on Linux x86_64 before the merge. Then, on Linux x64:
 
 ```sh
 cargo build --release --locked -p bake-cli -p bake-release
@@ -192,14 +183,26 @@ target/release/bake-release glibc-floor target/release/bake
 target/release/bake-release rehearse --archive .artifacts/bake-native-release/<version>/bake-v<version>-<platform>.tar.gz
 ```
 
-With both archives in `.artifacts/bake-native-release/<version>/` and published on the version's GitHub release:
+On Windows x64, from a clone of the release commit, run `cargo build --release --locked -p bake-cli -p bake-release` and `target\release\bake-release pack --binary target\release\bake.exe` (it needs cargo-about 0.9.2 there too), and copy its archive beside the Linux one. `rehearse` drives only `install.sh`, so check the Windows install with `install.ps1` once the release is live.
+
+With both archives in `.artifacts/bake-native-release/<version>/`, create the version's GitHub release by hand, tagged on `main`'s merge commit, so the archives the service redirects to are public:
+
+```sh
+git fetch origin && git tag -a "v<version>" origin/main -m "Bake <version>" && git push origin "v<version>"
+gh release create "v<version>" --verify-tag --title "Bake <version>" --notes "<the changelog section>" .artifacts/bake-native-release/<version>/*.tar.gz
+```
+
+Then sign, deploy, and check:
 
 ```sh
 target/release/bake-release assemble <version> --complete --key-file ~/.config/bake/native-release-signing-key.pem
+gh release upload "v<version>" distribution/host/public/native/stable.json distribution/host/public/native/stable.json.sig distribution/host/install.sh distribution/host/install.ps1
 for file in latest.json latest.json.sig; do curl -fsSL "https://bake.justar.dev/$file" -o "distribution/host/public/$file"; done
 node distribution/host/verify-native-manifest.mjs --complete --required
 (cd distribution/host && npm run deploy -- --message "Bake <version>")
 target/release/bake-release verify-live <version> --complete
 ```
+
+A release that rotates the native key, as 0.4.7 did ([D52](../docs/roadmap/rust-0.4/scope-00/support.md#decision-register)), cannot have the live channel checked with the committed key, which did not sign it: confirm by hand that the live `stable.json` names an older version, then pass `--offline` to `preflight` and `assemble`.
 
 Generated paths (`.artifacts/`, `distribution/host/public/`, `site/`, `.wrangler/`) are ignored by Git. A deploy that reports success is not a release until `verify-live` passes.

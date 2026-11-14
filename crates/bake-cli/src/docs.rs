@@ -78,6 +78,11 @@ pub const TOPICS: &[Topic] = &[
         text: include_str!("../docs/codemode.md"),
     },
     Topic {
+        name: "team",
+        summary: "Telecom between Bake sessions, spawned agents, and the model's questions",
+        text: include_str!("../docs/team.md"),
+    },
+    Topic {
         name: "rpc",
         summary: "--mode rpc: the JSONL protocol, its commands, and approvals",
         text: include_str!("../docs/rpc.md"),

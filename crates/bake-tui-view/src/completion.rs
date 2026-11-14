@@ -94,6 +94,16 @@ pub const LIVE_CATALOG: &[Command] = &[
         Some("[description]"),
         "Report a bug to the Bake developers",
     ),
+    command(
+        "telecom",
+        Some("[msg <agent> <text> | broadcast <text>]"),
+        "Show or message the Bake agents in this repository",
+    ),
+    command(
+        "spawn",
+        Some("<task>"),
+        "Start a headless Bake agent on a task",
+    ),
 ];
 
 /// Commands listed ahead of the rest, in this order, as the oracle ranks them.

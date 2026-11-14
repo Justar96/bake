@@ -30,6 +30,9 @@
 //! | [`mcp`] | Pi v1.3.0 `src/extensions/mcp/{index,runtime,tools,config}.ts`, `src/core/mcp-servers.ts`; Bake's tool names (`packages/mcp/mcp-client`) and D24 admission |
 //! | [`hooks`] | Bake 0.3: `packages/hooks/{hook-protocol,hooks-claude-code,hooks-codex}`, run at Pi v1.3.0's extension events (`src/core/extensions/types.ts`, `runner.ts`) |
 //! | [`owned_work`] | Bake: a session's owner of its tasks, blocking work, and background lifetime, which shutdown cancels and drains |
+//! | [`questions`] | Bake: the `ask_user` tool and the queue a frontend answers it from, after the approval broker |
+//! | [`spawned`] | Bake: headless `bake --mode rpc` agents a session starts, owns, and follows |
+//! | [`telecom`] | Bake: the sessions of one repository as a team, after pi-telecom 0.8.0 (`Justar96/pi-telecom` `b6fe4d8`, MIT) `src/{tool,callsign,transport}.ts`, over Bake's own socket protocol |
 //! | [`subagents`] | Bake: continuable children on any available model, in Pi session files (`packages/subagent/{subagent,tool-subagent,tool-subagent-control}`) |
 //! | [`jobs`] | Bake: a session's background-job registry over its owned work (`packages/jobs/{jobs,jobs-local}`, `packages/shell/tool-bash/src/background.ts`), structured after Pi v1.3.0 `packages/durable` task states |
 //! | [`plugins`] | Bake's trusted compiled-in plugins and their ordered tool-call veto, after Pi v1.3.0 `src/core/extensions/runner.ts` (`emitToolCall`), `agent-session.ts` (`_beforeToolCall`), and `examples/extensions/protected-paths.ts` |
@@ -58,15 +61,18 @@ pub mod permissions;
 pub mod plugins;
 pub mod print_mode;
 pub mod prompt_templates;
+pub mod questions;
 pub mod rpc;
 pub mod schedules;
 pub mod session;
 pub mod session_export;
 pub mod settings;
 pub mod skills;
+pub mod spawned;
 pub mod subagents;
 pub mod system_prompt;
 pub mod task_documents;
+pub mod telecom;
 #[cfg(test)]
 mod test_support;
 pub mod tools;

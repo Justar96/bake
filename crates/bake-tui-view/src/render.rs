@@ -82,6 +82,7 @@ fn needs(app: &State, width: u16, height: u16) -> Needs {
         pending: panel_rows(app.pending.len()),
         panel: panel_rows(app.attachments.len()),
         menu: menu_rows(app),
+        crew: crate::crew::rows(&app.crew),
         approval: approval_rows(app, inner_width(width)).max(dialog_rows(
             app,
             inner_width(width),
@@ -1460,6 +1461,7 @@ fn render_region(
     let panel = next(rows.panel);
     let notice = next(rows.notice);
     let menu_area = next(rows.menu);
+    let crew_area = next(rows.crew);
     let approval_area = next(rows.approval);
     let bar = next(rows.bar);
     let rule = next(rows.top_edge);
@@ -1517,6 +1519,7 @@ fn render_region(
     render_pending(app, inset(pending), buf);
     render_attachments(app, inset(panel), buf);
     render_menu(app, inset(menu_area), buf);
+    render_crew(app, crew_area, buf);
     render_approval(app, inset(approval_area), buf);
     render_dialog(app, inset(approval_area), buf);
     let columns = area.width;
@@ -2235,6 +2238,25 @@ fn render_panel(
             Rect::new(area.x, area.y + i as u16, area.width, 1),
             content,
         );
+    }
+}
+
+/// The crew panel above the composer ([`crate::crew`]).
+fn render_crew(app: &State, area: Rect, buf: &mut Buffer) {
+    if area.is_empty() {
+        return;
+    }
+    let elapsed = app.now.saturating_sub(app.crew_at);
+    let lines = crate::crew::lines(
+        &app.crew,
+        usize::from(area.width),
+        app.now,
+        elapsed,
+        app.tones,
+    );
+    for (row, line) in lines.into_iter().take(usize::from(area.height)).enumerate() {
+        let y = area.y + u16::try_from(row).unwrap_or(u16::MAX);
+        buf.set_line(area.x, y, &line, area.width);
     }
 }
 
@@ -5252,21 +5274,21 @@ mod tests {
         let (rows, _) = draw(&mut app, 80, 30);
         // The box's top edge; with nothing on the bar, the menu is over it.
         let bar = row_index(&rows, "❯") - 1;
-        // Eight of eighteen commands, the frequent ones first, then a count.
+        // Eight of twenty commands, the frequent ones first, then a count.
         let first = row_index(&rows, "/model");
         assert_eq!(first + 9, bar);
         assert!(rows[first].starts_with("  ▸ /model           [search]  Choose the model"));
         assert!(rows[first + 1].starts_with("    /resume          Resume a saved session"));
         assert_eq!(
             rows[first + 8].trim_end(),
-            "    +10 more, keep typing to narrow"
+            "    +12 more, keep typing to narrow"
         );
         // The box's edge names the menu's key.
         assert!(rows.iter().any(|r| r.contains("Tab completes")));
         // Up from the first wraps to the last, which scrolls into view.
         key(&mut app, Key::Up);
         let (rows, _) = draw(&mut app, 80, 30);
-        assert!(rows[bar - 2].starts_with("  ▸ /bug"));
+        assert!(rows[bar - 2].starts_with("  ▸ /spawn"));
         assert!(!rows.iter().any(|r| r.contains("/model")));
         // Nothing matching says so in one row, past the rail.
         key(&mut app, Key::Char('z'));

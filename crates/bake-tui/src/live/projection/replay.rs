@@ -134,6 +134,8 @@ pub(super) fn notice_row(message: &AgentMessage, labels: &Labels) -> Option<Row>
                 }),
             );
         }
+        bake_coding_agent::telecom::MESSAGE_TYPE => telecom_notice(&text, details?)?,
+        bake_coding_agent::spawned::NOTICE_TYPE => spawn_notice(&text, details?)?,
         subagents::MESSAGE_TYPE => {
             let from = details
                 .and_then(|details| details.get("from"))
@@ -244,6 +246,52 @@ fn agent_notice(text: &str, details: Option<&Value>, labels: &Labels) -> Option<
 }
 
 /// A notice's first line, kept to 48 characters.
+/// A telecom message, ask, or reply as one line: who sent it, and its text
+/// after the header line the model reads.
+fn telecom_notice(text: &str, details: &Value) -> Option<String> {
+    let field = |name: &str| details.get(name).and_then(Value::as_str);
+    let from = field("from")?;
+    let body = text.split_once('\n').map_or(text, |(_, body)| body);
+    // An ask ends with the model's instruction for replying.
+    let body = clip(
+        body.rsplit_once("\nAnswer with telecom action")
+            .map_or(body, |(ask, _)| ask),
+    );
+    Some(match field("kind")? {
+        "ask" => format!("← {from} asks ({}): {body}", field("askId")?),
+        "reply" => format!("← {from} answered {}: {body}", field("askId")?),
+        _ if details.get("human") == Some(&Value::Bool(true)) => {
+            format!("← {from}'s person: {body}")
+        }
+        _ => format!("← {from}: {body}"),
+    })
+}
+
+/// A spawned agent's settlement as one line: its answer or failure.
+fn spawn_notice(text: &str, details: &Value) -> Option<String> {
+    let agent = details.get("agent").and_then(Value::as_str)?;
+    if details.get("status").and_then(Value::as_str) == Some("failed") {
+        let reason = text
+            .split_once(" failed its run: ")
+            .map_or(text, |(_, why)| why);
+        return Some(format!("← {agent} failed: {}", clip(reason)));
+    }
+    Some(match text.split_once("Its last answer:\n") {
+        Some((_, answer)) => format!("← {agent} finished: {}", clip(answer)),
+        None => format!("← {agent} finished, with no answer"),
+    })
+}
+
+/// `text` on one line, kept to 160 characters.
+fn clip(text: &str) -> String {
+    let line = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut clipped: String = line.chars().take(160).collect();
+    if clipped.len() < line.len() {
+        clipped.push('…');
+    }
+    clipped
+}
+
 fn title(text: &str) -> String {
     let line = text.lines().next().unwrap_or_default();
     let mut title: String = line.chars().take(48).collect();

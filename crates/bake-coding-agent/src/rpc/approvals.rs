@@ -231,6 +231,7 @@ mod tests {
         assert!(!bridge.answer(&ExtensionUiResponse {
             id: "approval-1".into(),
             value: None,
+            values: None,
             confirmed: Some(true),
             cancelled: None,
         }));
@@ -246,6 +247,7 @@ mod tests {
         assert!(!bridge.answer(&ExtensionUiResponse {
             id,
             value: None,
+            values: None,
             confirmed: Some(true),
             cancelled: None,
         }));
@@ -257,6 +259,7 @@ mod tests {
             answer_of(&ExtensionUiResponse {
                 id: "approval-1".into(),
                 value: None,
+                values: None,
                 confirmed,
                 cancelled,
             })

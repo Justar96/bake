@@ -221,6 +221,9 @@ pub enum RuntimeUpdate {
     /// ([`crate::agents`]). Sent whenever one changes; an empty list, as
     /// for a session without subagents, hides them.
     Agents(Vec<crate::agents::Agent>),
+    /// The headless agents the session spawned, in start order, each with
+    /// its age when sent ([`crate::crew`]); an empty list hides the panel.
+    Crew(Vec<crate::crew::CrewMember>),
 }
 
 /// The refusal of a prompt sent while `/tree` navigates, its draft kept.

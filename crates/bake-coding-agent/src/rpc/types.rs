@@ -268,6 +268,10 @@ pub struct ExtensionUiResponse {
     /// A `select`, `input`, or `editor` answer.
     #[serde(default)]
     pub value: Option<String>,
+    /// Bake's own: the labels chosen for a multiple-choice question
+    /// ([`super::questions`]).
+    #[serde(default)]
+    pub values: Option<Vec<String>>,
     /// A `confirm` answer.
     #[serde(default)]
     pub confirmed: Option<bool>,
@@ -539,6 +543,7 @@ mod tests {
             Record::ExtensionUiResponse(ExtensionUiResponse {
                 id: "a".into(),
                 value: None,
+                values: None,
                 confirmed: Some(true),
                 cancelled: None,
             })

@@ -1627,6 +1627,61 @@ async fn build_session(args: &Args, build: Build) -> Result<Built, String> {
     // With `subagents` on, a top-level session starts subagents built as it
     // is; a subagent messages its parent and starts none (depth 1).
     let mut subagent_host = None;
+    // Only a top-level session joins its repository's telecom team; an
+    // in-process subagent talks to its parent through its own tools.
+    let telecom = (matches!(role, Role::Root(_)) && crate::telecom::enabled(settings.telecom))
+        .then(|| {
+            let options = crate::telecom::options_from_env(
+                Path::new(&session_cwd),
+                session.session_id(),
+                model
+                    .as_ref()
+                    .map(|model| format!("{}/{}", model.provider, model.id)),
+            )
+            .ok_or_else(|| "telecom: no Bake home to place the team in".to_owned())?;
+            crate::telecom::Station::start(options, jobs.clone(), &work)
+        });
+    if let Some(Ok(station)) = &telecom {
+        definitions.push(crate::telecom::tool::tool(station.clone()));
+    }
+    // A top-level session with someone to answer (a terminal, or an RPC
+    // client such as a parent Bake) can put questions to the person; the
+    // tool is one of its defaults, by the owner's decision, though no
+    // paired evaluation has measured it.
+    let questions =
+        (matches!(role, Role::Root(_)) && can_ask).then(crate::questions::QuestionBroker::new);
+    if let Some(broker) = &questions {
+        definitions.push(crate::questions::tool(broker.clone()));
+    }
+    // Agents run as headless processes of this executable and talk through
+    // telecom, so a top-level session with a station spawns them; a
+    // spawned agent spawns none.
+    let spawned = match &telecom {
+        Some(Ok(station)) if !crate::spawned::is_spawned() => {
+            std::env::current_exe().ok().map(|program| {
+                let selection = published.clone();
+                crate::spawned::SpawnHost::new(crate::spawned::HostOptions {
+                    program,
+                    cwd: PathBuf::from(&session_cwd),
+                    station: Some(station.clone()),
+                    jobs: jobs.clone(),
+                    work: work.clone(),
+                    questions: questions.clone(),
+                    standing: Arc::clone(&standing),
+                    model: Arc::new(move || {
+                        selection
+                            .get()
+                            .model
+                            .map(|model| format!("{}/{}", model.provider, model.id))
+                    }),
+                })
+            })
+        }
+        _ => None,
+    };
+    if let Some(host) = &spawned {
+        definitions.extend(crate::spawned::tools(host));
+    }
     let subagent_tools: &[&str] = match role {
         Role::Root(Some(factory)) if settings.subagents => {
             let parent_file = session
@@ -1700,6 +1755,15 @@ async fn build_session(args: &Args, build: Build) -> Result<Built, String> {
         bake_defaults.push(crate::agent_session::task_documents::NAME.to_owned());
     }
     bake_defaults.extend(subagent_tools.iter().map(|name| (*name).to_owned()));
+    if matches!(telecom, Some(Ok(_))) {
+        bake_defaults.push(crate::telecom::tool::TOOL_NAME.to_owned());
+    }
+    if spawned.is_some() {
+        bake_defaults.extend(crate::spawned::TOOL_NAMES.map(str::to_owned));
+    }
+    if questions.is_some() {
+        bake_defaults.push(crate::questions::TOOL_NAME.to_owned());
+    }
     if settings.schedules {
         bake_defaults.extend(crate::agent_session::schedules::NAMES.map(str::to_owned));
     }
@@ -1821,6 +1885,15 @@ async fn build_session(args: &Args, build: Build) -> Result<Built, String> {
     session.set_prompt_templates(prompt_templates);
     if let Some(host) = subagent_host {
         session.set_subagents(host);
+    }
+    if let Some(telecom) = telecom {
+        session.set_telecom(telecom);
+    }
+    if let Some(broker) = questions {
+        session.set_questions(broker);
+    }
+    if let Some(host) = spawned {
+        session.set_spawned(host);
     }
     session.set_permission(crate::permissions::LivePermission {
         table: permission.table.clone(),

@@ -319,7 +319,7 @@ mod tests {
     #[test]
     fn a_running_script_lists_its_latest_calls() {
         let lines = drawn(at(ms(900)));
-        assert_eq!(lines[0], "  ● codemode:  21 calls · 15 running");
+        assert_eq!(lines[0], "  ● codemode  21 calls · 15 running");
         // Seven script lines on eight rows, then the latest calls, the
         // rest counted.
         assert_eq!(lines[9..11], ["  │", "  │ ⋯ 13 earlier calls"]);

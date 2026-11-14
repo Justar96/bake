@@ -37,6 +37,9 @@ pub struct Needs {
     pub panel: u16,
     /// Rows the slash menu or a command's usage line wants; zero without.
     pub menu: u16,
+    /// Rows the crew panel wants ([`crate::crew`]); zero while the session
+    /// has spawned no agent.
+    pub crew: u16,
     /// Rows the approval panel wants; zero while no request waits.
     pub approval: u16,
     /// Rows the tray under the controls wants: the tasks list, or one agent
@@ -46,7 +49,7 @@ pub struct Needs {
 
 /// Rows granted to each region, top to bottom as drawn: body, gap, the
 /// pending-input panel, the attachments panel, notice, the slash menu,
-/// the approval panel, the bar, the box's top edge, the draft, its bottom
+/// the crew panel, the approval panel, the bar, the box's top edge, the draft, its bottom
 /// edge, the standing row, the tray, and the status line, always last, so
 /// it holds still while the tasks appear and the tray opens.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -57,6 +60,7 @@ pub struct Rows {
     pub panel: u16,
     pub notice: u16,
     pub menu: u16,
+    pub crew: u16,
     pub approval: u16,
     pub bar: u16,
     pub top_edge: u16,
@@ -75,6 +79,7 @@ impl Rows {
             + self.panel
             + self.notice
             + self.menu
+            + self.crew
             + self.approval
             + self.bar
             + self.top_edge
@@ -126,6 +131,11 @@ pub fn plan(height: u16, needs: Needs) -> Rows {
     let more = take(extra.min(left_after_body(height, chrome + tray + status + gap)));
     let notice = take(needs.notice);
     let menu = take(needs.menu);
+    // The crew panel gives way before the body's minimum, like the draft.
+    let crew = take(needs.crew.min(left_after_body(
+        height,
+        chrome + tray + status + gap + more + notice + menu,
+    )));
     // Pending input claims before attachments, as the TypeScript panels do.
     let pending = take(needs.pending);
     let panel = take(needs.panel);
@@ -137,6 +147,7 @@ pub fn plan(height: u16, needs: Needs) -> Rows {
         panel,
         notice,
         menu,
+        crew,
         approval,
         bar,
         top_edge,
@@ -168,6 +179,7 @@ mod tests {
             pending: 0,
             panel: 0,
             menu: 0,
+            crew: 0,
             approval: 0,
             tray: 0,
         }
@@ -314,6 +326,33 @@ mod tests {
     }
 
     #[test]
+    fn the_crew_panel_gives_way_before_the_body() {
+        let rows = plan(
+            40,
+            Needs {
+                crew: 5,
+                ..needs(1)
+            },
+        );
+        assert_eq!(rows.crew, 5);
+        assert_eq!(rows.total(), 40);
+        for height in 0..20 {
+            let rows = plan(
+                height,
+                Needs {
+                    crew: 5,
+                    ..needs(1)
+                },
+            );
+            assert_eq!(rows.total(), height);
+            assert!(
+                rows.crew == 0 || rows.body >= MIN_BODY_ROWS,
+                "{height}: {rows:?}"
+            );
+        }
+    }
+
+    #[test]
     fn without_a_standing_row_its_row_goes_to_the_others() {
         let rows = plan(
             6,
@@ -326,6 +365,7 @@ mod tests {
                 pending: 0,
                 panel: 0,
                 menu: 0,
+                crew: 0,
                 approval: 0,
                 tray: 0,
             },

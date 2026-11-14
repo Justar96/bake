@@ -52,6 +52,8 @@ rand_core.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
+# Telecom's member sockets (`telecom::endpoint`).
+tokio = { workspace = true, features = ["net"] }
 
 [target.'cfg(windows)'.dependencies]
 # Wasm helpers use overlapped named pipes.

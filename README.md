@@ -3,7 +3,7 @@
 Bake is a keyboard-driven coding agent for the terminal. It streams the model's answer as it arrives, runs shell and file tools inside a sandbox under a permission preset you choose, and saves every session so you can continue, resume, or fork it later. Bake is a single executable, `bake`.
 
 > [!NOTE]
-> **Bake 0.4.0 runs on Linux**, x86_64 and arm64, with glibc 2.34 or newer (RHEL 9 and its rebuilds, Amazon Linux 2023, Ubuntu 22.04, Debian 12, and newer). **macOS and Windows support is coming in a later 0.4 release.** Until then the installer stops on those platforms before it downloads anything; on Windows, install Bake inside WSL.
+> **Bake runs on Linux x86_64**, with glibc 2.34 or newer (RHEL 9 and its rebuilds, Amazon Linux 2023, Ubuntu 22.04, Debian 12, and newer), **and on Windows x64** from 0.4.7, without a sandbox for now (`irm https://bake.justar.dev/install.ps1 | iex`). Bake 0.4.6 was the last Linux arm64 release. **macOS support is coming in a later release.**
 >
 > 0.4 is a new install, not an upgrade of Bake 0.3, the earlier TypeScript agent. A 0.3 install keeps working with its own files, but 0.3 receives no further fixes ([D10 and D13](docs/roadmap/rust-0.4/scope-00/support.md#decision-register)).
 

@@ -108,6 +108,11 @@ pub struct Settings {
     /// `subagents`: gives a top-level session the subagent tools
     /// ([`crate::subagents`]). Defaults to false.
     pub subagents: bool,
+    /// `telecom`: joins the session to the other Bake sessions working in
+    /// its repository and gives it the `telecom` tool ([`crate::telecom`]).
+    /// Defaults to false, while its effect on models is unmeasured;
+    /// `BAKE_TELECOM` overrides it for a run ([`crate::telecom::enabled`]).
+    pub telecom: bool,
     /// `schedules`: gives a top-level session the reminder tools and their
     /// timer ([`crate::schedules`]). Defaults to false.
     pub schedules: bool,
@@ -280,6 +285,7 @@ impl Default for Settings {
             max_concurrent_read_tools: None,
             task_documents: false,
             subagents: false,
+            telecom: false,
             schedules: false,
             hooks: HookSettings::default(),
             compaction: None,
@@ -620,6 +626,7 @@ impl Settings {
             }),
             task_documents: object.get("taskDocuments").and_then(Value::as_bool) == Some(true),
             subagents: object.get("subagents").and_then(Value::as_bool) == Some(true),
+            telecom: object.get("telecom").and_then(Value::as_bool) == Some(true),
             schedules: object.get("schedules").and_then(Value::as_bool) == Some(true),
             hooks: HookSettings::from_value(object.get("hooks")),
             max_concurrent_read_tools: object.get("maxConcurrentReadTools").cloned(),

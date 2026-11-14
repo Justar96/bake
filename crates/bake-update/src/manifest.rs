@@ -37,11 +37,12 @@ pub const TARGETS: [&str; 5] = [
     "win32-x64",
 ];
 
-/// The platforms Bake 0.4.0 publishes native releases and updates for
-/// ([D47]); the rest of [`TARGETS`] arrive in 0.4.x.
+/// The platforms Bake publishes native releases and updates for
+/// ([D47], amended by [D52] for 0.4.7); the rest of [`TARGETS`] arrive later.
 ///
 /// [D47]: ../../../docs/roadmap/rust-0.4/scope-00/support.md
-pub const RELEASE_TARGETS: [&str; 2] = ["linux-arm64", "linux-x64"];
+/// [D52]: ../../../docs/roadmap/rust-0.4/scope-00/support.md
+pub const RELEASE_TARGETS: [&str; 2] = ["linux-x64", "win32-x64"];
 
 /// Largest manifest or signature that is read; a real one is a few
 /// hundred bytes.
@@ -85,7 +86,7 @@ pub fn release_target(host: Option<&'static str>) -> Result<&'static str, Update
     match host {
         Some(target) if RELEASE_TARGETS.contains(&target) => Ok(target),
         Some(target) => Err(UpdateError::Platform(format!(
-            "Bake 0.4.0 publishes native updates for {} only; native updates for {target} arrive in Bake 0.4.x",
+            "Bake publishes native updates for {} only; native updates for {target} arrive in a later release",
             RELEASE_TARGETS.join(" and ")
         ))),
         None => Err(UpdateError::Platform(format!(
@@ -491,8 +492,8 @@ mod tests {
     }
 
     #[test]
-    fn native_updates_are_published_for_the_two_linux_platforms_alone() {
-        assert_eq!(RELEASE_TARGETS, ["linux-arm64", "linux-x64"]);
+    fn native_updates_are_published_for_linux_x64_and_windows_x64_alone() {
+        assert_eq!(RELEASE_TARGETS, ["linux-x64", "win32-x64"]);
         assert!(
             RELEASE_TARGETS
                 .iter()
@@ -501,11 +502,11 @@ mod tests {
         for target in RELEASE_TARGETS {
             assert_eq!(release_target(Some(target)), Ok(target));
         }
-        for target in ["darwin-arm64", "darwin-x64", "win32-x64"] {
+        for target in ["darwin-arm64", "darwin-x64", "linux-arm64"] {
             assert_eq!(
                 release_target(Some(target)),
                 Err(UpdateError::Platform(format!(
-                    "Bake 0.4.0 publishes native updates for linux-arm64 and linux-x64 only; native updates for {target} arrive in Bake 0.4.x"
+                    "Bake publishes native updates for linux-x64 and win32-x64 only; native updates for {target} arrive in a later release"
                 )))
             );
         }

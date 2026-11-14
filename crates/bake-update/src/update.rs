@@ -455,7 +455,7 @@ pub mod tests {
         for host in [
             Some("darwin-arm64"),
             Some("darwin-x64"),
-            Some("win32-x64"),
+            Some("linux-arm64"),
             None,
         ] {
             match Updater::on_host(host, root(), Source::default(), "0.4.0") {

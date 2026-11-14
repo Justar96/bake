@@ -232,6 +232,17 @@ impl Driver {
             .lock()
             .unwrap_or_else(PoisonError::into_inner) = Projector::with_history(&session.messages());
         self.session = Arc::clone(&session);
+        if let Some(desk) = self.desk.take() {
+            desk.close();
+        }
+        self.desk = session.questions().and_then(|broker| {
+            super::questions::Desk::connect(
+                broker,
+                Arc::clone(&self.send),
+                Arc::clone(&self.dialog_ids),
+                tokio::runtime::Handle::current(),
+            )
+        });
         self.mcp = session.mcp_servers().map(McpNotices::new);
         *self.current.lock().unwrap_or_else(PoisonError::into_inner) = Arc::clone(&session);
         self.subscription = Some(subscribe(
