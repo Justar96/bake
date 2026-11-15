@@ -113,7 +113,7 @@ checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
 name = "bake-agent"
-version = "0.4.8"
+version = "0.4.9"
 dependencies = [
  "bake-ai",
  "regex",
@@ -124,7 +124,7 @@ dependencies = [
 
 [[package]]
 name = "bake-ai"
-version = "0.4.8"
+version = "0.4.9"
 dependencies = [
  "regex",
  "reqwest",
@@ -137,7 +137,7 @@ dependencies = [
 
 [[package]]
 name = "bake-codemode"
-version = "0.4.8"
+version = "0.4.9"
 dependencies = [
  "getrandom 0.4.3",
  "serde_json",
@@ -147,7 +147,7 @@ dependencies = [
 
 [[package]]
 name = "bake-coding-agent"
-version = "0.4.8"
+version = "0.4.9"
 dependencies = [
  "bake-agent",
  "bake-ai",
@@ -202,7 +202,7 @@ dependencies = [
 
 [[package]]
 name = "bake-mcp"
-version = "0.4.8"
+version = "0.4.9"
 dependencies = [
  "bake-process",
  "reqwest",
@@ -214,14 +214,14 @@ dependencies = [
 
 [[package]]
 name = "bake-mermaid"
-version = "0.4.8"
+version = "0.4.9"
 dependencies = [
  "unicode-width",
 ]
 
 [[package]]
 name = "bake-process"
-version = "0.4.8"
+version = "0.4.9"
 dependencies = [
  "getrandom 0.4.3",
  "libc",
@@ -231,7 +231,7 @@ dependencies = [
 
 [[package]]
 name = "bake-sandbox"
-version = "0.4.8"
+version = "0.4.9"
 dependencies = [
  "bake-process",
  "libc",
@@ -242,7 +242,7 @@ dependencies = [
 
 [[package]]
 name = "bake-session"
-version = "0.4.8"
+version = "0.4.9"
 dependencies = [
  "bake-agent",
  "bake-ai",
@@ -257,14 +257,14 @@ dependencies = [
 
 [[package]]
 name = "bake-svg"
-version = "0.4.8"
+version = "0.4.9"
 dependencies = [
  "resvg",
 ]
 
 [[package]]
 name = "bake-tui-view"
-version = "0.4.8"
+version = "0.4.9"
 dependencies = [
  "bake-mermaid",
  "bake-svg",
@@ -275,7 +275,7 @@ dependencies = [
 
 [[package]]
 name = "bake-update"
-version = "0.4.8"
+version = "0.4.9"
 dependencies = [
  "base64",
  "flate2",
