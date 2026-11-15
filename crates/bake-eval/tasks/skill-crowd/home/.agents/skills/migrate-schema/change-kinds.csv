@@ -1,0 +1,6 @@
+kind,code,lock,forward,rollback
+add nullable column,addcol,online,ALTER TABLE {table} ADD COLUMN {column} {type};,ALTER TABLE {table} DROP COLUMN {column};
+add column with default,adddef,blocking,ALTER TABLE {table} ADD COLUMN {column} {type} NOT NULL DEFAULT {default};,ALTER TABLE {table} DROP COLUMN {column};
+drop column,dropcol,blocking,ALTER TABLE {table} DROP COLUMN {column};,-- irreversible: restore {table}.{column} from the nightly snapshot
+add index,addidx,online,CREATE INDEX CONCURRENTLY {table}_{column}_idx ON {table} ({column});,DROP INDEX CONCURRENTLY {table}_{column}_idx;
+rename column,rencol,brief,ALTER TABLE {table} RENAME COLUMN {column} TO {new_name};,ALTER TABLE {table} RENAME COLUMN {new_name} TO {column};

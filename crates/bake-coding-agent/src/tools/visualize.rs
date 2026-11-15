@@ -291,7 +291,7 @@ pub fn create_visualize_tool_definition_with(options: VisualizeOptions) -> ToolD
         parameters(),
         move |_id, args, signal, _update, _ctx| boxed(run(options.clone(), args, signal)),
     );
-    tool.read_only = true;
+    tool.effect = Some(bake_agent::ToolEffect::Read);
     tool.replay = Some(ToolReplay::Safe);
     // A script's calls never reach the transcript, so its visual would not
     // be seen.
@@ -1418,7 +1418,7 @@ mod tests {
         let tool = &definition.tool;
         assert_eq!(tool.name, VISUALIZE_TOOL_NAME);
         assert!(!tool.nested_callable, "scripts cannot call it");
-        assert!(tool.read_only);
+        assert_eq!(tool.effect, Some(bake_agent::ToolEffect::Read));
         let result = (tool.execute)(
             "call-1".into(),
             json!({ "kind": "bar", "columns": ["a", "b"], "rows": [["x", 1]] }),

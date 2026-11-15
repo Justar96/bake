@@ -126,7 +126,7 @@ pub struct PrintModeOptions {
     pub job_wait: Duration,
 }
 
-/// Bake 0.3 headless `jobWaitMs`'s default: ten minutes.
+/// How long print mode waits for background work by default: ten minutes.
 pub const DEFAULT_JOB_WAIT: Duration = Duration::from_secs(600);
 
 /// Writes `text`, ignoring a reader that has gone away, as Pi's raw stdout
@@ -522,19 +522,25 @@ async fn run(
         Some(session.subscribe(move |event| {
             write_out(&out, &format!("{}\n", session_event_json(event)));
         }))
-    } else if !matches!(options.recovery, PrintRunRecovery::Disabled) {
+    } else {
         let out = Arc::clone(stderr);
         let file = session.session_file();
-        Some(session.subscribe(move |event| {
-            if let SessionEvent::RecoverableRunStarted { run_id } = event {
+        let recoverable = !matches!(options.recovery, PrintRunRecovery::Disabled);
+        Some(session.subscribe(move |event| match event {
+            SessionEvent::RecoverableRunStarted { run_id } if recoverable => {
                 write_out(&out, &format!("Run ID: {run_id}\n"));
                 if let Some(file) = &file {
                     write_out(&out, &format!("Session: {file:?}\n"));
                 }
             }
+            // A context file found while working that was left out.
+            SessionEvent::NestedContext { warnings, .. } => {
+                for warning in *warnings {
+                    write_out(&out, &format!("Warning: {warning}\n"));
+                }
+            }
+            _ => {}
         }))
-    } else {
-        None
     };
     let result = prompts(session, options.clone(), stderr).await;
     // Keep observers through owned summary and shutdown persistence.
@@ -645,7 +651,7 @@ fn report_remaining_recoverable_jobs(session: &AgentSession, stderr: &SharedWrit
     }
 }
 
-/// Bake 0.3 headless `settleJobs`: waits, up to `limit`, for the
+/// Waits, up to `limit`, for the
 /// session's background jobs and subagent runs and for the turns their
 /// notices open, so the answer printed is the last turn's. Returns how
 /// many were still running at the limit; the session's shutdown stops

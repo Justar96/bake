@@ -14,14 +14,8 @@
 //! `current.txt` on every run. A running process has already resolved its
 //! own release directory, so it keeps running while the pointer moves.
 //!
-//! The root is separate from Bake 0.3's (`~/.local/share/bake`,
-//! `%LOCALAPPDATA%\Bake`) and from its `BAKE_INSTALL_ROOT`: 0.4 installs
-//! beside a 0.3 install and never reads its layout ([D32], [D45]).
-//! Bake 0.3's `packages/boot/updater/src/layout.ts` is the reference for
-//! the pointer forms and for reading them without trusting their contents.
-//!
-//! [D32]: ../../../docs/roadmap/rust-0.4/scope-00/support.md
-//! [D45]: ../../../docs/roadmap/rust-0.4/scope-00/support.md
+//! A pointer is read without trusting its contents: it must name a
+//! release version.
 
 use std::ffi::OsStr;
 use std::fs;
@@ -45,7 +39,7 @@ pub enum Pointer {
     /// Unix: `current` and `previous`, relative symbolic links.
     Link,
     /// Windows: `current.txt` and `previous.txt`, each the version and a
-    /// CRLF, as `install.ps1` and the 0.3 updater write it, because
+    /// CRLF, as `install.ps1` writes it, because
     /// `bake.cmd` reads it with `set /p`. Tests use this form on any host.
     File,
 }

@@ -1,13 +1,12 @@
-//! The converter against Bake 0.3's: each expected string is what 0.3's
-//! `formatFetchOutput` (`packages/web/tool-web/src/fetch.ts`, turndown and
-//! `@joplin/turndown-plugin-gfm`) returned for the same document, after
-//! the result header. Then the ports of `tool-web.spec.ts`' "fetch
-//! formatting" cases for the depth preflight.
+//! The converter against turndown: each expected string is what turndown
+//! with `@joplin/turndown-plugin-gfm` and Bake's rules returned for the
+//! same document, after the result header. Then the fetch formatting cases
+//! for the depth preflight.
 
 use super::*;
 
-/// (document, 0.3's Markdown).
-const SAME_AS_TYPESCRIPT: &[(&str, &str)] = &[
+/// (document, expected Markdown).
+const TURNDOWN_CASES: &[(&str, &str)] = &[
     (
         "<h1>Hi</h1><p>Hello <b>world</b> <a href=\"https://x.test/a\">link</a></p><ul><li>one</li><li>two<ul><li>nested</li></ul></li></ul><table><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2|3</td></tr></table><pre><code class=\"language-rs\">fn main() {}\n</code></pre>",
         "# Hi\n\nHello **world** [link](https://x.test/a)\n\n-   one\n-   two\n    -   nested\n\n| A   | B   |\n| --- | --- |\n| 1   | 2\\|3 |\n\n```rs\nfn main() {}\n```",
@@ -99,14 +98,13 @@ const SAME_AS_TYPESCRIPT: &[(&str, &str)] = &[
 ];
 
 #[test]
-fn converts_as_the_typescript_converter_did() {
-    for (html, expected) in SAME_AS_TYPESCRIPT {
+fn converts_as_turndown_does() {
+    for (html, expected) in TURNDOWN_CASES {
         assert_eq!(html_to_markdown(html), *expected, "{html}");
     }
 }
 
-// tool-web.spec.ts: "converts html via turndown and drops active or
-// hidden content".
+// Converts HTML as turndown does and drops active or hidden content.
 #[test]
 fn drops_active_or_hidden_content() {
     assert_eq!(
@@ -204,7 +202,7 @@ fn scans_malformed_unterminated_tags_in_bounded_time() {
 
 // turndown's `fencedCodeBlock` takes only a `pre` whose first child is a
 // `code`; another `pre` stays an escaped block with its whitespace, its
-// `code` inline code. The expected strings are 0.3's output.
+// `code` inline code. The expected strings are turndown's output.
 #[test]
 fn fences_only_a_pre_that_opens_with_code() {
     assert_eq!(

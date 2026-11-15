@@ -1,4 +1,4 @@
-//! Scope 11 barrier proofs for subagents: a background child's run settles
+//! Barrier proofs for subagents: a background child's run settles
 //! just before, during, or just after its parent's running turn is aborted
 //! or the parent shuts down, and two children settle in the reverse of
 //! their start order. Each case counts the settlement notices the parent's
@@ -467,7 +467,7 @@ fn gone(pid: libc::pid_t) -> bool {
     (probe, std::io::Error::last_os_error().raw_os_error()) == (-1, Some(libc::ESRCH))
 }
 
-// Ownership, bottom-up (scope 11 addition): a parent with a running child
+// Ownership, bottom-up: a parent with a running child
 // that has a background job of its own, a background job's process of the
 // parent's, and a pending reminder. Esc aborts only the parent's turn; the
 // child, both jobs, and the timer go on. The parent's shutdown then stops

@@ -12,8 +12,8 @@ use bake_agent::{
     AfterToolCallResult, AgentContext, AgentEvent, AgentLoopConfig, AgentLoopError,
     AgentLoopTurnUpdate, AgentMessage, AgentRequestUpdate, AgentTool, AgentToolResult,
     AgentToolUpdateCallback, AgentTurnDecision, BeforeToolCallResult, CustomAgentMessage,
-    RunToolCallOptions, ToolExecutionMode, agent_loop, agent_loop_continue, hook, run_agent_loop,
-    run_tool_call, set_default_stream_fn,
+    RunToolCallOptions, ToolEffect, ToolExecutionMode, agent_loop, agent_loop_continue, hook,
+    run_agent_loop, run_tool_call, set_default_stream_fn,
 };
 use bake_ai::providers::faux::{
     FauxProvider, FauxProviderOptions, FauxResponseStep, faux_assistant_blocks, faux_text,
@@ -730,112 +730,132 @@ async fn one_sequential_tool_among_several_forces_sequential_execution() {
     assert_eq!(*order.lock().unwrap(), ["slow:a", "fast:b"]);
 }
 
-/// Bake: after a failed call of a tool that sets
-/// `failure_skips_dependents`, a batch that runs in order answers the calls
-/// that may depend on it without running them; another such tool's call and
-/// a read-only call still run.
+/// Bake: after a failed call of a `Write` tool, the later calls of the same
+/// response whose tool is neither `Read` nor `Write` (`Exec`, undeclared,
+/// or unknown) are answered without being run, across segments and when
+/// the whole batch runs one call at a time; another `Write` call and a
+/// `Read` call still run, and the next response starts clean.
 #[tokio::test]
 async fn a_failed_change_skips_the_calls_that_may_depend_on_it() {
-    let ran = executed();
-    let named = |name: &'static str, fails: bool| {
-        let ran = Arc::clone(&ran);
-        AgentTool::new(
-            name,
-            name,
-            "A tool",
-            value_schema(),
-            move |_, params, _, _, _ctx| {
-                let value = params["value"].as_str().unwrap_or_default().to_owned();
-                ran.lock().unwrap().push(format!("{name}:{value}"));
-                Box::pin(async move {
-                    if fails && value == "bad" {
-                        Err("no match".to_owned())
-                    } else {
-                        Ok(AgentToolResult::text("ok"))
-                    }
-                })
-            },
-        )
-    };
-    let mut change = named("change", true);
-    change.execution_mode = Some(ToolExecutionMode::Sequential);
-    change.failure_skips_dependents = true;
-    let check = named("check", false);
-    let mut look = named("look", false);
-    look.read_only = true;
-    let stream = agent_loop(
-        vec![user("change and check")],
-        context(vec![change, check, look]),
-        config(),
-        None,
-        Some(scripted(|index, _, _| match index {
-            0 => tool_use(vec![
-                call("tool-1", "check", json!({ "value": "before" })),
-                call("tool-2", "change", json!({ "value": "bad" })),
-                call("tool-3", "check", json!({ "value": "after" })),
-                call("tool-4", "change", json!({ "value": "good" })),
-                call("tool-5", "look", json!({ "value": "x" })),
-                call("tool-6", "missing", json!({})),
-            ]),
-            // A failed `check` stops nothing, and a batch starts clean.
-            1 => tool_use(vec![
-                call("tool-7", "change", json!({ "value": "good" })),
-                call("tool-8", "check", json!({ "value": "again" })),
-            ]),
-            _ => assistant_text("done"),
-        })),
-    );
-    let events = drain(&stream).await;
-    assert_eq!(
-        *ran.lock().unwrap(),
-        [
-            "check:before",
-            "change:bad",
-            "change:good",
-            "look:x",
-            "change:good",
-            "check:again"
-        ]
-    );
-    let ends: Vec<(String, bool, String)> = events
-        .iter()
-        .filter_map(|event| match event {
-            AgentEvent::ToolExecutionEnd {
-                tool_call_id,
-                is_error,
-                result,
-                ..
-            } => Some((tool_call_id.clone(), *is_error, result_text(result))),
-            _ => None,
-        })
-        .collect();
-    let skipped = "Not run: the change call before it in this response failed, and this call may depend on it. Fix that call, then send this one again.";
-    assert_eq!(
-        ends.iter()
-            .map(|(id, is_error, _)| (id.as_str(), *is_error))
-            .collect::<Vec<_>>(),
-        [
-            ("tool-1", false),
-            ("tool-2", true),
-            ("tool-3", true),
-            ("tool-4", false),
-            ("tool-5", false),
-            ("tool-6", true),
-            ("tool-7", false),
-            ("tool-8", false),
-        ]
-    );
-    assert_eq!(ends[2].2, skipped);
-    assert_eq!(
-        ends[5].2, skipped,
-        "an unknown tool is not known to be independent"
-    );
-    assert_eq!(
-        tool_result_ids(&events),
-        [
-            "tool-1", "tool-2", "tool-3", "tool-4", "tool-5", "tool-6", "tool-7", "tool-8"
-        ]
-    );
+    for mode in [ToolExecutionMode::Parallel, ToolExecutionMode::Sequential] {
+        let ran = executed();
+        let named = |name: &'static str, effect: Option<ToolEffect>| {
+            let ran = Arc::clone(&ran);
+            let mut tool = AgentTool::new(
+                name,
+                name,
+                "A tool",
+                value_schema(),
+                move |_, params, _, _, _ctx| {
+                    let value = params["value"].as_str().unwrap_or_default().to_owned();
+                    ran.lock().unwrap().push(format!("{name}:{value}"));
+                    Box::pin(async move {
+                        if value == "bad" {
+                            Err("no match".to_owned())
+                        } else {
+                            Ok(AgentToolResult::text("ok"))
+                        }
+                    })
+                },
+            );
+            tool.effect = effect;
+            tool
+        };
+        let tools = vec![
+            named("change", Some(ToolEffect::Write)),
+            named("check", None),
+            named("run", Some(ToolEffect::Exec)),
+            named("look", Some(ToolEffect::Read)),
+        ];
+        let mut config = config();
+        config.tool_execution = mode;
+        let stream = agent_loop(
+            vec![user("change and check")],
+            context(tools),
+            config,
+            None,
+            Some(scripted(|index, _, _| match index {
+                0 => tool_use(vec![
+                    call("tool-1", "check", json!({ "value": "before" })),
+                    call("tool-2", "change", json!({ "value": "bad" })),
+                    call("tool-3", "check", json!({ "value": "after" })),
+                    call("tool-4", "run", json!({ "value": "after" })),
+                    call("tool-5", "change", json!({ "value": "good" })),
+                    call("tool-6", "look", json!({ "value": "x" })),
+                    call("tool-7", "missing", json!({})),
+                ]),
+                // A failed `run` stops nothing, and a batch starts clean.
+                1 => tool_use(vec![
+                    call("tool-8", "run", json!({ "value": "bad" })),
+                    call("tool-9", "change", json!({ "value": "good" })),
+                    call("tool-10", "check", json!({ "value": "again" })),
+                ]),
+                _ => assistant_text("done"),
+            })),
+        );
+        let events = drain(&stream).await;
+        assert_eq!(
+            *ran.lock().unwrap(),
+            [
+                "check:before",
+                "change:bad",
+                "change:good",
+                "look:x",
+                "run:bad",
+                "change:good",
+                "check:again"
+            ],
+            "{mode:?}"
+        );
+        let ends: Vec<(String, bool, String)> = events
+            .iter()
+            .filter_map(|event| match event {
+                AgentEvent::ToolExecutionEnd {
+                    tool_call_id,
+                    is_error,
+                    result,
+                    ..
+                } => Some((tool_call_id.clone(), *is_error, result_text(result))),
+                _ => None,
+            })
+            .collect();
+        let skipped = "Not run: the change call before it in this response failed, and this call may depend on it. Fix that call, then send this one again.";
+        // `tool-7` fails in preparation and `tool-6` runs beside it, so
+        // their ends follow completion; the results keep assistant order.
+        let mut ends = ends;
+        ends.sort_by_key(|(id, _, _)| id["tool-".len()..].parse::<u32>().unwrap());
+        assert_eq!(
+            ends.iter()
+                .map(|(id, is_error, _)| (id.as_str(), *is_error))
+                .collect::<Vec<_>>(),
+            [
+                ("tool-1", false),
+                ("tool-2", true),
+                ("tool-3", true),
+                ("tool-4", true),
+                ("tool-5", false),
+                ("tool-6", false),
+                ("tool-7", true),
+                ("tool-8", true),
+                ("tool-9", false),
+                ("tool-10", false),
+            ],
+            "{mode:?}"
+        );
+        assert_eq!(ends[2].2, skipped);
+        assert_eq!(ends[3].2, skipped);
+        assert_eq!(
+            ends[6].2, skipped,
+            "an unknown tool is not known to be independent"
+        );
+        assert_eq!(
+            tool_result_ids(&events),
+            [
+                "tool-1", "tool-2", "tool-3", "tool-4", "tool-5", "tool-6", "tool-7", "tool-8",
+                "tool-9", "tool-10"
+            ]
+        );
+    }
 }
 
 /// Pi: "should allow parallel execution when all tools have
@@ -1933,7 +1953,17 @@ async fn run_tool_call_validates_runs_hooks_and_reports_failures() {
     assert_eq!(result_text(&c.result), "nope");
     let d = run("d", "missing", json!({})).await;
     assert!(d.is_error);
-    assert_eq!(result_text(&d.result), "Tool missing not found");
+    assert_eq!(
+        result_text(&d.result),
+        "Tool missing not found. Available tools: echo, failing."
+    );
+    // A name that matches one tool but for case and a namespace prefix.
+    let named = run("n", "functions.Echo", json!({ "value": "a" })).await;
+    assert!(named.is_error);
+    assert_eq!(
+        result_text(&named.result),
+        "Tool functions.Echo not found. Did you mean echo? Available tools: echo, failing."
+    );
     let e = run("e", "failing", json!({})).await;
     assert!(e.is_error);
     assert_eq!(e.result.details, Some(json!({ "partial": true })));

@@ -1,4 +1,4 @@
-//! Approval requests over the RPC protocol (D24).
+//! Approval requests over the RPC protocol.
 //!
 //! A tool call that asks for wider access reaches the session's approval
 //! broker ([`crate::permissions::ApprovalBroker`]), the same queue the

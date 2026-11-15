@@ -147,7 +147,7 @@ pub fn tool(broker: QuestionBroker) -> ToolDefinition {
     );
     // A replayed call would ask again; the recorded answer stands.
     tool.replay = Some(ToolReplay::Never);
-    tool.read_only = true;
+    tool.effect = Some(bake_agent::ToolEffect::Read);
     ToolDefinition {
         tool,
         prompt_snippet: None,

@@ -12,9 +12,9 @@ use ratatui_core::style::{Color, Modifier, Style};
 use ratatui_core::text::Span;
 use unicode_segmentation::UnicodeSegmentation;
 
-/// Verbs for a turn in progress; one is chosen per turn. The TypeScript
-/// list, extended. Each names active work: none says the turn is resting or
-/// done, and "Laminating" stays with compaction.
+/// Verbs for a turn in progress; one is chosen per turn. Each names active
+/// work: none says the turn is resting or done, and "Laminating" stays with
+/// compaction.
 pub const WORDS: &[&str] = &[
     "Baking",
     "Kneading",
@@ -69,8 +69,8 @@ pub const RUNNING_ANSI: Color = Color::Yellow;
 /// What the activity line reports, which decides its colour.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Hue {
-    /// A turn: the TypeScript palette's `running` orange, brightening toward
-    /// its progress `glint`.
+    /// A turn: the palette's `running` orange, brightening toward its
+    /// progress `glint`.
     #[default]
     Running,
     /// History compaction: the palette's `compacting` blue, brightening
@@ -153,15 +153,54 @@ pub enum Tones {
 
 impl Tones {
     /// Resolves the level from environment values that `env` returns.
-    /// `NO_COLOR` wins; `COLORTERM` of `truecolor` or `24bit` selects
-    /// [`Tones::TrueColor`].
+    ///
+    /// `NO_COLOR` wins. A set `COLORTERM` decides: `truecolor` or `24bit`
+    /// selects [`Tones::TrueColor`], anything else [`Tones::Ansi`]. Without
+    /// it, a terminal known to draw 24-bit colour is recognised by its
+    /// `TERM`, `TERM_PROGRAM`, or own variables, and so is WSL outside SSH,
+    /// since every Windows terminal that hosts it draws 24-bit colour but
+    /// few pass `COLORTERM` in. The Linux console and `dumb` stay ANSI.
     pub fn resolve(env: impl Fn(&str) -> Option<String>) -> Self {
-        if env("NO_COLOR").is_some_and(|value| !value.is_empty()) {
+        let set = |name: &str| env(name).filter(|value| !value.is_empty());
+        if set("NO_COLOR").is_some() {
             return Self::None;
         }
-        match env("COLORTERM").as_deref() {
-            Some("truecolor" | "24bit") => Self::TrueColor,
-            _ => Self::Ansi,
+        if let Some(declared) = set("COLORTERM") {
+            return match declared.as_str() {
+                "truecolor" | "24bit" => Self::TrueColor,
+                _ => Self::Ansi,
+            };
+        }
+        let term = set("TERM").unwrap_or_default();
+        if matches!(term.as_str(), "linux" | "dumb") {
+            return Self::Ansi;
+        }
+        let term_says = term.ends_with("-direct")
+            || matches!(
+                term.as_str(),
+                "xterm-kitty" | "xterm-ghostty" | "wezterm" | "alacritty" | "foot" | "foot-extra"
+            );
+        let program_says = set("TERM_PROGRAM").is_some_and(|program| {
+            matches!(
+                program.as_str(),
+                "iTerm.app" | "WezTerm" | "vscode" | "ghostty" | "Hyper" | "Tabby" | "rio"
+            )
+        });
+        let own_variable = [
+            "WT_SESSION",
+            "KITTY_WINDOW_ID",
+            "WEZTERM_PANE",
+            "GHOSTTY_RESOURCES_DIR",
+        ]
+        .iter()
+        .any(|name| set(name).is_some());
+        let wsl = set("WSL_DISTRO_NAME").is_some()
+            && set("SSH_CONNECTION").is_none()
+            && set("SSH_TTY").is_none();
+        if term_says || program_says || own_variable || wsl {
+            Self::TrueColor
+        } else {
+            Self::Ansi
         }
     }
 
@@ -232,7 +271,7 @@ mod tests {
     }
 
     #[test]
-    fn elapsed_time_reads_like_the_typescript_header() {
+    fn elapsed_time_reads_in_minutes_and_seconds() {
         assert_eq!(format_elapsed(Duration::from_millis(8_999)), "8s");
         assert_eq!(format_elapsed(Duration::from_secs(65)), "1m 05s");
         assert_eq!(format_elapsed(Duration::from_secs(600)), "10m 00s");
@@ -245,7 +284,7 @@ mod tests {
             .map(|i| pick(WORDS, &format!("sample-{i}")))
             .collect();
         assert!(distinct.len() > 4);
-        // The hash matches the TypeScript one: 31 * 'a' + 'b' = 3105.
+        // The hash is the string hash: 31 * 'a' + 'b' = 3105.
         assert_eq!(pick(&["x", "y", "z"], "ab"), ["x", "y", "z"][3105 % 3]);
     }
 
@@ -308,6 +347,30 @@ mod tests {
             Tones::resolve(env(&[("TERM", "xterm-256color")])),
             Tones::Ansi
         );
+        // A declared COLORTERM decides, whatever else is set.
+        assert_eq!(
+            Tones::resolve(env(&[("COLORTERM", "rxvt-xpm"), ("WT_SESSION", "1")])),
+            Tones::Ansi
+        );
+        // Without it, known 24-bit terminals and WSL hosts are recognised.
+        for known in [
+            &[("TERM", "xterm-kitty")][..],
+            &[("TERM", "xterm-direct")],
+            &[("TERM_PROGRAM", "vscode")],
+            &[("WT_SESSION", "0d3b")],
+            &[("TERM", "xterm-256color"), ("WSL_DISTRO_NAME", "Ubuntu")],
+        ] {
+            assert_eq!(Tones::resolve(env(known)), Tones::TrueColor, "{known:?}");
+        }
+        // WSL reached over SSH, the Linux console, and Apple's Terminal
+        // stay ANSI.
+        for plain in [
+            &[("WSL_DISTRO_NAME", "Ubuntu"), ("SSH_CONNECTION", "1 2 3 4")][..],
+            &[("TERM", "linux"), ("WSL_DISTRO_NAME", "Ubuntu")],
+            &[("TERM_PROGRAM", "Apple_Terminal")],
+        ] {
+            assert_eq!(Tones::resolve(env(plain)), Tones::Ansi, "{plain:?}");
+        }
         assert!(!Tones::None.moves());
     }
 

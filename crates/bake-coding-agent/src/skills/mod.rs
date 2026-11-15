@@ -44,6 +44,15 @@
 //!   error names the line and column but not the parser's own words.
 //! - **Diagnostics** are returned; `bake -p` does not print them, as Pi's
 //!   print mode does not.
+//! - **Escaping.** The skills list escapes only `&`, `<`, and `>` in a
+//!   skill's name, description, and location, which is all that element
+//!   text needs; Pi's `escapeXml` also writes quotes and apostrophes as
+//!   `&quot;` and `&apos;`.
+//! - **A budget.** Pi lists every description whole. Bake's list has a
+//!   budget of estimated tokens, `skills.listingTokens`
+//!   ([`DEFAULT_LISTING_TOKENS`] when unset), and a list over it is
+//!   shortened as [`format_skills_for_prompt`] describes; a list within it
+//!   is Pi's text but for the escaping.
 
 use std::collections::HashSet;
 use std::fs;
@@ -52,10 +61,13 @@ use std::path::{Path, PathBuf};
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use serde_json::Value;
 
-use crate::auth_storage::{read_text_file, strip_bom};
+use crate::auth_storage::read_text_file;
+use crate::json_store::strip_bom;
 use crate::session::paths::{lexical_normalize, normalize_path, resolve_path};
 use crate::tools::js::trim;
 
+#[cfg(test)]
+mod listing_tests;
 #[cfg(test)]
 mod tests;
 
@@ -378,7 +390,7 @@ pub fn parse_frontmatter(content: &str) -> Result<(Value, String), String> {
         return Ok((Value::Object(serde_json::Map::new()), body));
     };
     let max = usize::try_from(MAX_SKILL_FILE_BYTES).unwrap_or(usize::MAX);
-    let parsed = crate::cliproxyapi::yaml::parse_document(yaml.as_bytes(), max)
+    let parsed = crate::yaml::parse_document(yaml.as_bytes(), max)
         .map_err(|error| format!("Frontmatter {error}"))?;
     let parsed = if parsed.is_null() {
         Value::Object(serde_json::Map::new())
@@ -512,28 +524,93 @@ pub enum SkillReader {
     Indirect,
 }
 
-/// Pi's `escapeXml`.
+/// The estimated tokens the skills list may take when
+/// `skills.listingTokens` is unset.
+pub const DEFAULT_LISTING_TOKENS: u64 = 4000;
+
+/// The fewest characters a shortened description keeps; a description no
+/// longer than this is never shortened.
+pub const DESCRIPTION_FLOOR: usize = 120;
+
+/// The sentence the list opens with when a description in it is shortened
+/// or left out.
+pub const SHORTENED_NOTICE: &str =
+    "Some descriptions below are shortened or left out; a skill's file holds the whole one.";
+
+/// Pi's `escapeXml` for element text: `&`, `<`, and `>` only.
 fn escape_xml(text: &str) -> String {
     text.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&apos;")
 }
 
-/// Pi's `formatSkillsForPrompt`: the skills list in the Agent Skills XML
-/// form, leaving out skills with `disable-model-invocation`; empty when no
-/// skill remains.
-pub fn format_skills_for_prompt(skills: &[Skill], reader: SkillReader) -> String {
-    let visible: Vec<&Skill> = skills
-        .iter()
-        .filter(|skill| !skill.disable_model_invocation)
-        .collect();
-    if visible.is_empty() {
-        return String::new();
+/// How much of each description a list carries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Cut {
+    /// Every description whole.
+    Whole,
+    /// Descriptions longer than this many characters shortened to it, at a
+    /// word boundary.
+    Cap(usize),
+    /// Descriptions at [`DESCRIPTION_FLOOR`], and the last this many skills
+    /// without one.
+    Drop(usize),
+}
+
+/// `description` kept to about `cap` characters: whole when it is no
+/// longer, else up to the end of its last word that ends within `cap`
+/// characters and at or after [`DESCRIPTION_FLOOR`], or, with none there,
+/// the end of the first word that ends after `cap`, then `…`. A pure
+/// function of its arguments, nondecreasing in `cap`; it never splits a
+/// character.
+fn shorten(description: &str, cap: usize) -> String {
+    let chars: Vec<char> = description.chars().collect();
+    if chars.len() <= cap {
+        return description.to_owned();
     }
+    // A word ends at `end` when the character before it is not whitespace
+    // and the character at it is.
+    let ends_word =
+        |end: usize| end > 0 && !chars[end - 1].is_whitespace() && chars[end].is_whitespace();
+    let end = (DESCRIPTION_FLOOR..=cap)
+        .rev()
+        .find(|&end| ends_word(end))
+        .or_else(|| (cap + 1..chars.len()).find(|&end| ends_word(end)));
+    match end {
+        Some(end) => {
+            let mut kept: String = chars[..end].iter().collect();
+            kept.push('…');
+            kept
+        }
+        None => description.to_owned(),
+    }
+}
+
+/// The list's text with `cut` applied to `visible`.
+fn render_skills(visible: &[&Skill], reader: SkillReader, cut: Cut) -> String {
+    let descriptions: Vec<Option<String>> = visible
+        .iter()
+        .enumerate()
+        .map(|(index, skill)| match cut {
+            Cut::Whole => Some(skill.description.clone()),
+            Cut::Cap(cap) => Some(shorten(&skill.description, cap)),
+            Cut::Drop(dropped) => (index + dropped < visible.len())
+                .then(|| shorten(&skill.description, DESCRIPTION_FLOOR)),
+        })
+        .collect();
+    let shortened = descriptions
+        .iter()
+        .zip(visible)
+        .any(|(description, skill)| description.as_deref() != Some(skill.description.as_str()));
+    let opening = if shortened {
+        format!(
+            "\n\nThe following skills provide specialized instructions for specific tasks. {SHORTENED_NOTICE}"
+        )
+    } else {
+        "\n\nThe following skills provide specialized instructions for specific tasks.".to_owned()
+    };
     let mut lines = vec![
-        "\n\nThe following skills provide specialized instructions for specific tasks.".to_owned(),
+        opening,
         match reader {
             SkillReader::Read => {
                 "Use the read tool to load a skill's file when the task matches its description."
@@ -548,13 +625,15 @@ pub fn format_skills_for_prompt(skills: &[Skill], reader: SkillReader) -> String
         String::new(),
         "<available_skills>".to_owned(),
     ];
-    for skill in visible {
+    for (skill, description) in visible.iter().zip(descriptions) {
         lines.push("  <skill>".to_owned());
         lines.push(format!("    <name>{}</name>", escape_xml(&skill.name)));
-        lines.push(format!(
-            "    <description>{}</description>",
-            escape_xml(&skill.description)
-        ));
+        if let Some(description) = description {
+            lines.push(format!(
+                "    <description>{}</description>",
+                escape_xml(&description)
+            ));
+        }
         lines.push(format!(
             "    <location>{}</location>",
             escape_xml(&skill.file_path)
@@ -563,6 +642,73 @@ pub fn format_skills_for_prompt(skills: &[Skill], reader: SkillReader) -> String
     }
     lines.push("</available_skills>".to_owned());
     lines.join("\n")
+}
+
+/// Pi's `formatSkillsForPrompt`: the skills list in the Agent Skills XML
+/// form, leaving out skills with `disable-model-invocation`; empty when no
+/// skill remains.
+///
+/// Bake's budget: the list takes at most `listing_tokens` estimated tokens
+/// ([`bake_ai::utils::estimate::estimate_text_tokens`]) when it can. Within
+/// it, every description is whole. Over it, the longest descriptions are
+/// shortened to one length, the longest that fits and at least
+/// [`DESCRIPTION_FLOOR`] characters, each cut at a word boundary and ending
+/// in `…`. When even that does not fit, skills from the end of the list
+/// lose their description one by one, the rest kept at the floor; past
+/// that the list is names and locations only, over the budget, since no
+/// skill is left out. Any shortened list opens with [`SHORTENED_NOTICE`].
+/// The order is kept, and the result is a pure function of the skills, the
+/// reader, and the budget; a larger budget never shortens more.
+pub fn format_skills_for_prompt(
+    skills: &[Skill],
+    reader: SkillReader,
+    listing_tokens: u64,
+) -> String {
+    let visible: Vec<&Skill> = skills
+        .iter()
+        .filter(|skill| !skill.disable_model_invocation)
+        .collect();
+    if visible.is_empty() {
+        return String::new();
+    }
+    let fits = |cut: Cut| {
+        let text = render_skills(&visible, reader, cut);
+        (bake_ai::utils::estimate::estimate_text_tokens(&text) <= listing_tokens).then_some(text)
+    };
+    if let Some(text) = fits(Cut::Whole) {
+        return text;
+    }
+    // The largest cap that fits, by bisection: the text only grows with the
+    // cap, since each description does.
+    let longest = visible
+        .iter()
+        .map(|skill| skill.description.chars().count())
+        .max()
+        .unwrap_or(0);
+    if longest > DESCRIPTION_FLOOR && fits(Cut::Cap(DESCRIPTION_FLOOR)).is_some() {
+        let (mut low, mut high) = (DESCRIPTION_FLOOR, longest);
+        while low < high {
+            let middle = low + (high - low).div_ceil(2);
+            if fits(Cut::Cap(middle)).is_some() {
+                low = middle;
+            } else {
+                high = middle - 1;
+            }
+        }
+        return render_skills(&visible, reader, Cut::Cap(low));
+    }
+    // The fewest descriptions dropped from the end that fits, by bisection:
+    // the text only shrinks as more are dropped.
+    let (mut low, mut high) = (0, visible.len());
+    while low < high {
+        let middle = low + (high - low) / 2;
+        if fits(Cut::Drop(middle)).is_some() {
+            high = middle;
+        } else {
+            low = middle + 1;
+        }
+    }
+    render_skills(&visible, reader, Cut::Drop(low))
 }
 
 /// What [`load_skills`] reads, Pi's `LoadSkillsOptions` for Bake's roots.

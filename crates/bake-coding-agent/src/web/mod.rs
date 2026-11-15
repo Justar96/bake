@@ -2,31 +2,24 @@
 //! ([`crate::tools::web_tools`]): an anonymous public HTTP(S) fetcher and a
 //! search that runs through the CLIProxyAPI route.
 //!
-//! Pi v1.3.0 (`71023aec`; MIT, see the crate `NOTICE`) has no web tools.
-//! Ported from Bake 0.3's TypeScript and its tests:
+//! Pi v1.3.0 (`71023aec`; MIT, see the crate `NOTICE`) has no web tools;
+//! these are Bake's own.
 //!
-//! | Module | TypeScript source |
+//! | Module | Contents |
 //! |---|---|
-//! | this module ([`WebError`] and its codes) | `packages/web/web/src/{index,types}.ts` |
-//! | [`policy`] | `packages/web/web-fetch-http/src/{policy,network}.ts` (URL, content-type, charset, and public-address rules) |
-//! | [`fetch`](mod@fetch) | `packages/web/web-fetch-http/src/{provider,network,index}.ts` |
-//! | [`html`] | the HTML conversion of `packages/web/tool-web/src/fetch.ts` |
-//! | [`search`] | `packages/web/web-search-deepseek/src/{provider,types}.ts` |
-//!
-//! `docs/subsystems/web.md` describes the 0.3 design. 0.3 selected one
-//! provider per capability through the `ctx.web` registry; Bake has
-//! exactly one of each, so the registry and its selection codes
-//! (`WEB_PROVIDER_AMBIGUOUS` and the like) are not ported.
+//! | this module ([`WebError`] and its codes) | the failures and their codes |
+//! | [`policy`] | URL, content-type, charset, and public-address rules |
+//! | [`fetch`](mod@fetch) | the public fetcher |
+//! | [`html`] | the HTML-to-Markdown conversion |
+//! | [`search`] | the search request and its results |
 //!
 //! # Search through CLIProxyAPI
 //!
-//! 0.3 searched with DeepSeek's Anthropic-compatible endpoint. By the
-//! owner's decision, the Rust search keeps that request's structure (an
-//! Anthropic Messages request carrying the server-side
-//! `web_search_20250305` tool, results taken only from structured
-//! `web_search_tool_result` blocks) and sends it through the session's
-//! CLIProxyAPI route instead, with one of the route's Anthropic Messages
-//! models ([`search::select_search_model`]).
+//! A search is an Anthropic Messages request carrying the server-side
+//! `web_search_20250305` tool, with results taken only from structured
+//! `web_search_tool_result` blocks, sent through the session's CLIProxyAPI
+//! route with one of the route's Anthropic Messages models
+//! ([`search::select_search_model`]).
 
 pub mod fetch;
 pub mod html;
@@ -37,14 +30,13 @@ pub(crate) mod test_server;
 
 use std::fmt;
 
-/// A failure to search or to retrieve and represent a resource
-/// (`WebError`). The message is what the model reads; the code is for
+/// A failure to search or to retrieve and represent a resource. The message is what the model reads; the code is for
 /// callers that branch on the cause.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WebError {
     /// One of the `WEB_*` codes.
     pub code: &'static str,
-    /// The failure, in 0.3's words.
+    /// The failure, as the model reads it.
     pub message: String,
 }
 

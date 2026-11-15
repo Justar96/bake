@@ -97,8 +97,7 @@ async fn run(tool: &AgentTool, params: Value) -> Result<AgentToolResult, String>
     .await
 }
 
-/// Bake's `SENSITIVE_ENV_PATTERN` contract from
-/// `packages/subprocess/subprocess/src/index.ts`, through the real bash tool.
+/// Bake's credential-name scrub, through the real bash tool.
 /// The re-executed fixture owns its environment; parallel tests inherit none
 /// of these synthetic values.
 #[tokio::test]
@@ -373,7 +372,7 @@ fn definition_and_prompt_match_pi() {
     assert_eq!(declaration.parameters, definition["parameters"]);
 
     // Pi's one guideline names the `PI_*` variables, so Bake's tool
-    // contributes none (D33); the snippet is Pi's.
+    // contributes none; the snippet is Pi's.
     let prompt = bash_tool_prompt();
     assert_eq!(prompt.name, "bash");
     assert_eq!(
@@ -390,9 +389,24 @@ fn definition_and_prompt_match_pi() {
     assert!(prompt.guidelines.is_empty());
 }
 
+/// Bake's texts for the invalid timeouts where they differ from Pi's: a
+/// value of 0 or less states the rule, and both say how to run without a
+/// timeout.
+fn bake_timeout_error(pi: &str, name: &str) -> String {
+    const WITHOUT: &str = "Leave timeout out to run the command without one.";
+    match name {
+        "timeout-zero" | "timeout-negative" => {
+            format!("Invalid timeout: must be greater than 0 seconds. {WITHOUT}")
+        }
+        "timeout-over-max" => format!("{pi}. {WITHOUT}"),
+        _ => pi.to_owned(),
+    }
+}
+
 /// Failures Pi's local operations raise before spawning: invalid timeouts,
-/// "should throw error when cwd does not exist", and "should pass shellPath
-/// through to shell resolution".
+/// with Bake's texts ([`bake_timeout_error`]), "should throw error when cwd
+/// does not exist", and "should pass shellPath through to shell
+/// resolution".
 #[tokio::test]
 async fn local_failures_before_spawn_match_pi() {
     let oracle = golden();
@@ -414,7 +428,11 @@ async fn local_failures_before_spawn_match_pi() {
             },
         );
         let error = run(&tool, case["params"].clone()).await.unwrap_err();
-        assert_eq!(error, case["error"].as_str().unwrap(), "{name}");
+        assert_eq!(
+            error,
+            bake_timeout_error(case["error"].as_str().unwrap(), name),
+            "{name}"
+        );
     }
 }
 

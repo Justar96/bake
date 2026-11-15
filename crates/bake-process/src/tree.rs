@@ -30,7 +30,7 @@
 //!
 //! A descendant that starts its own session (Unix) or breaks away from the
 //! job (Windows) leaves the tree: it is neither killed nor awaited, as it
-//! escapes Pi. The tree is cleanup, not containment; D24's sandbox is the
+//! escapes Pi. The tree is cleanup, not containment; Bake's sandbox is the
 //! boundary.
 //!
 //! One Linux exception: a PID namespace a member of the tree started. Its

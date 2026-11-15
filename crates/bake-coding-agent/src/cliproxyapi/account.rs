@@ -1,21 +1,13 @@
 //! The CLIProxyAPI account `bake` keeps in the Bake home: sign-in,
 //! sign-out, and catalog refresh, written to `settings.json` and
-//! `auth.json` only. D25 reads Bake 0.3's `settings.yaml` and
-//! `.credentials.yaml` through [`super::import`] and never writes them.
-//!
-//! The behavior follows Bake's retained contract:
-//! `apps/tui/packages/app/src/cliproxyapi.ts` (`configureCliProxyApi`,
-//! `refreshCliProxyModels`) and `apps/tui/packages/app/src/login.ts`
-//! (`logout`, which removes the route, then the key). The files and the
-//! binding below belong to Bake 0.4.
+//! `auth.json` only. A sign-out removes the route, then the key.
 //!
 //! # Format
 //!
 //! - **Route:** the `cliproxyapi` member of `settings.json`
 //!   ([`crate::settings::CliProxySetting`]). It holds
 //!   [`CliProxyRoute::to_settings_json`] plus an `account` member, an
-//!   opaque generation. `null` means signed out. Any present value
-//!   suppresses the 0.3 route import.
+//!   opaque generation. `null` means signed out.
 //! - **Key:** `auth.json`'s `cliproxyapi` record, a Pi API-key credential
 //!   with the same `account` member.
 //!
@@ -42,9 +34,8 @@
 //! In each of these cases readers find either a matching pair or a
 //! disabled account. A bound `auth.json` record is no credential to
 //! [`AuthStorage`]'s ordinary reads, so even when `settings.json` has lost
-//! its member and the 0.3 route is imported again, the bound key is never
-//! sent there. A `settings.json` that cannot be read disables the account
-//! and suppresses the import, rather than falling back. No reader finds a
+//! its member, the bound key is never sent to another route. A
+//! `settings.json` that cannot be read disables the account. No reader finds a
 //! route with another sign-in's key.
 //! Disabled shows as a startup warning and, in the session, as no
 //! `cliproxyapi` provider; signing in again recovers. The registry takes
@@ -96,7 +87,7 @@ const MAX_SETTINGS_BYTES: u64 = 16 * 1024 * 1024;
 /// The account as one read of the home finds it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AccountView {
-    /// No `cliproxyapi` member: the 0.3 import may supply a route.
+    /// No `cliproxyapi` member: never signed in.
     Absent,
     /// `null`: signed out.
     SignedOut,
@@ -253,8 +244,8 @@ pub struct LogoutCommitted {
 /// What a refresh did.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RefreshOutcome {
-    /// There is no signed-in account to refresh: the member is absent (a
-    /// route only the 0.3 import holds is never refreshed) or `null`.
+    /// There is no signed-in account to refresh: the member is absent or
+    /// `null`.
     NotSignedIn,
     /// The account is off, for this reason ([`AccountView::Disabled`]).
     Disabled(String),
@@ -479,8 +470,8 @@ impl CliProxyAccount {
         }
     }
 
-    /// Signs out: the member becomes `null`, so neither the account's route
-    /// nor the 0.3 import's is used again, then the key leaves `auth.json`.
+    /// Signs out: the member becomes `null`, so the account's route is not
+    /// used again, then the key leaves `auth.json`.
     /// Blocks.
     pub fn logout(&self) -> Result<LogoutCommitted, AccountError> {
         let _lock = self.lock()?;
@@ -543,8 +534,7 @@ impl CliProxyAccount {
     /// Brings `registry` to the account as stored now. A bound account
     /// becomes the `cliproxyapi` provider, below `models.json`, with its key
     /// bound. A signed-out or disabled one leaves no route or bound key. An
-    /// absent member leaves the registry as it is, so a route from the 0.3
-    /// import stays. For [`ModelRuntime::try_update`]. Returns a warning
+    /// absent member leaves the registry as it is. For [`ModelRuntime::try_update`]. Returns a warning
     /// when the account is disabled, and `Err`, with the registry
     /// unchanged, when the route does not compose. Blocks.
     pub fn apply_to(&self, registry: &mut ModelRegistry) -> Result<Option<String>, String> {

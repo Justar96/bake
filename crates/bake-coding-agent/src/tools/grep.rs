@@ -100,7 +100,7 @@ pub(crate) fn owned_grep_tool_definition(
             boxed(execute(cwd.clone(), owner.clone(), args, signal))
         },
     );
-    tool.read_only = true;
+    tool.effect = Some(bake_agent::ToolEffect::Read);
     tool.replay = Some(ToolReplay::Safe);
     ToolDefinition {
         tool,

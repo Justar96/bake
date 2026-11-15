@@ -23,11 +23,13 @@
 //! - Pi's session hosts the runner. Here the agent loop does, so the hooks
 //!   a session installs on its agent (and the tools it activates) are the
 //!   nested pipeline, and no session code runs nested calls.
-//! - Exclusivity follows the loop's own rule for running a batch one call
-//!   at a time: a nested call runs exclusively when the agent executes
-//!   sequentially, when its tool is sequential, or, with
-//!   `max_concurrent_read_tools`, when its tool is not read-only. That
-//!   limit's cap on concurrent reads applies to the model's batches only.
+//! - Exclusivity follows the loop's own rule for running a call alone: a
+//!   nested call runs exclusively when the agent executes sequentially,
+//!   when its tool is sequential, when its tool declares
+//!   [`ToolEffect::Write`] or [`ToolEffect::Exec`], or, with
+//!   `max_concurrent_read_tools`, when its tool is not
+//!   [`ToolEffect::Read`] (an unknown tool included). That limit's cap on
+//!   concurrent reads applies to the model's batches only.
 //! - A calling tool's nested calls cannot outlive it. Each runs as a task
 //!   its caller's scope owns, so a future the tool holds without polling
 //!   neither stalls the call nor keeps the exclusive queue. When the
@@ -72,7 +74,10 @@ use tokio::task::JoinSet;
 
 use crate::agent_loop::{
     CatchUnwind, ToolCallHooks, create_error_tool_result, elapsed_ms, find_tool, run_tool_call_in,
+    runs_alone,
 };
+#[cfg(doc)]
+use crate::types::ToolEffect;
 use crate::types::{
     AfterToolCall, AgentContext, AgentEvent, AgentEventSink, AgentTool, AgentToolCallOutcome,
     AgentToolResult, AgentToolUpdateCallback, BeforeToolCall, BoxFuture, ToolContext,
@@ -322,13 +327,8 @@ impl NestedPipeline {
     /// The loop's rule for running a call alone.
     fn is_exclusive(&self, tool: Option<&AgentTool>) -> bool {
         self.tool_execution == ToolExecutionMode::Sequential
-            || match tool {
-                Some(tool) => {
-                    tool.execution_mode == Some(ToolExecutionMode::Sequential)
-                        || (self.max_concurrent_read_tools.is_some() && !tool.read_only)
-                }
-                None => self.max_concurrent_read_tools.is_some(),
-            }
+            || tool.is_some_and(|tool| tool.execution_mode == Some(ToolExecutionMode::Sequential))
+            || runs_alone(tool, self.max_concurrent_read_tools.is_some())
     }
 
     async fn emit(&self, event: AgentEvent) {
@@ -764,7 +764,14 @@ async fn outcome(
         Value::Object(arguments) => arguments,
         other => {
             let error = match tool {
-                None => format!("Tool {name} not found"),
+                None => {
+                    let available: Vec<&str> = site
+                        .callable
+                        .iter()
+                        .map(|tool| tool.name.as_str())
+                        .collect();
+                    crate::unknown_tool::unknown_tool_message(name, &available)
+                }
                 Some(tool) => validate_tool_arguments(&tool.parameters, name, &other)
                     .err()
                     .unwrap_or_else(|| {

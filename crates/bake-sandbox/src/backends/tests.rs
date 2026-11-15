@@ -1,8 +1,5 @@
 //! Chain selection, caching, probe parsing, wrap shapes, and fail-closed
-//! refusals through the real `confine` path, following `describe('the
-//! platform chains')`, `describe('the default landlock probe')`,
-//! `describe('probeTimeoutMs config')`, and `describe('the default seatbelt
-//! probe')` in `packages/sandbox/sandbox-local/tests/local.spec.ts`. Fake
+//! refusals through the real `confine` path. Fake
 //! runners are shell scripts run through `/bin/sh`, so no test executes a
 //! file it has just written. Real enforcement is in `tests/enforcement.rs`.
 
@@ -551,7 +548,7 @@ mod fake_runners {
 
     #[tokio::test]
     async fn only_the_contract_report_lines_count_as_landlock() {
-        // Stricter than TypeScript, which read any zero exit as full.
+        // A zero exit alone does not prove full enforcement.
         for (report, status) in [
             ("", 0),
             ("landlock: fully enforced", 0),

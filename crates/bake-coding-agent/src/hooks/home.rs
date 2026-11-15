@@ -1,9 +1,8 @@
 //! The hooks files `settings.json` names, read under the owner rules of
 //! `$BAKE_HOME/mcp.json` ([`crate::mcp::home`]).
 //!
-//! Bake 0.3 pointed each bridge's `configPath` at a `hooks.json`; bake
-//! takes the same paths from the `hooks` member of `settings.json`
-//! ([`HookSettings`]). A path may start with `~/`; a relative one is read
+//! bake takes the `hooks.json` paths from the `hooks` member of
+//! `settings.json` ([`HookSettings`]). A path may start with `~/`; a relative one is read
 //! from the Bake home. A hooks file runs commands and decides which tool
 //! calls run, so, as for `mcp.json`, it must be a regular file that only
 //! its owner (or root) can change, in directories only they can change,
@@ -127,7 +126,7 @@ fn load(
     if read as u64 > MAX_HOOKS_FILE_BYTES {
         return Err(format!("larger than {MAX_HOOKS_FILE_BYTES} bytes"));
     }
-    let raw: Value = serde_json::from_str(crate::auth_storage::strip_bom(&text))
+    let raw: Value = serde_json::from_str(crate::json_store::strip_bom(&text))
         .map_err(|error| format!("is not valid JSON: {error}"))?;
     let parsed = parse_hooks(&raw, dialect)?;
     Ok((parsed.groups, parsed.skipped))

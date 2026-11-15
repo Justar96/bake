@@ -1,7 +1,4 @@
-//! The model-facing names of MCP tools, a retained Bake contract.
-//!
-//! Ported from `publicToolName` in Bake's
-//! `packages/mcp/mcp-client/src/tools.ts`: every MCP tool has the identity
+//! The model-facing names of MCP tools, Bake's own contract: every MCP tool has the identity
 //! `(server, tool)` and the public name `mcp__<server>__<tool>`. When a
 //! character outside `[A-Za-z0-9_-]` is replaced or the name is cut to 64
 //! characters, the first 12 hex digits of the identity's SHA-256 are
@@ -29,7 +26,8 @@ fn normalize(text: &str) -> String {
         if character.is_ascii_alphanumeric() || matches!(character, '_' | '-') {
             normalized.push(character);
         } else {
-            // The TypeScript regex replaces each UTF-16 code unit.
+            // Each UTF-16 code unit is replaced, so a name's length does not
+            // depend on the encoding of the character.
             for _ in 0..character.len_utf16() {
                 normalized.push('_');
             }
@@ -75,12 +73,11 @@ pub fn public_tool_name(server: &str, tool: &str) -> String {
 mod tests {
     use super::*;
 
-    /// Names recorded from the TypeScript `publicToolName` contract, whose
-    /// shapes are pinned by `packages/mcp/mcp-client/tests/mcp-client.spec.ts`.
+    /// Recorded names that pin the naming contract.
     const RECORDED: &str = include_str!("../../tests/fixtures/mcp/public-names.json");
 
     #[test]
-    fn names_match_the_typescript_algorithm() {
+    fn names_match_the_recorded_contract() {
         let cases: Vec<(String, String, String)> = serde_json::from_str(RECORDED).unwrap();
         assert!(cases.len() >= 8);
         for (server, tool, expected) in cases {
@@ -92,7 +89,6 @@ mod tests {
         }
     }
 
-    // `mcp-client.spec.ts`, "publicToolName".
     #[test]
     fn clean_names_join_verbatim_and_others_are_hashed() {
         assert_eq!(

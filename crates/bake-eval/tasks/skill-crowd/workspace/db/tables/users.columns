@@ -1,0 +1,5 @@
+id BIGINT not-null
+email TEXT not-null
+created_at TIMESTAMPTZ not-null
+display_name TEXT null
+disabled BOOLEAN not-null

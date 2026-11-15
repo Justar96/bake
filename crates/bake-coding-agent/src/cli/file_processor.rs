@@ -14,8 +14,9 @@ use std::path::Path;
 
 use bake_ai::ImageContent;
 
-use crate::auth_storage::{read_text_file, strip_bom};
+use crate::auth_storage::read_text_file;
 use crate::cli::MAX_STDIN_BYTES;
+use crate::json_store::strip_bom;
 use crate::tools::image::{
     ImageResizeOptions, MAX_DECODE_ALLOC, ProcessedImage, mime, process_image,
 };

@@ -1,0 +1,73 @@
+# Evaluations
+
+A change to what a model reads or to how the agent loop runs is measured before it lands: prompts, tools, results and errors, context, compaction, caching, the loop, and model adapters. `bake-eval` runs two built `bake` executables, the base and the candidate, on the same tasks, models, and trial numbers, and reports the difference pair by pair. Each record here is one such run.
+
+## Running one
+
+Build the base from a clean worktree of the base `develop` commit and the candidate from the change, both in release mode, then run from the repository root:
+
+```sh
+cargo build --release --locked -p bake-eval
+target/release/bake-eval check-tasks
+target/release/bake-eval run \
+  --base <base worktree>/target/release/bake \
+  --candidate target/release/bake \
+  --models gemini-4-hydrogen-xhigh:high,gpt-6.1-sol:high,claude-opus-5-5:high \
+  --trials 5 --jobs 6 \
+  --out docs/evaluations/<date>-<name>
+```
+
+- `check-tasks` reaches no model. It proves that every task's check fails on the untouched workspace and passes on the task's solution.
+- `run` needs live models. It copies the provider account, and nothing else, from the Bake home (`BAKE_HOME`, else `~/.bake`; `--home` names another) into each sample's own home and removes it when the sample ends. Models are named as `--model` takes them, with `:level` for the thinking level; one without a provider belongs to `--provider`, `cliproxyapi` unless given.
+- It writes `run.json` (the parameters), `samples.jsonl` (one record a sample, appended as samples finish), and `README.md` (the report) into `--out`, and refuses a directory that already holds a run. `bake-eval report --out <dir>` writes the report again from the other two.
+- `--base-settings <file>` and `--candidate-settings <file>` give an arm's samples `settings.json` members, so one executable can be measured with a setting off and on.
+- `--only <task,...>` runs some tasks, `--keep-work` with `--work <dir>` keeps each sample's workspace, session, and event stream for reading, and `bake-eval help` lists the rest.
+
+Tasks are shell and Python scripts, so evaluations run on Linux with `python3`. Each run uses Bake's default permission, `danger-full-access`, in a temporary directory.
+
+## Reading one
+
+- A sample passes when its run ends in `success` and the task's check exits 0. Compare the pass counts first: a change that saves tokens and fails more tasks is a regression.
+- A change is the ratio of the sums over the pairs both arms measured, with a 95% bootstrap interval over those pairs. One large task can decide that ratio, so under each model's table the report also gives requests and tokens with every task weighing the same; with the whole task set, read that line first.
+- An interval is a guide, not a test. Two of the runs whose arms were identical produced one interval that narrowly excludes zero (Gemini's model requests), so a single such interval among many is weak evidence; a change counts when it is larger than the noise floor's width, appears in more than one model, or repeats.
+- Samples share the host. When several samples of one task run at once, an agent that finds processes by name can see or stop another sample's: in `hanging-command`, agents were seen running `pkill -f` on the name of the CLI the task starts. Read that task's numbers with this in mind.
+- Read every change against the noise floor: a record whose two arms are the same executable, run with the same tasks, models, and trial count. A change whose interval lies inside the noise floor's interval is not distinguishable from noise.
+- `add-flag`, `cascade-fix`, `fix-test`, `log-count`, `rename-api`, and `trace-question` are small and take three to six model requests each; the other seven took four to fourteen in their first live runs, with many tool calls a request, and each exercises one harness behavior: a command that never returns, output larger than a tool result keeps, a nested `AGENTS.md`, a user-level skill, one skill among forty-three, a cause far from its symptom, and a refactor across many files. In those runs the three models passed every task, so the set measures cost far better than it measures correctness. None of them measures compaction, subagents, MCP servers, or the terminal.
+
+## Tasks
+
+The tasks are in [`crates/bake-eval/tasks`](../../crates/bake-eval/tasks/); [the crate](../../crates/bake-eval/src/task.rs) documents their layout.
+
+| Task | What it asks for |
+|---|---|
+| `add-flag` | Add a command-line option with tests, keeping the old output |
+| `cascade-fix` | Make a release check pass that reveals one failure at a time |
+| `fix-test` | Fix two bugs that failing unit tests point at |
+| `hanging-command` | Fix a job runner whose test suite never returns, because a CLI it starts in its own session hangs, then a second failure |
+| `hidden-cause-bug` | Fix wrong order totals with two causes in shared helpers, one behind two indirections, in a 30-module package |
+| `large-output` | Make a build pass whose problems sit mid-output in 150 to 220 KB per run, revealed one phase at a time |
+| `log-count` | Count and locate lines in a 6,000-line log with look-alike lines |
+| `multi-module-refactor` | Replace a global registry with an explicit object across a 36-module package with a lookup cache and lazy readers |
+| `nested-instructions` | Add an endpoint and change another in a subtree whose own `AGENTS.md`, one of several, sets conventions |
+| `rename-api` | Rename a function across code, tests, documentation, and a string key |
+| `skill-crowd` | File a database migration with the exact files, template, and lookup table one user-level skill prescribes, found among 43 skills with long descriptions, several of them near misses |
+| `skill-procedure` | Prepare a release with the exact files a user-level skill and its template prescribe, overriding an outdated in-repo guide |
+| `trace-question` | Answer a question about a codebase without changing it |
+
+Adding or changing a task changes what every later record measures: run a new noise floor with it.
+
+## Records
+
+| Record | What it measured |
+|---|---|
+| [2026-11-14, noise floor of 0.4.8](2026-11-14-noise-floor-0.4.8/README.md) | Bake 0.4.8 against itself on the six tasks, with Gemini 4 Hydrogen, GPT-6.1 Sol, and Claude Opus 5.5 at `high`, five trials. All 180 samples passed. With these tasks, models, and trial count, a change in total tokens within about ±9% (Gemini), ±7% (GPT), or ±6% (Claude), or in model requests within about ±7%, ±5%, or ±5%, is noise |
+| [2026-11-15, tool effects](2026-11-15-tool-effects/README.md) | Tool effects (declared effects and the segment scheduler; no prompt or tool text changed) against `4ed086385c` on the first six tasks, same models and trial count as the 0.4.8 noise floor. All 180 samples passed, and every measure's interval contains zero and lies within that noise floor's width: no change beyond noise. The tasks use no MCP server, so the cost of running MCP tools in order is not measured, and run times were taken while other evaluation runs shared the host |
+| [2026-11-15, noise floor of the twelve tasks](2026-11-15-noise-floor-twelve-tasks/README.md) | The tool-effects build against itself on all twelve tasks, same models, five trials. All 360 samples passed. With every task weighing the same, a change in total tokens within about ±11% (Gemini), ±11% (GPT), or ±8% (Claude), or in model requests within about ±7%, ±5%, or ±6%, is noise; the ratio of sums is far wider (up to ±28% in tokens), because `multi-module-refactor` alone uses a third or more of the tokens |
+| [2026-11-15, commands as jobs](2026-11-15-commands-as-jobs/README.md) | A foreground `bash` call that returns after `bash.foregroundSeconds` while its command continues as a job, with the new sentence in the `bash` description, against the tool-effects build on all twelve tasks, five trials. All 360 samples passed, and no measure moved beyond the twelve-task noise floor (the one interval that excludes zero, Gemini's requests at -3.1%, is inside that floor's width). No command ran for 300 seconds, so these runs measured the changed description only; the handover itself is covered by the crate's tests and by the probe below |
+| [2026-11-15, foreground budget probe](2026-11-15-foreground-budget-probe/README.md) | The commands-as-jobs build with `bash.foregroundSeconds` at its default against 20, on `hanging-command`, five trials. All 30 samples passed, and no command was handed over: the models gave every long command a `timeout` or started it in the background themselves. With the description stating 20 seconds, Claude used 56% more tokens (34% to 79%) and 21% more requests; the other two models did not move beyond their intervals. A low budget is therefore not free even when it never applies |
+| [2026-11-15, handover probe](2026-11-15-handover-probe/README.md) | The same two arms on two tasks kept beside the record, not shipped: a 45-second build asked for plainly, and the same build with a prompt that forbids a timeout and the background. All 36 samples passed. Under the plain prompt no command was handed over. Under the forced one, Claude and Gemini were handed the job in all six samples, read it with `job_output`, and answered, for one more request; GPT gave a `timeout` anyway (first `0`, which is refused), so it was never handed a job |
+| [2026-11-15, noise floor of the skill tasks](2026-11-15-noise-floor-skill-tasks/README.md) | The model-profiles build against itself on `skill-procedure` and `skill-crowd`, ten trials. All 120 samples passed. With every task weighing the same, total tokens stayed within about ±10% and model requests within about ±8% |
+| [2026-11-15, skills listing](2026-11-15-skills-listing/README.md) | The budgeted skills listing (`skills.listingTokens`, 4,000) against the model-profiles build on the same two tasks, ten trials. All 120 samples passed in both arms. On `skill-crowd`, whose 43 user skills make an 8,200-token listing, mean tokens fell by 16% (Gemini), 30% (GPT), and 34% (Claude) with requests unchanged, and every model still chose the right skill; with every task weighing the same, total tokens fell by 12.0%, 13.8%, and 18.3%, beyond the noise floor. `skill-procedure`, whose one skill fits the budget, did not move. Not measured: a needed skill among those that keep only a name (the last nine of the 43) |
+| [2026-11-15, nested context files](2026-11-15-nested-context-files/README.md) | One build with `nestedContextFiles` off against on, on `nested-instructions`, ten trials. All 60 samples passed in both arms. With it on, the handlers' `AGENTS.md` reached the model in all 30 samples, as did one to three files of directories the task does not need. No benefit was measured: with it off the models already read those files with their tools (Claude in 8 of 10 samples, the other two in all 10), and with it on they still did. Total tokens moved by -23% for Claude, +19% for Gemini, and -2% for GPT, which is inside what this one task varies between identical runs (Claude's samples range from 84,000 to 200,000 tokens). The setting stays off by default |
+| [2026-11-15, recovery texts](2026-11-15-recovery-texts/README.md) | The three reworded errors (an unknown tool, a failed `edit` match, a refused `bash` `timeout`) against the nested-context build on all thirteen tasks, five trials. All 390 samples passed. Gemini and GPT did not move. Claude's failed tool calls rose from 7 to 22 and its requests by 4.2% (1.0% to 7.6%) with every task weighing the same; the next record ran the same candidate executable and counted 11 failed calls with requests at -1.3%, and Claude's count ranges from 7 to 22 over the eight arms recorded so far, so this is read as the two ends of a sparse measure, not as an effect. The runs kept no event streams, so how often a reworded error was shown is not known: the record shows no harm and does not show a benefit |
+| [2026-11-15, the runtime so far against develop](2026-11-15-runtime-against-develop/README.md) | A clean build of `4ed086385c` against the tree with tool effects, commands as jobs, model profiles, the skills listing budget, nested context files (off), and the recovery texts, on all thirteen tasks, five trials. The candidate passed 195 of 195 and the base 193: one base run of `multi-module-refactor` reached the 900-second run deadline, and one met a service error. With every task weighing the same, no model's requests or tokens moved beyond the noise floor (tokens -0.2%, +1.3%, and -2.8%). The skills budget does not show here because only `skill-crowd` has a listing over the budget |

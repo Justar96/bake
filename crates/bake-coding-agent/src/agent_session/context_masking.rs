@@ -30,14 +30,13 @@ pub(super) fn observation_details(
     enabled: bool,
 ) -> Option<Value> {
     let name = &context.tool_call.name;
-    let eligible = enabled
-        && !context.is_error
-        && eligible_name(Some(name))
-        && context
-            .context
-            .tools
-            .iter()
-            .any(|tool| tool.name == *name && tool.read_only);
+    let eligible =
+        enabled
+            && !context.is_error
+            && eligible_name(Some(name))
+            && context.context.tools.iter().any(|tool| {
+                tool.name == *name && tool.effect == Some(bake_agent::ToolEffect::Read)
+            });
     let mut details = match context.result.details.as_ref() {
         Some(Value::Object(details)) => details.clone(),
         None if eligible => serde_json::Map::new(),

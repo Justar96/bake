@@ -151,7 +151,7 @@ pub(crate) fn owned_read_tool_definition(
         },
     );
     tool.output_schema = Some(output_schema());
-    tool.read_only = true;
+    tool.effect = Some(bake_agent::ToolEffect::Read);
     tool.replay = Some(ToolReplay::Safe);
     tool.constrained_sampling = Some(ConstrainedSampling::JsonSchema {
         strict: StrictPreference::Prefer,

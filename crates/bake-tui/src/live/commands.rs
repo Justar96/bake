@@ -3,14 +3,11 @@
 //! `/clone`, `/compact`, `/login`, `/logout`, `/refresh-models`,
 //! `/changelog`, `/share`, and `/bug`.
 //!
-//! `/permission [preset]` keeps Bake 0.3's runtime command
-//! (`packages/interaction/permission-presets/src/index.ts` at
-//! `97ce6abba01fddb5ed532b60a2e25a1e134b5244`): a preset named exactly
+//! `/permission [preset]` is Bake's own command: a preset named exactly
 //! switches the session at once and answers `preset NAME`; an unknown name
-//! is refused with the presets and the usage, on one line where the
-//! TypeScript text took two, since the draft's notice is one row. Without
-//! a name, a list of
-//! the preset table opens, as `/thinking`'s does: Enter switches this
+//! is refused with the presets and the usage, on one line, since the
+//! draft's notice is one row. Without a name, a list of the preset table
+//! opens, as `/thinking`'s does: Enter switches this
 //! session, and Ctrl+S also saves `permission.defaultPreset` for new
 //! sessions ([`AgentSession::set_permission_preset`]).
 //!
@@ -28,15 +25,14 @@
 //! `/session`, `/name`, `/new`, and `/resume` follow Pi v1.2.0
 //! `interactive-mode.ts` (`handleSessionCommand`, `handleNameCommand`,
 //! `handleClearCommand`, `showSessionSelector`, `handleResumeSession`) and
-//! `core/agent-session-runtime.ts` (`newSession`, `switchSession`), with the
-//! TypeScript navigation's rules (`apps/tui/packages/app/src/navigation.ts`):
-//! a running turn refuses a replacement, an untitled session is listed as
-//! such, and `/resume` lists only the working directory's sessions. A
-//! replacement is staged: [`bake_coding_agent::cli::SessionFactory`] builds
-//! the new session apart from the running one, and the driver swaps them
-//! only while idle and not cancelled ([`Done::Replace`]). `/resume` answers
-//! with a session id, which a fresh listing resolves to its file. No sheet
-//! sends a model request.
+//! `core/agent-session-runtime.ts` (`newSession`, `switchSession`), with
+//! Bake's rules: a running turn refuses a replacement, an untitled session is
+//! listed as such, and `/resume` lists only the working directory's sessions.
+//! A replacement is staged: [`bake_coding_agent::cli::SessionFactory`] builds
+//! the new session apart from the running one, and the driver swaps them only
+//! while idle and not cancelled ([`Done::Replace`]). `/resume` answers with a
+//! session id, which a fresh listing resolves to its file. No sheet sends a
+//! model request.
 //!
 //! `/tree` follows Pi v1.3.0 (`71023aec1546d6d677a65669c5665c0927ce0dd0`)
 //! `interactive-mode.ts` (`showTreeSelector` with its branch-summary
@@ -85,9 +81,8 @@
 //! a settled session from the sheet to the upload.
 //!
 //! `/login`, `/logout`, and `/refresh-models` keep Bake's CLIProxyAPI
-//! contract: `apps/tui/packages/app/src/cliproxyapi.ts`
-//! (`configureCliProxyApi`, `refreshCliProxyModels`) and
-//! `apps/tui/packages/app/src/login.ts` (`logout`). They write through
+//! contract: they set up or remove the route and refresh its model list,
+//! and they write through
 //! [`bake_coding_agent::cliproxyapi::account`].
 //!
 //! Each command runs as one task the driver owns. The task asks through
@@ -472,8 +467,8 @@ impl Context {
 }
 
 /// Why a command refuses `argument` before doing anything: `/login` and
-/// `/logout` know CLIProxyAPI alone, since D8 and D48 defer every other
-/// provider to a later release, and `/refresh-models`, `/settings`, and
+/// `/logout` know CLIProxyAPI alone, since every other provider is
+/// planned for a later release, and `/refresh-models`, `/settings`, and
 /// the session commands take no argument.
 pub fn refuse_argument(name: &str, argument: &str) -> Option<String> {
     match name {
@@ -530,7 +525,7 @@ fn model_ref(model: &Model) -> String {
     format!("{}/{}", model.provider, model.id)
 }
 
-/// A token count as the TypeScript sheet's facts write it: `200k`, `1M`.
+/// A token count as the model sheet's facts write it: `200k`, `1M`.
 fn tokens(count: u64) -> String {
     if count >= 1_000_000 && count.is_multiple_of(100_000) {
         let tenths = count / 100_000;
@@ -546,7 +541,7 @@ fn tokens(count: u64) -> String {
     }
 }
 
-/// The `/model` sheet's title, the TypeScript `modelSheetPrompt`'s: how
+/// The `/model` sheet's title: how
 /// many models, from which providers.
 fn model_title(models: &[Model]) -> String {
     let mut providers: Vec<&str> = Vec::new();
@@ -640,15 +635,14 @@ fn natural(a: &str, b: &str) -> std::cmp::Ordering {
     }
 }
 
-/// The `/model` sheet's rows, after the TypeScript `modelSheetPrompt`:
-/// a section for each provider, in its order, and in it a group for each
-/// lab that makes its models, `Anthropic`, `Google`, `OpenAI`, and so on,
-/// in alphabetical order with models of no known lab last under `Other`;
-/// each lab's models in natural order, so a model's variants sit
-/// together. Each row is labelled with its readable name, its context
-/// window, thinking, and image facts in columns, and its id as its detail,
-/// and shows its exact `provider/id` route under the list while selected.
-/// The route is each row's value, which typing matches.
+/// The `/model` sheet's rows: a section for each provider, in its order, and
+/// in it a group for each lab that makes its models, `Anthropic`, `Google`,
+/// `OpenAI`, and so on, in alphabetical order with models of no known lab
+/// last under `Other`; each lab's models in natural order, so a model's
+/// variants sit together. Each row is labelled with its readable name, its
+/// context window, thinking, and image facts in columns, and its id as its
+/// detail, and shows its exact `provider/id` route under the list while
+/// selected. The route is each row's value, which typing matches.
 fn model_items(models: &[Model]) -> Vec<ListItem> {
     let mut providers: Vec<&str> = Vec::new();
     for model in models {
@@ -1054,8 +1048,8 @@ async fn new_session(context: &Context) -> Outcome {
     })
 }
 
-/// How long ago `ms` was, from `now`, as the TypeScript session picker
-/// writes ages: `now`, `5m`, `3h`, `2d`.
+/// How long ago `ms` was, from `now`, as the session picker writes ages:
+/// `now`, `5m`, `3h`, `2d`.
 fn age(ms: i64, now: i64) -> String {
     let minutes = (now.saturating_sub(ms) / 60_000).max(0);
     if minutes < 1 {
@@ -1069,8 +1063,8 @@ fn age(ms: i64, now: i64) -> String {
     }
 }
 
-/// The first block of eight hex digits of a session id, as the TypeScript
-/// picker's `shortId` tells sessions apart, or the id.
+/// The first block of eight hex digits of a session id, which tells
+/// sessions apart in the picker, or the id.
 fn short_id(id: &str) -> &str {
     let bytes = id.as_bytes();
     (0..bytes.len().saturating_sub(7))
@@ -1126,7 +1120,7 @@ impl SessionFilter for ResumeSearch {
 }
 
 /// `/resume`, Pi's `showSessionSelector` and `handleResumeSession`, laid
-/// out as the TypeScript session picker: this directory's saved sessions,
+/// out as Bake's session picker: this directory's saved sessions,
 /// newest first, each by its name or first message, with its age and short
 /// id, and its first message under the list while selected; the running
 /// session is marked current, wherever the selection is. Typing searches
@@ -1867,11 +1861,11 @@ async fn refresh(context: &Context) -> Outcome {
 /// What a note says of a committed write whose directory flush failed.
 const UNSYNCED: &str = "may not survive a power loss";
 
-/// The once-per-launch refresh, Bake's `runner.ts` background
-/// `refreshCliProxyModels`: only a signed-in account, keeping the models in
-/// use (`models_in_use`); bounded by `CATALOG_TIMEOUT`'s fetch and the
-/// abort signal. It is quiet, as Bake's is, except that a route write it
-/// committed but could not flush goes to the transcript through `send`.
+/// The once-per-launch background refresh of the CLIProxyAPI models: only
+/// a signed-in account, keeping the models in use (`models_in_use`);
+/// bounded by `CATALOG_TIMEOUT`'s fetch and the abort signal. It is quiet,
+/// except that a route write it committed but could not flush goes to the
+/// transcript through `send`.
 pub async fn startup_refresh(
     session: Arc<AgentSession>,
     home: PathBuf,
@@ -2007,7 +2001,7 @@ mod tests {
     }
 
     #[test]
-    fn helpers_format_as_the_typescript_picker() {
+    fn helpers_format_as_the_session_picker() {
         assert_eq!(tokens(200_000), "200k");
         assert_eq!(tokens(1_000_000), "1M");
         assert_eq!(tokens(1_500_000), "1.5M");
@@ -2046,7 +2040,7 @@ mod tests {
     #[test]
     fn share_bug_and_changelog_take_pi_s_arguments() {
         assert!(refuse_argument("share", "now").is_some());
-        assert!(refuse_argument("changelog", "0.3").is_some());
+        assert!(refuse_argument("changelog", "0.4").is_some());
         assert_eq!(refuse_argument("bug", "it broke"), None);
         assert_eq!(refuse_argument("bug", ""), None);
         assert_eq!(IDLE, ["share", "bug"]);

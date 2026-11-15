@@ -1,0 +1,35 @@
+{
+  "name": "nested context files",
+  "date": "2026-11-14",
+  "base": {
+    "path": "/home/jtar-wsl/bake/.artifacts/eval/bake-m5b",
+    "version": "bake 0.4.8",
+    "bytes": 72043920
+  },
+  "candidate": {
+    "path": "/home/jtar-wsl/bake/.artifacts/eval/bake-m5b",
+    "version": "bake 0.4.8",
+    "bytes": 72043920
+  },
+  "same_executable": true,
+  "base_settings": {},
+  "candidate_settings": {
+    "nestedContextFiles": true
+  },
+  "models": [
+    "cliproxyapi/gemini-4-hydrogen-xhigh:high",
+    "cliproxyapi/gpt-6.1-sol:high",
+    "cliproxyapi/claude-opus-5-5:high"
+  ],
+  "tasks": [
+    [
+      "nested-instructions",
+      "Add `GET /products/{id}/stock`, answering `{\"id\": <id>, \"in_stock\": <units>}` with the number of units of the product we can sell right now, and a 404 for a product that does not exist. Also include the same `in_stock` number in what `GET /products/{id}` returns. Add tests for both."
+    ]
+  ],
+  "trials": 10,
+  "jobs": 6,
+  "max_model_calls": 60,
+  "run_timeout_ms": 900000,
+  "host": "linux/x86_64"
+}

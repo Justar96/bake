@@ -9,9 +9,6 @@
 //! accepted, and a complete release needs both. The version must be newer
 //! than every native release already published, local and live: a channel
 //! never moves backward.
-//!
-//! Ported from Bake's `scripts/release/assemble-rust.ts` (revision
-//! 97ce6abba0).
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};

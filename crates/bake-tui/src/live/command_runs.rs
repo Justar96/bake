@@ -59,8 +59,7 @@ impl Driver {
         });
     }
 
-    /// Why the session cannot be replaced now, as the TypeScript
-    /// navigation's `unavailable`: a turn runs, prompts wait, or the
+    /// Why the session cannot be replaced now: a turn runs, prompts wait, or the
     /// session compacts or retries. `None` when it can.
     pub(super) fn busy(&self, running: Option<&Running>) -> Option<String> {
         if running.is_some() || self.session.is_streaming() {

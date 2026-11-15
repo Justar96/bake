@@ -1,6 +1,6 @@
 //! Cases from Pi v1.3.0 `test/rpc-prompt-response-semantics.test.ts` and
 //! `test/rpc.test.ts`, named after the Pi test each follows, plus Bake's
-//! approval cases (D24). They run the RPC loop over in-memory pipes
+//! approval cases. They run the RPC loop over in-memory pipes
 //! against `bake-ai`'s faux provider, as the session tests do.
 //!
 //! Each of Pi's RPC cases (v1.3.0, `71023aec1546d6d677a65669c5665c0927ce0dd0`)
@@ -32,10 +32,10 @@
 //! | `rpc.test.ts`: should set and get session name | [`should_set_and_get_session_name`] |
 //! | `rpc-prompt-response-semantics.test.ts`: emits one failure response when prompt preflight rejects | [`emits_one_failure_response_when_prompt_preflight_rejects`], [`pipelined_prompts_each_answer_for_themselves`] |
 //! | `rpc-prompt-response-semantics.test.ts`: emits one started response when prompt preflight succeeds | [`emits_one_started_response_when_prompt_preflight_succeeds`], [`pipelined_prompts_each_answer_for_themselves`] |
-//! | `rpc-prompt-response-semantics.test.ts`: reports extension commands and intercepted input as handled without starting a run | Excluded: no extensions (D43), so nothing registers a command or intercepts input |
+//! | `rpc-prompt-response-semantics.test.ts`: reports extension commands and intercepted input as handled without starting a run | Excluded: no extensions, so nothing registers a command or intercepts input |
 //! | `rpc-prompt-response-semantics.test.ts`: emits one success response when prompt is queued during streaming | [`returns_and_clears_queued_steering_and_follow_up_messages`] |
-//! | `rpc-prompt-response-semantics.test.ts`: reports %s as handled even when an extension queues another message | Excluded: no extension `input` handler (D43) |
-//! | `rpc-prompt-response-semantics.test.ts`: reports %s as queued after input transformation | Excluded: no extension `input` handler (D43) |
+//! | `rpc-prompt-response-semantics.test.ts`: reports %s as handled even when an extension queues another message | Excluded: no extension `input` handler |
+//! | `rpc-prompt-response-semantics.test.ts`: reports %s as queued after input transformation | Excluded: no extension `input` handler |
 //! | `rpc-prompt-response-semantics.test.ts`: returns and clears queued steering and follow-up messages | [`returns_and_clears_queued_steering_and_follow_up_messages`] |
 //! | `rpc-jsonl.test.ts`: serializes strict JSONL records without escaping Unicode separators | `jsonl.rs` `serializes_strict_jsonl_records_without_escaping_unicode_separators` |
 //! | `rpc-jsonl.test.ts`: splits on LF only and preserves U+2028/U+2029 inside payloads | `jsonl.rs` `splits_on_lf_only_and_preserves_unicode_separators_inside_payloads` |

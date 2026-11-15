@@ -2,18 +2,13 @@
 //! `send_message`, `interrupt_agent`, and `list_agents` for a parent, and
 //! `send_message` alone for a child.
 //!
-//! Ported from Bake's TypeScript `packages/subagent/tool-subagent/src/{index,list-models}.ts`
-//! and `packages/subagent/tool-subagent-control/src/{index,list-agents}.ts`
-//! under the 0.3 default surface (`backgroundMode: continuable`): the
-//! names, parameters, descriptions, and result texts. Differences: the
-//! model-choice texts, which every request carries once more than one
+//! Children are continuable: a background child returns its id at once.
+//! The model-choice texts, which every request carries once more than one
 //! model is available, are cut to what the model needs, and say that
 //! omitted fields inherit the caller's route, since Bake has no task router
-//! yet; `interrupt_agent` drops "its own subagents keep running";
-//! `list_agents` has no `scope`, since with no nested children its
-//! `descendants` are its `children`, drops the depth-1 remark, and adds each
-//! child's route to its row; and a call with no calling agent cannot occur,
-//! so those errors are gone. The model-choice fields and
+//! yet; `list_agents` has no `scope`, since with no nested children its
+//! `descendants` are its `children`, and adds each child's route to its
+//! row. The model-choice fields and
 //! `list_subagent_models` are shown when more than one model is available.
 
 use bake_agent::{AgentTool, AgentToolResult, ToolReplay};
@@ -104,6 +99,8 @@ pub fn child_tools(link: &ParentLink) -> Vec<ToolDefinition> {
         },
     );
     tool.replay = Some(ToolReplay::Never);
+    // Coordination with no workspace effect of its own: runs beside other calls.
+    tool.execution_mode = Some(bake_agent::ToolExecutionMode::Parallel);
     vec![definition(tool)]
 }
 
@@ -151,6 +148,8 @@ fn subagent_tool(host: SubagentHost, model_choice: bool) -> ToolDefinition {
         },
     );
     tool.replay = Some(ToolReplay::Never);
+    // Coordination with no workspace effect of its own: runs beside other calls.
+    tool.execution_mode = Some(bake_agent::ToolExecutionMode::Parallel);
     definition(tool)
 }
 
@@ -252,7 +251,7 @@ fn list_models_tool(host: SubagentHost) -> ToolDefinition {
         },
     );
     tool.replay = Some(ToolReplay::Safe);
-    tool.read_only = true;
+    tool.effect = Some(bake_agent::ToolEffect::Read);
     definition(tool)
 }
 
@@ -291,6 +290,8 @@ fn parent_send_message_tool(host: SubagentHost) -> ToolDefinition {
         },
     );
     tool.replay = Some(ToolReplay::Never);
+    // Coordination with no workspace effect of its own: runs beside other calls.
+    tool.execution_mode = Some(bake_agent::ToolExecutionMode::Parallel);
     definition(tool)
 }
 
@@ -314,6 +315,8 @@ fn interrupt_tool(host: SubagentHost) -> ToolDefinition {
         },
     );
     tool.replay = Some(ToolReplay::Never);
+    // Coordination with no workspace effect of its own: runs beside other calls.
+    tool.execution_mode = Some(bake_agent::ToolExecutionMode::Parallel);
     definition(tool)
 }
 
@@ -346,6 +349,6 @@ fn list_agents_tool(host: SubagentHost) -> ToolDefinition {
         },
     );
     tool.replay = Some(ToolReplay::Safe);
-    tool.read_only = true;
+    tool.effect = Some(bake_agent::ToolEffect::Read);
     definition(tool)
 }

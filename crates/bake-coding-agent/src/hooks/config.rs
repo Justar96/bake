@@ -1,19 +1,17 @@
-//! Parsing a Claude Code or Codex `hooks.json`, ported from Bake 0.3's
-//! `packages/hooks/hooks-claude-code/src/config.ts` and
-//! `packages/hooks/hooks-codex/src/config.ts`.
+//! Parsing a Claude Code or Codex `hooks.json`.
 //!
 //! Both read a settings object whose `hooks` member holds the event map,
 //! or the bare event map. Only the five events [`HookEvent`] names run;
 //! other events are ignored before their groups are read, so they cannot
 //! invalidate the file, except that Claude Code's `SubagentStart` and
-//! `SubagentStop`, which 0.3 ran, are reported as not run. Malformed
+//! `SubagentStop` are reported as not run. Malformed
 //! entries are dropped; non-command hooks, and Codex's `async: true`
 //! hooks, are skipped with a warning; an invalid matcher on a runnable
 //! group rejects the whole file. `UserPromptSubmit` and `Stop` have no
 //! matcher subject, so their matchers are discarded before validation.
 //!
-//! Not ported: 0.3's `${CLAUDE_PLUGIN_ROOT}` and `${CLAUDE_PROJECT_DIR}`
-//! substitution, which needed a configured root. The shell expands
+//! Not supported: `${CLAUDE_PLUGIN_ROOT}` and `${CLAUDE_PROJECT_DIR}`
+//! substitution, which needs a configured root. The shell expands
 //! `${CLAUDE_PROJECT_DIR}` from the variable every Claude Code hook gets.
 
 use std::time::Duration;
@@ -176,8 +174,6 @@ pub fn parse_hooks(raw: &Value, dialect: HookDialect) -> Result<ParsedHooks, Str
 
 #[cfg(test)]
 mod tests {
-    //! Ported from 0.3's `hooks-claude-code/tests/config.spec.ts` and
-    //! `hooks-codex/tests/config.spec.ts`.
     use serde_json::json;
 
     use super::*;

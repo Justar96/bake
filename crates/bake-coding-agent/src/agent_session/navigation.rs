@@ -434,6 +434,9 @@ impl AgentSession {
                     };
                     // Under the session lock, so no reader sees the new leaf
                     // with the old transcript.
+                    core.nested.restore(&super::nested_context::recorded_paths(
+                        &session.branch_entries(None),
+                    ));
                     core.refresh_context(&session.build_session_projection());
                     Ok(Ok(TreeNavigation {
                         moved: true,

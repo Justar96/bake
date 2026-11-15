@@ -1,6 +1,4 @@
-//! Canonical paths and containment, from `canonicalPath` in
-//! `packages/sandbox/sandbox/src/roots.ts` and `isPathUnder` in
-//! `packages/fs/fs-sandbox/src/containment.ts`.
+//! Canonical paths and containment.
 
 use std::path::{Component, Path, PathBuf};
 
@@ -8,8 +6,8 @@ use std::path::{Component, Path, PathBuf};
 /// and the enforcement layers see it. When the path or a prefix does not
 /// exist, the longest existing prefix is resolved and the rest appended
 /// lexically, so a file about to be created gets the identity it will have.
-/// The TypeScript `canonicalPath` returned a missing path unchanged; the
-/// prefix resolution keeps a new file under a linked workspace inside it.
+/// The prefix resolution keeps a new file under a linked workspace inside
+/// it.
 pub fn canonical_path(path: &Path) -> PathBuf {
     if let Ok(resolved) = std::fs::canonicalize(path) {
         return strip_verbatim(resolved);

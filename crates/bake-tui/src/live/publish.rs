@@ -3,8 +3,33 @@
 //! status line.
 
 use super::*;
-use bake_coding_agent::spawned::{SpawnHost, SpawnedState};
+use bake_coding_agent::spawned::{SpawnHost, SpawnedState, read_transcript};
 use bake_tui_view::crew::{CrewMember, CrewState};
+
+/// The shortest time between two reads of a watched transcript while its
+/// agent keeps writing it.
+const CREW_READ_EVERY: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// The spawned agent whose transcript the view shows: its session file once
+/// found, the file's size and modification time at the last read, and when
+/// that read was.
+pub(super) struct CrewWatch {
+    id: u64,
+    file: Option<std::path::PathBuf>,
+    seen: Option<(u64, std::time::SystemTime)>,
+    read_at: Option<std::time::Instant>,
+}
+
+impl CrewWatch {
+    pub(super) fn new(id: u64) -> Self {
+        Self {
+            id,
+            file: None,
+            seen: None,
+            read_at: None,
+        }
+    }
+}
 
 /// The host's agents as the crew panel draws them.
 pub(super) fn crew(host: &SpawnHost) -> Vec<CrewMember> {
@@ -67,6 +92,52 @@ impl Driver {
             let crew = self.session.spawned().map(crew).unwrap_or_default();
             self.send(RuntimeUpdate::Crew(crew));
         }
+        self.publish_crew_log(false);
+    }
+
+    /// Sends the watched agent's transcript when its session file changed,
+    /// at most every [`CREW_READ_EVERY`], or now when `force`d. The file is
+    /// read without a lock ([`read_transcript`]); a watch on an agent the
+    /// session no longer has ends.
+    pub(super) fn publish_crew_log(&mut self, force: bool) {
+        let Some(watch) = self.crew_watch.as_mut() else {
+            return;
+        };
+        let Some(host) = self
+            .session
+            .spawned()
+            .filter(|host| host.list().iter().any(|agent| agent.id == watch.id))
+        else {
+            self.crew_watch = None;
+            return;
+        };
+        let due = force
+            || watch
+                .read_at
+                .is_none_or(|at| at.elapsed() >= CREW_READ_EVERY);
+        if !due {
+            return;
+        }
+        if watch.file.is_none() {
+            watch.file = host.session_file(watch.id);
+        }
+        let Some(file) = watch.file.clone() else {
+            return;
+        };
+        let stamp = std::fs::metadata(&file)
+            .ok()
+            .and_then(|meta| Some((meta.len(), meta.modified().ok()?)));
+        if !force && stamp.is_some() && stamp == watch.seen {
+            return;
+        }
+        watch.read_at = Some(std::time::Instant::now());
+        let Ok(messages) = read_transcript(&file) else {
+            return;
+        };
+        watch.seen = stamp;
+        let id = watch.id;
+        let rows = projection::replay(&messages);
+        self.send(RuntimeUpdate::CrewLog { id, rows });
     }
 
     /// Sends the pending panel: the session's queues and the driver's own.

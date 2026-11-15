@@ -14,11 +14,9 @@
 //! and Bake's own `permission` section ([`crate::permissions`]),
 //! `terminal.notifications`, `statusLine` (the status line's optional
 //! readings), `webSearch.model` ([`crate::web::search`]), and
-//! `maxToolArgumentWhitespace` (Bake's route option in
-//! `packages/llm/llm-pi-ai/src/config.ts`). Pi reads `~/.pi/agent/settings.json` and
+//! `maxToolArgumentWhitespace` (Bake's route option). Pi reads `~/.pi/agent/settings.json` and
 //! merges a project's `.pi/settings.json` over it; Bake reads
-//! `$BAKE_HOME/settings.json` only. Bake 0.3's `settings.yaml` beside it is
-//! a different file, which this module does not read (D25).
+//! `$BAKE_HOME/settings.json` only.
 //!
 //! [`SettingsStore`] writes the file, porting the global-scope saves of
 //! `SettingsManager` (Pi v1.2.0, `06a466935536f8c9bcacb2d5efc0fc021be1bdff`)
@@ -59,8 +57,9 @@ use bake_agent::QueueMode;
 use bake_ai::ModelThinkingLevel;
 use serde_json::{Map, Value};
 
-use crate::auth_storage::{read_text_file, strip_bom};
+use crate::auth_storage::read_text_file;
 use crate::compaction::CompactionSettings;
+use crate::json_store::strip_bom;
 use crate::json_store::{JsonFileStore, StoreError, remove_member, set_member};
 use crate::model_registry::resolver::parse_thinking_level;
 use crate::session::json::{js_number_to_string, js_truthy};
@@ -103,6 +102,26 @@ pub struct Settings {
     /// `maxConcurrentReadTools` as stored, checked by
     /// [`Self::read_tool_concurrency`]. Absent preserves unlimited batches.
     pub max_concurrent_read_tools: Option<Value>,
+    /// `bash.foregroundSeconds` as stored, checked by
+    /// [`Self::bash_foreground_budget`]. Bake's own.
+    pub bash_foreground_seconds: Option<Value>,
+    /// `nestedContextFiles` as stored, checked by
+    /// [`Self::nested_context_files`]. Bake's own.
+    pub nested_context_files: Option<Value>,
+    /// Set by the caller when context files are not loaded for the run
+    /// (`-nc`): no file is then found while working either. Not a
+    /// `settings.json` member.
+    pub no_context_files: bool,
+    /// `skills.listingTokens` as stored, checked by
+    /// [`Self::skills_listing_tokens`]. Bake's own.
+    pub skills_listing_tokens: Option<Value>,
+    /// `modelProfiles` as stored, checked by [`Self::model_profiles`].
+    /// Bake's own.
+    pub model_profiles: Option<Value>,
+    /// Set by the caller when the active tools were chosen explicitly, as
+    /// `--tools` chooses them: the profiles' `tools` members then change
+    /// nothing ([`Self::model_profile`]). Not a `settings.json` member.
+    pub explicit_tools: bool,
     /// `taskDocuments`: enables the versioned task document tool and context.
     pub task_documents: bool,
     /// `subagents`: gives a top-level session the subagent tools
@@ -183,12 +202,10 @@ pub struct Settings {
 
 /// The `cliproxyapi` member of `settings.json`, which `bake` owns: a
 /// login writes the route there, a logout writes `null`, and a refresh
-/// replaces its `models`. Any present value, `null` included, takes the
-/// route's place in the read-only 0.3 import (D25), so a signed-out route
-/// is not imported again.
+/// replaces its `models`.
 #[derive(Clone, Default, PartialEq)]
 pub enum CliProxySetting {
-    /// No member: the 0.3 import applies.
+    /// No member: never signed in.
     #[default]
     Absent,
     /// `null`: signed out; no route.
@@ -287,6 +304,12 @@ impl Default for Settings {
             images_auto_resize: None,
             default_tools: None,
             max_concurrent_read_tools: None,
+            bash_foreground_seconds: None,
+            skills_listing_tokens: None,
+            nested_context_files: None,
+            no_context_files: false,
+            model_profiles: None,
+            explicit_tools: false,
             task_documents: false,
             subagents: false,
             telecom: false,
@@ -451,6 +474,53 @@ mod read_concurrency_tests {
                     .unwrap(),
             );
             assert!(settings.read_tool_concurrency().is_err(), "{value}");
+        }
+    }
+
+    // `bash.foregroundSeconds`: 300 when unset, any positive integer, and
+    // anything else an error.
+    #[test]
+    fn the_foreground_budget_is_a_positive_integer() {
+        let budget = |value: serde_json::Value| {
+            Settings::from_object(
+                serde_json::json!({ "bash": { "foregroundSeconds": value } })
+                    .as_object()
+                    .unwrap(),
+            )
+            .bash_foreground_budget()
+        };
+        assert_eq!(
+            Settings::default().bash_foreground_budget(),
+            Ok(std::time::Duration::from_secs(300))
+        );
+        let unrelated = Settings::from_object(
+            serde_json::json!({ "bash": { "other": 1 } })
+                .as_object()
+                .unwrap(),
+        );
+        assert_eq!(
+            unrelated.bash_foreground_budget(),
+            Ok(std::time::Duration::from_secs(300))
+        );
+        for seconds in [1_u64, 45, 86_400] {
+            assert_eq!(
+                budget(serde_json::json!(seconds)),
+                Ok(std::time::Duration::from_secs(seconds))
+            );
+        }
+        for value in [
+            serde_json::json!(0),
+            serde_json::json!(-5),
+            serde_json::json!(2.5),
+            serde_json::json!("60"),
+            serde_json::json!(null),
+            serde_json::json!(true),
+        ] {
+            assert_eq!(
+                budget(value.clone()),
+                Err("Invalid bash.foregroundSeconds setting: expected a positive integer.".into()),
+                "{value}"
+            );
         }
     }
 }
@@ -636,6 +706,18 @@ impl Settings {
             schedules: object.get("schedules").and_then(Value::as_bool) == Some(true),
             hooks: HookSettings::from_value(object.get("hooks")),
             max_concurrent_read_tools: object.get("maxConcurrentReadTools").cloned(),
+            bash_foreground_seconds: object
+                .get("bash")
+                .and_then(|bash| bash.get("foregroundSeconds"))
+                .cloned(),
+            skills_listing_tokens: object
+                .get("skills")
+                .and_then(|skills| skills.get("listingTokens"))
+                .cloned(),
+            nested_context_files: object.get("nestedContextFiles").cloned(),
+            no_context_files: false,
+            model_profiles: object.get("modelProfiles").cloned(),
+            explicit_tools: false,
             compaction: object.get("compaction").cloned(),
             background_compaction: object.get("backgroundCompaction").and_then(Value::as_bool)
                 == Some(true),
@@ -704,6 +786,127 @@ impl Settings {
                     })
             })
             .transpose()
+    }
+
+    /// How long a `bash` call without `timeout` waits before its command
+    /// continues as a background job ([`crate::tools::bash::BashToolOptions::foreground_budget`]):
+    /// `bash.foregroundSeconds`, a positive integer, else
+    /// [`crate::tools::bash::DEFAULT_FOREGROUND_SECONDS`]. An invalid
+    /// explicit value fails session creation, as
+    /// [`Self::read_tool_concurrency`]'s does.
+    pub fn bash_foreground_budget(&self) -> Result<std::time::Duration, String> {
+        match &self.bash_foreground_seconds {
+            None => Ok(std::time::Duration::from_secs(
+                crate::tools::bash::DEFAULT_FOREGROUND_SECONDS,
+            )),
+            Some(value) => value
+                .as_u64()
+                .filter(|seconds| *seconds >= 1)
+                .map(std::time::Duration::from_secs)
+                .ok_or_else(|| {
+                    "Invalid bash.foregroundSeconds setting: expected a positive integer."
+                        .to_owned()
+                }),
+        }
+    }
+
+    /// Whether context files found while working join the prompt
+    /// (`crate::agent_session` adds them): `nestedContextFiles`, a boolean,
+    /// `false` when unset. An invalid explicit value fails session
+    /// creation, as [`Self::bash_foreground_budget`]'s does.
+    pub fn nested_context_files(&self) -> Result<bool, String> {
+        match &self.nested_context_files {
+            None => Ok(false),
+            Some(value) => value.as_bool().ok_or_else(|| {
+                "Invalid nestedContextFiles setting: expected true or false.".to_owned()
+            }),
+        }
+    }
+
+    /// The estimated tokens the system prompt's skills list may take
+    /// ([`crate::skills::format_skills_for_prompt`]): `skills.listingTokens`,
+    /// a positive integer, else [`crate::skills::DEFAULT_LISTING_TOKENS`].
+    /// An invalid explicit value fails session creation, as
+    /// [`Self::bash_foreground_budget`]'s does.
+    pub fn skills_listing_tokens(&self) -> Result<u64, String> {
+        match &self.skills_listing_tokens {
+            None => Ok(crate::skills::DEFAULT_LISTING_TOKENS),
+            Some(value) => value.as_u64().filter(|tokens| *tokens >= 1).ok_or_else(|| {
+                "Invalid skills.listingTokens setting: expected a positive integer.".to_owned()
+            }),
+        }
+    }
+
+    /// `modelProfiles`, checked: each entry's pattern and profile, in the
+    /// order written. Any malformed entry is an error naming its key and
+    /// member, and session creation stops with it, as an invalid
+    /// `permission` section stops it; nothing is half-applied. Tool names
+    /// are checked by the caller that knows the tools
+    /// ([`ModelProfile::unknown_tool`]).
+    pub fn model_profiles(&self) -> Result<Vec<(String, ModelProfile)>, String> {
+        let Some(value) = &self.model_profiles else {
+            return Ok(Vec::new());
+        };
+        let Some(entries) = value.as_object() else {
+            return Err(format!(
+                "Invalid modelProfiles setting: {}. Expected an object of model patterns.",
+                js_string(value)
+            ));
+        };
+        entries
+            .iter()
+            .map(|(key, entry)| Ok((key.clone(), ModelProfile::parse(key, entry)?)))
+            .collect()
+    }
+
+    /// The profile of `model`: every `modelProfiles` entry whose pattern
+    /// matches it, as `enabledModels` matches, in the order written, a later
+    /// entry overriding an earlier one member by member and `tools` lists
+    /// joined in order. Empty when none matches. Malformed entries, which
+    /// session creation refuses, are ignored here.
+    pub fn model_profile(&self, model: &bake_ai::Model) -> ModelProfile {
+        let mut profile = ModelProfile::default();
+        for (pattern, entry) in self.model_profiles().unwrap_or_default() {
+            if crate::model_registry::resolver::model_matches_pattern(&pattern, model) {
+                profile.overlay(entry);
+            }
+        }
+        if self.explicit_tools {
+            profile.tools.clear();
+        }
+        profile
+    }
+
+    /// The thinking level `model`'s settings choose: its profile's
+    /// `thinkingLevel`, else its `modelThinkingLevels` entry.
+    pub fn thinking_level_for(&self, model: &bake_ai::Model) -> Option<ModelThinkingLevel> {
+        self.model_profile(model)
+            .thinking_level
+            .or_else(|| self.model_thinking_level(&model.provider, &model.id))
+    }
+
+    /// [`Self::compaction_settings`] for `model`, with its profile's
+    /// `compaction` members over `compaction.modelOverrides` and the
+    /// ordinary settings.
+    pub fn compaction_settings_for(
+        &self,
+        model: Option<&bake_ai::Model>,
+    ) -> Result<CompactionSettings, String> {
+        let mut settings = self
+            .compaction_settings(model.map(|model| (model.provider.as_str(), model.id.as_str())))?;
+        if let Some(model) = model {
+            let profile = self.model_profile(model);
+            if let Some(tokens) = profile.reserve_tokens {
+                settings.reserve_tokens = tokens;
+            }
+            if let Some(tokens) = profile.keep_recent_tokens {
+                settings.keep_recent_tokens = tokens;
+            }
+            if let Some(percent) = profile.threshold_percent {
+                settings.threshold_percent = Some(percent);
+            }
+        }
+        Ok(settings)
     }
 
     /// Pi's `getCompactionEnabled`.
@@ -874,6 +1077,173 @@ impl Settings {
     }
 }
 
+/// One `modelProfiles` value: the choices that depend on the model. Each
+/// member is unset unless the entry sets it.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ModelProfile {
+    /// `tools`: `+name` and `-name` entries applied after `defaultTools`.
+    pub tools: Vec<String>,
+    /// `codemode.mode`, over the `codemode.mode` setting.
+    pub codemode_mode: Option<CodemodeMode>,
+    /// `thinkingLevel`, over `modelThinkingLevels`.
+    pub thinking_level: Option<ModelThinkingLevel>,
+    /// `compaction.reserveTokens`.
+    pub reserve_tokens: Option<u64>,
+    /// `compaction.keepRecentTokens`.
+    pub keep_recent_tokens: Option<u64>,
+    /// `compaction.thresholdPercent`.
+    pub threshold_percent: Option<u8>,
+    /// `prompt`: the text of the `model_notes` prompt section.
+    pub prompt: Option<String>,
+}
+
+/// The name of the prompt section a profile's `prompt` becomes.
+pub const MODEL_NOTES_SECTION: &str = "model_notes";
+
+impl ModelProfile {
+    /// Checks one entry; `key` names it in errors.
+    fn parse(key: &str, value: &Value) -> Result<Self, String> {
+        let invalid = |member: &str, value: &Value, expected: &str| {
+            format!(
+                "Invalid modelProfiles[\"{key}\"]{member} setting: {}. Expected {expected}.",
+                js_string(value)
+            )
+        };
+        let Some(entry) = value.as_object() else {
+            return Err(invalid("", value, "an object"));
+        };
+        let mut profile = Self::default();
+        for (member, value) in entry {
+            match member.as_str() {
+                "tools" => {
+                    let expected = "a list of \"+name\" and \"-name\" entries";
+                    let tools = value
+                        .as_array()
+                        .and_then(|tools| {
+                            tools
+                                .iter()
+                                .map(|tool| tool.as_str().map(str::to_owned))
+                                .collect::<Option<Vec<String>>>()
+                        })
+                        .filter(|tools| {
+                            tools.iter().all(|tool| {
+                                crate::tools::index::is_tool_modifier(tool)
+                                    && tool.len() > 1
+                                    && !tool.contains('*')
+                            })
+                        })
+                        .ok_or_else(|| invalid(".tools", value, expected))?;
+                    profile.tools = tools;
+                }
+                "codemode" => {
+                    let mode = value
+                        .as_object()
+                        .filter(|codemode| codemode.keys().all(|key| key == "mode"))
+                        .and_then(|codemode| codemode.get("mode"))
+                        .and_then(Value::as_str)
+                        .and_then(|mode| match mode {
+                            "on" => Some(CodemodeMode::On),
+                            "only" => Some(CodemodeMode::Only),
+                            _ => None,
+                        })
+                        .ok_or_else(|| {
+                            invalid(
+                                ".codemode",
+                                value,
+                                "{ \"mode\": \"on\" } or { \"mode\": \"only\" }",
+                            )
+                        })?;
+                    profile.codemode_mode = Some(mode);
+                }
+                "thinkingLevel" => {
+                    let level = value
+                        .as_str()
+                        .and_then(crate::model_registry::resolver::parse_thinking_level)
+                        .ok_or_else(|| {
+                            invalid(
+                                ".thinkingLevel",
+                                value,
+                                "one of off, minimal, low, medium, high, xhigh, or max",
+                            )
+                        })?;
+                    profile.thinking_level = Some(level);
+                }
+                "compaction" => {
+                    let Some(compaction) = value.as_object() else {
+                        return Err(invalid(".compaction", value, "an object"));
+                    };
+                    for (field, value) in compaction {
+                        let member = format!(".compaction.{field}");
+                        match field.as_str() {
+                            "reserveTokens" | "keepRecentTokens" => {
+                                let tokens = token_count(value).ok_or_else(|| {
+                                    invalid(&member, value, "a non-negative safe integer")
+                                })?;
+                                if field == "reserveTokens" {
+                                    profile.reserve_tokens = Some(tokens);
+                                } else {
+                                    profile.keep_recent_tokens = Some(tokens);
+                                }
+                            }
+                            "thresholdPercent" => {
+                                let percent = token_count(value)
+                                    .filter(|percent| (1..=100).contains(percent))
+                                    .and_then(|percent| u8::try_from(percent).ok())
+                                    .ok_or_else(|| {
+                                        invalid(&member, value, "a whole number from 1 to 100")
+                                    })?;
+                                profile.threshold_percent = Some(percent);
+                            }
+                            _ => {
+                                return Err(format!(
+                                    "Invalid modelProfiles[\"{key}\"].compaction setting: unknown member \"{field}\". Expected reserveTokens, keepRecentTokens, or thresholdPercent."
+                                ));
+                            }
+                        }
+                    }
+                }
+                "prompt" => {
+                    let prompt = value
+                        .as_str()
+                        .ok_or_else(|| invalid(".prompt", value, "a string"))?;
+                    profile.prompt = Some(prompt.to_owned());
+                }
+                _ => {
+                    return Err(format!(
+                        "Invalid modelProfiles[\"{key}\"] setting: unknown member \"{member}\". Expected tools, codemode, thinkingLevel, compaction, or prompt."
+                    ));
+                }
+            }
+        }
+        Ok(profile)
+    }
+
+    /// `later` over this profile: each member it sets wins, and its `tools`
+    /// follow these.
+    fn overlay(&mut self, later: Self) {
+        self.tools.extend(later.tools);
+        self.codemode_mode = later.codemode_mode.or(self.codemode_mode);
+        self.thinking_level = later.thinking_level.or(self.thinking_level);
+        self.reserve_tokens = later.reserve_tokens.or(self.reserve_tokens);
+        self.keep_recent_tokens = later.keep_recent_tokens.or(self.keep_recent_tokens);
+        self.threshold_percent = later.threshold_percent.or(self.threshold_percent);
+        self.prompt = later.prompt.or(self.prompt.take());
+    }
+
+    /// The first name in `tools` that is not one of `known`.
+    pub fn unknown_tool<'a>(&'a self, known: &[String]) -> Option<&'a str> {
+        self.tools
+            .iter()
+            .map(|entry| &entry[1..])
+            .find(|name| !known.iter().any(|known| known == name))
+    }
+
+    /// `base`, the active tool names, with this profile's `tools` applied.
+    pub fn active_tools(&self, base: &[String]) -> Vec<String> {
+        crate::tools::index::apply_tool_modifiers(base, &self.tools)
+    }
+}
+
 /// The `settings.json` path under a Bake home.
 pub fn settings_path(home: &Path) -> PathBuf {
     home.join("settings.json")
@@ -897,7 +1267,7 @@ fn queue_mode_name(mode: QueueMode) -> &'static str {
 /// read as a JSON object is left untouched and the setter fails. A setter
 /// error for which [`StoreError::is_committed`] holds means the change was
 /// written but may not survive a power loss; [`SettingsStore::load`] reads
-/// it back. Setters block, and never touch Bake 0.3's `settings.yaml` (D25).
+/// it back. Setters block.
 #[derive(Debug, Clone)]
 pub struct SettingsStore {
     file: JsonFileStore,
@@ -1253,7 +1623,7 @@ mod tests {
         assert_eq!(read("{}"), (None, None));
     }
 
-    // Bake `packages/llm/llm-pi-ai/src/config.ts`: a positive integer.
+    // A positive integer.
     #[test]
     fn reads_the_tool_argument_whitespace_bound() {
         let read =
@@ -1918,6 +2288,235 @@ mod tests {
                 std::fs::metadata(store.path()).unwrap().modified().unwrap(),
                 modified
             );
+        }
+    }
+
+    fn profiled(value: serde_json::Value) -> Settings {
+        Settings::from_object(value.as_object().expect("object"))
+    }
+
+    fn names(entries: &[&str]) -> Vec<String> {
+        entries.iter().map(|entry| (*entry).to_owned()).collect()
+    }
+
+    // Entries apply in the order written: each later match overrides the
+    // members it sets, `tools` lists join, and patterns match as
+    // `enabledModels` patterns do (`provider/id`, a bare id, a glob).
+    #[test]
+    fn model_profiles_apply_in_order_with_later_members_winning() {
+        let settings = profiled(serde_json::json!({
+            "modelProfiles": {
+                "faux/*": {
+                    "tools": ["+grep"],
+                    "thinkingLevel": "high",
+                    "codemode": { "mode": "only" },
+                    "prompt": "first",
+                    "compaction": { "reserveTokens": 10, "keepRecentTokens": 20 }
+                },
+                "m-1": { "tools": ["-grep", "+ls"], "thinkingLevel": "low", "compaction": { "keepRecentTokens": 30 } },
+                "other/m-1": { "prompt": "never" }
+            }
+        }));
+        let one = bake_ai::providers::faux::faux_model("m-1");
+        let profile = settings.model_profile(&one);
+        assert_eq!(profile.tools, names(&["+grep", "-grep", "+ls"]));
+        assert_eq!(profile.thinking_level, Some(ModelThinkingLevel::Low));
+        assert_eq!(profile.codemode_mode, Some(CodemodeMode::Only));
+        assert_eq!(profile.prompt.as_deref(), Some("first"));
+        assert_eq!(profile.reserve_tokens, Some(10));
+        assert_eq!(profile.keep_recent_tokens, Some(30));
+        assert_eq!(profile.threshold_percent, None);
+        assert_eq!(
+            profile.active_tools(&names(&["read", "grep"])),
+            names(&["read", "ls"])
+        );
+        let two = settings.model_profile(&bake_ai::providers::faux::faux_model("m-2"));
+        assert_eq!(two.tools, names(&["+grep"]));
+        assert_eq!(two.thinking_level, Some(ModelThinkingLevel::High));
+        let mut elsewhere = bake_ai::providers::faux::faux_model("m-1");
+        elsewhere.provider = "other".into();
+        assert_eq!(
+            settings.model_profile(&elsewhere).prompt.as_deref(),
+            Some("never")
+        );
+        assert!(settings.model_profiles().is_ok());
+    }
+
+    // The profile's level wins over `modelThinkingLevels`, and its
+    // compaction members over `compaction.modelOverrides`; an explicit tool
+    // selection drops only its `tools`.
+    #[test]
+    fn a_profile_wins_over_the_per_model_settings() {
+        let mut settings = profiled(serde_json::json!({
+            "modelThinkingLevels": { "faux/m": "max", "faux/n": "medium" },
+            "compaction": { "modelOverrides": { "faux/m": { "reserveTokens": 5, "thresholdPercent": 80 } } },
+            "modelProfiles": {
+                "faux/m": { "tools": ["+ls"], "thinkingLevel": "minimal", "compaction": { "reserveTokens": 7 } }
+            }
+        }));
+        let m = bake_ai::providers::faux::faux_model("m");
+        let n = bake_ai::providers::faux::faux_model("n");
+        assert_eq!(
+            settings.thinking_level_for(&m),
+            Some(ModelThinkingLevel::Minimal)
+        );
+        assert_eq!(
+            settings.thinking_level_for(&n),
+            Some(ModelThinkingLevel::Medium)
+        );
+        let compaction = settings
+            .compaction_settings_for(Some(&m))
+            .expect("settings");
+        assert_eq!(compaction.reserve_tokens, 7);
+        assert_eq!(compaction.threshold_percent, Some(80));
+        settings.explicit_tools = true;
+        let profile = settings.model_profile(&m);
+        assert!(profile.tools.is_empty());
+        assert_eq!(profile.thinking_level, Some(ModelThinkingLevel::Minimal));
+    }
+
+    // Each malformed member is refused with the entry and member it is in.
+    #[test]
+    fn malformed_model_profiles_are_refused_with_their_place() {
+        let cases = [
+            (
+                serde_json::json!([]),
+                "Invalid modelProfiles setting: . Expected an object of model patterns.",
+            ),
+            (
+                serde_json::json!({ "m": 1 }),
+                "Invalid modelProfiles[\"m\"] setting: 1. Expected an object.",
+            ),
+            (
+                serde_json::json!({ "m": { "tools": ["grep"] } }),
+                "Invalid modelProfiles[\"m\"].tools setting: grep. Expected a list of \"+name\" and \"-name\" entries.",
+            ),
+            (
+                serde_json::json!({ "m": { "tools": ["+gr*"] } }),
+                "Invalid modelProfiles[\"m\"].tools setting: +gr*. Expected a list of \"+name\" and \"-name\" entries.",
+            ),
+            (
+                serde_json::json!({ "m": { "tools": ["+"] } }),
+                "Invalid modelProfiles[\"m\"].tools setting: +. Expected a list of \"+name\" and \"-name\" entries.",
+            ),
+            (
+                serde_json::json!({ "m": { "codemode": { "mode": "off" } } }),
+                "Invalid modelProfiles[\"m\"].codemode setting: [object Object]. Expected { \"mode\": \"on\" } or { \"mode\": \"only\" }.",
+            ),
+            (
+                serde_json::json!({ "m": { "compaction": { "thresholdPercent": 0 } } }),
+                "Invalid modelProfiles[\"m\"].compaction.thresholdPercent setting: 0. Expected a whole number from 1 to 100.",
+            ),
+            (
+                serde_json::json!({ "m": { "compaction": { "reserveTokens": -1 } } }),
+                "Invalid modelProfiles[\"m\"].compaction.reserveTokens setting: -1. Expected a non-negative safe integer.",
+            ),
+            (
+                serde_json::json!({ "m": { "compaction": { "enabled": false } } }),
+                "Invalid modelProfiles[\"m\"].compaction setting: unknown member \"enabled\". Expected reserveTokens, keepRecentTokens, or thresholdPercent.",
+            ),
+            (
+                serde_json::json!({ "m": { "prompt": 3 } }),
+                "Invalid modelProfiles[\"m\"].prompt setting: 3. Expected a string.",
+            ),
+            (
+                serde_json::json!({ "m": { "temperature": 1 } }),
+                "Invalid modelProfiles[\"m\"] setting: unknown member \"temperature\". Expected tools, codemode, thinkingLevel, compaction, or prompt.",
+            ),
+        ];
+        for (value, expected) in cases {
+            let settings = profiled(serde_json::json!({ "modelProfiles": value }));
+            assert_eq!(
+                settings.model_profiles(),
+                Err(expected.to_owned()),
+                "{value}"
+            );
+            // A refused setting resolves to no profile rather than half of one.
+            assert_eq!(
+                settings.model_profile(&bake_ai::providers::faux::faux_model("m")),
+                ModelProfile::default()
+            );
+        }
+        let unknown =
+            profiled(serde_json::json!({ "modelProfiles": { "m": { "tools": ["+nope"] } } }))
+                .model_profiles()
+                .expect("valid shape");
+        assert_eq!(unknown[0].1.unknown_tool(&names(&["read"])), Some("nope"));
+    }
+
+    // `nestedContextFiles`: a boolean, false when unset; anything else
+    // stops the session's start.
+    #[test]
+    fn nested_context_files_is_a_boolean() {
+        let read = |value: serde_json::Value| {
+            profiled(serde_json::json!({ "nestedContextFiles": value })).nested_context_files()
+        };
+        assert_eq!(Settings::default().nested_context_files(), Ok(false));
+        assert_eq!(read(serde_json::json!(true)), Ok(true));
+        assert_eq!(read(serde_json::json!(false)), Ok(false));
+        for invalid in [
+            serde_json::json!("true"),
+            serde_json::json!(1),
+            serde_json::json!(null),
+            serde_json::json!({}),
+        ] {
+            assert_eq!(
+                read(invalid.clone()),
+                Err("Invalid nestedContextFiles setting: expected true or false.".into()),
+                "{invalid}"
+            );
+        }
+    }
+
+    // `skills.listingTokens`: a positive integer, 4000 when unset; anything
+    // else stops the session's start.
+    #[test]
+    fn skills_listing_tokens_is_a_positive_integer() {
+        let tokens = |value: serde_json::Value| {
+            profiled(serde_json::json!({ "skills": { "listingTokens": value } }))
+                .skills_listing_tokens()
+        };
+        assert_eq!(Settings::default().skills_listing_tokens(), Ok(4000));
+        assert_eq!(
+            profiled(serde_json::json!({ "skills": {} })).skills_listing_tokens(),
+            Ok(4000)
+        );
+        for valid in [1_u64, 400, 100_000] {
+            assert_eq!(tokens(serde_json::json!(valid)), Ok(valid));
+        }
+        for invalid in [
+            serde_json::json!(0),
+            serde_json::json!(-5),
+            serde_json::json!(1.5),
+            serde_json::json!("1500"),
+            serde_json::json!(null),
+            serde_json::json!(true),
+        ] {
+            assert_eq!(
+                tokens(invalid.clone()),
+                Err("Invalid skills.listingTokens setting: expected a positive integer.".into()),
+                "{invalid}"
+            );
+        }
+    }
+
+    proptest::proptest! {
+        // Any JSON as `modelProfiles` is either refused or yields profiles
+        // whose tools are all exact modifiers; resolving never panics.
+        #[test]
+        fn model_profiles_parse_any_json_safely(text in "[\\[\\]{}\":,a-z0-9+*/ .-]{0,64}") {
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) {
+                let settings = profiled(serde_json::json!({ "modelProfiles": value }));
+                if let Ok(profiles) = settings.model_profiles() {
+                    for (_, profile) in profiles {
+                        let exact = profile.tools.iter().all(|tool| {
+                            crate::tools::index::is_tool_modifier(tool) && tool.len() > 1 && !tool.contains('*')
+                        });
+                        proptest::prop_assert!(exact);
+                    }
+                }
+                let _ = settings.model_profile(&bake_ai::providers::faux::faux_model("m"));
+            }
         }
     }
 }

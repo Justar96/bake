@@ -1,0 +1,1 @@
+The function `_apply_volume_break` in shop/discounts.py applies it, and a line needs at least 12 units of one item.

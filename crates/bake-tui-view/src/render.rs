@@ -101,7 +101,7 @@ fn tray_cap(focus: Focus, height: u16) -> u16 {
     match focus {
         Focus::Composer => 0,
         Focus::Tasks => u16::try_from(sheet_body_cap(height)).unwrap_or(0),
-        Focus::Inspect | Focus::Shell => (height / 2).max(3),
+        Focus::Inspect | Focus::Shell | Focus::Crew => (height / 2).max(3),
     }
 }
 
@@ -186,6 +186,24 @@ fn tray(app: &State, width: usize, rows: usize) -> Tray {
             }
             None => (Vec::new(), None, 0, None),
         },
+        Focus::Crew => match app
+            .crew_viewed
+            .and_then(|id| app.crew.iter().find(|member| member.id == id))
+        {
+            Some(member) => {
+                let (lines, most) = crate::crew::transcript(
+                    member,
+                    app.crew_log.as_deref(),
+                    width,
+                    rows,
+                    app.crew_scroll,
+                    app.now,
+                    look,
+                );
+                (lines, None, 0, Some(most))
+            }
+            None => (Vec::new(), None, 0, None),
+        },
     };
     Tray {
         lines,
@@ -196,20 +214,20 @@ fn tray(app: &State, width: usize, rows: usize) -> Tray {
     }
 }
 
-/// Widest a sheet grows, the TypeScript `SHEET_WIDTH`: past this, rows
+/// Widest a sheet grows: past this, rows
 /// are harder to scan than to scroll.
 pub const SHEET_WIDTH: u16 = 80;
 
 /// The fewest columns a framed sheet takes; a narrower one is drawn
-/// without its frame, as the TypeScript sheet is below its minimum.
+/// without its frame.
 const SHEET_FRAME_COLUMNS: u16 = 12;
 
 /// Columns between a sheet's columns.
 const SHEET_GAP: usize = 2;
 
 /// Body rows a sheet asks for at most at `height`: half the terminal, at
-/// least 3 and at most 14, as the TypeScript picker takes up to half the
-/// screen for a list worth scanning.
+/// least 3 and at most 14, so a list worth scanning takes up to half the
+/// screen.
 fn sheet_body_cap(height: u16) -> usize {
     usize::from(height / 2).clamp(3, 14)
 }
@@ -300,9 +318,9 @@ fn dialog_rows(app: &State, width: u16, height: u16) -> u16 {
 /// a value legibly; a narrower sheet is not handed the keyboard.
 const SHEET_MIN_INNER: usize = 10;
 
-/// An information sheet's rows at `width` cells, as the TypeScript sheet
-/// wraps its lines: each value wrapped under its own column, its wrapped
-/// rows hanging past the label, so a long path or id is shown whole.
+/// An information sheet's rows at `width` cells: each value wrapped under its
+/// own column, its wrapped rows hanging past the label, so a long path or id
+/// is shown whole.
 fn info_rows(info: &crate::dialog::InfoDialog, width: usize) -> Vec<Line<'static>> {
     let clean = |text: &str| editor::sanitize(text).replace(['\n', '\t'], " ");
     let width = width.max(1);
@@ -427,7 +445,7 @@ fn sheet_footer(keys: &str, short: &str, position: Option<String>, width: usize)
     Line::styled(fit(keys, width), dim())
 }
 
-/// The status column's style: the TypeScript picker's `done` tone.
+/// The status column's style: the palette's `done` tone.
 fn current_style(tones: crate::activity::Tones) -> Style {
     match tones {
         crate::activity::Tones::TrueColor => Style::new().fg(Color::Rgb(0x22, 0xc5, 0x5e)),
@@ -448,7 +466,7 @@ struct SheetColumns {
     detail: bool,
 }
 
-/// The TypeScript picker's columns at `width` cells after the pointer:
+/// The picker's columns at `width` cells after the pointer:
 /// the label takes at most 55% of the room the facts and status leave,
 /// and facts give way from the right before a label is cut shorter than
 /// 20 cells (or its own width).
@@ -528,11 +546,9 @@ fn sheet_columns(
     }
 }
 
-/// The open dialog ([`crate::dialog`]), in the approval panel's place,
-/// drawn as the TypeScript sheet and picker draw theirs
-/// (`apps/tui/packages/ui/src/sheet.tsx`, `picker.tsx`): at most
-/// [`SHEET_WIDTH`] columns, in a dim frame where it fits; its title bold;
-/// a list's note, filter row (`>` and what is typed, or what typing does),
+/// The open dialog ([`crate::dialog`]), in the approval panel's place: at
+/// most [`SHEET_WIDTH`] columns, in a dim frame where it fits; its title
+/// bold; a list's note, filter row (`>` and what is typed, or what typing does),
 /// rows under their groups' headings with the selection's `▸`, aligned
 /// label, fact, and `Current` columns, and a dim detail, the selected
 /// row's description, and keys with the selection's position. A long list
@@ -1505,6 +1521,7 @@ fn render_region(
             Notice::ImagesWhileRunning => copy::IMAGES_WHILE_RUNNING,
             Notice::PreviewOnly => copy::PREVIEW_ONLY,
             Notice::NoTasks => copy::NO_TASKS,
+            Notice::NoCrew => copy::NO_CREW,
             Notice::Returned => copy::RETURNED,
             Notice::Restored => copy::RESTORED,
             Notice::ApprovalKeys => copy::APPROVAL_KEYS_ONLY,
@@ -1551,7 +1568,7 @@ fn render_region(
     let above_label = (above > 0).then(|| format!("+{above} {}", copy::ABOVE));
     // The tasks list and a shell hold the keyboard outside the composer,
     // so the composer names no key while either is open.
-    let listing = matches!(app.focus, Focus::Tasks | Focus::Shell);
+    let listing = matches!(app.focus, Focus::Tasks | Focus::Shell | Focus::Crew);
     let approving = app.approval().is_some();
     let asking = approving || app.dialog.is_some();
     let mut mode = mode::view(app.mode(), !app.draft.is_empty(), area.width);
@@ -1833,6 +1850,21 @@ fn bar_left(app: &State) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
             app.selected_agent().map(|agent| agent.name.as_str()),
             copy::TASKS_LEDGER_KEYS,
         ),
+        Focus::Crew => {
+            let name = app
+                .crew_viewed
+                .and_then(|id| app.crew.iter().find(|member| member.id == id))
+                .map(|member| tasks::one_line(&member.name))
+                .unwrap_or_default();
+            (
+                vec![
+                    Span::styled(copy::CREW, accent().add_modifier(Modifier::UNDERLINED)),
+                    Span::styled(" / ", dim()),
+                    Span::styled(name, Style::new().add_modifier(Modifier::BOLD)),
+                ],
+                vec![Span::styled(format!("  {}", copy::CREW_KEYS), dim())],
+            )
+        }
     }
 }
 
@@ -1864,7 +1896,7 @@ fn listed_rows(count: usize) -> usize {
     count.min(completion::MENU_ROWS) + usize::from(count > completion::MENU_ROWS)
 }
 
-/// The file menu's status rows, as the oracle stacks them under its list:
+/// The file menu's status rows, stacked under its list:
 /// nothing found, still looking, and why discovery failed.
 fn file_status(menu: &FileMenu) -> Vec<(String, bool)> {
     let mut rows = Vec::new();
@@ -2019,7 +2051,7 @@ fn render_file_menu(app: &State, menu: &FileMenu, area: Rect, buf: &mut Buffer) 
     }
 }
 
-/// The slash menu above the box, as the oracle's `Completion` draws it: a
+/// The slash menu above the box: a
 /// `▸` on the selected row, the names in a column sized to the longest, and
 /// each command's hint and description after it, dim unless selected. More
 /// commands than rows keep the selected one in view and count the rest.
@@ -2132,7 +2164,7 @@ fn panel_rows(count: usize) -> u16 {
     u16::try_from(items + 2).unwrap_or(u16::MAX)
 }
 
-/// The staged images above the box, as the oracle's attachments panel:
+/// The staged images above the box:
 /// `Staged attachments: 2` in blue, a numbered line for each image, and a
 /// footer.
 fn render_attachments(app: &State, area: Rect, buf: &mut Buffer) {
@@ -2147,11 +2179,10 @@ fn render_attachments(app: &State, area: Rect, buf: &mut Buffer) {
     render_panel(&title, style, &items, copy::ATTACHMENTS_HELP, area, buf);
 }
 
-/// The prompts the runtime holds above the box, as the oracle's pending
-/// panel: `Pending input` in amber, a line for each prompt with where it
-/// will be admitted, `Next step: …`, and the key that sends them now. A
-/// prompt of several lines reads as one, its breaks shown as spaces, and is
-/// cut to the row; the oracle wraps it instead.
+/// The prompts the runtime holds above the box: `Pending input` in amber, a
+/// line for each prompt with where it will be admitted, `Next step: …`, and
+/// the key that sends them now. A prompt of several lines reads as one, its
+/// breaks shown as spaces, and is cut to the row.
 fn render_pending(app: &State, area: Rect, buf: &mut Buffer) {
     let width = usize::from(area.width);
     let items: Vec<String> = app
@@ -2291,7 +2322,7 @@ fn render_standing(
     // Bake: over one task's own view the counts are enough; naming the
     // newest running task there would repeat or rival what the tray shows.
     let newest = match app.focus {
-        Focus::Inspect | Focus::Shell => None,
+        Focus::Inspect | Focus::Shell | Focus::Crew => None,
         Focus::Composer | Focus::Tasks => app.newest_running(),
     };
     let (left, right) = tasks::standing(
@@ -2673,8 +2704,13 @@ fn render_tray(app: &mut State, area: Rect, buf: &mut Buffer) -> (usize, usize) 
         ..
     } = tray(app, usize::from(area.width), rows);
     if let Some(most) = most {
-        app.shell_most = most;
-        app.shell_scroll = app.shell_scroll.min(most);
+        if app.focus == Focus::Crew {
+            app.crew_most = most;
+            app.crew_scroll = app.crew_scroll.min(most);
+        } else {
+            app.shell_most = most;
+            app.shell_scroll = app.shell_scroll.min(most);
+        }
     }
     // The first rows, the subtitle among them, unless the selected entry
     // lies below them; then the window ends on it, or starts on it when it
@@ -2916,7 +2952,7 @@ mod tests {
     }
 
     // Pi model-selector.test.ts "keeps the current model marked while
-    // browsing", drawn as the TypeScript picker draws a row: the pointer,
+    // browsing", drawn as Bake's picker draws a row: the pointer,
     // the label's column, and the `Current` status, which stays on the
     // current model as the selection moves.
     #[test]

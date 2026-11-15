@@ -1,12 +1,10 @@
-//! Scope 11 race and restart proofs for reminders ([D39]): a delete that
+//! Race and restart proofs for reminders: a delete that
 //! lands between a look's decision and its dispatch, wall-clock jumps
 //! forward and back, a daylight-saving gap and overlap through the tools,
 //! overdue delivery on resume, and a process killed with `SIGKILL` on
 //! either side of a dispatch and after its delivery. Each case counts the durable dispatches and the posted and
 //! delivered reminders: a reminder occurrence reaches the model at most
 //! once. Time is the test clock, as in the parent module.
-//!
-//! [D39]: ../../../../../docs/roadmap/rust-0.4/scope-00/support.md
 
 use std::path::PathBuf;
 

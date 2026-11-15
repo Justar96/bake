@@ -144,14 +144,14 @@ fn the_environment_lists_bake_variable_names_but_no_values() {
             _ => None,
         },
         [
-            "DSH_HOME".to_owned(),
+            "BAKE_HOME".to_owned(),
             "BAKE_API_KEY".to_owned(),
             "OPENAI_API_KEY".to_owned(),
         ],
     );
     assert_eq!(
         environment["bakeEnvironmentVariables"],
-        json!(["BAKE_API_KEY", "DSH_HOME"])
+        json!(["BAKE_API_KEY", "BAKE_HOME"])
     );
     assert_eq!(environment["shell"], "bash");
     assert_eq!(environment["terminal"]["tmux"], true);

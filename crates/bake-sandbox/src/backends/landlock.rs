@@ -1,14 +1,16 @@
 //! The Landlock helper: apply a Landlock ruleset to this process, then exec
 //! the wrapped command, which inherits it with every descendant.
 //!
-//! A port of the `landlock-run` launcher,
-//! `native/system/packages/entry/src/main.c` (BSD-3-Clause, see the crate
-//! `NOTICE`), with its CLI contract from `native/system/docs/cli-contract.md`
-//! and the constants of `native/system/packages/entry/src/index.ts`. Bake's
+//! A port of the `landlock-run` launcher, `packages/entry/src/main.c`
+//! (BSD-3-Clause, see the crate `NOTICE`), with its CLI contract from
+//! `docs/cli-contract.md` and the constants of `packages/entry/src/index.ts`,
+//! all under [`native/system` at revision `97ce6abb`][landlock-run]. Bake's
 //! Rust binary serves as its own helper: `bake` dispatches a first
 //! argument of [`HELPER_ARG`] to [`helper_main`] before anything else runs, so
 //! the release ships one executable and the helper is always the build that
 //! wrapped the command.
+//!
+//! [landlock-run]: https://github.com/Justar96/bake/blob/97ce6abba01fddb5ed532b60a2e25a1e134b5244/native/system
 //!
 //! ```text
 //! <exe> __bake-landlock-run [--ro <path>]... [--rw <path>]... -- <argv>...
@@ -19,7 +21,7 @@
 //! kernel's ABI governs. Everything else is denied. Every helper failure
 //! prints one `landlock-run: ` line on stderr and exits
 //! [`LAUNCHER_FAILURE_EXIT`] without running the command; the wire texts are
-//! the launcher's, so the TypeScript runner-failure rule applies unchanged.
+//! the launcher's, so the Landlock runner-failure rule matches them.
 //! A kernel below ABI 5 governs a subset of the accesses: the helper reports
 //! [`PARTIAL_ENFORCEMENT_LINE`] and runs the command confined for the rest.
 //!

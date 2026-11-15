@@ -2,11 +2,7 @@
 //!
 //! The tag must name the workspace version, which must be stable, with
 //! written changelog notes, and newer than the native release the download
-//! service serves; a rerun (`retry`) accepts the same version, which its
-//! publish job then takes from the version's GitHub release instead of
-//! signing it again.
-//!
-//! Ported from Bake's `scripts/release/preflight.ts` (revision 97ce6abba0).
+//! service serves.
 
 use std::path::Path;
 
@@ -15,21 +11,21 @@ use bake_update::version::compare_versions;
 use crate::util::{Result, read_text};
 use crate::workspace::{changelog_section, is_stable, version};
 
-/// What a preflight found ready: the version and its release notes.
-#[derive(Debug)]
-pub struct Ready {
-    pub version: String,
-    pub notes: String,
+/// Checks the workspace against `tag` and, when given, the version the
+/// live channel serves, and returns the workspace version. Every problem
+/// is reported, one per line.
+pub fn preflight(root: &Path, tag: Option<&str>, live: Option<&str>) -> Result<String> {
+    let version = version(root)?;
+    check(&version, &read_text(&root.join("CHANGELOG.md"))?, tag, live)?;
+    Ok(version)
 }
 
-/// Checks the workspace against `tag` and, when given, the version the
-/// live channel serves. Every problem is reported, one per line.
-pub fn preflight(root: &Path, tag: Option<&str>, live: Option<&str>, retry: bool) -> Result<Ready> {
+/// [`preflight`] over a version and changelog text.
+pub fn check(version: &str, changelog: &str, tag: Option<&str>, live: Option<&str>) -> Result<()> {
     let mut problems = Vec::new();
-    let version = version(root)?;
-    if !is_stable(&version) {
+    if !is_stable(version) {
         problems.push(format!(
-            "Automated releases require a stable, canonical version: {version}"
+            "A release requires a stable, canonical version: {version}"
         ));
     }
     if let Some(tag) = tag
@@ -39,29 +35,25 @@ pub fn preflight(root: &Path, tag: Option<&str>, live: Option<&str>, retry: bool
             "Tag {tag} does not name the workspace version {version}; expected v{version}"
         ));
     }
-    let notes = changelog_section(&read_text(&root.join("CHANGELOG.md"))?, &version);
-    match &notes {
+    match changelog_section(changelog, version) {
         None => problems.push(format!("CHANGELOG.md has no {version} section")),
         Some(notes) if notes.is_empty() => {
-            problems.push(format!("CHANGELOG.md's {version} section is empty"))
+            problems.push(format!("CHANGELOG.md's {version} section is empty"));
         }
         Some(_) => {}
     }
-    if let Some(published) = live {
-        let order = compare_versions(&version, published);
-        if order == std::cmp::Ordering::Less || (order == std::cmp::Ordering::Equal && !retry) {
-            problems.push(format!(
-                "{version} is not newer than the published native {published}; release a new version"
-            ));
-        }
+    if let Some(published) = live
+        && compare_versions(version, published) != std::cmp::Ordering::Greater
+    {
+        problems.push(format!(
+            "{version} is not newer than the published native {published}; release a new version"
+        ));
     }
-    if !problems.is_empty() {
-        return Err(problems.join("\n"));
+    if problems.is_empty() {
+        Ok(())
+    } else {
+        Err(problems.join("\n"))
     }
-    Ok(Ready {
-        version,
-        notes: notes.unwrap_or_default(),
-    })
 }
 
 #[cfg(test)]
@@ -73,17 +65,31 @@ mod tests {
         let root = crate::util::repository_root();
         let version = version(&root).expect("version");
         let tag = format!("v{version}");
-        let ready = preflight(&root, Some(&tag), Some("0.0.1"), false).expect("ready");
-        assert!(!ready.notes.is_empty());
-        let refused = preflight(&root, Some("v0.0.0"), Some(&version), false).expect_err("refused");
+        assert_eq!(
+            preflight(&root, Some(&tag), Some("0.0.1")).expect("ready"),
+            version
+        );
+        let refused = preflight(&root, Some("v0.0.0"), Some(&version)).expect_err("refused");
         assert!(
             refused.contains("does not name the workspace version"),
             "{refused}"
         );
         assert!(refused.contains("is not newer"), "{refused}");
+    }
+
+    #[test]
+    fn a_version_needs_written_notes() {
+        let changelog = "## [Unreleased]\n\n## [1.0.0] - 2026-01-01\n\n- a\n";
+        assert!(check("1.0.0", changelog, Some("v1.0.0"), None).is_ok());
         assert!(
-            preflight(&root, Some(&tag), Some(&version), true).is_ok(),
-            "a retry may see its own version"
+            check("1.0.1", changelog, None, None)
+                .expect_err("none")
+                .contains("no 1.0.1 section")
+        );
+        assert!(
+            check("1.0.0-rc.1", "## [1.0.0-rc.1]\n- a\n", None, None)
+                .expect_err("pre")
+                .contains("stable")
         );
     }
 }

@@ -100,7 +100,7 @@ impl Rows {
 /// draft rows up to [`composer::window_rows`] while the body keeps
 /// [`MIN_BODY_ROWS`], panels such as the notice, and the body last.
 ///
-/// This follows the TypeScript collapse: the gap, the bottom edge, the top
+/// The collapse order: the gap, the bottom edge, the top
 /// edge, and then the bar give way before the input. Claiming the top edge
 /// first means a short terminal loses the open edge, and the box closes
 /// only when both edges have rows. Bake: the status line sits under the
@@ -136,7 +136,7 @@ pub fn plan(height: u16, needs: Needs) -> Rows {
         height,
         chrome + tray + status + gap + more + notice + menu,
     )));
-    // Pending input claims before attachments, as the TypeScript panels do.
+    // Pending input claims before attachments.
     let pending = take(needs.pending);
     let panel = take(needs.panel);
     let body = take(u16::MAX);
@@ -205,7 +205,7 @@ mod tests {
     }
 
     #[test]
-    fn short_terminals_give_up_chrome_in_the_typescript_order() {
+    fn short_terminals_give_up_chrome_in_order() {
         // Each row of height adds the next claimant: composer, top edge,
         // bottom edge, standing row, status line, gap, then the notice.
         let shown = |height, bar| {
@@ -230,8 +230,7 @@ mod tests {
         assert_eq!(shown(6, false), [1, 0, 1, 1, 1, 1, 1, 0, 0]);
         assert_eq!(shown(7, false), [1, 0, 1, 1, 1, 1, 1, 1, 0]);
         assert_eq!(shown(8, false), [1, 0, 1, 1, 1, 1, 1, 1, 1]);
-        // A bar with something to say claims right after the draft, as the
-        // TypeScript header does.
+        // A bar with something to say claims right after the draft.
         assert_eq!(shown(2, true), [1, 1, 0, 0, 0, 0, 0, 0, 0]);
         assert_eq!(shown(6, true), [1, 1, 1, 1, 1, 1, 0, 0, 0]);
     }

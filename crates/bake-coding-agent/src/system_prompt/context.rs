@@ -25,7 +25,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::auth_storage::{read_text_file, strip_bom};
+use crate::auth_storage::read_text_file;
+use crate::json_store::strip_bom;
 use crate::session::paths::{resolve_path, resolve_path_string};
 
 /// The largest context file read, in bytes.
@@ -77,6 +78,19 @@ fn load_context_file_from_dir(dir: &Path, warnings: &mut Vec<String>) -> Option<
         }
     }
     None
+}
+
+/// The context file of `dir` as the startup search reads it
+/// ([`load_context_file_from_dir`]), for the files found while working
+/// (`crate::agent_session::nested_context`).
+pub(crate) fn context_file_in(dir: &Path, warnings: &mut Vec<String>) -> Option<ContextFile> {
+    load_context_file_from_dir(dir, warnings)
+}
+
+/// The main repository's context file a nested worktree holding `dir`
+/// shadows ([`find_shadowed_context_file`]).
+pub(crate) fn shadowed_context_file(dir: &Path) -> Option<PathBuf> {
+    find_shadowed_context_file(dir)
 }
 
 /// Pi's `canonicalizePath`: the real path, else the path as given.

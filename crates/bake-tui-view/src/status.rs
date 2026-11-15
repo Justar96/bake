@@ -1,5 +1,5 @@
 //! The status line's fields and the order they give way in as the row
-//! narrows; a port of the TypeScript `status-line.ts` fitting.
+//! narrows.
 //!
 //! The row is minimal: `● deepseek-v4-flash high  ctx ~11%
 //! (15.2k/128k)  ~/bake ⎇ main`, the session's state dot, the model and
@@ -29,8 +29,8 @@ use unicode_width::UnicodeWidthStr;
 use crate::copy;
 use crate::palette::Token;
 
-/// The order fields give way in, first to yield first, in tenths so the
-/// TypeScript table's half ranks stay exact. Only some fields exist in the
+/// The order fields give way in, first to yield first, in tenths so half
+/// ranks stay exact. Only some fields exist in the
 /// preview; the rest keep their places for the fields that will.
 pub mod rank {
     pub const CONTEXT_ABSOLUTE: u16 = 10;
@@ -769,7 +769,7 @@ mod tests {
             .join("  ")
     }
 
-    // The cases below are the TypeScript `fitStatus` tests, case for case.
+    // The cases below pin how the row fits as it narrows.
 
     #[test]
     fn keeps_every_field_whole_while_they_fit_two_cells_apart() {
@@ -1067,7 +1067,7 @@ mod tests {
             "deepseek-v4-flash high  ctx ~11%  …/bake ⎇ main"
         );
         assert_eq!(row(&fields, 46), "deepseek-v4-flash high  ctx ~11%  ⎇ main");
-        // Then the branch goes, and then the level, as in the TypeScript ranks.
+        // Then the branch goes, and then the level.
         assert_eq!(row(&fields, 37), "deepseek-v4-flash high  ctx ~11%");
         assert_eq!(row(&fields, 28), "deepseek-v4-flash  ctx ~11%");
         assert_eq!(row(&fields, 20), "deepseek-…  ctx ~11%");
@@ -1265,7 +1265,7 @@ mod tests {
     }
 
     #[test]
-    fn token_counts_abbreviate_as_the_typescript_status_line_does() {
+    fn token_counts_abbreviate() {
         let cases = [
             (950, "950"),
             (1_000, "1k"),

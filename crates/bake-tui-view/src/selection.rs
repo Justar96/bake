@@ -5,7 +5,7 @@
 //! the view draws and copies one instead. A point names a line by the
 //! transcript row and line that draw it, not by its place on screen, so a
 //! selection stays on its text while the view scrolls or output arrives
-//! below. Ports the TypeScript `selection.ts`.
+//! below.
 
 use std::cmp::Ordering;
 use std::time::Duration;

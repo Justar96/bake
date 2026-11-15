@@ -25,7 +25,7 @@
 //! back. Steers a cancel takes off the session's queue come back as
 //! [`RuntimeUpdate::Returned`], so no submission is lost.
 //!
-//! Approvals (D24) are answered through the [`ApprovalBroker`] the command
+//! Approvals are answered through the [`ApprovalBroker`] the command
 //! line built the session's tools with ([`LiveSession::approvals`]): the
 //! port connects the broker to the view, so its queue arrives as
 //! [`RuntimeUpdate::Approvals`] in order with the other updates, and
@@ -97,41 +97,6 @@ use bake_coding_agent::cli::SessionFactory;
 use driver::{INTERRUPTED_PROMPT, refused_command, work_outcome};
 use mcp::McpNotices;
 use projection::Projector;
-
-/// The slash commands `bake` does not run in 0.4.0, which D48 defers to a
-/// later 0.4.x release; [`commands::COMMANDS`] are the ones it runs. They
-/// are Pi v1.3.0's remaining built-ins (`core/slash-commands.ts`) and Bake
-/// 0.3's terminal and runtime commands
-/// (`apps/tui/packages/app/src/{controller,navigation}.ts` and the runtime's
-/// `/goal`, `/feedback`, and `/permission`). A prompt that names one is
-/// refused instead of reaching the model, from the composer with its draft
-/// kept and from the interactive command line with its text put in the
-/// draft. Print and RPC mode do not refuse it: they send the text to the
-/// model as Pi does.
-const DEFERRED_COMMANDS: &[&str] = &[
-    // Pi v1.3.0.
-    "scoped-models",
-    "export",
-    "import",
-    "copy",
-    "hotkeys",
-    "trust",
-    "reload",
-    "quit",
-    // Bake 0.3's terminal.
-    "agents",
-    "attach",
-    "clear-attachments",
-    "remove-attachment",
-    "help",
-    "terminal-setup",
-    "update",
-    "sessions",
-    "clear",
-    // Bake 0.3's runtime.
-    "goal",
-    "feedback",
-];
 
 /// A session the command line set up for interactive mode.
 pub struct LiveSession {
@@ -454,6 +419,7 @@ impl LivePort {
             shells: Vec::new(),
             agents: Vec::new(),
             crew_version: None,
+            crew_watch: None,
             status_due,
             status: None,
         };
@@ -716,6 +682,9 @@ struct Driver {
     /// The spawn host's version the crew panel last showed; `None` for a
     /// session that spawns no agents.
     crew_version: Option<u64>,
+    /// The spawned agent whose transcript the view shows
+    /// ([`Request::WatchCrew`]).
+    crew_watch: Option<publish::CrewWatch>,
     /// Woken by the session's listener when the status line may have
     /// changed ([`projection::moves_status`]).
     status_due: Arc<Notify>,

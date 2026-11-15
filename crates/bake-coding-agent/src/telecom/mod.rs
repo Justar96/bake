@@ -76,29 +76,75 @@ fn from_choice(choice: Option<&str>, setting: bool) -> bool {
     }
 }
 
-/// The options of a station for a session in `cwd`, from the environment,
-/// or `None` when no telecom root can be placed.
-pub fn options_from_env(
-    cwd: &std::path::Path,
-    session_id: &str,
-    model: Option<String>,
-) -> Option<StationOptions> {
-    let home = crate::home::bake_home();
-    let root = directory::root(home.as_deref())?;
-    let var = |name: &str| {
-        std::env::var(name)
-            .ok()
-            .map(|value| value.trim().to_owned())
-            .filter(|value| wire::is_callsign(value))
-    };
-    Some(StationOptions {
-        root,
-        cwd: cwd.to_path_buf(),
-        session_id: session_id.to_owned(),
-        callsign: var(CALLSIGN_ENV),
-        parent: var(PARENT_ENV),
-        model,
-    })
+/// What a process's environment says about telecom and spawned agents:
+/// [`ENABLE_ENV`], [`CALLSIGN_ENV`], [`PARENT_ENV`],
+/// [`directory::DIR_ENV`], and [`crate::spawned::DEPTH_ENV`]. The command
+/// line reads it once ([`Self::from_process`]) and passes it on, so a test
+/// can give its own in place of the one it runs under.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TelecomEnv {
+    /// [`ENABLE_ENV`] as set.
+    pub enable: Option<String>,
+    /// [`CALLSIGN_ENV`] as set.
+    pub callsign: Option<String>,
+    /// [`PARENT_ENV`] as set.
+    pub parent: Option<String>,
+    /// [`directory::DIR_ENV`] when set and not empty.
+    pub dir: Option<std::path::PathBuf>,
+    /// Whether [`crate::spawned::DEPTH_ENV`] marks this process as a spawned
+    /// agent ([`crate::spawned::is_spawned`]).
+    pub spawned: bool,
+}
+
+impl TelecomEnv {
+    /// This process's environment.
+    pub fn from_process() -> Self {
+        Self {
+            enable: std::env::var(ENABLE_ENV).ok(),
+            callsign: std::env::var(CALLSIGN_ENV).ok(),
+            parent: std::env::var(PARENT_ENV).ok(),
+            dir: std::env::var_os(directory::DIR_ENV)
+                .filter(|value| !value.is_empty())
+                .map(std::path::PathBuf::from),
+            spawned: crate::spawned::is_spawned(),
+        }
+    }
+
+    /// Whether telecom is on: this environment's choice, else `setting`
+    /// ([`enabled`]).
+    pub fn enabled(&self, setting: bool) -> bool {
+        from_choice(self.enable.as_deref(), setting)
+    }
+
+    /// The options of a station for a session in `cwd` with the Bake home
+    /// `home`, or `None` when no telecom root can be placed: the root is
+    /// [`Self::dir`], else `telecom` in `home`.
+    pub fn station_options(
+        &self,
+        home: Option<&std::path::Path>,
+        cwd: &std::path::Path,
+        session_id: &str,
+        model: Option<String>,
+    ) -> Option<StationOptions> {
+        let root = self
+            .dir
+            .clone()
+            .or_else(|| home.map(|home| home.join("telecom")))?;
+        let callsign = |value: &Option<String>| {
+            value
+                .as_deref()
+                .map(|value| value.trim().to_owned())
+                .filter(|value| wire::is_callsign(value))
+        };
+        Some(StationOptions {
+            root,
+            cwd: cwd.to_path_buf(),
+            session_id: session_id.to_owned(),
+            callsign: callsign(&self.callsign),
+            parent: callsign(&self.parent),
+            model,
+        })
+    }
 }
 
 #[cfg(test)]

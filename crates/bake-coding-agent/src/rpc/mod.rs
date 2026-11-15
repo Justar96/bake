@@ -13,7 +13,7 @@
 //! What differs from Pi, in each case because Bake has no
 //! equivalent subsystem:
 //!
-//! - **Extensions are deferred (D43)**, so there is no extension UI, no
+//! - **Extensions are deferred**, so there is no extension UI, no
 //!   extension command, and no `extension_error` record. The one
 //!   `extension_ui_request` this mode sends is Bake's approval question
 //!   ([`approvals`]), which a Pi client can answer. `get_commands` lists
@@ -92,7 +92,7 @@ pub struct RpcModeOptions {
     pub stdout: SharedWriter,
     /// Diagnostics, which are never protocol records.
     pub stderr: SharedWriter,
-    /// The approval queue this mode answers (D24); without one, every
+    /// The approval queue this mode answers; without one, every
     /// escalation fails closed.
     pub approvals: Option<ApprovalBroker>,
     /// Builds the sessions `new_session`, `switch_session`, `fork`, and
@@ -265,7 +265,7 @@ struct Handler {
     out: SharedWriter,
     stderr: SharedWriter,
     /// The approval queue a replacement withdraws and shutdown closes
-    /// (D24); without one, every escalation fails closed.
+    ///; without one, every escalation fails closed.
     approvals: Option<ApprovalBroker>,
     bridge: Option<Arc<ApprovalBridge>>,
     subscription: Mutex<Option<SessionSubscription>>,

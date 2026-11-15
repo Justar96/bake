@@ -1,0 +1,6 @@
+id BIGINT not-null
+owner_id BIGINT not-null
+name TEXT not-null
+currency TEXT not-null
+created_at TIMESTAMPTZ not-null
+closed_at TIMESTAMPTZ null

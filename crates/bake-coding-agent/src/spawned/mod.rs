@@ -32,7 +32,7 @@ mod tools;
 
 use std::collections::VecDeque;
 use std::ffi::OsString;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 use std::time::Duration;
@@ -47,6 +47,7 @@ use crate::owned_work::{TaskScope, WorkGate};
 use crate::permissions::StandingPermissions;
 use crate::questions::QuestionBroker;
 use crate::session::messages::CustomMessage;
+use crate::session::{NewSessionOptions, SessionManager, load_entries_from_file};
 use crate::telecom::Station;
 use bake_ai::{TextContent, UserContent, UserContentBlock};
 
@@ -67,8 +68,9 @@ const LINE_CAP: usize = 8 * 1024 * 1024;
 /// How much of an agent's standard error is kept, for a failure's reason.
 const STDERR_TAIL: usize = 2048;
 
-/// The longest answer a notice carries.
-const NOTICE_TEXT_CAP: usize = 4000;
+/// The longest answer a notice carries; a longer one ends with a marker
+/// that says how much was cut and how to get it.
+const NOTICE_TEXT_CAP: usize = 16 * 1024;
 
 /// Where an agent is.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -198,6 +200,22 @@ impl SpawnHost {
                 version: AtomicU64::new(0),
             }),
         }
+    }
+
+    /// The session file of agent `id`, once it has reported its session
+    /// and the file is among the Bake home's sessions for its directory.
+    /// Reads session headers; a viewer keeps the path.
+    pub fn session_file(&self, id: u64) -> Option<PathBuf> {
+        let session = lock(&self.inner.agents)
+            .iter()
+            .find(|entry| entry.row.id == id)?
+            .row
+            .session_id
+            .clone()?;
+        let cwd = self.inner.options.cwd.to_string_lossy();
+        SessionManager::find_by_id(&cwd, &session, None)
+            .ok()
+            .flatten()
     }
 
     /// The agents, in start order.
@@ -618,6 +636,10 @@ async fn drive(
                                 .find(|entry| entry.row.id == id)
                                 .map(|entry| entry.row.clone());
                             if let Some(row) = row.filter(|_| !stopping) {
+                                // Another agent's report, as a telecom
+                                // message is: it refills the wake budget, so
+                                // the parent always hears it.
+                                jobs.reset_wakes();
                                 let _ = jobs.post(settled_notice(&row, text, failed));
                             }
                         }
@@ -755,15 +777,7 @@ fn settled_notice(
     let body = match (&failed, text) {
         (Some(reason), _) => format!("[spawn] {who} failed its run: {reason}"),
         (None, Some(text)) => {
-            let mut text = text.trim().to_owned();
-            if text.len() > NOTICE_TEXT_CAP {
-                let mut cut = NOTICE_TEXT_CAP;
-                while !text.is_char_boundary(cut) {
-                    cut -= 1;
-                }
-                text.truncate(cut);
-                text.push_str("\n[...]");
-            }
+            let text = capped_answer(&text, name, NOTICE_TEXT_CAP);
             format!("[spawn] {who} finished a run and is idle. Its last answer:\n{text}")
         }
         (None, None) => format!("[spawn] {who} finished a run and is idle, with no answer."),
@@ -772,6 +786,104 @@ fn settled_notice(
         body,
         json!({ "agent": name, "status": if failed.is_some() { "failed" } else { "idle" } }),
     )
+}
+
+/// The context messages a session file holds now: what a viewer of a
+/// spawned agent's transcript shows. The file is read without a lock and
+/// never written, as `/export` reads one, so the agent writing it is not
+/// disturbed; a missing or empty file holds none.
+pub fn read_transcript(path: &Path) -> Result<Vec<bake_agent::AgentMessage>, String> {
+    let entries =
+        load_entries_from_file(path).map_err(|error| format!("{}: {error}", path.display()))?;
+    if entries.is_empty() {
+        return Ok(Vec::new());
+    }
+    let session = SessionManager::in_memory(None, NewSessionOptions::default(), entries)
+        .map_err(|error| error.to_string())?;
+    Ok(session
+        .build_session_context()
+        .messages
+        .iter()
+        .map(|message| message.to_agent())
+        .collect())
+}
+
+/// `text` trimmed and cut to `cap` bytes at a character boundary, ending
+/// with how many bytes were cut and how to get them from `name`.
+fn capped_answer(text: &str, name: &str, cap: usize) -> String {
+    let text = text.trim();
+    if text.len() <= cap {
+        return text.to_owned();
+    }
+    let mut cut = cap;
+    while !text.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    let more = text.len() - cut;
+    format!(
+        "{}\n[... {more} more bytes cut; ask {name} with telecom for the rest]",
+        &text[..cut]
+    )
+}
+
+#[cfg(test)]
+mod answer_tests {
+    use proptest::prelude::*;
+
+    use super::{capped_answer, read_transcript};
+
+    #[test]
+    fn a_transcript_is_the_session_file_s_context() {
+        let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/pi-session/pi-v3.jsonl");
+        let expected: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(fixture.with_extension("pi.json")).expect("fixture"),
+        )
+        .expect("json");
+        let messages = read_transcript(&fixture).expect("read");
+        assert_eq!(
+            messages.len(),
+            expected["context"]["messages"]
+                .as_array()
+                .expect("messages")
+                .len()
+        );
+        let missing = fixture.with_file_name("no-such-session.jsonl");
+        assert!(read_transcript(&missing).expect("read").is_empty());
+    }
+
+    proptest! {
+        /// Any answer keeps a prefix of its trimmed text within the cap,
+        /// and says exactly how many bytes the cut left out.
+        #[test]
+        fn any_answer_keeps_a_prefix_within_the_cap(text in "\\PC{0,64}", cap in 0usize..48) {
+            let out = capped_answer(&text, "x", cap);
+            let trimmed = text.trim();
+            match out.split_once("\n[... ") {
+                Some((kept, marker)) if trimmed.len() > cap => {
+                    prop_assert!(kept.len() <= cap);
+                    prop_assert!(trimmed.starts_with(kept));
+                    let more = trimmed.len() - kept.len();
+                    prop_assert_eq!(marker, format!("{more} more bytes cut; ask x with telecom for the rest]"));
+                }
+                _ => prop_assert_eq!(out, trimmed),
+            }
+        }
+    }
+
+    #[test]
+    fn a_long_answer_says_how_much_was_cut_and_whom_to_ask() {
+        assert_eq!(capped_answer("  short \n", "alpha-1", 16), "short");
+        assert_eq!(
+            capped_answer("0123456789abcdef!!", "alpha-1", 16),
+            "0123456789abcdef\n[... 2 more bytes cut; ask alpha-1 with telecom for the rest]"
+        );
+        // Never inside a character: "é" is two bytes.
+        assert_eq!(
+            capped_answer("aé", "b", 2),
+            "a\n[... 2 more bytes cut; ask b with telecom for the rest]"
+        );
+    }
 }
 
 #[cfg(all(test, unix))]

@@ -89,7 +89,7 @@ fn operations(path: &Path) -> Vec<String> {
         .collect()
 }
 
-// D39 through the binary: `bake -p` killed with SIGKILL after a reminder's
+// Reminders through the binary: `bake -p` killed with SIGKILL after a reminder's
 // durable dispatch and before any turn delivered it, while the server
 // holds the turn's request. The next `--continue` run delivers nothing:
 // the reminder is lost, never repeated.

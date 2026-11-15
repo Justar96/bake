@@ -1,24 +1,19 @@
 //! A session's approval history, stored in its Pi session file.
 //!
-//! Bake's TypeScript approval service appended two log-only audit events
-//! around every request (`ApprovalService.request` in
-//! `packages/interaction/user-approval/src/index.ts`, lines 208-227, with
-//! the payloads of `types.ts`, lines 13-60): `approval/asked` with a fresh
-//! request id, the tool, the tool call, and the asker's reason, before the
-//! answerers were asked, and exactly one `approval/decided` with that id
-//! and the outcome. A failure to append either rejected the request. Here
-//! each event is one Pi `custom` entry of type [`APPROVAL_CUSTOM_TYPE`]
+//! Two audit records surround every request: `asked` with a fresh request
+//! id, the tool, the tool call, and the asker's reason, before the
+//! answerer is asked, and exactly one `decided` with that id and the
+//! outcome. A failure to append either rejects the request. Each record is
+//! one Pi `custom` entry of type [`APPROVAL_CUSTOM_TYPE`]
 //! whose data holds `version` ([`APPROVAL_ENTRY_VERSION`]), `kind`
-//! (`asked` or `decided`), and the event's fields under their TypeScript
-//! names. An `asked` entry also names the sandbox mode the request would
-//! grant (`sandbox`), which the TypeScript runtime kept only inside the
-//! reason's text. The call's arguments are not copied: `callId` names the
+//! (`asked` or `decided`), and the record's fields. An `asked` entry also
+//! names the sandbox mode the request would grant (`sandbox`). The call's arguments are not copied: `callId` names the
 //! call in the assistant message before the entry. Pi's `custom` entries
-//! never reach the model, as the TypeScript events did not, so recording a
+//! never reach the model, so recording a
 //! request changes no request the model sees.
 //!
-//! The outcome is the TypeScript vocabulary, `allowed-once`, `rejected`,
-//! `cancelled`, or `unavailable`, or one of Bake's two wider grants:
+//! The outcome is `allowed-once`, `rejected`, `cancelled`, or
+//! `unavailable`, or one of the two wider grants:
 //!
 //! - `allowed-once` is for the one call its request names, so its scope is
 //!   that call; a later call, a resumed session, or a replayed call asks
@@ -79,7 +74,7 @@ pub const APPROVAL_CUSTOM_TYPE: &str = "bake.approval";
 /// The `version` of the approval entries this build writes and reads.
 pub const APPROVAL_ENTRY_VERSION: u64 = 1;
 
-/// Every outcome: the TypeScript `ApprovalOutcome` order, then Bake's.
+/// Every outcome: the one-call outcomes, then the wider grants.
 const OUTCOMES: [EscalationOutcome; 6] = [
     EscalationOutcome::AllowedOnce,
     EscalationOutcome::Rejected,
@@ -180,7 +175,7 @@ impl ApprovalEntry {
     }
 
     /// The entry's `data`, members in a fixed order; an absent optional
-    /// field is omitted, as the TypeScript event omitted it.
+    /// field is omitted.
     pub fn to_data(&self) -> Value {
         let mut data = Map::new();
         data.insert("version".into(), APPROVAL_ENTRY_VERSION.into());

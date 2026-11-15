@@ -726,6 +726,15 @@ pub fn resolve_model_scope_from_models(
     }
 }
 
+/// Whether `pattern` names `model` as an `enabledModels` pattern would:
+/// [`resolve_model_scope_from_models`] over `model` alone, so `provider/id`,
+/// a bare id, a glob, and a partial id or name all match as they do there.
+pub fn model_matches_pattern(pattern: &str, model: &Model) -> bool {
+    !resolve_model_scope_from_models(&[pattern.to_owned()], std::slice::from_ref(model))
+        .scoped_models
+        .is_empty()
+}
+
 /// Pi's `InitialModelResult`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct InitialModel {

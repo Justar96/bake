@@ -1,10 +1,9 @@
 //! External hook processes in the Claude Code and Codex `hooks.json`
 //! formats.
 //!
-//! Ported from Bake 0.3's hooks group (`packages/hooks/`): the shared
-//! engine `hook-protocol` ([`matcher`], [`codec`], [`merge`], [`runner`])
-//! and both bridges, `hooks-claude-code` and `hooks-codex` ([`config`] and
-//! the decision mapping in `engine`), with their tests. The hook points
+//! The shared engine ([`matcher`], [`codec`], [`merge`], [`runner`]) serves
+//! both dialects, Claude Code and Codex ([`config`] and the decision
+//! mapping in `engine`). The hook points
 //! are Pi v1.3.0's extension events (`src/core/extensions/types.ts`,
 //! `runner.ts`, and their callers in `agent-session.ts`): `session_start`,
 //! `input`, `tool_call`, `tool_result`, and `agent_before_settle`; the
@@ -18,7 +17,7 @@
 //! | `PostToolUse` | after a tool call, before its result is recorded | replace the result with feedback, or add context |
 //! | `Stop` | when a run would end | continue it with a reason |
 //!
-//! A `{"continue": false}` stops as each bridge stopped in 0.3: a prompt
+//! A `{"continue": false}` stops as each dialect defines: a prompt
 //! is blocked; a Claude Code tool hook ends the run once the calls of its
 //! batch finish (a `PreToolUse` one also denies the call); a Codex
 //! `PostToolUse` hook replaces the result; and on `Stop` it drops a block's
@@ -35,9 +34,9 @@
 //! Configuration is `settings.json`'s `hooks` member ([`home`]); nothing
 //! runs unless it names a file.
 //!
-//! Not ported: 0.3's `SubagentStart` and `SubagentStop` events, Claude
+//! Not supported: the `SubagentStart` and `SubagentStop` events, Claude
 //! Code's `${CLAUDE_PLUGIN_ROOT}` substitution, `systemMessage` display,
-//! and `updatedInput`, which is recorded and ignored as in 0.3.
+//! and `updatedInput`, which is recorded and ignored.
 
 pub mod codec;
 pub mod config;
@@ -150,7 +149,7 @@ pub struct HooksOptions {
     /// Which events run.
     pub scope: HookScope,
     /// The session's standing permission: its sandbox mode when a hook
-    /// starts confines that hook (D24).
+    /// starts confines that hook.
     pub standing: Arc<StandingPermissions>,
     /// The provider that confines it; the one the session's `bash` uses.
     pub sandbox: Arc<dyn SandboxProvider>,

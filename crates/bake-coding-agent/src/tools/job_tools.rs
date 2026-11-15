@@ -1,16 +1,15 @@
 //! The model's background-job tools, `job_output`, `job_list`, and
 //! `job_kill`, over one session's [`JobRegistry`].
 //!
-//! Pi v1.3.0 (`71023aec`; MIT, see the crate `NOTICE`) has no job tools.
-//! Ported from Bake's TypeScript `packages/jobs/tool-jobs/src/index.ts`:
-//! the names, parameters, descriptions under `wakeup` delivery, the
-//! `[status: ...]` line, the still-running guidance, the list and kill
-//! texts, and the unknown-job explanation. Differences: the `job_id`
+//! Pi v1.3.0 (`71023aec`; MIT, see the crate `NOTICE`) has no job tools;
+//! these are Bake's own: the names, parameters, descriptions under `wakeup`
+//! delivery, the `[status: ...]` line, the still-running guidance, the
+//! list and kill texts, and the unknown-job explanation. The `job_id`
 //! description and the unknown-job text mention subagent ids only for a
 //! session that can start subagents
 //! ([`create_job_tool_definitions_with_subagents`]); terminal observations
-//! carry recovery metadata in result details; a `completing` job, which
-//! the TypeScript did not have, reads as `running`; output a stream dropped
+//! carry recovery metadata in result details; a `completing` job reads as
+//! `running`; output a stream dropped
 //! between reads is announced on its own line; and a read longer than
 //! Pi's output limits keeps its tail, as Pi's `bash` does, with a marker
 //! instead of a spill file.
@@ -18,7 +17,7 @@
 //! The completion notice the descriptions promise is delivered by the
 //! session ([`crate::agent_session`]); a still-running read adds
 //! [`STILL_RUNNING`] while that notice would open the next turn
-//! ([`JobRegistry::notice_would_wake`]).
+//! ([`JobRegistry::completion_would_wake`]).
 
 use std::time::Duration;
 
@@ -74,6 +73,9 @@ fn definitions(jobs: &JobRegistry, subagents: bool) -> Vec<ToolDefinition> {
 /// `job_output` advances the job's read cursor and `job_kill` stops the job.
 fn definition(mut tool: AgentTool, replay: ToolReplay) -> ToolDefinition {
     tool.replay = Some(replay);
+    // Job bookkeeping with no workspace effect of its own: runs beside other
+    // calls, so a wait on one job does not hold the others.
+    tool.execution_mode = Some(bake_agent::ToolExecutionMode::Parallel);
     ToolDefinition {
         tool,
         prompt_snippet: None,
@@ -98,8 +100,8 @@ fn observation(text: String, snapshot: &JobSnapshot) -> AgentToolResult {
     result
 }
 
-/// The status word the model sees: the TypeScript's five, with a
-/// `completing` job still `running`.
+/// The status word the model sees, with a `completing` job still
+/// `running`.
 fn public_status(status: JobStatus) -> &'static str {
     match status {
         JobStatus::Completing => "running",
@@ -224,7 +226,7 @@ async fn job_output(
     let body = body.strip_suffix('\n').unwrap_or(&body);
     let live = !read.snapshot.status.is_terminal();
     let mut text = format!("{body}\n{}", status_line(&read.snapshot));
-    if live && jobs.notice_would_wake() {
+    if live && JobRegistry::completion_would_wake(&read.snapshot) {
         text.push('\n');
         text.push_str(STILL_RUNNING);
     }

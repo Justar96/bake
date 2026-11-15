@@ -194,7 +194,7 @@ mod tests {
     }
 
     #[test]
-    fn window_rows_match_the_oracle_below_thirty_rows() {
+    fn window_rows_below_thirty_rows() {
         assert_eq!(window_rows(8), 5);
         assert_eq!(window_rows(29), 5);
         assert_eq!(window_rows(40), 8);

@@ -1,6 +1,4 @@
-//! The proxy's catalog and each model's wire protocol: `cliProxyApi`,
-//! `cliProxyModels`, and `CliProxyModel` in
-//! `apps/tui/packages/app/src/cliproxyapi.ts`.
+//! The proxy's catalog and each model's wire protocol.
 
 use indexmap::IndexMap;
 use serde_json::{Map, Value, json};
@@ -148,8 +146,7 @@ pub struct CliProxyModel {
 }
 
 impl CliProxyModel {
-    /// The model as the 0.3 login saved it in `settings.yaml`, with the
-    /// TypeScript's key order.
+    /// The model as a sign-in saves it in the route.
     pub fn to_json(&self) -> Value {
         let mut out = Map::new();
         out.insert("id".into(), json!(self.id));
@@ -424,8 +421,7 @@ mod tests {
         );
     }
 
-    // The namespace and family patterns' edges, each checked against the
-    // TypeScript regular expressions in Node.
+    // The namespace and family patterns' edges.
     #[test]
     fn matches_the_family_patterns_exactly() {
         let api = |id: &str| cli_proxy_api(id, None).as_str();
@@ -496,8 +492,7 @@ mod tests {
         assert_eq!(ids, ["gpt-6-sol", "unlabelled"]);
     }
 
-    // Adaptive thinking follows the protocol and either top level alone, as
-    // the TypeScript gives it.
+    // Adaptive thinking follows the protocol and either top level alone.
     #[test]
     fn takes_adaptive_thinking_only_over_anthropic_messages() {
         assert_eq!(
@@ -519,13 +514,12 @@ mod tests {
         );
     }
 
-    // cliProxyModels' remaining branches, each checked against the
-    // TypeScript in Node: the list's three homes and its error, slug and id
+    // The model list's remaining branches: the list's three homes and its error, slug and id
     // fallbacks and trimming, limit fallbacks and non-integers, duplicate
     // modalities and efforts, objects without an effort, and a later
     // duplicate id replacing the earlier one in its place.
     #[test]
-    fn follows_the_remaining_typescript_branches() {
+    fn follows_the_remaining_model_list_branches() {
         assert_eq!(
             cli_proxy_models(&json!({ "data": {} }), None),
             Err(InvalidModelList)

@@ -8,9 +8,8 @@
 //! said last; the preview's fixture runtime reports samples the same way.
 //! The view draws what was reported and asks the runtime to stop a working
 //! agent's run ([`crate::state::Effect::StopAgent`]); the runtime reports
-//! the change. The words follow the 0.3 terminal's subagent sheet
-//! (`apps/tui/packages/ui/src/subagents.tsx`): how the last run ended, then
-//! whether the agent is resident.
+//! the change. The words say how the last run ended, then whether the
+//! agent is resident.
 
 use ratatui_core::style::{Color, Modifier, Style};
 use ratatui_core::text::{Line, Span};

@@ -1,7 +1,6 @@
 //! A process as a background job: the producer a background command
 //! runs. Its output streams into the job's `JobOutput`, and its outcome
-//! follows Bake's TypeScript `packages/shell/tool-bash/src/background.ts`
-//! (`processOutcome`, `processJob`): a killed process is `killed` with its
+//! is: a killed process is `killed` with its
 //! signal as detail, any other exit is `completed` with its exit code, a
 //! nonzero one included, and a stop before the spawn is `killed`.
 //!
@@ -52,8 +51,8 @@ pub async fn run_process(context: JobContext, spec: ProcessSpec) -> JobOutcome {
     }
 }
 
-/// `signal: <name>` for a Unix signal exit, as the TypeScript renders
-/// Node's signal name; `killed before exit` otherwise.
+/// `signal: <name>` for a Unix signal exit, with Node's signal name;
+/// `killed before exit` otherwise.
 fn killed_detail(status: Option<ExitStatus>) -> String {
     #[cfg(unix)]
     {

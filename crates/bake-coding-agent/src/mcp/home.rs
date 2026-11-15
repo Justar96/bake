@@ -7,7 +7,7 @@
 //! and no project trust. An entry's `env` may pass variables Bake's scrub
 //! drops ([`super::config`]), so a server can receive credentials, and the
 //! file must be one only its owner can change. The Bake home is wherever
-//! `BAKE_HOME` (then `DSH_HOME`) points, so neither the name nor the path
+//! `BAKE_HOME` points, so neither the name nor the path
 //! as spelled is trusted.
 //!
 //! # Unix: checks bound to what is read

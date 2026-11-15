@@ -43,11 +43,8 @@ const ERROR_PREVIEW_CHARS: usize = 500;
 /// `DEFAULT_MAX_CODEMODE_WORKERS`: a script holds its slot until its thread
 /// has exited.
 pub const MAX_CONCURRENT_CODEMODE_SCRIPTS: usize = 2;
-/// Where Pi reads `PI_CODEMODE_MAX_WORKERS`, Bake reads this, then
-/// [`DSH_CODEMODE_MAX_WORKERS_ENV`].
+/// Where Pi reads `PI_CODEMODE_MAX_WORKERS`, Bake reads this.
 pub const BAKE_CODEMODE_MAX_WORKERS_ENV: &str = "BAKE_CODEMODE_MAX_WORKERS";
-/// Read when [`BAKE_CODEMODE_MAX_WORKERS_ENV`] is unset or blank.
-pub const DSH_CODEMODE_MAX_WORKERS_ENV: &str = "DSH_CODEMODE_MAX_WORKERS";
 /// How long a script waits for a free slot before failing, Pi's
 /// `CODEMODE_WORKER_WAIT_MS`. It bounds the wait when every slot is held by
 /// a script that waits on another script, such as a subagent's.
@@ -68,11 +65,9 @@ const OUTPUT_PREFIX: &str = "bake-codemode";
 /// Pi reads it on every call; Bake reads it once, when the process's first
 /// script asks for a slot.
 pub fn max_codemode_workers(env: impl Fn(&str) -> Option<std::ffi::OsString>) -> usize {
-    [BAKE_CODEMODE_MAX_WORKERS_ENV, DSH_CODEMODE_MAX_WORKERS_ENV]
-        .into_iter()
-        .filter_map(env)
+    env(BAKE_CODEMODE_MAX_WORKERS_ENV)
         .map(|value| value.to_string_lossy().trim().to_owned())
-        .find(|value| !value.is_empty())
+        .filter(|value| !value.is_empty())
         .and_then(|value| value.parse::<f64>().ok())
         .filter(|value| *value >= 1.0 && value.fract() == 0.0)
         .map_or(MAX_CONCURRENT_CODEMODE_SCRIPTS, |value| {
@@ -930,7 +925,9 @@ async fn run_script(
                             queue.push_back(QueuedCall { id, index, tool: Arc::clone(tool), args });
                         }
                         None => {
-                            let _ = handle.answer(id, Err(CallError::new(format!("Tool {name} not found"))));
+                            let available: Vec<&str> = catalog.tools.iter().map(|tool| tool.name.as_str()).collect();
+                            let message = bake_agent::unknown_tool_message(&name, &available);
+                            let _ = handle.answer(id, Err(CallError::new(message)));
                         }
                     }
                 }

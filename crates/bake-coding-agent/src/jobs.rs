@@ -69,22 +69,20 @@
 //! job registry; its `packages/durable` task states give the structure
 //! here: a `completing` task's outcome is decided but it becomes terminal
 //! only once the work it owns is done, a background task is outside a
-//! conversation's aborts, and cancelling a wait cancels only the wait. The
-//! retained contract is Bake's TypeScript `packages/jobs/jobs/src/{types,index}.ts`,
-//! `packages/jobs/jobs-local/src/index.ts`, and the process outcome of
-//! `packages/shell/tool-bash/src/background.ts` ([`process`]): `<kind>-N`
+//! conversation's aborts, and cancelling a wait cancels only the wait.
+//! Bake's job contract, with the process outcome in [`process`]: `<kind>-N`
 //! ids, the per-owner limit of 10 checked before the producer starts, the
 //! `running`/`stopping`/terminal statuses with first-wins settlement, the
 //! consuming stream cursor beside idempotent final output, bounded waits
 //! whose cancellation rejects only a live job, the `reported` claim, and
 //! teardown that cancels, claims, and awaits.
 //!
-//! Differences from the TypeScript: one registry per session rather than
-//! per process, so there are no owner scopes or controller layers; no
-//! listener callbacks ([`JobEvents`] instead); a `Completing` state, and
-//! terminal only after the job's resources settle, where the TypeScript
-//! trusted the producer's `done`; cancellation that cannot throw, so no
-//! record is force-failed; and bounded retention of terminal records.
+//! There is one registry per session, so there are no owner scopes or
+//! controller layers; no listener callbacks ([`JobEvents`] instead); a
+//! `Completing` state, and terminal only after the job's resources settle,
+//! not when the producer says it is done; cancellation that cannot throw,
+//! so no record is force-failed; and bounded retention of terminal
+//! records.
 //! The session's model tools and background `bash` share this registry.
 //! Its journal preserves lifecycle facts, not processes or output bytes.
 //!
@@ -118,9 +116,16 @@ use crate::session::messages::CustomMessage;
 /// cut at a character boundary.
 pub const MAX_TEXT_BYTES: usize = 1024;
 
-/// Turns completion notices may open on an idle session before the next
-/// user prompt, `tool-jobs`' `maxConsecutiveWakes`: it bounds a chain in
-/// which a woken turn starts the job whose completion wakes it again.
+/// How deep a chain of turns opened by notices may go on an idle session,
+/// `tool-jobs`' `maxConsecutiveWakes`: it bounds a chain in which a woken
+/// turn starts the job whose completion wakes it again.
+///
+/// Depth, not count: a job remembers the depth of the turn that started it
+/// ([`JobSnapshot::depth`]), 0 for a user prompt's turn, and its notice
+/// opens a turn one deeper. Jobs started side by side in one turn each wake
+/// the session at the same depth, however many there are, so a session
+/// that runs one job after another from its prompt's turn is never left
+/// waiting on a notice that cannot wake it.
 pub const MAX_CONSECUTIVE_WAKES: usize = 3;
 
 /// The output a viewer sees of each stream job: its newest bytes, read or
@@ -137,8 +142,8 @@ pub const MAX_KIND_BYTES: usize = 32;
 /// The registry's bounds.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JobLimits {
-    /// Live jobs (`running`, `stopping`, or `completing`) at once. The
-    /// TypeScript default, 10.
+    /// Live jobs (`running`, `stopping`, or `completing`) at once; 10 by
+    /// default.
     pub max_active: usize,
     /// Terminal jobs kept for reads.
     pub max_retained: usize,
@@ -146,7 +151,7 @@ pub struct JobLimits {
     pub stream_bytes: usize,
     /// Final output kept per job (its tail).
     pub final_output_bytes: usize,
-    /// The longest wait. The TypeScript job tools' cap, 60 s.
+    /// The longest wait. Default: 60 s.
     pub max_wait: Duration,
 }
 
@@ -239,7 +244,7 @@ impl JobStatus {
         matches!(self, Self::Completed | Self::Killed | Self::Failed)
     }
 
-    /// The TypeScript status word: `running`, `stopping`, `completing`,
+    /// The status word: `running`, `stopping`, `completing`,
     /// `completed`, `killed`, or `failed`.
     pub fn as_str(self) -> &'static str {
         match self {
@@ -354,6 +359,9 @@ pub struct JobSnapshot {
     /// stop or teardown has said no report is wanted. For a session job,
     /// a reserved delivery also counts; this is not a durability receipt.
     pub reported: bool,
+    /// The wake depth of the turn that started it: 0 for a turn a user
+    /// prompt or another agent's message opened ([`MAX_CONSECUTIVE_WAKES`]).
+    pub depth: usize,
 }
 
 /// What [`JobRegistry::read`] returns.
@@ -487,8 +495,9 @@ pub struct JobRegistry {
 
 struct Inner {
     id: u64,
-    /// Turns completion notices opened since the last user prompt
-    /// ([`JobRegistry::spend_wake`]).
+    /// The wake depth of the session's current or last turn: 0 after a
+    /// user prompt or a message that refills it, else the depth a notice
+    /// opened it at ([`JobRegistry::wake_at`]).
     wakes: AtomicUsize,
     gate: WorkGate,
     limits: JobLimits,
@@ -571,6 +580,7 @@ struct Record {
     claim: Claim,
     admission: Option<Result<(), String>>,
     waiters: usize,
+    depth: usize,
     /// The job's own gate: its producer and everything it started.
     gate: WorkGate,
     /// Notified when the job becomes terminal.
@@ -589,6 +599,7 @@ impl Record {
             started_at: self.started_at,
             finished_at: self.finished_at,
             reported: self.claim != Claim::Unclaimed,
+            depth: self.depth,
         }
     }
 }
@@ -954,21 +965,52 @@ impl JobRegistry {
         }
     }
 
-    /// Whether a completion notice would open a turn on an idle session:
-    /// fewer than [`MAX_CONSECUTIVE_WAKES`] turns were opened by notices
-    /// since the last user prompt.
+    /// Whether the notices waiting now would open a turn on an idle
+    /// session: the shallowest of them is above [`MAX_CONSECUTIVE_WAKES`].
+    /// With none waiting, whether a job started now would wake it.
     pub fn notice_would_wake(&self) -> bool {
-        self.inner.wakes.load(Ordering::SeqCst) < MAX_CONSECUTIVE_WAKES
+        let wakes = self.inner.wakes.load(Ordering::SeqCst);
+        let state = self.inner.state();
+        let jobs = state
+            .records
+            .iter()
+            .filter(|record| record.status.is_terminal() && record.claim == Claim::Unclaimed)
+            .map(|record| record.depth)
+            .min();
+        let mail = (!state.mail.is_empty()).then_some(wakes);
+        jobs.into_iter().chain(mail).min().unwrap_or(wakes) < MAX_CONSECUTIVE_WAKES
     }
 
-    /// Takes one wake from the budget: true when a notice may open a turn.
+    /// Whether `job`'s completion notice would open a turn on an idle
+    /// session, as far as its depth decides.
+    pub fn completion_would_wake(job: &JobSnapshot) -> bool {
+        job.depth < MAX_CONSECUTIVE_WAKES
+    }
+
+    /// The depth of notices taken now: the shallowest job's
+    /// ([`JobSnapshot::depth`]), and the current depth for posted mail.
+    pub fn notice_depth(&self, jobs: &[JobSnapshot], mail: bool) -> usize {
+        let wakes = self.inner.wakes.load(Ordering::SeqCst);
+        let jobs = jobs.iter().map(|job| job.depth).min();
+        jobs.into_iter()
+            .chain(mail.then_some(wakes))
+            .min()
+            .unwrap_or(wakes)
+    }
+
+    /// Opens a turn for notices of `depth`: true, with the session one
+    /// deeper, when `depth` is under [`MAX_CONSECUTIVE_WAKES`].
+    pub fn wake_at(&self, depth: usize) -> bool {
+        if depth >= MAX_CONSECUTIVE_WAKES {
+            return false;
+        }
+        self.inner.wakes.store(depth + 1, Ordering::SeqCst);
+        true
+    }
+
+    /// Opens a turn at the current depth ([`Self::wake_at`]).
     pub fn spend_wake(&self) -> bool {
-        self.inner
-            .wakes
-            .try_update(Ordering::SeqCst, Ordering::SeqCst, |spent| {
-                (spent < MAX_CONSECUTIVE_WAKES).then_some(spent + 1)
-            })
-            .is_ok()
+        self.wake_at(self.inner.wakes.load(Ordering::SeqCst))
     }
 
     /// Refills the wake budget: a user prompt was sent.
@@ -993,6 +1035,22 @@ impl JobRegistry {
     /// job's [`JobContext`]; the future it returns runs until it returns
     /// the job's outcome. Must be called inside a Tokio runtime.
     pub fn start<F, Fut>(&self, spec: JobSpec, producer: F) -> Result<JobId, StartError>
+    where
+        F: FnOnce(JobContext) -> Fut + Send + 'static,
+        Fut: Future<Output = JobOutcome> + Send + 'static,
+    {
+        self.start_since(spec, bake_ai::now_ms(), producer)
+    }
+
+    /// [`Self::start`] for work that began before it became a job, at
+    /// `started_at` (milliseconds since the epoch), such as a foreground
+    /// command handed over to a job: the job's age counts from then.
+    pub fn start_since<F, Fut>(
+        &self,
+        spec: JobSpec,
+        started_at: i64,
+        producer: F,
+    ) -> Result<JobId, StartError>
     where
         F: FnOnce(JobContext) -> Fut + Send + 'static,
         Fut: Future<Output = JobOutcome> + Send + 'static,
@@ -1046,11 +1104,12 @@ impl JobRegistry {
             final_output: None,
             final_omitted: 0,
             stream,
-            started_at: bake_ai::now_ms(),
+            started_at,
             finished_at: None,
             claim: Claim::Unclaimed,
             admission: None,
             waiters: 0,
+            depth: inner.wakes.load(Ordering::SeqCst),
             gate,
             wake: Arc::new(Notify::new()),
         });

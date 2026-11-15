@@ -23,7 +23,7 @@ use crate::selection::{self, Granularity, Point, Range};
 use crate::status::{SessionState, StatusInput};
 use crate::tasks::{self, Group, Phase, Task, TaskId};
 use crate::tips::{self, Tips};
-use crate::transcript::{self, Transcript};
+use crate::transcript::{self, Row, Transcript};
 use crate::wheel::{self, WheelSteps};
 
 /// Everything the frontend applies, in arrival order.
@@ -227,8 +227,7 @@ impl Spot {
     }
 }
 
-/// How long a first Ctrl+C waits for a second before the quit is disarmed:
-/// the TypeScript `doubleInterruptMs` default.
+/// How long a first Ctrl+C waits for a second before the quit is disarmed.
 pub const QUIT_WINDOW: Duration = Duration::from_millis(2000);
 
 /// The slash menu as drawn: the matching commands and the selected one.
@@ -305,6 +304,9 @@ pub enum Effect {
     /// Stop the run of the subagent with this id; the runtime reports how
     /// it ended ([`RuntimeUpdate::Agents`]).
     StopAgent(String),
+    /// Watch the transcript of the spawned agent with this id, reporting it
+    /// whole as it changes ([`RuntimeUpdate::CrewLog`]); `None` stops.
+    WatchCrew(Option<u64>),
     /// Move the session to its model's next thinking level; the runtime
     /// reports it in the status line ([`RuntimeUpdate::Status`]).
     CycleThinking,
@@ -320,6 +322,8 @@ pub enum Focus {
     Inspect,
     /// The selected background shell's output.
     Shell,
+    /// A spawned agent's transcript ([`State::crew_viewed`]).
+    Crew,
 }
 
 impl Focus {
@@ -329,6 +333,7 @@ impl Focus {
             Self::Tasks => Scope::Tasks,
             Self::Inspect => Scope::Inspect,
             Self::Shell => Scope::Shell,
+            Self::Crew => Scope::Crew,
         }
     }
 
@@ -361,6 +366,8 @@ pub enum Notice {
     PreviewOnly,
     /// Ctrl+G with no subagent or background shell to list.
     NoTasks,
+    /// Ctrl+X with no spawned agent.
+    NoCrew,
     /// The runtime gave prompts back to the draft.
     Returned,
     /// `/tree` or `/fork` put the chosen message into the draft.
@@ -445,6 +452,14 @@ pub struct State {
     /// When `crew` was reported, on [`Self::now`]'s clock, so its ages
     /// advance between reports.
     pub crew_at: Duration,
+    /// The spawned agent whose transcript is open ([`Focus::Crew`]), and its
+    /// rows once the runtime read them ([`RuntimeUpdate::CrewLog`]).
+    pub crew_viewed: Option<u64>,
+    pub crew_log: Option<Vec<Row>>,
+    /// Rows the transcript is scrolled up from its newest, and the most it
+    /// could be at the last frame, set by rendering.
+    pub crew_scroll: usize,
+    pub(crate) crew_most: usize,
     /// The task the tasks list selects; one no longer listed, or none,
     /// selects the first listed.
     pub selected: Option<TaskId>,
@@ -626,6 +641,10 @@ impl State {
             agents: Vec::new(),
             crew: Vec::new(),
             crew_at: Duration::ZERO,
+            crew_viewed: None,
+            crew_log: None,
+            crew_scroll: 0,
+            crew_most: 0,
             selected: None,
             seen: Vec::new(),
             notice: None,
@@ -1193,7 +1212,7 @@ fn apply(state: &mut State, msg: Msg) -> Vec<Effect> {
             // A terminal pastes nothing for a clipboard that holds only an
             // image, and a dropped file arrives as its path; either is read
             // as an image. Other text goes in, a long paste collapsed into a
-            // placeholder, as the oracle's does.
+            // placeholder.
             Focus::Composer if text.is_empty() => {
                 return vec![Effect::ReadImage(ImageSource::Clipboard)];
             }
@@ -1203,10 +1222,9 @@ fn apply(state: &mut State, msg: Msg) -> Vec<Effect> {
                 }
                 paste_text(state, &text);
             }
-            // The list's keys are on the bar; a paste there is ignored, as
-            // the oracle ignores one while a sheet is open.
+            // The list's keys are on the bar; a paste there is ignored.
             Focus::Tasks | Focus::Shell => {}
-            Focus::Inspect => state.notice = Some(Notice::ReadOnly),
+            Focus::Inspect | Focus::Crew => state.notice = Some(Notice::ReadOnly),
         },
         Msg::Resize { cols, .. } => {
             // What was on screen no longer is: the request must be drawn
@@ -1284,6 +1302,21 @@ fn runtime(state: &mut State, update: RuntimeUpdate) {
         RuntimeUpdate::Crew(list) => {
             state.crew = list;
             state.crew_at = state.now;
+            // An agent cleared from the panel takes its transcript with it;
+            // the runtime stops a watch it can no longer serve.
+            let viewed = state.crew_viewed;
+            if viewed.is_some_and(|id| !state.crew.iter().any(|member| member.id == id)) {
+                state.crew_viewed = None;
+                state.crew_log = None;
+                if state.focus == Focus::Crew {
+                    state.focus = Focus::Composer;
+                }
+            }
+        }
+        RuntimeUpdate::CrewLog { id, rows } => {
+            if state.crew_viewed == Some(id) {
+                state.crew_log = Some(rows);
+            }
         }
         RuntimeUpdate::Jobs(list) => {
             state.jobs = list;
@@ -1584,6 +1617,7 @@ fn pointer_at(state: &mut State, mouse: Mouse) {
             Focus::Tasks => step_selection(state, isize::from(direction)),
             Focus::Inspect => {}
             Focus::Shell => scroll_shell(state, -isize::from(direction) * rows as isize),
+            Focus::Crew => scroll_crew(state, -isize::from(direction) * rows as isize),
         }
         return;
     }
@@ -1951,20 +1985,19 @@ fn edit_note(state: &mut State, input: KeyInput) {
 /// A key while an approval request waits; `burst` when it was read in one
 /// sweep with other keys.
 ///
-/// The panel lists its answers ([`approval_choices`]): ↑↓ or an answer's
-/// key (`y` once, `a` session, `f` full access) chooses one, and Enter
-/// confirms it, so a terminal that repeats a held key as fresh presses can
-/// repeat a choice into no grant, and Enter alone never allows. `n`, or
-/// Enter on Deny, starts a note to the model: printable keys and pastes
-/// type it, Backspace erases, Enter sends the rejection with it, and Esc
-/// goes back to the answers. Elsewhere Esc withdraws the request, as the
-/// TypeScript controller's cancel does. Only keys read alone after the
-/// input thread armed the request ([`Msg::ApprovalArmed`]) choose, confirm,
-/// or send, so a key typed before the prompt appeared, still waiting, or
-/// one inside a burst of typed or pasted text decides nothing; it says how
-/// to answer instead. The page keys scroll the request's detail. Nothing
-/// touches the draft, its caret, or its staged images, and Ctrl+C keeps
-/// its quit gesture.
+/// The panel lists its answers ([`approval_choices`]): ↑↓ or an answer's key
+/// (`y` once, `a` session, `f` full access) chooses one, and Enter confirms
+/// it, so a terminal that repeats a held key as fresh presses can repeat a
+/// choice into no grant, and Enter alone never allows. `n`, or Enter on Deny,
+/// starts a note to the model: printable keys and pastes type it, Backspace
+/// erases, Enter sends the rejection with it, and Esc goes back to the
+/// answers. Elsewhere Esc withdraws the request. Only keys read alone after
+/// the input thread armed the request ([`Msg::ApprovalArmed`]) choose,
+/// confirm, or send, so a key typed before the prompt appeared, still
+/// waiting, or one inside a burst of typed or pasted text decides nothing; it
+/// says how to answer instead. The page keys scroll the request's detail.
+/// Nothing touches the draft, its caret, or its staged images, and Ctrl+C
+/// keeps its quit gesture.
 fn approval_key(state: &mut State, input: KeyInput, burst: bool) -> Vec<Effect> {
     let bound = keys::action(state.focus.scope(), input);
     if let Some(effects) = quit_key(state, bound) {
@@ -2098,6 +2131,7 @@ fn key(state: &mut State, input: KeyInput) -> Vec<Effect> {
         Focus::Tasks => return tasks_key(state, bound),
         Focus::Inspect => inspect_key(state, bound),
         Focus::Shell => return shell_key(state, bound),
+        Focus::Crew => return crew_key(state, bound),
     }
     Vec::new()
 }
@@ -2161,10 +2195,10 @@ fn menu_key(state: &mut State, bound: Option<Action>) -> bool {
     }
 }
 
-/// Up, Down, and Tab while the file menu is open, as the oracle's composer
-/// takes them: the arrows cycle the selection and Tab puts in the selected
-/// mention; with nothing listed yet they do nothing. Enter is not the
-/// menu's, so it sends the draft as typed. Returns `false` without a menu.
+/// Up, Down, and Tab while the file menu is open: the arrows cycle the
+/// selection and Tab puts in the selected mention; with nothing listed yet
+/// they do nothing. Enter is not the menu's, so it sends the draft as typed.
+/// Returns `false` without a menu.
 fn file_key(state: &mut State, bound: Option<Action>) -> bool {
     let Some(menu) = state.file_menu() else {
         return false;
@@ -2264,7 +2298,16 @@ fn composer_key(state: &mut State, bound: Option<Action>, input: KeyInput) -> Ve
             open_tasks(state, Group::Agents);
             return Vec::new();
         }
-        // Without a menu, Tab types a tab, as the oracle's composer does.
+        Some(Action::ViewCrew) => {
+            return match crate::crew::first(&state.crew) {
+                Some(id) => view_crew(state, id),
+                None => {
+                    state.notice = Some(Notice::NoCrew);
+                    Vec::new()
+                }
+            };
+        }
+        // Without a menu, Tab types a tab.
         Some(Action::Complete) => draft.type_text("\t"),
         // Esc asks the runtime to stop its turn, which ends when it says so.
         Some(Action::Interrupt) if running => {
@@ -2442,7 +2485,7 @@ fn composer_key(state: &mut State, bound: Option<Action>, input: KeyInput) -> Ve
 }
 
 /// The prompts the session holds, newest first, as Up recalls them: the
-/// TypeScript `inputHistory` over the transcript's user rows. The preview
+/// transcript's user rows. The preview
 /// has no pending input or commands to recall.
 fn input_history(transcript: &Transcript) -> Vec<String> {
     transcript
@@ -2540,6 +2583,59 @@ fn scroll_shell(state: &mut State, by: isize) {
         .shell_scroll
         .saturating_add_signed(by)
         .min(state.shell_most);
+}
+
+/// Opens the transcript of the spawned agent `id`, unread until the
+/// runtime reports it, and asks the runtime to watch it.
+fn view_crew(state: &mut State, id: u64) -> Vec<Effect> {
+    state.focus = Focus::Crew;
+    state.notice = None;
+    state.crew_viewed = Some(id);
+    state.crew_log = None;
+    state.crew_scroll = 0;
+    vec![Effect::WatchCrew(Some(id))]
+}
+
+/// Closes the open transcript and stops its watch.
+fn close_crew(state: &mut State) -> Vec<Effect> {
+    state.focus = Focus::Composer;
+    state.crew_viewed = None;
+    state.crew_log = None;
+    vec![Effect::WatchCrew(None)]
+}
+
+/// Keys in a spawned agent's transcript.
+fn crew_key(state: &mut State, bound: Option<Action>) -> Vec<Effect> {
+    let page = shell_page(state);
+    match bound {
+        Some(Action::SelectPrevious) => scroll_crew(state, 1),
+        Some(Action::SelectNext) => scroll_crew(state, -1),
+        Some(Action::PageUp) => scroll_crew(state, page),
+        Some(Action::PageDown) => scroll_crew(state, -page),
+        Some(Action::ToLatest) => state.crew_scroll = 0,
+        Some(Action::Left | Action::Right) => {
+            let by = if bound == Some(Action::Left) { -1 } else { 1 };
+            let next = state
+                .crew_viewed
+                .and_then(|id| crate::crew::step(&state.crew, id, by));
+            if let Some(next) = next.filter(|&next| Some(next) != state.crew_viewed) {
+                return view_crew(state, next);
+            }
+        }
+        Some(Action::ReturnToComposer | Action::ViewCrew) => return close_crew(state),
+        // Other keys do nothing: the bar names the keys that work here.
+        _ => {}
+    }
+    Vec::new()
+}
+
+/// Scrolls the transcript `by` rows toward its start, within what the last
+/// frame could show.
+fn scroll_crew(state: &mut State, by: isize) {
+    state.crew_scroll = state
+        .crew_scroll
+        .saturating_add_signed(by)
+        .min(state.crew_most);
 }
 
 fn inspect_key(state: &mut State, bound: Option<Action>) {
@@ -2726,7 +2822,7 @@ mod tests {
         assert_eq!((state.draft.text(), state.notice), ("", None));
         // The prompt shows only once the runtime commits it.
         assert_eq!(state.transcript.rows.len(), rows);
-        // Undo brings a sent draft back, as the oracle's does.
+        // Undo brings a sent draft back.
         chord(&mut state, Key::Char('-'), Mods::CTRL);
         assert_eq!(state.draft.text(), "hello");
     }
@@ -3035,6 +3131,84 @@ mod tests {
         runtime(&mut state, RuntimeUpdate::Agents(Vec::new()));
         assert_eq!(state.focus, Focus::Composer);
         assert!(!state.tasks_row());
+    }
+
+    fn crew_member(id: u64, name: &str, state: crate::crew::CrewState) -> crate::crew::CrewMember {
+        crate::crew::CrewMember {
+            id,
+            name: name.into(),
+            state,
+            tool: None,
+            line: None,
+            task: "a task".into(),
+            age: Duration::ZERO,
+        }
+    }
+
+    // Ctrl+X opens a spawned agent's transcript and asks the runtime to
+    // watch it; ←→ move to another agent, the runtime's rows for the agent
+    // shown fill it, and Esc or Ctrl+X closes it and ends the watch.
+    #[test]
+    fn ctrl_x_opens_a_spawned_agent_s_transcript() {
+        use crate::crew::CrewState;
+        let mut state = live();
+        assert_eq!(chord(&mut state, Key::Char('x'), Mods::CTRL), []);
+        assert_eq!(
+            (state.focus, state.notice),
+            (Focus::Composer, Some(Notice::NoCrew))
+        );
+        runtime(
+            &mut state,
+            RuntimeUpdate::Crew(vec![
+                crew_member(1, "alpha-1", CrewState::Idle),
+                crew_member(2, "alpha-2", CrewState::Working),
+            ]),
+        );
+        assert_eq!(
+            chord(&mut state, Key::Char('x'), Mods::CTRL),
+            [Effect::WatchCrew(Some(2))]
+        );
+        assert_eq!((state.focus, state.crew_viewed), (Focus::Crew, Some(2)));
+        // Rows for another agent are not this one's.
+        runtime(
+            &mut state,
+            RuntimeUpdate::CrewLog {
+                id: 1,
+                rows: vec![Row::Answer("one".into())],
+            },
+        );
+        assert_eq!(state.crew_log, None);
+        runtime(
+            &mut state,
+            RuntimeUpdate::CrewLog {
+                id: 2,
+                rows: vec![Row::Answer("two".into())],
+            },
+        );
+        assert_eq!(state.crew_log, Some(vec![Row::Answer("two".into())]));
+        // Typing is not taken there; → wraps to the first agent, unread.
+        assert_eq!(press(&mut state, Key::Char('q')), []);
+        assert_eq!(state.draft.text(), "");
+        assert_eq!(press(&mut state, Key::Right), [Effect::WatchCrew(Some(1))]);
+        assert_eq!(
+            (state.crew_viewed, state.crew_log.as_ref()),
+            (Some(1), None)
+        );
+        assert_eq!(press(&mut state, Key::Esc), [Effect::WatchCrew(None)]);
+        assert_eq!((state.focus, state.crew_viewed), (Focus::Composer, None));
+        // Ctrl+X closes it too, and an agent cleared from the panel takes
+        // its open transcript with it.
+        chord(&mut state, Key::Char('x'), Mods::CTRL);
+        assert_eq!(
+            chord(&mut state, Key::Char('x'), Mods::CTRL),
+            [Effect::WatchCrew(None)]
+        );
+        chord(&mut state, Key::Char('x'), Mods::CTRL);
+        runtime(
+            &mut state,
+            RuntimeUpdate::Crew(vec![crew_member(1, "alpha-1", CrewState::Idle)]),
+        );
+        assert_eq!((state.focus, state.crew_viewed), (Focus::Composer, None));
     }
 
     // One selection moves across both groups, agents then shells, and Enter
@@ -4002,7 +4176,7 @@ mod tests {
     }
 
     #[test]
-    fn readline_keys_move_kill_and_yank_as_the_oracle_does() {
+    fn readline_keys_move_kill_and_yank() {
         let mut state = State::default();
         let caret_at = |state: &State| {
             let (text, caret) = (state.draft.text(), state.draft.caret());
@@ -4190,7 +4364,7 @@ mod tests {
     }
 
     #[test]
-    fn the_slash_menu_selects_completes_and_closes_as_the_oracle_does() {
+    fn the_slash_menu_selects_completes_and_closes() {
         let mut state = State::default();
         type_str(&mut state, "/lo");
         assert_eq!(menu_names(&state), Some((vec!["login", "logout"], "login")));
@@ -4577,8 +4751,7 @@ mod tests {
 
     // ---- Approvals ----
     //
-    // The keys follow the TypeScript `ApprovalView`
-    // (`apps/tui/packages/ui/src/interaction.tsx`): `n` rejects, a paste
+    // The approval keys: `n` rejects, a paste
     // is dropped, Ctrl and Alt chords decide nothing; `y` then Enter
     // allows, and only once the input thread has armed the request.
 

@@ -77,6 +77,7 @@ pub(crate) fn owned_write_tool_definition(
         },
     );
     tool.replay = Some(ToolReplay::Never);
+    tool.effect = Some(bake_agent::ToolEffect::Write);
     tool.constrained_sampling = Some(ConstrainedSampling::JsonSchema {
         strict: StrictPreference::Prefer,
     });

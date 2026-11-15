@@ -1,10 +1,8 @@
 //! Completion notices for a session's background jobs, and what a resumed
 //! session learns from its file about jobs an earlier process ran.
 //!
-//! Ported from Bake's TypeScript `packages/jobs/tool-jobs/src/index.ts`
-//! (`fitCompletionNotice`, `onJobDone`): a job that settles unreported
-//! becomes a notice to its session. Where the TypeScript queued a user
-//! message, the session queues Pi's custom message (`custom_message` entry,
+//! A job that settles unreported becomes a notice to its session: Pi's
+//! custom message (`custom_message` entry,
 //! [`NOTICE_TYPE`]), which reaches the model as a user message and records
 //! the job in its details, so recovery can tell which jobs were reported.
 //! When the notice is delivered is the session's ([`super::AgentSession`]):
@@ -62,13 +60,18 @@ pub fn completion_notice(snapshot: &JobSnapshot) -> CustomMessage {
 /// terminal job not yet reported, then the notices other agents posted
 /// ([`JobRegistry::post`]), in arrival order.
 pub fn claim(jobs: &JobRegistry) -> Vec<CustomMessage> {
-    let mut notices: Vec<CustomMessage> = jobs
-        .claim_unreported()
-        .iter()
-        .map(completion_notice)
-        .collect();
-    notices.extend(jobs.claim_mail());
-    notices
+    claim_at(jobs).0
+}
+
+/// [`claim`], with the depth a turn they open would be woken at
+/// ([`JobRegistry::notice_depth`]).
+pub fn claim_at(jobs: &JobRegistry) -> (Vec<CustomMessage>, usize) {
+    let settled = jobs.claim_unreported();
+    let mail = jobs.claim_mail();
+    let depth = jobs.notice_depth(&settled, !mail.is_empty());
+    let mut notices: Vec<CustomMessage> = settled.iter().map(completion_notice).collect();
+    notices.extend(mail);
+    (notices, depth)
 }
 
 /// The notice for a job an earlier process of the session started and did

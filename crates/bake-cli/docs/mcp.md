@@ -32,12 +32,13 @@ The file uses the `mcpServers` shape other MCP clients share:
 - `enabled: false` keeps an entry without starting it.
 - `exposure` is `direct` (the default: its tools are given to the model) or `hidden` (they are not); `toolExposure` sets it for single tools by name or `*` pattern. A `hidden` server's resources are not reachable either.
 - `description` is a one-sentence note about what the server offers. The model reads its first line in the `mcp_servers` section of the system prompt, in place of the server's own instructions.
+- `trustReadOnly: true` trusts the server's `readOnlyHint`: a tool the server marks read-only runs as a read, at once with the reads next to it in a response, and still runs after a failed `edit` or `write`. Without it, the hint is only the server's claim, and every tool of the server runs alone, in the order the model wrote the calls, and is answered with an error instead of run after a failed `edit` or `write` earlier in the same response. Set it only for a server you trust to mark its tools truthfully.
 
 A server name may use letters, digits, `_`, and `-`, up to 32 characters. bake reads only this file: there is no project `mcp.json`, so a repository cannot add or change a server.
 
 ## Environment and credentials
 
-A server starts with bake's environment minus the variables that look like credentials (names containing `KEY`, `PASSWORD`, `SECRET`, or `TOKEN`, in any case), every `DSH_*` variable, and the `BAKE_*` variables Bake manages, such as `BAKE_HOME`. A variable named in `env` is passed even when it would be removed, so `"FILES_TOKEN": "${FILES_TOKEN}"` hands that one credential to that one server. Because of that, bake reads `mcp.json` only when its owner alone can change it, and otherwise starts none of its servers:
+A server starts with bake's environment minus the variables that look like credentials (names containing `KEY`, `PASSWORD`, `SECRET`, or `TOKEN`, in any case) and the `BAKE_*` variables Bake manages, such as `BAKE_HOME`. A variable named in `env` is passed even when it would be removed, so `"FILES_TOKEN": "${FILES_TOKEN}"` hands that one credential to that one server. Because of that, bake reads `mcp.json` only when its owner alone can change it, and otherwise starts none of its servers:
 
 - `mcp.json` must be a regular file, not a link or a FIFO, of at most 1 MiB.
 - On Unix it and every directory above it must belong to you or root, and other users must not be able to write them (`chmod go-w`); a directory with the sticky bit, such as `/tmp`, is allowed.

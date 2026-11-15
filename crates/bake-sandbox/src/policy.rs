@@ -1,5 +1,4 @@
-//! The per-call policy, from `SandboxExecutionPolicy`/`SandboxPolicy` in
-//! `packages/sandbox/sandbox/src/index.ts` and `writableRoots` in `roots.ts`.
+//! The per-call policy and its writable roots.
 
 use std::path::{Path, PathBuf};
 
@@ -38,8 +37,8 @@ pub struct SandboxPolicy {
     /// state off it (private temporary directories, for example).
     pub session_id: Option<String>,
     /// Further directories `workspace-write` may write under, added by policy
-    /// layers above the TypeScript contract; canonical, like the workspace. Empty by default, which is the
-    /// TypeScript behavior.
+    /// layers above this crate; canonical, like the workspace. Empty by
+    /// default.
     pub extra_writable_roots: Vec<PathBuf>,
 }
 
@@ -84,9 +83,6 @@ impl SandboxPolicy {
     /// command left at that path. Only `/tmp` and the OS temporary directory
     /// are canonicalized, because only the system administrator controls
     /// those paths themselves (`/tmp` is `/private/tmp` on macOS).
-    ///
-    /// TypeScript's `writableRoots` called `realpathSync` on every root on
-    /// every call; this is the deliberate difference.
     pub fn writable_roots(&self) -> Vec<PathBuf> {
         if self.mode != SandboxMode::WorkspaceWrite {
             return Vec::new();
@@ -155,7 +151,7 @@ mod tests {
     }
 
     #[test]
-    fn extra_roots_follow_the_typescript_ones() {
+    fn extra_roots_follow_the_built_in_ones() {
         let workspace = std::env::temp_dir().join("bake-sandbox-policy-extra-ws");
         let extra = std::env::temp_dir().join("bake-sandbox-policy-extra-root");
         let roots = SandboxPolicy::new(SandboxMode::WorkspaceWrite, &workspace)

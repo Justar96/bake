@@ -187,7 +187,7 @@ impl Fixture {
         self.start_turn(vec![text], now)
     }
 
-    /// Sends every waiting steer now, as the oracle's Alt+↑ does: the
+    /// Sends every waiting steer now, as Alt+↑ does: the
     /// running turn is interrupted, keeping them, and a new turn starts with
     /// all of them, in the order they were sent.
     pub fn send_pending(&mut self, now: Duration) -> Vec<RuntimeUpdate> {
@@ -216,7 +216,7 @@ impl Fixture {
 
     /// Stops the running turn where it is: what was live is committed as it
     /// stood, a running call marked interrupted. Waiting steers are kept and
-    /// start the next turn, as the oracle keeps its inbox on a cancel.
+    /// start the next turn.
     pub fn cancel(&mut self, now: Duration) -> Vec<RuntimeUpdate> {
         let mut updates = self.stop();
         if !updates.is_empty()

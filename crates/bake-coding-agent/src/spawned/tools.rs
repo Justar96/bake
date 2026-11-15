@@ -69,6 +69,8 @@ pub fn tools(host: &SpawnHost) -> Vec<ToolDefinition> {
         );
         // A replay would start a second process.
         tool.replay = Some(ToolReplay::Never);
+        // Coordination with no workspace effect of its own: runs beside other calls.
+        tool.execution_mode = Some(bake_agent::ToolExecutionMode::Parallel);
         tool
     };
     let stop = {
@@ -125,6 +127,8 @@ pub fn tools(host: &SpawnHost) -> Vec<ToolDefinition> {
             },
         );
         tool.replay = Some(ToolReplay::Never);
+        // Coordination with no workspace effect of its own: runs beside other calls.
+        tool.execution_mode = Some(bake_agent::ToolExecutionMode::Parallel);
         tool
     };
     vec![

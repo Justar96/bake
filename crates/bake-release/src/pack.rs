@@ -8,8 +8,6 @@
 //! platform, and its embedded documentation must match the sources, both
 //! before and after the archive is unpacked by `bake-update`'s own reader;
 //! only then does the archive replace the destination, by rename.
-//!
-//! Ported from Bake's `scripts/release/pack-rust.ts` (revision 97ce6abba0).
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -80,7 +78,6 @@ fn run_isolated(binary: &Path, args: &[&str]) -> Result<Ran> {
         .env("HOME", &home)
         .env("USERPROFILE", &home)
         .env("BAKE_HOME", home.join(".bake"))
-        .env("DSH_HOME", home.join(".dsh"))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

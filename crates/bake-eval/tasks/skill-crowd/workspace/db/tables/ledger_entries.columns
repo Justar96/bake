@@ -1,0 +1,6 @@
+id BIGINT not-null
+account_id BIGINT not-null
+amount NUMERIC(19,4) not-null
+posted_at TIMESTAMPTZ not-null
+description TEXT null
+reversed_by BIGINT null

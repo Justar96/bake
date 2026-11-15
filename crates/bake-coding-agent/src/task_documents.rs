@@ -1,4 +1,4 @@
-//! Branch-local plan, todo, and goal snapshots in Pi custom entries (D37).
+//! Branch-local plan, todo, and goal snapshots in Pi custom entries.
 //!
 //! Bake's revision and compare-and-set rules draw on
 //! `packages/goal/goal/src/{types,fold}.ts`; these entries do not read that
@@ -19,8 +19,9 @@ use crate::session::{GroupEntry, SessionError, SessionManager};
 pub mod artifacts;
 pub mod verification;
 
-/// Pi custom-entry type for a complete task document snapshot.
-pub const DOCUMENT_TYPE: &str = "bake.task.document.v1";
+/// Pi custom-entry type for a complete task document snapshot, which the
+/// session store keeps durable across a fork.
+pub const DOCUMENT_TYPE: &str = crate::session::entry::TASK_DOCUMENT_TYPE;
 /// Pi custom-message type exposing one exact revision to the model.
 pub const CONTEXT_TYPE: &str = "bake.task.document.context.v1";
 /// The largest document body, measured in UTF-8 bytes.
@@ -373,3 +374,6 @@ pub fn expose_pending(session: &mut SessionManager) -> Result<usize, DocumentErr
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod session_branch_tests;

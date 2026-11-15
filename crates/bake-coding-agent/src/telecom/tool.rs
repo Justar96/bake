@@ -99,6 +99,8 @@ pub fn tool(station: Station) -> ToolDefinition {
     );
     // A message sent cannot be unsent: a replay must not repeat it.
     tool.replay = Some(ToolReplay::Never);
+    // Coordination with no workspace effect of its own: runs beside other calls.
+    tool.execution_mode = Some(bake_agent::ToolExecutionMode::Parallel);
     ToolDefinition {
         tool,
         prompt_snippet: None,

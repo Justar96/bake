@@ -855,7 +855,7 @@ fn host_call(
             // them. The prelude calls the bridge inside a Promise executor,
             // so an error thrown into the script here would only reject the
             // call, and a loop that does not await would go on; the run
-            // fails instead, as Bake 0.3's runtime did (`maxPendingCalls`).
+            // fails instead.
             let waiting = caller.data().issued.saturating_sub(caller.data().settled);
             if waiting as usize >= MAX_PENDING_CALLS {
                 return Err(GuestError::Protocol(format!(

@@ -1,5 +1,4 @@
-//! The matcher both hook dialects share, ported from Bake 0.3's
-//! `packages/hooks/hook-protocol/src/matcher.ts`.
+//! The matcher both hook dialects share.
 //!
 //! Claude Code reads a pattern of letters, digits, `_`, and `|` as literal
 //! alternatives and any other pattern as a regex; Codex reads every
@@ -7,8 +6,7 @@
 //! `*`, matches everything. At run time an invalid regex is a non-match;
 //! the config parsers reject it first through [`matcher_diagnostic`].
 //!
-//! Regexes use the `regex` crate's syntax, where 0.3 used JavaScript's:
-//! look-around and backreferences are refused as invalid.
+//! Regexes use the `regex` crate's syntax, not JavaScript's: look-around and backreferences are refused as invalid.
 
 use regex::Regex;
 
@@ -57,7 +55,6 @@ pub fn matches_matcher(matcher: Option<&str>, query: &str, dialect: HookDialect)
 
 #[cfg(test)]
 mod tests {
-    //! Ported from 0.3's `hook-protocol/tests/matcher.spec.ts`.
     use super::*;
 
     const CLAUDE: HookDialect = HookDialect::ClaudeCode;

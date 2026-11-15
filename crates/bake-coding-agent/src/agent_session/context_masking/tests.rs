@@ -383,7 +383,7 @@ async fn a_native_read_is_attested_but_a_custom_override_cannot_attest_itself() 
                 },
             )
         };
-        assert_eq!(tool.read_only, native);
+        assert_eq!(tool.effect == Some(bake_agent::ToolEffect::Read), native);
         let mut options = options(&h, new_file_session(&dir), &dir.path().to_string_lossy());
         options.settings.context_masking = true;
         options.tools = vec![Arc::new(tool)];

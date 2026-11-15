@@ -1,6 +1,5 @@
-//! The local OS backends, ported from `LocalSandboxProvider` in
-//! `packages/sandbox/sandbox-local/src/index.ts`: Linux bubblewrap then
-//! Landlock, and macOS Seatbelt. The Windows restricted-token runner and the
+//! The local OS backends: Linux bubblewrap then Landlock, and macOS
+//! Seatbelt. The Windows restricted-token runner and the
 //! unqualified AppContainer runner exist for explicit chains only: the
 //! first does not confine deletion (see [`windows_acl`]), and the second has
 //! no native qualification yet (see [`windows_appcontainer`]), so the
@@ -264,8 +263,8 @@ impl LocalProvider {
         provider
     }
 
-    /// A provider walking `chain` in place of the platform's: the test seam
-    /// TypeScript called `internals.chain`. An empty chain refuses every
+    /// A provider walking `chain` in place of the platform's, for tests and
+    /// explicit Windows chains. An empty chain refuses every
     /// confined call. Bubblewrap is looked up on the process `PATH` now.
     pub fn with_chain(chain: Vec<Runner>) -> Self {
         let exe = std::env::current_exe().ok();
@@ -483,7 +482,7 @@ impl LocalProvider {
                 Ok(ran.and_then(|(code, _)| (code == Some(0)).then_some(Enforcement::Full)))
             }
             Runner::WindowsAcl => {
-                // TypeScript's probe: a read-only run, which grants nothing,
+                // The probe is a read-only run, which grants nothing,
                 // around `cmd /c exit 0`. Only an override chain probes it.
                 let Some(runner) = self.windows_acl.as_ref() else {
                     return Ok(None);

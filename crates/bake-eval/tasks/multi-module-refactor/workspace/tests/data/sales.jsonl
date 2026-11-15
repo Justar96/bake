@@ -1,0 +1,7 @@
+{"region": "north", "product": "apples", "amount": 1200.5}
+{"region": "south", "product": "pears", "amount": 300}
+{"region": "north", "product": "pears", "amount": 99.95}
+{"region": "east", "product": "apples", "amount": "410.10"}
+{"region": "south", "product": "apples", "amount": 250.25}
+{"region": "north", "product": "plums", "amount": 0.05}
+{"region": "east", "product": "plums", "amount": 12}

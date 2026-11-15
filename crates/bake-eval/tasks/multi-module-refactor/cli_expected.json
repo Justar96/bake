@@ -1,0 +1,111 @@
+[
+ {
+  "args": [
+   "examples/by-region.spec",
+   "tests/data/sales.csv"
+  ],
+  "code": 0,
+  "stdout": "Sales by region\n===============\n\nregion  sum      count  mean\n------  -------  -----  ------\neast    422.10   2      211.05\nnorth   1300.50  3      433.50\nsouth   550.25   2      275.12\n",
+  "stderr": ""
+ },
+ {
+  "args": [
+   "--format",
+   "markdown",
+   "examples/by-region.spec",
+   "tests/data/sales.jsonl"
+  ],
+  "code": 0,
+  "stdout": "## Sales by region\n\n| region | sum | count | mean |\n|---|---|---|---|\n| east | 422.10 | 2 | 211.05 |\n| north | 1300.50 | 3 | 433.50 |\n| south | 550.25 | 2 | 275.12 |\n",
+  "stderr": ""
+ },
+ {
+  "args": [
+   "--format",
+   "json",
+   "examples/big-sales.spec",
+   "tests/data/sales.tsv"
+  ],
+  "code": 0,
+  "stdout": "{\n  \"title\": \"Large sales by region\",\n  \"columns\": [\n    \"region\",\n    \"count\",\n    \"sum\",\n    \"p90\"\n  ],\n  \"rows\": [\n    [\n      \"east\",\n      \"1\",\n      \"410.10\",\n      \"410.10\"\n    ],\n    [\n      \"north\",\n      \"1\",\n      \"1200.50\",\n      \"1200.50\"\n    ],\n    [\n      \"south\",\n      \"2\",\n      \"550.25\",\n      \"300.00\"\n    ]\n  ]\n}\n",
+  "stderr": ""
+ },
+ {
+  "args": [
+   "--format",
+   "html",
+   "examples/big-sales.spec",
+   "tests/data/sales.fw"
+  ],
+  "code": 0,
+  "stdout": "<table>\n  <caption>Large sales by region</caption>\n  <tr><th>region</th><th>count</th><th>sum</th><th>p90</th></tr>\n  <tr><td>east</td><td>1</td><td>410.10</td><td>410.10</td></tr>\n  <tr><td>north</td><td>1</td><td>1200.50</td><td>1200.50</td></tr>\n  <tr><td>south</td><td>2</td><td>550.25</td><td>300.00</td></tr>\n</table>\n",
+  "stderr": ""
+ },
+ {
+  "args": [
+   "examples/big-sales.spec",
+   "tests/data/sales.csv"
+  ],
+  "code": 0,
+  "stdout": "Large sales by region\n=====================\n\nregion  count  sum      p90\n------  -----  -------  -------\neast    1      410.10   410.10\nnorth   1      1200.50  1200.50\nsouth   2      550.25   300.00\n",
+  "stderr": ""
+ },
+ {
+  "args": [
+   "--list"
+  ],
+  "code": 0,
+  "stdout": "formats: csv, html, json, markdown, text\naggregators: count, distinct, max, mean, median, min, mode, p25, p75, p90, stdev, sum\nfilters: !=, <, <=, =, >, >=, contains, startswith\n",
+  "stderr": ""
+ },
+ {
+  "args": [
+   "--plugin",
+   "plugins/shout.py",
+   "--list"
+  ],
+  "code": 0,
+  "stdout": "formats: csv, html, json, markdown, shout, text\naggregators: count, distinct, max, mean, median, min, mode, p25, p75, p90, range, stdev, sum\nfilters: !=, <, <=, =, >, >=, contains, startswith\n",
+  "stderr": ""
+ },
+ {
+  "args": [
+   "--plugin",
+   "plugins/shout.py",
+   "SPREAD",
+   "tests/data/sales.tsv"
+  ],
+  "code": 0,
+  "stdout": "SPREAD BY REGION\n================\n\nREGION  RANGE    COUNT\n------  -------  -----\nSOUTH   49.75    2\nEAST    398.10   2\nNORTH   1200.45  3\n",
+  "stderr": ""
+ },
+ {
+  "args": [
+   "SPREAD",
+   "tests/data/sales.csv"
+  ],
+  "code": 1,
+  "stdout": "",
+  "stderr": "error: unknown aggregator 'range' (known: count, distinct, max, mean, median, min, mode, p25, p75, p90, stdev, sum)\n"
+ },
+ {
+  "args": [
+   "--format",
+   "pdf",
+   "examples/by-region.spec",
+   "tests/data/sales.csv"
+  ],
+  "code": 1,
+  "stdout": "",
+  "stderr": "error: unknown format 'pdf' (known: csv, html, json, markdown, text)\n"
+ },
+ {
+  "args": [
+   "examples/by-region.spec",
+   "tests/data/sales.xml"
+  ],
+  "code": 1,
+  "stdout": "",
+  "stderr": "error: unknown reader '.xml' (known: .csv, .fw, .jsonl, .tsv)\n"
+ }
+]

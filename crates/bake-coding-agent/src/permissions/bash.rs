@@ -1,12 +1,10 @@
 //! Pi's bash tool under the sandbox.
 //!
-//! Ported from Bake's TypeScript `packages/shell/bash-sandbox/src/{index,helpers}.ts`
-//! (`SandboxBashExecutor.run`: wrap the exact shell argv through the
-//! provider, fail closed when it cannot, classify a runner failure before a
-//! denial) and the sandbox parts of `packages/shell/tool-bash/src/index.ts`
-//! (`bashDescription`, the `sandbox_permissions` and `justification`
-//! parameters, the escalation step) and `render.ts` (`renderResult`'s
-//! denial marker and escalation hint).
+//! Each call wraps the exact shell argv through the sandbox provider, fails
+//! closed when it cannot, and classifies a runner failure before a denial.
+//! The tool takes the `sandbox_permissions` and `justification`
+//! parameters and the escalation step, and a denied run gains the denial
+//! marker and escalation hint.
 //!
 //! The wrapped tool is Pi's: [`SandboxedBashOperations`] is a
 //! [`BashOperations`] that runs Pi's local shell through
@@ -14,13 +12,10 @@
 //! abort, and process-tree ownership stay Pi's. Each call resolves its
 //! policy through the [`PermissionEngine`](super::PermissionEngine) first.
 //!
-//! Where Pi's text and the sandbox's meet: Pi's description gains the
-//! TypeScript sandbox paragraph; Pi's parameters gain the two escalation
-//! parameters; a denied run's output gains the TypeScript markers before
-//! Pi's exit status, as `renderResult` put them before its exit marker. A
-//! runner failure fails the call with the `SandboxUnavailable` text, as a
-//! TypeScript foreground run did (the `runner_failed_notice` belonged to
-//! background jobs, which Pi does not have).
+//! Where Pi's text and the sandbox's meet: Pi's description gains Bake's
+//! sandbox paragraph; Pi's parameters gain the two escalation parameters;
+//! a denied run's output gains Bake's markers before Pi's exit status. A
+//! runner failure fails the call with the `SandboxUnavailable` text.
 
 use std::collections::VecDeque;
 use std::ffi::OsString;
@@ -64,18 +59,25 @@ pub const BASH_JUSTIFICATION_DESCRIPTION: &str = "One sentence for the user.";
 pub const STDERR_CLASSIFY_BYTES: usize = 64 * 1024;
 
 /// Pi's description with the sandbox paragraph, whose escalation sentences
-/// appear only when `targets` is not empty, and the background sentence when
-/// the tool takes `run_in_background`.
-pub fn sandboxed_bash_tool_description(targets: &[SandboxMode], background: bool) -> String {
+/// appear only when `targets` is not empty, and, with `background` (the
+/// tool takes `run_in_background`), that foreground budget and the
+/// background sentence.
+pub fn sandboxed_bash_tool_description(
+    targets: &[SandboxMode],
+    background: Option<std::time::Duration>,
+) -> String {
+    sandboxed_description_over(&bash_tool_description_for(background), targets)
+}
+
+/// `base`, a bash description without the sandbox paragraph, with it for
+/// `targets`.
+pub(crate) fn sandboxed_description_over(base: &str, targets: &[SandboxMode]) -> String {
     let escalation = if targets.is_empty() {
         ""
     } else {
         BASH_SANDBOX_ESCALATION_DESCRIPTION
     };
-    format!(
-        "{}{BASH_SANDBOX_DESCRIPTION}{escalation}",
-        bash_tool_description_for(background)
-    )
+    format!("{base}{BASH_SANDBOX_DESCRIPTION}{escalation}")
 }
 
 /// Pi's parameters with `sandbox_permissions` (enum `targets`) and
@@ -337,8 +339,10 @@ pub fn create_sandboxed_bash_tool_definition(
     let cwd = cwd.to_path_buf();
     let permissions = permissions.clone();
     let background = options.jobs.is_some();
-    tool.description =
-        sandboxed_bash_tool_description(permissions.escalation_targets(), background);
+    tool.description = sandboxed_bash_tool_description(
+        permissions.escalation_targets(),
+        background.then_some(options.foreground_budget),
+    );
     tool.parameters = sandboxed_bash_tool_parameters(permissions.escalation_targets(), background);
     tool.execute = Arc::new(
         move |id: String, args: Value, signal: Option<AbortSignal>, on_update, ctx| {

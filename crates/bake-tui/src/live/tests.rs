@@ -692,15 +692,13 @@ fn quitting_mid_turn_shuts_the_session_down_before_stop_returns() {
 }
 
 #[test]
-fn deferred_commands_are_refused_and_the_draft_comes_back() {
+fn unknown_commands_are_refused_and_the_draft_comes_back() {
     let h = harness(Vec::new(), Vec::new());
     h.until(|update| matches!(update, RuntimeUpdate::Status(_)));
-    for (id, word) in (1..).zip(DEFERRED_COMMANDS) {
+    for (id, word) in (1..).zip(["help", "clear", "frobnicate"]) {
         h.submit_id(id, Submission::FollowUp(format!("/{word} gpt")));
         let updates = h.until(|update| matches!(update, RuntimeUpdate::Refused { .. }));
-        let expected = format!(
-            "/{word} is not available in bake yet; it is planned for a later 0.4.x release, and your draft is kept."
-        );
+        let expected = driver::unknown_command(word);
         assert!(
             matches!(
                 updates.last(),
@@ -748,10 +746,10 @@ fn harness_with_review_template(prompts: &[&str]) -> Harness {
     }
 }
 
-/// D48 on the interactive command line: a deferred command, an unknown
-/// command-like word, and a command that runs only from the composer never
-/// reach the session. Their texts go into the draft together, in order,
-/// with the first one's reason; the prompt after them still runs.
+/// On the interactive command line, unknown command-like words and a command
+/// that runs only from the composer never reach the session. Their texts go
+/// into the draft together, in order, with the first one's reason; the prompt
+/// after them still runs.
 #[test]
 fn command_line_commands_are_refused_into_the_draft_and_the_rest_run() {
     let h = harness_with_review_template(&["/goal ship it", "/frobnicate now", "/model", "hello"]);
@@ -770,7 +768,7 @@ fn command_line_commands_are_refused_into_the_draft_and_the_rest_run() {
                 "/frobnicate now".into(),
                 "/model".into()
             ],
-            reason: driver::deferred_command("goal"),
+            reason: driver::unknown_command("goal"),
         }],
         "{updates:#?}"
     );
@@ -844,7 +842,7 @@ fn a_command_line_command_bake_runs_is_kept_for_the_composer() {
     );
     assert_eq!(
         driver::command_line_refusal("/help", &[]),
-        Some(driver::deferred_command("help"))
+        Some(driver::unknown_command("help"))
     );
     let templates = ["review".to_owned()];
     assert_eq!(driver::command_line_refusal("/review x", &templates), None);
@@ -1045,9 +1043,11 @@ fn a_driver_panic_still_shuts_the_session_down_and_is_reported() {
 #[test]
 fn commands_are_refused_but_skills_templates_and_paths_are_not() {
     let templates = ["review".to_owned()];
-    assert!(refused_command("/quit", &templates).is_some_and(|r| r.contains("0.4.x")));
+    assert!(refused_command("/quit", &templates).is_some_and(|r| r.contains("not a command")));
     assert!(refused_command("  /copy x", &templates).is_some());
-    assert!(refused_command("/clear ship it", &templates).is_some_and(|r| r.contains("0.4.x")));
+    assert!(
+        refused_command("/clear ship it", &templates).is_some_and(|r| r.contains("not a command"))
+    );
     assert!(
         refused_command("/frobnicate ship it", &templates)
             .is_some_and(|r| r.contains("not a command"))
@@ -1068,75 +1068,11 @@ fn commands_are_refused_but_skills_templates_and_paths_are_not() {
     assert_eq!(refused_command("plain", &templates), None);
 }
 
-/// D48: every Pi v1.3.0 built-in and Bake 0.3 slash command that `bake`
-/// does not run is refused with the same deferral sentence, bare or with
-/// an argument, and none of them is one `bake` runs.
-#[test]
-fn each_deferred_command_refuses_with_a_deferral_sentence() {
-    let pi = [
-        "scoped-models",
-        "export",
-        "import",
-        "copy",
-        "hotkeys",
-        "trust",
-        "reload",
-        "quit",
-    ];
-    let bake_03 = [
-        "agents",
-        "attach",
-        "clear-attachments",
-        "remove-attachment",
-        "help",
-        "terminal-setup",
-        "update",
-        "sessions",
-        "clear",
-        "goal",
-        "feedback",
-    ];
-    let expected: Vec<&str> = pi.iter().chain(&bake_03).copied().collect();
-    assert_eq!(DEFERRED_COMMANDS, expected.as_slice());
-    for word in DEFERRED_COMMANDS {
-        assert!(!commands::COMMANDS.contains(word), "/{word} runs");
-        let sentence = format!(
-            "/{word} is not available in bake yet; it is planned for a later 0.4.x release, and your draft is kept."
-        );
-        assert_eq!(
-            refused_command(&format!("/{word}"), &[]),
-            Some(sentence.clone())
-        );
-        assert_eq!(
-            refused_command(&format!("  /{word} with an argument"), &[]),
-            Some(sentence)
-        );
-        assert_eq!(commands::parse(&format!("/{word}")), None);
-    }
-}
-
-/// D48: neither slash menu, the preview's or a live session's, lists a
-/// deferred command; `commands`' `the_menu_lists_exactly_the_commands_that_run`
-/// pins the live menu to the commands that run.
-#[test]
-fn the_menus_list_no_deferred_command() {
-    use bake_tui_view::completion::{CATALOG, LIVE_CATALOG};
-    for command in CATALOG.iter().chain(LIVE_CATALOG) {
-        assert!(
-            !DEFERRED_COMMANDS.contains(&command.name),
-            "the menu lists the deferred /{}",
-            command.name
-        );
-    }
-}
-
-// ---- Approvals (D24) ----
+// ---- Approvals ----
 //
 // The session's real sandboxed `write` tool under a read-only session asks
 // the broker to escalate to workspace-write; what the view answers decides
-// whether the file appears. Fixtures follow
-// `apps/tui/packages/app/tests/interactions.spec.ts` and
-// `packages/interaction/user-approval/tests/approval.spec.ts`.
+// whether the file appears.
 
 use bake_coding_agent::permissions::{
     ApprovalBroker, ApprovalPolicy, StandingPermissions, ToolPermissions,

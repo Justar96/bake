@@ -1,5 +1,4 @@
-//! Folding every matched hook's outcome into the most restrictive one,
-//! ported from Bake 0.3's `packages/hooks/hook-protocol/src/merge.ts`.
+//! Folding every matched hook's outcome into the most restrictive one.
 //!
 //! Decisions rank `deny` over `ask` over `allow`, and only the winning
 //! rank's reasons are kept, joined by a blank line. The first
@@ -106,7 +105,6 @@ pub fn merge_hook_outputs<'a>(outputs: impl IntoIterator<Item = &'a HookOutput>)
 
 #[cfg(test)]
 mod tests {
-    //! Ported from 0.3's `hook-protocol/tests/merge.spec.ts`.
     use super::*;
 
     fn out(decision: Option<HookDecision>, reason: Option<&str>) -> HookOutput {

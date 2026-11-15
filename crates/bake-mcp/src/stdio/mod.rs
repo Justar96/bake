@@ -26,8 +26,8 @@
 //! This module runs exactly the command it is given. It does not decide
 //! whether a server may run, and it does not confine it. The caller must:
 //!
-//! - admit the command under Bake's permissions (D24) before spawning, and
-//!   pass the D24 sandbox's wrapped command (`bake-sandbox`'s
+//! - admit the command under Bake's permissions before spawning, and
+//!   pass the sandbox's wrapped command (`bake-sandbox`'s
 //!   `ConfinedCommand`: its program, arguments, and runner environment) as
 //!   the [`StdioCommand`] when the session's mode confines processes. No
 //!   caller does yet: neither the CLI nor configuration starts MCP servers;
@@ -43,7 +43,7 @@
 //! The process and its tree are owned by `bake-process`'s `OwnedProcess`,
 //! the owner Bake's coding tools use, under its kill policy: a server's
 //! descendants never outlive a completed shutdown, even when the server
-//! exits by itself. Process groups and Jobs are cleanup ownership, not D24
+//! exits by itself. Process groups and Jobs are cleanup ownership, not
 //! containment.
 //!
 //! On Unix the server leads a new session and process group (`setsid` before

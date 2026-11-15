@@ -2814,3 +2814,97 @@ fn every_tool_heads_its_card_with_a_title_and_what_it_acts_on() {
         ]
     );
 }
+
+// A `bash` call without `run_in_background` whose command outlived the
+// foreground budget settles as one that started a job: tagged with the
+// job's id and `background`, with neither the output it returned nor the
+// text telling the model about the job. Its output while it ran showed.
+#[test]
+fn a_command_handed_over_to_a_job_settles_as_background() {
+    let mut projector = Projector::default();
+    projector.begin(None);
+    let args = json!({ "command": "./slow.sh" });
+    run(&mut projector, start("a", "bash", args.clone()));
+    let rows = live_rows(run(
+        &mut projector,
+        AgentEvent::ToolExecutionUpdate {
+            tool_call_id: "a".into(),
+            tool_name: "bash".into(),
+            args,
+            partial_result: AgentToolResult::text("step 1"),
+            parent_tool_call_id: None,
+        },
+    ));
+    assert_eq!(
+        rows,
+        [card(
+            "Bash",
+            "./slow.sh",
+            None,
+            CallState::Running,
+            None,
+            &["step 1"]
+        )]
+    );
+    let rows = live_rows(run(
+        &mut projector,
+        end(
+            "a",
+            "bash",
+            "step 1\n\nCommand still running after 10 seconds; it continues as background job bash-1: `job_output` reads more of its output, `job_kill` stops it, and a notice arrives when it finishes.",
+            Some(json!({ BACKGROUND_JOB_DETAIL: { "id": "bash-1", "label": "./slow.sh" } })),
+        ),
+    ));
+    assert_eq!(
+        rows,
+        [card(
+            "Bash",
+            "./slow.sh",
+            Some("bash-1"),
+            CallState::Done,
+            Some("background"),
+            &[]
+        )]
+    );
+}
+
+// Context files found while working are rows of their own: one per file
+// loaded, then the warnings. Found during a call, they follow its card.
+#[test]
+fn context_files_found_while_working_are_rows() {
+    let loaded = ["/w/pkg/AGENTS.md".to_owned()];
+    let warnings = [
+        "Skipped context file /w/pkg/sub/AGENTS.md: the context files found while working may hold at most 64 KiB."
+            .to_owned(),
+    ];
+    let event = SessionEvent::NestedContext {
+        loaded: &loaded,
+        warnings: &warnings,
+    };
+    let expected = [
+        Row::Info("Loaded context file /w/pkg/AGENTS.md".into()),
+        Row::Info("Warning: Skipped context file /w/pkg/sub/AGENTS.md: the context files found while working may hold at most 64 KiB.".into()),
+    ];
+    // Between calls, they are committed at once.
+    let mut projector = Projector::default();
+    let updates = projector.apply(&event);
+    let committed: Vec<Row> = updates
+        .into_iter()
+        .flat_map(|update| match update {
+            RuntimeUpdate::Commit(rows) => rows,
+            _ => Vec::new(),
+        })
+        .collect();
+    assert_eq!(committed, expected);
+
+    // During a call, they follow its card.
+    let mut projector = Projector::default();
+    projector.begin(None);
+    let args = json!({ "path": "pkg/a.txt" });
+    run(&mut projector, start("r", "read", args));
+    projector.apply(&event);
+    let rows = live_rows(run(&mut projector, end("r", "read", "a", None)));
+    assert_eq!(rows.len(), 3, "{rows:?}");
+    assert!(matches!(&rows[0], Row::Call { tool, state: CallState::Done, .. } if tool == "Read"));
+    assert_eq!(rows[1..], expected);
+}

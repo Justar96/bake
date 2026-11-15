@@ -1,5 +1,4 @@
-//! Decoding a hook process's outcome, ported from Bake 0.3's
-//! `packages/hooks/hook-protocol/src/codec.ts`.
+//! Decoding a hook process's outcome.
 //!
 //! Exit 0 may carry structured JSON on standard output, or plain text;
 //! exit 2 blocks with standard error as the reason; every other exit, and a
@@ -37,7 +36,7 @@ impl HookDecision {
     }
 }
 
-/// The dialect-neutral outcome of one hook process, 0.3's `HookOutput`.
+/// The dialect-neutral outcome of one hook process.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct HookOutput {
     /// The exit code; `None` when the hook could not run, timed out, or
@@ -156,7 +155,6 @@ fn apply_structured(
 
 #[cfg(test)]
 mod tests {
-    //! Ported from 0.3's `hook-protocol/tests/codec.spec.ts`.
     use serde_json::json;
 
     use super::*;

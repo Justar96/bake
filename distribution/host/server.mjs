@@ -10,7 +10,7 @@ import { createHandler } from './handler.mjs'
 
 const root = resolve(import.meta.dirname)
 const publicRoot = join(root, 'public')
-if (!existsSync(join(publicRoot, 'latest.json'))) throw new Error('Missing public/latest.json; assemble a release first')
+if (!existsSync(join(publicRoot, 'native', 'stable.json'))) throw new Error('Missing public/native/stable.json; assemble a release first')
 
 const handle = createHandler({
   archiveRedirect: process.env.BAKE_ARCHIVE_REDIRECT,

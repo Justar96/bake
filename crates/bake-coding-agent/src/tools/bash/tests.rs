@@ -22,20 +22,24 @@ fn timeouts_follow_pis_bounds() {
         resolve_timeout(Some(2_147_483.647)),
         Ok(Some(Duration::from_secs_f64(2_147_483.647)))
     );
-    for invalid in [0.0, -1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+    for invalid in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         assert_eq!(
             resolve_timeout(Some(invalid)),
             Err("Invalid timeout: must be a finite number of seconds".to_owned())
         );
     }
-    assert_eq!(
-        resolve_timeout(Some(2_147_483.648)),
-        Err("Invalid timeout: maximum is 2147483.647 seconds".to_owned())
-    );
-    assert_eq!(
-        resolve_timeout(Some(f64::MAX)),
-        Err("Invalid timeout: maximum is 2147483.647 seconds".to_owned())
-    );
+    for invalid in [0.0, -0.0, -1.0, -0.001] {
+        assert_eq!(
+            resolve_timeout(Some(invalid)),
+            Err("Invalid timeout: must be greater than 0 seconds. Leave timeout out to run the command without one.".to_owned())
+        );
+    }
+    for invalid in [2_147_483.648, f64::MAX] {
+        assert_eq!(
+            resolve_timeout(Some(invalid)),
+            Err("Invalid timeout: maximum is 2147483.647 seconds. Leave timeout out to run the command without one.".to_owned())
+        );
+    }
 }
 
 /// A non-number timeout from a direct call is refused as not finite.

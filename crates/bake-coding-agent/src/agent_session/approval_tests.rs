@@ -3,9 +3,7 @@
 //! read the session file on disk when they are asked and when the call
 //! runs. Each case checks the approval entries
 //! ([`crate::permissions::history`]) against what was asked and what ran.
-//! The rules are those of Bake's TypeScript `ApprovalService.request`
-//! (`packages/interaction/user-approval/src/index.ts`, lines 208-227) and
-//! its `tests/approval.spec.ts`: an `asked` entry before anyone is asked, one
+//! The rules: an `asked` entry before anyone is asked, one
 //! `decided` entry per request, a fresh id per request, the pair under the
 //! `never` policy and with no one to answer, and a failed write that refuses
 //! the request. The kill case follows `context_masking/crash_tests.rs`.
@@ -711,8 +709,7 @@ async fn each_answer_is_recorded_and_answered_as_without_a_record() {
 }
 
 // Under `never` the request is rejected without asking anyone, and with no
-// one to answer it is `unavailable`; both still write the pair, as the
-// TypeScript service did, and give the unrecorded session's refusal.
+// one to answer it is `unavailable`; both still write the pair and give the unrecorded session's refusal.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn never_and_no_answerer_still_record_the_pair() {
     for (policy, answers, outcome) in [
@@ -1276,7 +1273,7 @@ async fn a_session_that_does_not_persist_records_nothing() {
     assert_eq!(names, ["markers", "ws"], "no session file");
 }
 
-/// A session over Pi's `write` under D24, standing in `read-only` with the
+/// A session over Pi's `write` under Bake's permissions, standing in `read-only` with the
 /// `ask` policy in `ws`; the answerer allows `w-allow` and rejects the rest.
 async fn write_session(
     h: &Harness,

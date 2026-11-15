@@ -5,9 +5,8 @@ use std::fmt;
 /// Why an update, check, or rollback stopped. Every variant carries the
 /// plain sentence the command prints; none carries a cause chain, so a
 /// message never leaks a path or a library's wording the user cannot act
-/// on. Bake 0.3's `UpdateError` (`packages/boot/updater/src/manifest.ts`)
-/// is one untyped class; these are its failures named apart, so a caller
-/// can tell a refused manifest from a held lock.
+/// on. The failures are named apart, so a caller can tell a refused
+/// manifest from a held lock.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UpdateError {
     /// The manifest is not the JSON a native release manifest must be.

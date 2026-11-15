@@ -1,9 +1,8 @@
-//! The proxy's URL forms: `cliProxyEndpoints` in
-//! `apps/tui/packages/app/src/cliproxyapi.ts`.
+//! The proxy's URL forms.
 //!
-//! The TypeScript parses with the WHATWG `URL` class; the `url` crate that
-//! reqwest re-exports implements the same standard, so hosts, ports,
-//! percent-encoding, and origins serialize alike.
+//! Addresses are parsed by the WHATWG URL standard, which the `url` crate
+//! that reqwest re-exports implements, so hosts, ports, percent-encoding,
+//! and origins serialize as a browser would serialize them.
 
 use std::fmt;
 
@@ -21,7 +20,7 @@ pub struct CliProxyEndpoints {
     pub inference: String,
 }
 
-/// Why an address is not a proxy URL. The messages are the TypeScript's.
+/// Why an address is not a proxy URL.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CliProxyUrlError {
     /// Empty after trimming.
@@ -89,7 +88,7 @@ pub fn cli_proxy_endpoints(input: &str) -> Result<CliProxyEndpoints, CliProxyUrl
     };
     let url = Url::parse(&text).map_err(|_| CliProxyUrlError::Invalid)?;
     // WHATWG `search` and `hash` are empty for a bare `?` or `#`, so only a
-    // non-empty query or fragment is refused, as the TypeScript refuses it.
+    // non-empty query or fragment is refused.
     if !matches!(url.scheme(), "http" | "https")
         || !url.username().is_empty()
         || url.password().is_some_and(|password| !password.is_empty())
@@ -160,12 +159,11 @@ mod tests {
         );
     }
 
-    // cliProxyEndpoints' own branches: the empty and unparseable errors and
+    // The endpoint rules' branches: the empty and unparseable errors and
     // their messages, a scheme in any case, trailing slashes, one suffix
-    // stripped, and a bare `?` or `#` (empty WHATWG search and hash). Every
-    // expected value is the TypeScript's own output for the same input.
+    // stripped, and a bare `?` or `#` (empty WHATWG search and hash).
     #[test]
-    fn follows_the_typescript_branches() {
+    fn follows_each_endpoint_branch() {
         assert_eq!(
             cli_proxy_endpoints(" \t\u{FEFF}"),
             Err(CliProxyUrlError::Empty)

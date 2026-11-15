@@ -1,12 +1,9 @@
 //! A session's hooks: which hooks an event runs, the stdin payload of each
 //! dialect, and what the merged outcome does at each hook point.
 //!
-//! Ported from Bake 0.3's bridges, `packages/hooks/hooks-claude-code/src/
-//! index.ts` and `packages/hooks/hooks-codex/src/index.ts` (`runPoint`, the
-//! per-event payload builders, and each listener's decision mapping), and
-//! the durable record of `hook-protocol/src/events.ts`
-//! (`appendHookResult`'s decision rule and stderr summary). The texts the
-//! model or the user sees are 0.3's.
+//! Each dialect builds its per-event payload and maps the merged outcome to
+//! a decision; every evaluation that ran a hook leaves a durable record
+//! with its decision and a summary of its standard error.
 
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -33,7 +30,7 @@ pub const POST_TOOL_USE_BLOCKED: &str = "blocked by PostToolUse hook";
 pub const STOP_BLOCKED: &str = "continue: blocked by Stop hook";
 /// The most `Stop` continuations one prompt takes in a row. A `Stop` hook
 /// that blocks again after them is overruled: the run ends with
-/// [`stop_cap_note`]. 0.3 had no bound (its `TODO(stop-loop-guard)`).
+/// [`stop_cap_note`].
 pub const MAX_STOP_HOOK_CONTINUATIONS: u32 = 8;
 
 /// The note the model and the user see when a run ends at
@@ -48,8 +45,7 @@ pub fn stop_cap_note() -> String {
 /// followed by `: <reason>` when the hook gave one.
 pub const PROMPT_BLOCKED: &str = "Prompt blocked by UserPromptSubmit hook";
 
-/// The most characters of a hook's standard error its record keeps
-/// (0.3's `DEFAULT_STDERR_SUMMARY_MAX_CHARS`).
+/// The most characters of a hook's standard error its record keeps.
 pub const STDERR_SUMMARY_MAX_CHARS: usize = 500;
 
 /// The `source` of `SessionStart`: a session with no conversation yet
@@ -127,7 +123,7 @@ pub struct PayloadBase {
 }
 
 /// `dialect`'s stdin payload for `input`. Claude Code's
-/// `transcript_path` is `""` and Codex's `null`, as in 0.3: the session
+/// `transcript_path` is `""` and Codex's `null`: the session
 /// file is not in either tool's transcript format.
 pub fn payload(dialect: HookDialect, input: &EventInput<'_>, base: &PayloadBase) -> Value {
     let event = input.event();
@@ -237,7 +233,7 @@ impl std::fmt::Debug for Hooks {
 }
 
 /// Whether `merged` ends the event before `dialect`'s successors run:
-/// the outcomes on which 0.3's listener returned without calling `next()`.
+/// a block, a denial, or a question.
 fn ends_event(event: HookEvent, dialect: HookDialect, merged: &MergedOutcome) -> bool {
     let deny = merged.decision == MergedDecision::Deny;
     match (event, dialect) {
@@ -252,7 +248,8 @@ fn ends_event(event: HookEvent, dialect: HookDialect, merged: &MergedOutcome) ->
     }
 }
 
-/// 0.3's `summarizeStderr`: trimmed, `None` when empty, cut with `…`.
+/// A hook's standard error for its record: trimmed, `None` when empty, cut
+/// with `…`.
 fn summarize_stderr(stderr: &str) -> Option<String> {
     let trimmed = stderr.trim();
     if trimmed.is_empty() {
@@ -267,13 +264,13 @@ fn summarize_stderr(stderr: &str) -> Option<String> {
 
 /// A hook's stable id in its file, `<event>/<group>/<hook>`: the indexes
 /// of its matcher group among the event's groups and of the hook in that
-/// group. Like 0.3's opaque `handlerId`, it stands in for the command,
+/// group. It stands in for the command,
 /// whose text may hold secrets and is never recorded.
 fn handler_id(event: HookEvent, group: usize, hook: usize) -> String {
     format!("{}/{group}/{hook}", event.as_str())
 }
 
-/// One hook's record: 0.3's `hook/invoked` and `hook/result` together.
+/// One hook's record: what was invoked and its result together.
 /// It holds neither the command text nor the hook's `systemMessage`.
 fn record(dialect: HookDialect, group: &MatcherGroup, handler_id: String, run: &HookRun) -> Value {
     let output = &run.output;
@@ -612,8 +609,7 @@ pub fn decision_entry(
 
 #[cfg(test)]
 mod tests {
-    //! The decision mapping of 0.3's bridges (`hooks-claude-code/src/
-    //! index.ts`, `hooks-codex/src/index.ts`) and their coverage cases.
+    //! The decision mapping of both dialects and its coverage cases.
     use super::*;
 
     const CLAUDE: HookDialect = HookDialect::ClaudeCode;

@@ -181,7 +181,7 @@ async fn assigns_ids_below_the_caller_emits_events_with_the_parent_id_and_record
                 record("call/1", "echo", json!({ "a": 1 })),
                 NestedToolCallRecord {
                     status: "error".into(),
-                    error: Some("Tool missing not found".into()),
+                    error: Some("Tool missing not found. Available tools: echo.".into()),
                     ..record("call/2", "missing", json!({}))
                 },
             ],
@@ -769,7 +769,19 @@ async fn a_tool_not_nested_callable_is_neither_listed_nor_run() {
         .execute("script", json!({}), NestedToolCallOptions::default())
         .await;
     assert!(outcome.is_error);
-    assert_eq!(text(&outcome), "Tool script not found");
+    assert_eq!(
+        text(&outcome),
+        "Tool script not found. Available tools: echo."
+    );
+    // Arguments that are not an object meet the same answer, and a name
+    // one tool matches but for its case gets the suggestion.
+    let outcome = call
+        .execute("Echo", json!(5), NestedToolCallOptions::default())
+        .await;
+    assert_eq!(
+        text(&outcome),
+        "Tool Echo not found. Did you mean echo? Available tools: echo."
+    );
     assert_eq!(ran.load(Ordering::SeqCst), 0);
 }
 

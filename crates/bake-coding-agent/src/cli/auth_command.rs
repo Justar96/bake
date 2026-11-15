@@ -4,8 +4,8 @@
 //! Adapted from Pi v1.3.0 (`71023aec1546d6d677a65669c5665c0927ce0dd0`)
 //! `packages/coding-agent/src/cli/{auth-command,auth-check,credential-print}.ts`
 //! and the `runAuthCommand` branch of `src/main.ts`, for the providers
-//! `bake` has: whatever `models.json` composes, the CLIProxyAPI account
-//! and the route imported from Bake 0.3 (D8 and D25), and the credentials
+//! `bake` has: whatever `models.json` composes, the CLIProxyAPI account,
+//! and the credentials
 //! `auth.json` holds ([`crate::auth_storage`]).
 //!
 //! The commands read files only: the Bake home's `models.json`,
@@ -13,7 +13,7 @@
 //! (`allowModelNetwork: false`, `refreshOnCreate: false`), and nothing is
 //! written, so `--no-refresh` is accepted and changes nothing: Pi's refresh
 //! renews an expired OAuth credential, and `bake` has no OAuth provider
-//! to renew. OAuth providers are deferred beyond 0.4.0 (D8 and D48), so
+//! to renew. OAuth providers are deferred beyond 0.4.0, so
 //! `print-bearer-token` checks its arguments as Pi does and then refuses
 //! with [`BEARER_TOKEN_DEFERRED`], and `print-api-key` for a provider
 //! `auth.json` records as OAuth refuses with the same deferral.
@@ -99,7 +99,7 @@ impl AuthCommandKind {
 }
 
 /// Why `print-bearer-token` prints nothing: bearer tokens belong to OAuth
-/// providers, which D8 and D48 defer.
+/// providers, which are deferred.
 pub const BEARER_TOKEN_DEFERRED: &str = "auth print-bearer-token is not available in bake yet; OAuth providers, which hold bearer tokens, are planned for a later release";
 
 /// Pi's `isAuthCommandHelp`.
@@ -801,7 +801,7 @@ mod tests {
             resolve(&["--provider", "oauth"], AuthCommandKind::ApiKey),
             Err("Provider \"oauth\" is configured with OAuth, not an API key; OAuth providers are not available in bake yet and are planned for a later release".to_owned())
         );
-        // D48: a bearer token is deferred, whatever the provider holds,
+        // A bearer token is deferred, whatever the provider holds,
         // once the arguments check.
         for args in [
             &["--provider", "faux"][..],

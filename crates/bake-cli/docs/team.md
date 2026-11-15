@@ -37,6 +37,7 @@ Each time an agent finishes a run, the parent session is told, with the agent's 
 
 The crew panel above the composer shows each agent while there are any: a spinner and its current tool or line while it works, `?` while it waits for an answer, `+` when idle, `x` when its run failed or its process ended unsuccessfully, with the reason, and `-` once it was stopped or exited cleanly. With `NO_COLOR` set, the panel draws without colour or motion. In the interactive terminal:
 
+- Ctrl+X opens an agent's transcript under the composer, read from its session file without disturbing it and updated as it works; ←→ move between agents, ↑↓ and PgUp/PgDn scroll, and Esc or Ctrl+X closes it.
 - `/spawn <task>` starts an agent on a task.
 - `/spawn msg <agent> <text>` steers it.
 - `/spawn interrupt <agent>` stops its current run.

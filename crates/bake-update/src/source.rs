@@ -7,17 +7,13 @@
 //! <base>/releases/<version>/<file>
 //! ```
 //!
-//! `<base>` is `https://bake.justar.dev/native` ([D45]). Bake 0.3's
-//! `latest.json` route stays on its final TypeScript release and never
-//! serves a native archive, so nothing here reads it.
+//! `<base>` is `https://bake.justar.dev/native`.
 //!
 //! Only `https` is fetched. A test serves its own releases from a
 //! loopback `http` origin, which [`Source::allow_loopback_http`] permits
 //! and a release build never sets.
 //! Manifest and signature bodies are bounded by [`MAX_METADATA_BYTES`]
 //! while streaming, independently of their HTTP framing or declared size.
-//!
-//! [D45]: ../../../docs/roadmap/rust-0.4/scope-00/support.md
 
 use std::io::Write;
 use std::path::Path;

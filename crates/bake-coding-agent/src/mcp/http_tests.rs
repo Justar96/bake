@@ -119,7 +119,7 @@ fn start(entry: Value, settings: McpHttpOptions, resolver: Option<HostResolver>)
         servers: config.servers,
         standing: Arc::new(StandingPermissions::new(
             // A `url` server needs no sandbox backend: the connection is
-            // this process's own, as the web tools' are (D40).
+            // this process's own, as the web tools' are.
             bake_sandbox::SandboxMode::ReadOnly,
             ApprovalPolicy::Never,
             "custom",
@@ -405,8 +405,8 @@ async fn an_oversized_response_or_event_is_refused() {
     server.stop().await;
 }
 
-// The specification's session expiry, which Pi's transport reports and Bake
-// 0.3 could only answer with a reload: the server re-initializes at once
+// The specification's session expiry, which Pi's transport reports: the
+// server re-initializes at once
 // and publishes the new listing as one new generation, and the call that
 // found the session gone fails without being sent again.
 #[tokio::test]
@@ -610,7 +610,7 @@ async fn a_stalled_startup_times_out_within_the_reconnect_budget() {
     server.stop().await;
 }
 
-// Bake 0.3's reconnect policy over Pi's transport: a connection that fails
+// Bake's reconnect policy over Pi's transport: a connection that fails
 // is retried within the budget, and the connection that succeeds publishes
 // its listing as the next whole generation.
 #[tokio::test]
@@ -778,7 +778,7 @@ async fn header_values_never_appear_in_an_error_or_a_status() {
     server.stop().await;
 }
 
-// D48 defers MCP prompts and resource subscriptions. A server that offers
+// MCP prompts and resource subscriptions are not supported. A server that offers
 // both, with change notifications, is still only listed and read: the
 // session sends no `prompts/*` request and no `resources/subscribe`, and
 // publishes no tool for either.

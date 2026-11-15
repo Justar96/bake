@@ -477,11 +477,11 @@ impl PromptExecution {
         if self.closed_reason().is_some() {
             return Ok((RunOutcome::FinishedTurn, false));
         }
-        let notices: Vec<CustomMessage> = job_notices::claim(&self.jobs);
+        let (notices, depth): (Vec<CustomMessage>, usize) = job_notices::claim_at(&self.jobs);
         if notices.is_empty() {
             return Ok((RunOutcome::FinishedTurn, false));
         }
-        if self.model().is_none() || !self.jobs.spend_wake() {
+        if self.model().is_none() || !self.jobs.wake_at(depth) {
             self.pending_notices
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
@@ -808,11 +808,21 @@ impl PromptExecution {
         }
     }
 
+    /// The profile of the session's model now ([`crate::settings::Settings::model_profile`]);
+    /// empty without a model.
+    fn model_profile(&self) -> crate::settings::ModelProfile {
+        super::model_profile(&self.settings, self.model().as_ref())
+    }
+
     /// The system message patching the sections the transcript replays,
     /// Pi's `_preparePromptAndToolLoadout`; it also activates the tools.
+    /// The model's profile chooses here, so a model switch reaches the
+    /// model at the next prompt as this tool change and section patch.
     fn prepare_prompt_and_tools(&self) -> Result<Option<SystemMessage>, String> {
-        let mut active: Vec<Arc<AgentTool>> = self
-            .active_tool_names
+        let profile = self.model_profile();
+        let active_names =
+            super::profile_tool_names(&profile, &self.active_tool_names, &self.tools);
+        let mut active: Vec<Arc<AgentTool>> = active_names
             .iter()
             .filter_map(|name| self.tools.iter().find(|tool| &tool.name == name))
             .cloned()
@@ -833,18 +843,25 @@ impl PromptExecution {
         }
         // The active `codemode` tool's descriptions and hidden declarations;
         // without it, the tools as they are.
-        let (active, hidden) = super::codemode::apply_codemode_loadout(
-            active,
-            &read_settings(&self.settings),
-            &self.codemode,
-        );
+        let (active, hidden) = {
+            let settings = read_settings(&self.settings);
+            let mode = profile.codemode_mode.unwrap_or(settings.codemode_mode);
+            super::codemode::apply_codemode_loadout(active, &settings, mode, &self.codemode)
+        };
         self.agent.set_tools(active);
         *self
             .hidden_declarations
             .lock()
             .unwrap_or_else(PoisonError::into_inner) = hidden.clone();
         let mut options = self.prompt_options.clone();
-        options.selected_tools = self.active_tool_names.clone();
+        options.selected_tools = active_names;
+        // The profile's notes follow `environment`, the last of Bake's own
+        // sections, so everything before them stays the same across models.
+        if let Some(prompt) = profile.prompt.filter(|prompt| !prompt.is_empty()) {
+            options
+                .sections
+                .insert(0, (crate::settings::MODEL_NOTES_SECTION.to_owned(), prompt));
+        }
         if let Some(permission) = &self.permission {
             options.permissions = permission.prompt_text();
         }
@@ -862,6 +879,13 @@ impl PromptExecution {
             options
                 .sections
                 .push((crate::mcp::MCP_SERVERS_SECTION.to_owned(), section));
+        }
+        // The context files found while working, last: a section a patch
+        // adds is replayed after the others.
+        if let Some(section) = self.core.nested.section() {
+            options
+                .sections
+                .push((super::nested_context::SECTION.to_owned(), section));
         }
         let sections = build_system_prompt_sections(&options).map_err(|error| error.to_string())?;
         let systems: Vec<Message> = self

@@ -1037,31 +1037,24 @@ async fn queues_a_concurrent_burst_behind_two_scripts() {
 }
 
 /// Pi's "reads the limit from PI_CODEMODE_MAX_WORKERS" and "ignores an
-/// invalid PI_CODEMODE_MAX_WORKERS", for Bake's two spellings of the
-/// setting.
+/// invalid PI_CODEMODE_MAX_WORKERS", for Bake's spelling of the setting.
 #[test]
 fn reads_the_slot_limit_from_the_environment() {
-    let limit = |bake: Option<&str>, dsh: Option<&str>| {
+    let limit = |bake: Option<&str>| {
         max_codemode_workers(|name| {
-            match name {
-                BAKE_CODEMODE_MAX_WORKERS_ENV => bake,
-                DSH_CODEMODE_MAX_WORKERS_ENV => dsh,
-                _ => None,
-            }
-            .map(Into::into)
+            (name == BAKE_CODEMODE_MAX_WORKERS_ENV)
+                .then_some(bake)
+                .flatten()
+                .map(Into::into)
         })
     };
-    assert_eq!(limit(None, None), 2);
-    assert_eq!(limit(Some("3"), None), 3);
-    assert_eq!(limit(Some(" 4 "), Some("5")), 4);
-    assert_eq!(limit(None, Some("5")), 5);
-    assert_eq!(limit(Some(""), Some("5")), 5);
-    assert_eq!(limit(Some("1e1"), None), 10);
+    assert_eq!(limit(None), 2);
+    assert_eq!(limit(Some("3")), 3);
+    assert_eq!(limit(Some(" 4 ")), 4);
+    assert_eq!(limit(Some("")), 2);
+    assert_eq!(limit(Some("1e1")), 10);
     for invalid in ["0", "-1", "1.5", "two", "Infinity", "NaN"] {
-        assert_eq!(limit(Some(invalid), Some("5")), 2, "{invalid}");
+        assert_eq!(limit(Some(invalid)), 2, "{invalid}");
     }
-    assert_eq!(
-        limit(Some("1e300"), None),
-        tokio::sync::Semaphore::MAX_PERMITS
-    );
+    assert_eq!(limit(Some("1e300")), tokio::sync::Semaphore::MAX_PERMITS);
 }

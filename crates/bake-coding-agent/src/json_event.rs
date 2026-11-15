@@ -375,6 +375,12 @@ pub fn session_event_json(event: &SessionEvent<'_>) -> Value {
             }
             Value::Object(out)
         }
+        SessionEvent::NestedContext { loaded, warnings } => {
+            let mut out = object("nested_context");
+            out.insert("loaded".into(), (*loaded).into());
+            out.insert("warnings".into(), (*warnings).into());
+            Value::Object(out)
+        }
         SessionEvent::ContextMasking {
             source_leaf_id,
             masked_results,

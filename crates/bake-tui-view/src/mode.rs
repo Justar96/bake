@@ -8,8 +8,8 @@ use unicode_width::UnicodeWidthStr;
 use crate::copy;
 
 /// Narrower than this, the composer shows only a placeholder's first part and
-/// no mode hint; the TypeScript layout's `HINT_MIN_COLUMNS`. A hint cut to fit
-/// stops being help, and the key it names still works unnamed.
+/// no mode hint. A hint cut to fit stops being help, and the key it names
+/// still works unnamed.
 pub const HINT_MIN_COLUMNS: u16 = 60;
 
 /// What the composer is for at the moment.

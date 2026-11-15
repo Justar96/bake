@@ -32,11 +32,10 @@ enum EditKind {
 }
 
 /// ASCII punctuation a word step stops at inside a word, such as the dots
-/// and slashes of a path: the TypeScript `PUNCTUATION` class.
+/// and slashes of a path.
 const PUNCTUATION: &str = "(){}[]<>.,;:'\"!?+-=*/\\|&%^$#@~`";
 
-/// Pasted text longer than this many bytes collapses into a placeholder; the
-/// TypeScript `PASTE_COLLAPSE_CHARS`, which counts UTF-16 units.
+/// Pasted text longer than this many bytes collapses into a placeholder.
 pub const PASTE_COLLAPSE_BYTES: usize = 800;
 /// Pasted text with at least this many lines collapses into a placeholder.
 pub const PASTE_COLLAPSE_LINES: usize = 3;
@@ -56,7 +55,7 @@ pub fn collapses(text: &str) -> bool {
 
 /// The placeholder a collapsed paste shows in the draft: `[Pasted text #1
 /// +42 lines]`, or `[Pasted text #1 900 chars]` for one long line. The
-/// format is fixed English, as the oracle's is.
+/// format is fixed English.
 pub fn pasted_text_token(id: u32, text: &str) -> String {
     let breaks = text.matches('\n').count();
     if breaks > 0 {
@@ -424,7 +423,7 @@ impl Draft {
     }
 
     /// Puts the caret where a click landed: on drawn row `row` at `width`, the
-    /// place at or before cell `column` of its text, the oracle's `offsetAt`.
+    /// place at or before cell `column` of its text.
     /// A column past the text reaches the row's last place. Returns `false`
     /// past the last row.
     pub fn place(&mut self, row: usize, column: usize, width: usize) -> bool {
@@ -729,15 +728,13 @@ impl Draft {
     }
 }
 
-/// Where a word step from byte `caret` lands, toward the end when `forward`:
-/// a port of the TypeScript `wordStop`.
+/// Where a word step from byte `caret` lands, toward the end when `forward`.
 ///
 /// A step skips whitespace, then one word or one run of punctuation. Inside
 /// a word, ASCII punctuation such as the dots of a path is a stop of its
 /// own. The step stays inside its logical line: at a line's edge it crosses
 /// the line break alone. Words are Unicode word segments without a
-/// dictionary, so CJK text steps one ideograph at a time where the oracle's
-/// ICU segmenter steps by dictionary word.
+/// dictionary, so CJK text steps one ideograph at a time.
 pub fn word_stop(text: &str, caret: usize, forward: bool, atoms: &[(String, Atom)]) -> usize {
     let line_start = text[..caret].rfind('\n').map_or(0, |i| i + 1);
     let line_end = text[caret..].find('\n').map_or(text.len(), |i| caret + i);
@@ -806,7 +803,7 @@ pub fn word_stop(text: &str, caret: usize, forward: bool, atoms: &[(String, Atom
 }
 
 /// The range of a placeholder in `text` that the caret at `at` would cross
-/// going back or forward: the TypeScript `atomAt`.
+/// going back or forward.
 fn atom_at(
     text: &str,
     at: usize,
@@ -930,7 +927,7 @@ pub struct DraftLayout {
 /// Wraps `text` the way an editor does, into rows of `width` cells that
 /// include the caret's column, and places the caret.
 ///
-/// Ports `layoutDraft` from the TypeScript composer. Rows break after spaces
+/// Rows break after spaces
 /// and tabs, and blanks at a break hang past the row, so a wrapped row never
 /// starts with a space the user did not type. A wide grapheme is a word of
 /// its own, because CJK text has no spaces to break on. A word that does not
@@ -1067,7 +1064,7 @@ mod tests {
     }
 
     /// Every stop a run of word steps makes from one end of `text`, the
-    /// caret drawn as `|`: the TypeScript `wordStop` walk.
+    /// caret drawn as `|`.
     fn walk(text: &str, forward: bool) -> Vec<String> {
         let mut caret = if forward { 0 } else { text.len() };
         let mut stops = Vec::new();
@@ -1127,12 +1124,12 @@ mod tests {
 
     #[test]
     fn text_without_spaces_steps_by_unicode_word_segment() {
-        // Without the oracle's dictionary, each ideograph is a segment.
+        // Without a dictionary, each ideograph is a segment.
         assert_eq!(walk("你好 hi", false), ["你好 |hi", "你|好 hi", "|你好 hi"]);
     }
 
     #[test]
-    fn word_moves_follow_the_oracle_around_a_path() {
+    fn word_moves_stop_at_path_punctuation() {
         let mut draft = typed("run src/app.ts now");
         draft.word_left();
         assert_eq!(&draft.text()[draft.caret()..], "now");
@@ -1146,7 +1143,7 @@ mod tests {
 
     #[test]
     fn kills_join_one_ring_entry_that_yanks_back_and_undoes_by_step() {
-        // The TypeScript shell test: Ctrl+W then Alt+Backspace join one entry.
+        // Ctrl+W then Alt+Backspace join one entry.
         let mut draft = typed("alpha beta gamma");
         draft.kill_word_left();
         assert_eq!(draft.text(), "alpha beta ");
@@ -1241,7 +1238,7 @@ mod tests {
 
     #[test]
     fn up_and_down_move_between_the_rows_of_a_wrapped_line() {
-        // "alpha beta " then "gamma" at 11 columns, as the oracle draws it.
+        // "alpha beta " then "gamma" at 11 columns.
         let text = "alpha beta gamma";
         let mut draft = at(text, 2);
         assert!(draft.vertical(11, false));
@@ -1329,8 +1326,7 @@ mod tests {
 
     #[test]
     fn a_click_lands_before_the_grapheme_at_its_cell() {
-        // "alpha beta " / "gamma " / "delta" at 11 columns, as the oracle's
-        // `offsetAt` cases draw it.
+        // "alpha beta " / "gamma " / "delta" at 11 columns.
         let text = "alpha beta gamma delta";
         let place = |text: &str, row, column, width| {
             let mut draft = typed(text);
@@ -1346,7 +1342,7 @@ mod tests {
     }
 
     #[test]
-    fn row_edges_follow_the_oracle_cases() {
+    fn row_edges_are_reached() {
         let text = "alpha beta gamma delta";
         let mut draft = at(text, 13);
         draft.row_home(11);

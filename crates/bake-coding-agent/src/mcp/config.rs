@@ -17,7 +17,7 @@
 //! Differences from Pi, each refused with a message rather than ignored:
 //!
 //! - Server names follow Bake's tool-name contract,
-//!   `[A-Za-z0-9_-]{1,32}` (`packages/mcp/mcp-client`).
+//!   `[A-Za-z0-9_-]{1,32}`.
 //! - The only exposures are `direct` (the default here; Pi's is
 //!   `codemode`) and `hidden`: Pi's `codemode`, `codemode-deferred`, and
 //!   `deferred` are not supported yet.
@@ -26,10 +26,7 @@
 //!   Pi's config values do, but never run a command (`!cmd`). A server's
 //!   environment is Bake's scrubbed environment, which drops credential-like
 //!   and Bake-managed names, with the entry's `env` over it, so naming a
-//!   scrubbed variable here passes it: the file's owner authorizes it, as an
-//!   explicit `env` overrides the scrub in Bake's TypeScript
-//!   (`packages/mcp/mcp-client/src/transport.ts` `buildChildEnv`, and
-//!   `scrubbedParentEnv` in `packages/subprocess/subprocess/src/index.ts`).
+//!   scrubbed variable here passes it: the file's owner authorizes it.
 //!   Only an owner-controlled file may therefore be loaded. A sandbox
 //!   runner's own variables still go over the entry's, so `env` cannot
 //!   forge them.
@@ -80,6 +77,10 @@ pub struct McpServerSettings {
     pub timeout: Duration,
     /// `description`.
     pub description: Option<String>,
+    /// `trustReadOnly`: the user trusts the server's `readOnlyHint`, so a
+    /// tool it hints as read-only runs as a read, beside other reads.
+    /// Default: false, which leaves the hint the server's own claim.
+    pub trust_read_only: bool,
 }
 
 impl Default for McpServerSettings {
@@ -90,6 +91,7 @@ impl Default for McpServerSettings {
             tool_exposure: Vec::new(),
             timeout: Duration::from_secs(60),
             description: None,
+            trust_read_only: false,
         }
     }
 }
@@ -284,7 +286,7 @@ pub(crate) fn failed(error: String) -> McpConfig {
 /// #11191); `source` names it in errors.
 pub fn parse_mcp_config(text: &str, source: &Path) -> McpConfig {
     let shown = source.display();
-    let parsed: Value = match serde_json::from_str(crate::auth_storage::strip_bom(text)) {
+    let parsed: Value = match serde_json::from_str(crate::json_store::strip_bom(text)) {
         Ok(value) => value,
         Err(error) => return failed(format!("{shown}: {error}")),
     };
@@ -458,6 +460,15 @@ fn validate_settings(name: &str, object: &Map<String, Value>) -> Result<McpServe
         None => {}
         Some(Value::Bool(enabled)) => settings.enabled = *enabled,
         Some(_) => return Err(format!("server \"{name}\": enabled must be a boolean")),
+    }
+    match object.get("trustReadOnly") {
+        None => {}
+        Some(Value::Bool(trust)) => settings.trust_read_only = *trust,
+        Some(_) => {
+            return Err(format!(
+                "server \"{name}\": trustReadOnly must be a boolean"
+            ));
+        }
     }
     match object.get("description") {
         None => {}
@@ -670,6 +681,37 @@ mod tests {
         );
         assert!(overflow.servers.is_empty());
         assert_eq!(overflow.errors.len(), 1, "{:?}", overflow.errors);
+    }
+
+    // Bake: `trustReadOnly` is a boolean, false unless set; any other
+    // value refuses the entry.
+    #[test]
+    fn trust_read_only_is_a_boolean() {
+        let config = parse(json!({
+            "mcpServers": {
+                "trusted": { "command": "x", "trustReadOnly": true },
+                "distrusted": { "command": "x", "trustReadOnly": false },
+                "plain": { "command": "x" },
+                "text": { "command": "x", "trustReadOnly": "true" },
+                "number": { "url": "https://example.com/mcp", "trustReadOnly": 1 },
+            }
+        }));
+        let trust: Vec<(&str, bool)> = config
+            .servers
+            .iter()
+            .map(|server| (server.name.as_str(), server.settings.trust_read_only))
+            .collect();
+        assert_eq!(
+            trust,
+            [("trusted", true), ("distrusted", false), ("plain", false)]
+        );
+        assert_eq!(
+            config.errors,
+            [
+                "/home/u/.bake/mcp.json: server \"text\": trustReadOnly must be a boolean",
+                "/home/u/.bake/mcp.json: server \"number\": trustReadOnly must be a boolean",
+            ]
+        );
     }
 
     #[test]

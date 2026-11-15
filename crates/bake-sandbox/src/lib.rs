@@ -1,9 +1,7 @@
-//! Bake's process-confinement contract (D24).
+//! Bake's process-confinement contract.
 //!
-//! The retained Bake sandbox, ported from the TypeScript packages
-//! `packages/sandbox/sandbox` (`index.ts`, `escalation.ts`, `roots.ts`,
-//! `diagnostics.ts`) and the write containment of `packages/fs/fs-sandbox`.
-//! Pi has no sandbox; this crate is the seam Pi's tools are wrapped through.
+//! Pi has no sandbox; this crate is Bake's own, and the seam Pi's tools are
+//! wrapped through.
 //!
 //! | Module | Contents |
 //! |---|---|
@@ -39,8 +37,8 @@
 //! The modes govern **file writes made by the confined process tree**. They
 //! do not stop that tree from asking another process, one outside the
 //! sandbox, to write for it. Every backend leaves the network namespace and
-//! Unix-domain sockets reachable, as the TypeScript profiles did
-//! (`profiles.ts`), so a `read-only` command can still cause writes through:
+//! Unix-domain sockets reachable, so a `read-only` command can still cause
+//! writes through:
 //!
 //! - **The user's systemd manager over D-Bus.** The session bus socket
 //!   `/run/user/$UID/bus` stays visible and connectable: bubblewrap binds the
@@ -62,12 +60,11 @@
 //!   sockets remain allowed. `sandbox-exec` also does not start a new
 //!   terminal session.
 //!
-//! The enforcement each backend reports is TypeScript's and does not account
-//! for these channels: [`Enforcement::Full`] means the file rules are fully
+//! The enforcement each backend reports does not account for these
+//! channels: [`Enforcement::Full`] means the file rules are fully
 //! enforced, not that no write can happen on the command's behalf. Closing
 //! them (hiding `/run/user/$UID` and agent sockets, unsharing the network,
-//! Landlock ABI 6 socket scoping, a seccomp filter) is an open decision for
-//! the support register.
+//! Landlock ABI 6 socket scoping, a seccomp filter) is an open decision.
 #![warn(missing_docs)]
 
 pub mod backends;

@@ -1,10 +1,10 @@
 //! Which glyphs draw the composer box, decided once from the environment.
 //!
-//! Ports `resolveFrame` from the TypeScript terminal: a terminal that is not
-//! encoding UTF-8, names no capable `TERM`, or may draw East Asian Ambiguous
-//! characters two cells wide gets the ASCII frame. A full-width run of
-//! box-drawing characters drawn wider than measured wraps and breaks every
-//! row below it, so the frame must match what the terminal can draw.
+//! A terminal that is not encoding UTF-8, names no capable `TERM`, or may
+//! draw East Asian Ambiguous characters two cells wide gets the ASCII frame.
+//! A full-width run of box-drawing characters drawn wider than measured wraps
+//! and breaks every row below it, so the frame must match what the terminal
+//! can draw.
 
 /// Glyph set for the composer's edges and prompt.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -64,8 +64,7 @@ impl FrameStyle {
 ///
 /// Windows Terminal sets neither a locale nor `TERM` but draws UTF-8, so its
 /// `WT_SESSION` stands in for both. Other Windows consoles draw the frame
-/// unless `TERM` is `dumb`; unlike the TypeScript resolver, this one does not
-/// read the Windows system locale.
+/// unless `TERM` is `dumb`; the Windows system locale is not read.
 pub fn resolve(env: impl Fn(&str) -> Option<String>, windows: bool) -> FrameStyle {
     let set = |name: &str| env(name).filter(|value| !value.is_empty());
     let ctype = CTYPE_VARIABLES

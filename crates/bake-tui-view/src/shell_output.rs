@@ -375,7 +375,7 @@ pub fn parse_sgr(line: &str, tones: Tones) -> (String, Vec<(Range<usize>, Style)
             continue;
         }
         let at = text.len();
-        // A tab is four spaces, as the TypeScript `toolText` draws it.
+        // A tab is four spaces.
         if c == '\t' {
             text.push_str("    ");
         } else {

@@ -2,7 +2,9 @@ bake-sandbox includes code ported from the following BSD-3-Clause-licensed
 project. Bake's own changes are under the workspace's MIT license.
 
 ================================================================================
-landlock-run (node-addon-landlock-run), in this repository at native/system
+landlock-run (node-addon-landlock-run)
+https://github.com/Justar96/bake/blob/97ce6abba01fddb5ed532b60a2e25a1e134b5244/native/system
+(Bake repository, revision 97ce6abba01fddb5ed532b60a2e25a1e134b5244)
 Ported: packages/entry/src/main.c (the Landlock launcher) and the launcher
 constants of packages/entry/src/index.ts, as src/backends/landlock.rs, with
 the CLI contract of docs/cli-contract.md.

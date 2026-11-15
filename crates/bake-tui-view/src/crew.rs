@@ -168,6 +168,76 @@ fn fit(text: &str, width: usize) -> String {
     out
 }
 
+/// The agent to open first: the one the panel lists first.
+pub fn first(crew: &[CrewMember]) -> Option<u64> {
+    ordered(crew).first().map(|member| member.id)
+}
+
+/// The agent `step` places from `id` in start order, wrapping, so moving
+/// between agents does not jump as their states reorder the panel.
+pub fn step(crew: &[CrewMember], id: u64, step: isize) -> Option<u64> {
+    let mut ids: Vec<u64> = crew.iter().map(|member| member.id).collect();
+    ids.sort_unstable();
+    let at = ids.iter().position(|&each| each == id)?;
+    let len = isize::try_from(ids.len()).ok()?;
+    let next = (isize::try_from(at).ok()? + step).rem_euclid(len);
+    ids.get(usize::try_from(next).ok()?).copied()
+}
+
+/// One agent's transcript in the tray, at most `height` rows: a header with
+/// its mark, callsign, and state, a rule counting the rows out of view,
+/// then its rows `scroll` rows up from the newest. `rows` is `None` until
+/// the runtime has read them. Returns the lines and the most it can scroll.
+pub fn transcript(
+    member: &CrewMember,
+    rows: Option<&[crate::transcript::Row]>,
+    width: usize,
+    height: usize,
+    scroll: usize,
+    now: Duration,
+    look: crate::transcript::Look,
+) -> (Vec<Line<'static>>, usize) {
+    let dim = Style::new().add_modifier(Modifier::DIM);
+    let header = Line::from(vec![
+        Span::raw("  "),
+        mark(&member.state, now, look.tones),
+        Span::raw(" "),
+        Span::styled(
+            crate::tasks::one_line(&member.name),
+            Style::new().add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(format!("  {}", member.state.word()), dim),
+    ]);
+    let mut body: Vec<Line<'static>> = match rows {
+        None => vec![Line::styled(
+            format!("  {}", crate::copy::CREW_LOADING),
+            dim,
+        )],
+        Some([]) => vec![Line::styled(format!("  {}", crate::copy::CREW_EMPTY), dim)],
+        Some(rows) => (0..rows.len())
+            .flat_map(|index| crate::transcript::present(rows, index, width, look))
+            .collect(),
+    };
+    let room = height.saturating_sub(2);
+    let most = body.len().saturating_sub(room);
+    let scroll = scroll.min(most);
+    let end = body.len() - scroll;
+    let start = end.saturating_sub(room);
+    let mut counts = Vec::new();
+    if start > 0 {
+        counts.push(format!("+{start} {}", crate::copy::ABOVE));
+    }
+    if scroll > 0 {
+        counts.push(format!("+{scroll} {}", crate::copy::BELOW));
+    }
+    let mut lines = vec![
+        header,
+        crate::jobs::counted_rule(width, &counts.join(crate::copy::STATUS_SEP), look),
+    ];
+    lines.extend(body.drain(start..end));
+    (lines, most)
+}
+
 /// The agents in the order they are listed.
 fn ordered(crew: &[CrewMember]) -> Vec<&CrewMember> {
     let mut sorted: Vec<&CrewMember> = crew.iter().collect();
@@ -217,7 +287,7 @@ pub fn lines(
         header.push(Span::styled(format!("  (+{hidden} more)"), dim));
     }
     let used: usize = header.iter().map(|span| span.content.width()).sum();
-    let hint = "/telecom  /spawn";
+    let hint = "Ctrl+X view  /spawn";
     if used + hint.len() + 4 <= width {
         header.push(Span::raw(" ".repeat(width - used - hint.len() - 2)));
         header.push(Span::styled(hint, dim));
@@ -362,6 +432,67 @@ mod tests {
             .collect()
     }
 
+    const PLAIN: crate::transcript::Look = crate::transcript::Look {
+        tones: Tones::None,
+        classic: false,
+        lit: true,
+        mermaid: crate::mermaid::Mermaid::Streaming,
+    };
+
+    #[test]
+    fn a_transcript_shows_its_newest_rows_and_counts_the_rest() {
+        use crate::transcript::Row;
+        let agent = member(1, "alpha-1", CrewState::Idle);
+        let draw = |rows: Option<&[Row]>, height, scroll| {
+            let (lines, most) = transcript(&agent, rows, 40, height, scroll, Duration::ZERO, PLAIN);
+            (lines.iter().map(text).collect::<Vec<_>>(), most)
+        };
+        // Unread, then read but empty.
+        let (unread, most) = draw(None, 10, 0);
+        assert_eq!(unread[0], "  + alpha-1  idle");
+        assert_eq!(unread[2], "  Reading its session…");
+        assert_eq!(most, 0);
+        assert_eq!(draw(Some(&[]), 10, 0).0[2], "  Nothing in its session yet.");
+
+        let rows: Vec<Row> = (1..=6)
+            .map(|n| Row::Answer(format!("answer {n}")))
+            .collect();
+        let (all, most) = draw(Some(&rows), 100, 0);
+        let body = all.len() - 2;
+        assert_eq!(most, 0);
+        assert!(all.iter().any(|line| line.contains("answer 6")), "{all:?}");
+        // A short tray keeps the newest rows and counts the rest above.
+        let (newest, most) = draw(Some(&rows), 6, 0);
+        assert_eq!(newest.len(), 6);
+        assert_eq!(most, body - 4);
+        assert!(newest[1].contains(&format!("+{most} above")), "{newest:?}");
+        assert!(newest.last().unwrap().contains("answer 6"), "{newest:?}");
+        // Scrolled up, it counts below too; past the most it stops there.
+        let (up, _) = draw(Some(&rows), 6, 2);
+        assert!(up[1].contains("+2 below"), "{up:?}");
+        assert_eq!(draw(Some(&rows), 6, 999).0, draw(Some(&rows), 6, most).0);
+        // An untrusted callsign is drawn on one line.
+        let named = member(2, "bad\nname", CrewState::Working);
+        let (lines, _) = transcript(&named, None, 40, 6, 0, Duration::ZERO, PLAIN);
+        assert!(!text(&lines[0]).contains('\n'), "{:?}", text(&lines[0]));
+    }
+
+    #[test]
+    fn moving_between_agents_follows_start_order_and_wraps() {
+        let crew = vec![
+            member(3, "c", CrewState::Working),
+            member(1, "a", CrewState::Idle),
+            member(2, "b", CrewState::Asking),
+        ];
+        // The first opened is the one the panel lists first.
+        assert_eq!(first(&crew), Some(2));
+        assert_eq!(step(&crew, 2, 1), Some(3));
+        assert_eq!(step(&crew, 3, 1), Some(1));
+        assert_eq!(step(&crew, 1, -1), Some(3));
+        assert_eq!(step(&crew, 9, 1), None);
+        assert_eq!(first(&[]), None);
+    }
+
     #[test]
     fn the_panel_lists_busy_agents_first_with_ascii_marks() {
         let mut working = member(2, "alpha-2", CrewState::Working);
@@ -385,7 +516,7 @@ mod tests {
             "{:?}",
             texts[0]
         );
-        assert!(texts[0].ends_with("/telecom  /spawn"), "{:?}", texts[0]);
+        assert!(texts[0].ends_with("Ctrl+X view  /spawn"), "{:?}", texts[0]);
         assert!(
             texts[1].starts_with("  ? alpha-3 asking   running the tests"),
             "{:?}",

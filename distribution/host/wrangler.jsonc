@@ -1,7 +1,7 @@
 // The download service at https://bake.justar.dev: the Worker in worker.mjs,
-// over the files stage-site.mjs stages into site/ before each deploy. The
-// release workflow deploys it with `npm run deploy` from this directory;
-// distribution/README.md describes the service and its secrets.
+// over the files stage-site.mjs stages into site/ before each deploy.
+// `bake-release publish` deploys it with `npm run deploy` from this
+// directory; distribution/README.md describes the service and its secrets.
 {
   "name": "bake-downloads",
   "account_id": "c8dbba40cfd4ed115775e568e4473843",

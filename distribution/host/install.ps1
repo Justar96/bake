@@ -177,9 +177,6 @@ if (-not $localAppData) { $localAppData = [Environment]::GetFolderPath('LocalApp
 if (-not $env:BAKE_NATIVE_ROOT -and -not $localAppData) { throw 'Bake install: LOCALAPPDATA names no directory for the install root' }
 $nativeRoot = if ($env:BAKE_NATIVE_ROOT) { $env:BAKE_NATIVE_ROOT } else { Join-Path $localAppData 'bake-native' }
 $nativeRoot = [IO.Path]::GetFullPath($nativeRoot)
-# The 0.3 TypeScript install, which this installer reads to recognize a
-# Bake-managed `bake.cmd` and never writes to.
-$legacyRoot = if ($env:BAKE_INSTALL_ROOT) { $env:BAKE_INSTALL_ROOT } elseif ($localAppData) { Join-Path $localAppData 'Bake' } else { '' }
 $replaceCommand = $env:BAKE_REPLACE_COMMAND -eq '1'
 $uninstallLinks = $false
 foreach ($argument in $args) {
@@ -190,19 +187,10 @@ foreach ($argument in $args) {
   }
 }
 
-# The command directory: the one a 0.3 install already put on PATH, so the
-# takeover replaces the `bake` the user's PATH names, and otherwise the native
-# install's own `bin`, which is added to the user PATH.
+# The command directory: BAKE_BIN_DIR, or the native install's own `bin`,
+# which is added to the user PATH.
 function BakeCommandDirectory() {
   if ($env:BAKE_BIN_DIR) { return [IO.Path]::GetFullPath($env:BAKE_BIN_DIR) }
-  if ($legacyRoot -eq '') { return (Join-Path $nativeRoot 'bin') }
-  $legacyBin = Join-Path $legacyRoot 'bin'
-  $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-  if ((Test-Path -LiteralPath $legacyBin -PathType Container) -and $null -ne $userPath) {
-    foreach ($part in ($userPath -split ';')) {
-      if ($part.TrimEnd('\') -eq $legacyBin.TrimEnd('\')) { return $legacyBin }
-    }
-  }
   return (Join-Path $nativeRoot 'bin')
 }
 
@@ -372,12 +360,6 @@ function BakeShimText([string]$root) {
   ) -join "`r`n")
 }
 
-# Whether `bake.cmd` is a Bake 0.3 launcher, which names the 0.3 release root
-# and starts Node on the TypeScript entry point.
-function BakeIsLegacyShim([string]$text) {
-  return ($text -match 'BAKE_RELEASE_ROOT' -and $text -match 'apps\\cli\\lib\\bin\.js')
-}
-
 # A stalled host fails the install rather than holding it open forever; the
 # manifest and its signature are small, so they get a short deadline.
 function BakeFetch([string]$url, [string]$path, [int]$timeoutSeconds) {
@@ -438,8 +420,8 @@ function BakeUninstallLinks() {
   }
 }
 
-# Create `<bin>\bake.cmd`, taking over a Bake-managed 0.3 launcher and
-# recording in links.json what was replaced. `dsh.cmd` is never touched.
+# Create `<bin>\bake.cmd` and record in links.json whether it replaced a
+# command, and where that command's backup is.
 function BakeLinkCommand([string]$version, [string]$release) {
   New-Item -ItemType Directory -Force -Path $binDir | Out-Null
   $command = Join-Path $binDir 'bake.cmd'
@@ -454,18 +436,16 @@ function BakeLinkCommand([string]$version, [string]$release) {
       # A rerun of this installer, which is how an install is updated. The
       # command already reads `current.txt`, and links.json still records
       # what the first run replaced; backing this shim up and recording it
-      # instead would lose the 0.3 command `--uninstall-links` has to
-      # restore, and grow <root>\backups on every run.
+      # instead would lose the backup `--uninstall-links` has to restore,
+      # and grow <root>\backups on every run.
       Write-Output "Kept $command"
       BakeEnsureOnPath
       return
     }
-    $managed = BakeIsLegacyShim $existing
-    if (-not $managed -and -not $replaceCommand) {
+    if (-not $replaceCommand) {
       Write-Error "Bake install: $command exists and no Bake installer made it, so it was left alone. Bake $version is installed at $release. Run it there, or install again with -ReplaceCommand (BAKE_REPLACE_COMMAND=1) to replace that file and keep a backup." -ErrorAction Continue
       exit 1
     }
-    if ($managed) { Write-Output "Taking over $command from the Bake 0.3 install" }
     $backups = Join-Path $nativeRoot 'backups'
     New-Item -ItemType Directory -Force -Path $backups | Out-Null
     $backup = Join-Path $backups ("bake.cmd." + ([DateTimeOffset]::UtcNow).ToUnixTimeSeconds() + ".$PID")

@@ -5,18 +5,17 @@
 //! are read from the session files and the requests themselves.
 //!
 //! The round trip follows Pi v1.2.0
-//! `packages/coding-agent/src/core/agent-session-runtime.ts`
-//! (`newSession`, `switchSession`) and the TypeScript navigation's
-//! `apps/tui/packages/app/src/navigation.ts` (busy refusal, a cancelled
-//! choice keeping the session). Cases adapted from Pi's
+//! `packages/coding-agent/src/core/agent-session-runtime.ts` (`newSession`,
+//! `switchSession`), with Bake's rules for a busy refusal and a cancelled
+//! choice keeping the session. Cases adapted from Pi's
 //! `test/suite/agent-session-runtime.test.ts` name the case they follow:
 //! "restores model and thinking state from the destination session" in the
 //! round trip. Its "settles the active response before session replacement"
 //! is not followed: Pi aborts the running turn, while bake refuses the
-//! replacement until the turn ends, as the TypeScript navigation did (see
-//! the busy case). Its `session_before_switch` cancellation needs
-//! extensions, which bake does not have; a user's cancellation is
-//! covered by the cancelled-resume case instead.
+//! replacement until the turn ends (see the busy case). Its
+//! `session_before_switch` cancellation needs extensions, which bake does not
+//! have; a user's cancellation is covered by the cancelled-resume case
+//! instead.
 //!
 //! `/tree` and `/fork` follow Pi v1.2.0 `interactive-mode.ts`
 //! (`showTreeSelector`, `showUserMessageSelector`), `navigateTree`, and the

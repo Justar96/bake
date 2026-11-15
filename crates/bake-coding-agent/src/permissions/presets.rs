@@ -1,18 +1,16 @@
-//! Permission presets, ported from Bake's TypeScript
-//! `packages/interaction/permission-presets/src/{index,types}.ts`: named
+//! Permission presets: named
 //! bundles of the two knobs, the sandbox mode and the approval policy, the
 //! derived `custom` value, and the default preset for new sessions.
 //!
 //! The table comes from `$BAKE_HOME/settings.json` `permission.presets`
-//! (Pi's settings shape) and defaults to the TypeScript table, with
-//! friendlier labels. The TypeScript Auto review integration
-//! (`registerAuto`) is not ported; its name stays reserved.
+//! (Pi's settings shape) and defaults to [`PresetTable::default`]. The name
+//! `auto` is reserved for a per-call review integration.
 //!
 //! The composition's defaults are Pi's: full access with no approval
 //! prompts, since Pi v1.5.2 runs every tool unconfined and "does not ask
 //! for approval before every tool call" (its `docs/security.md`). The
-//! TypeScript composition's defaults, `workspace-write` and `ask`, are
-//! [`KnobDefaults::TYPESCRIPT`].
+//! default through Bake 0.4.5, `workspace-write` and `ask`, is
+//! [`KnobDefaults::WORKSPACE_ASK`].
 
 use bake_sandbox::SandboxMode;
 use serde_json::{Map, Value};
@@ -24,9 +22,6 @@ use super::approval::ApprovalPolicy;
 pub const CUSTOM_PRESET: &str = "custom";
 /// The name reserved for the per-call review integration (`AUTO_PRESET`).
 pub const AUTO_PRESET: &str = "auto";
-/// The settings namespace (`PERMISSION_SETTINGS_NAMESPACE`), in
-/// `settings.json` and in the 0.3 `settings.yaml`.
-pub const PERMISSION_SETTINGS_NAMESPACE: &str = "permission";
 
 /// One preset's knob bundle and presentation (`PresetSpec`).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -69,11 +64,10 @@ impl KnobDefaults {
         approval: ApprovalPolicy::Never,
     };
 
-    /// Every shipped 0.3 profile's (`packages/bundle/base/cordis.patch.yml`),
-    /// the default through Bake 0.4.5: `workspace-write` and `ask`. A table
+    /// The default through Bake 0.4.5: `workspace-write` and `ask`. A table
     /// without a full-access preset falls back to the preset matching these
     /// ([`PresetTable::default_preset`]).
-    pub const TYPESCRIPT: Self = Self {
+    pub const WORKSPACE_ASK: Self = Self {
         sandbox: SandboxMode::WorkspaceWrite,
         approval: ApprovalPolicy::Ask,
     };
@@ -114,9 +108,8 @@ pub struct PresetTable {
 }
 
 impl Default for PresetTable {
-    /// The TypeScript default table (`PermissionPresetService.Config`): its
-    /// keys, order, and descriptions, with labels that say what each
-    /// preset does rather than repeat its key.
+    /// The default table, with labels that say what each preset does
+    /// rather than repeat its key.
     fn default() -> Self {
         Self {
             presets: vec![
@@ -144,8 +137,7 @@ impl Default for PresetTable {
 }
 
 impl PresetTable {
-    /// A table of `presets`, refusing the reserved names as the TypeScript
-    /// constructor does.
+    /// A table of `presets`, refusing the reserved names.
     pub fn new(presets: Vec<(String, PresetSpec)>) -> Result<Self, String> {
         if presets.iter().any(|(name, _)| name == CUSTOM_PRESET) {
             return Err(format!(
@@ -197,7 +189,7 @@ impl PresetTable {
             .map(|(_, spec)| spec)
     }
 
-    /// A configured preset, or the TypeScript `resolve` error.
+    /// A configured preset, or the error naming the available ones.
     pub fn resolve(&self, name: &str) -> Result<&PresetSpec, String> {
         self.spec(name).ok_or_else(|| {
             format!(
@@ -246,9 +238,9 @@ impl PresetTable {
     /// The default preset for new sessions: `configured` when given, else
     /// the first preset matching `defaults`, the composition's knob
     /// defaults (Pi's full access); for a table without one, the first
-    /// preset matching [`KnobDefaults::TYPESCRIPT`], the default through
-    /// Bake 0.4.5; else the table's first preset. `configured` resolves as
-    /// the TypeScript constructor resolves `defaultPreset`; only an empty
+    /// preset matching [`KnobDefaults::WORKSPACE_ASK`], the default through
+    /// Bake 0.4.5; else the table's first preset. `configured` must name a
+    /// preset in the table; only an empty
     /// table has no default.
     pub fn default_preset(
         &self,
@@ -259,7 +251,7 @@ impl PresetTable {
             self.resolve(name)?;
             return Ok(name.to_owned());
         }
-        [defaults, KnobDefaults::TYPESCRIPT]
+        [defaults, KnobDefaults::WORKSPACE_ASK]
             .into_iter()
             .map(|defaults| self.derive(&KnobState::default(), defaults))
             .find(|name| name != CUSTOM_PRESET)

@@ -1,9 +1,7 @@
 //! Release version syntax and ordering: `MAJOR.MINOR.PATCH` with an
 //! optional prerelease, in canonical semantic-versioning form, compared by
-//! semantic-versioning precedence. The ordering is ported from Bake 0.3's
-//! `packages/boot/updater/src/version.ts`; the syntax is stricter than its
-//! pattern, which accepted leading zeros and empty prerelease identifiers.
-//! Over canonical versions the order is total: two versions compare equal
+//! semantic-versioning precedence. Leading zeros and empty prerelease
+//! identifiers are refused. Over canonical versions the order is total: two versions compare equal
 //! only when they are the same text, so a manifest can never offer a
 //! different release as the installed one, and the order is transitive.
 
@@ -143,8 +141,8 @@ mod tests {
             "1.2.3 ",
             "..",
             "1..3",
-            // Leading zeros and empty identifiers, which the 0.3 pattern
-            // accepted and which made the order non-total.
+            // Leading zeros and empty identifiers, which would make the
+            // order non-total.
             "01.2.3",
             "1.02.3",
             "1.2.03",

@@ -402,6 +402,8 @@ pub(super) struct Core {
     /// ([`super::write_session`]), so no write lands after a failed one,
     /// whichever task gets the lock next.
     pub gap: Arc<Mutex<Option<String>>>,
+    /// The context files found while working ([`super::nested_context`]).
+    pub nested: super::nested_context::NestedContext,
     /// Failures tests inject at the session's write boundary.
     #[cfg(test)]
     pub hooks: Mutex<super::TestHooks>,
@@ -588,8 +590,7 @@ impl Core {
         &self,
         model: Option<&Model>,
     ) -> Result<CompactionSettings, String> {
-        super::read_settings(&self.settings)
-            .compaction_settings(model.map(|model| (model.provider.as_str(), model.id.as_str())))
+        super::read_settings(&self.settings).compaction_settings_for(model)
     }
 
     /// Pi's `_refreshFinalizedContext`: the agent's transcript becomes the

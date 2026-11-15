@@ -10,11 +10,15 @@ bake reads its settings from `settings.json` in the Bake home, a JSON object rea
 | `defaultThinkingLevel` | The thinking level when none is given: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`; `medium` when unset |
 | `enabledModels` | Model patterns or globs that scope the available models when `--models` is not passed (`bake docs models`) |
 | `modelThinkingLevels` | Thinking levels for particular models, keyed `provider/id`, used when a new session is given no thinking level |
+| `modelProfiles` | The choices that depend on the model, keyed by model pattern: `tools`, `codemode.mode`, `thinkingLevel`, `compaction`, and `prompt`. See [Model profiles](#model-profiles) |
 | `steeringMode`, `followUpMode` | How prompts sent while a turn runs are delivered: `one-at-a-time` (the default) or `all` at the next step |
 | `cliproxyapi` | The CLIProxyAPI account's route, or `null` once signed out; written by `/login` (`bake docs models`) |
 | `defaultTools` | The tool names a session starts with, in place of `read`, `bash`, `edit`, `write`, the job tools, the web tools `web_search` and `web_fetch`, and `codemode`; a list of only `+name` and `-name` entries adds to or removes from those defaults instead, so `["+grep"]` keeps `codemode`, `["+visualize"]` turns on the chart, table, diagram, and SVG tool in print and RPC runs (`bake docs cli`), and `["-ask_user"]` removes the tool that asks you questions (`bake docs team`) |
 | `webSearch.model` | The CLIProxyAPI route model `web_search` runs on: the id of one of the route's Anthropic Messages models, with or without `cliproxyapi/` |
-| `maxConcurrentReadTools` | Optional integer from 1 to 64; bounds concurrent native read tools and runs batches containing other tools sequentially. Absent preserves existing unlimited parallel batches |
+| `bash.foregroundSeconds` | How long a `bash` command the model gives no `timeout` runs in the foreground: a positive integer of seconds, 300 when unset. A command still running then continues as a background job, and the call returns its output so far with the job's id (`bake docs cli`). An invalid value stops the session's start |
+| `nestedContextFiles` | When `true`, a session also adds the `AGENTS.md` files of the subdirectories below the working directory that its file tools succeed on, before the next request, at most 64 KiB of them; default `false` (`bake docs context`). An invalid value stops the session's start |
+| `skills.listingTokens` | The estimated tokens the system prompt's list of skills may take, its opening lines and each skill's name and location included: a positive integer, 4000 when unset. A longer list shortens its descriptions, the longest first, and then leaves out the descriptions of the last skills; every skill is still listed (`bake docs skills`). An invalid value stops the session's start |
+| `maxConcurrentReadTools` | Optional integer from 1 to 64; bounds how many reads next to each other in one response run at once, and makes every tool that is not a read run alone, in order. Absent leaves reads next to each other unbounded |
 | `taskDocuments` | When `true`, enables the versioned `task_document` tool for plans, todos, and user-requested goals; default `false` |
 | `subagents` | When `true`, gives a top-level session the subagent tools: `subagent`, `send_message`, `interrupt_agent`, `list_agents`, and `list_subagent_models` when more than one model is available; default `false` |
 | `visualize` | When `true`, the default, a session in the interactive terminal starts with the `visualize` tool, which draws charts, tables, Mermaid diagrams, and SVG images in the conversation (`bake docs cli`); `false` leaves it to `--tools` and `defaultTools`. `/settings` changes it under Answers, from the next session: `/new`, `/resume`, or a restart |
@@ -38,7 +42,7 @@ bake reads its settings from `settings.json` in the Bake home, a JSON object rea
 
 An invalid compaction token value or `thresholdPercent` is reported, by name, as an error when compaction runs. A malformed `permission` section stops the run, since its presets bound what tools may do.
 
-`maxConcurrentReadTools` bounds batches made entirely of trusted native `read`, `ls`, `find`, and `grep` tools. Preparation and permission hooks run in assistant order; completion events follow completion order and recorded results retain assistant order. A batch containing any other tool runs sequentially, including a custom or MCP tool advertising itself as read-only. Invalid explicit values stop session creation. With the setting absent, existing unlimited parallel batches and mutation barriers apply. Cancellation waits for started work and skips queued execution; session shutdown also drains blocking native reads and listings.
+Tool calls in one response run in the order the model wrote them. Reads next to each other run together: Bake's own observation tools, such as `read`, `ls`, `find`, `grep`, and the web tools, and the tools an MCP server marks read-only when its entry sets `trustReadOnly` (`bake docs mcp`). `bash`, `edit`, `write`, an MCP tool, and the `task_document` and `schedule_*` tools run alone: each call waits for the calls before it, and the calls after it wait for it. `codemode` and the tools that coordinate work, such as the job, subagent, telecom, and agent-spawning tools, run together with the calls next to them that are not run alone. `maxConcurrentReadTools` bounds each run of reads to that many at once, and also makes every tool that is not a read run alone, `codemode` and the coordination tools included. Preparation and permission hooks run in assistant order; completion events follow completion order and recorded results retain assistant order. Invalid explicit values stop session creation. Cancellation waits for started work and skips queued execution; session shutdown also drains blocking native reads and listings.
 
 With `taskDocuments: true`, the default tool set also includes `task_document`. An explicit `defaultTools` list or CLI tool selection still controls whether it is active. The tool lists, reads, and revises documents using their exact current revision reference. Documents belong to the selected session branch and remain available after compaction or resume. `claimed_complete` records the agent’s claim; it does not assert that files passed a check. The Rust SDK can record separate evidence tied to a trusted native check and declared file versions. No setting automatically creates a goal or runs checks. With `--no-session`, documents exist only for that process.
 
@@ -55,6 +59,34 @@ With `compaction.cachedSummary` on, the default, a compaction writes its summary
 With `backgroundCompaction: true`, Bake starts a summary once the context is within `compaction.reserveTokens` of the automatic compaction threshold, when that threshold is greater than `compaction.reserveTokens`. It installs a completed summary between turns only if the summarized context still matches. New conversation messages remain; context edits, navigation, another compaction, or changed model settings discard the candidate. Ordinary compaction still runs when required. Background requests share the run’s deadline and model-call allowance, preserve one call for foreground work, and remain charged when discarded. They can add model cost without reducing waiting time. JSON mode reports their lifecycle and each attempt’s available usage; interactive mode reports committed summaries.
 
 With `contextMasking: true`, Bake keeps the last eight complete assistant tool batches and the latest successful `read` for each recorded path and range. Older successful text output from `read`, `ls`, `find`, and `grep` may be replaced by a placeholder when its recorded details identify a trusted host read capability. Unmarked imported history and unknown tool overrides remain, as do errors, incomplete batches, explicit context edits, images, and other tools. New tool results cannot supply the reserved provenance marker themselves, including while masking is off. Recorded markers are trusted session metadata, not cryptographic authentication of imported or edited logs. Assistant calls and their result identities stay paired. Each replacement is written as a Pi context edit before the reduced context is used, so reopening reproduces it and the original result stays in the file. Turning the setting off stops new masking; it does not undo recorded edits. Ordinary foreground compaction still applies when the retained context exceeds its threshold. JSON mode reports committed masking counts and removed content bytes. This experiment can lose useful older observations or cause repeated reads; its quality and cost are not yet qualified. Compare it with `backgroundCompaction` disabled to isolate the policy.
+
+## Model profiles
+
+`modelProfiles` collects in one place what suits one model and not another. Each key is a model pattern, matched as `enabledModels` and `--models` match: `provider/id`, an id, part of an id or name, or a glob such as `cliproxyapi/*sonnet*`. Each value may set:
+
+- `tools`: `+name` and `-name` entries applied after `defaultTools`, such as `["+grep", "-web_search"]`. A name that is no Bake tool stops the session's start; a known tool this session does not have, such as `subagent` without `subagents: true`, is skipped. `--tools`, `--no-tools`, and `--no-builtin-tools` choose the tools alone, and the profiles' `tools` then change nothing. MCP tools are not affected.
+- `codemode`: `{ "mode": "only" }` or `{ "mode": "on" }`, in place of `codemode.mode`.
+- `thinkingLevel`: the level a new session or a switch to the model takes when none is given, in place of the `modelThinkingLevels` entry.
+- `compaction`: `reserveTokens`, `keepRecentTokens`, and `thresholdPercent`, in place of the `compaction.modelOverrides` entry and the ordinary members.
+- `prompt`: notes for the model, sent as a `model_notes` section after the `environment` section of the system prompt.
+
+Every entry whose pattern matches the session's model applies, in the order the file lists them: a later entry's member wins over an earlier one's, and `tools` lists are applied one after another. A model no pattern matches gets nothing from `modelProfiles`. A malformed entry, such as an unknown member, a level that does not exist, or a `tools` entry that is not `+name` or `-name`, stops the session's start with an error naming the entry and member, as a malformed `permission` section does.
+
+The profile follows the session's model. After a switch with `/model`, the next request carries the new model's tools and `model_notes`, sent as a change to the tools and that one section, so the rest of the conversation stays in the provider's prompt cache; switching back undoes the change. The thinking level changes with the switch itself. `/settings` shows the compaction members in effect for the current model; there is no view of the whole profile.
+
+```json
+{
+  "modelProfiles": {
+    "cliproxyapi/*": { "tools": ["+grep"] },
+    "cliproxyapi/gpt-5.5": {
+      "codemode": { "mode": "only" },
+      "thinkingLevel": "high",
+      "compaction": { "thresholdPercent": 70 },
+      "prompt": "Batch independent reads into one codemode script."
+    }
+  }
+}
+```
 
 ## Mermaid diagrams
 

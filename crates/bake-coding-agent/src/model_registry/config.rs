@@ -23,7 +23,8 @@ use std::sync::OnceLock;
 use regex::Regex;
 use serde_json::{Map, Value};
 
-use crate::auth_storage::{read_text_file, strip_bom};
+use crate::auth_storage::read_text_file;
+use crate::json_store::strip_bom;
 
 /// The largest `models.json` read, in bytes.
 pub const MAX_MODELS_FILE_BYTES: u64 = 16 * 1024 * 1024;

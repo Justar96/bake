@@ -1,7 +1,7 @@
 //! Nested tool calls through a real session: the faux model calls `script`,
 //! a test tool that runs other tools through its `ToolContext::nested`
 //! executor, as the `codemode` tool will. Each nested call meets the
-//! session's whole pipeline: Bake's D24 `write` and `bash` under each
+//! session's whole pipeline: Bake's sandboxed `write` and `bash` under each
 //! permission (allowed, refused, an approval answered yes and no, under
 //! `never`, and aborted while pending), the plugins' vetoes, the external
 //! hooks before and after the call (a deny, an ask, and a `PostToolUse`
@@ -152,7 +152,7 @@ impl Fixture {
         ]);
     }
 
-    /// A persisted session whose tools are `script` and Bake's D24 `write`
+    /// A persisted session whose tools are `script` and Bake's sandboxed `write`
     /// and `bash` standing in `mode` under `policy`, all under the
     /// session's work gate, with `plugins` vetoing.
     async fn session(
@@ -696,7 +696,7 @@ async fn hooks_deny_a_nested_call_and_record_it() {
                 PluginRegistry::default(),
             )
             .await;
-        // As 0.3's bridge tests: Claude Code reports the hook's stderr,
+        // Claude Code reports the hook's stderr,
         // Codex its own text.
         let (command, expected) = match dialect {
             HookDialect::ClaudeCode => ("echo 'no nested writes' >&2; exit 2", "no nested writes"),

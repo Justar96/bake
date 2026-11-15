@@ -211,8 +211,10 @@ fn apply_replacements_preserving_unchanged_lines(
     Ok(result)
 }
 
-fn not_found(path: &str, index: usize, total: usize) -> String {
-    if total == 1 {
+/// Pi's message, then where the closest text is when some is close
+/// ([`crate::tools::edit_closest`]).
+fn not_found(path: &str, index: usize, total: usize, content: &str, old_text: &str) -> String {
+    let message = if total == 1 {
         format!(
             "Could not find the exact text in {path}. The old text must match exactly including all whitespace and newlines."
         )
@@ -220,6 +222,13 @@ fn not_found(path: &str, index: usize, total: usize) -> String {
         format!(
             "Could not find edits[{index}] in {path}. The oldText must match exactly including all whitespace and newlines."
         )
+    };
+    match crate::tools::edit_closest::closest_text(content, old_text) {
+        Some(closest) => format!(
+            "{message}\n{}",
+            crate::tools::edit_closest::render(&closest)
+        ),
+        None => message,
     }
 }
 
@@ -293,7 +302,13 @@ pub fn apply_edits_to_normalized_content(
     let mut matched: Vec<Replacement> = Vec::with_capacity(total);
     for (index, edit) in edits.iter().enumerate() {
         let Some(found) = fuzzy_find_text(&base, &edit.old_text) else {
-            return Err(not_found(path, index, total));
+            return Err(not_found(
+                path,
+                index,
+                total,
+                normalized_content,
+                &edit.old_text,
+            ));
         };
         let occurrences = count_occurrences(&base, &edit.old_text);
         if occurrences > 1 {
@@ -542,5 +557,49 @@ mod tests {
                 Err(message) => prop_assert!(message.starts_with("No changes"), "{message}"),
             }
         }
+
+        #[test]
+        fn an_old_text_in_the_file_never_reads_as_not_found(
+            before in "[a-z \n]{0,12}",
+            old_text in "[a-z \n]{1,12}",
+            after in "[a-z \n]{0,12}",
+        ) {
+            let content = format!("{before}{old_text}{after}");
+            let edit = Edit { old_text, new_text: "Z".into() };
+            let result = apply_edits_to_normalized_content(&content, &[edit], "f");
+            prop_assert!(
+                !result.as_ref().is_err_and(|message| message.starts_with("Could not find")),
+                "{result:?}"
+            );
+        }
+    }
+
+    // The closest text joins the not-found message, in both of its forms
+    // and for a CRLF file once the edit tool has normalized it; without
+    // similar text the message is Pi's.
+    #[test]
+    fn a_missing_text_names_the_closest_text() {
+        let crlf = "fn a() {\r\n    one();\r\n}\r\n";
+        let content = normalize_to_lf(crlf);
+        let edit = |old: &str| Edit {
+            old_text: old.into(),
+            new_text: "x".into(),
+        };
+        assert_eq!(
+            apply_edits_to_normalized_content(&content, &[edit("fn a() {\n  one();\n}")], "f.rs"),
+            Err("Could not find the exact text in f.rs. The old text must match exactly including all whitespace and newlines.\nThe closest text is at lines 1-3:\n```\nfn a() {\n    one();\n}\n```\nIt differs only in whitespace (indentation, trailing spaces, or line endings).".into())
+        );
+        assert_eq!(
+            apply_edits_to_normalized_content(
+                &content,
+                &[edit("fn a() {"), edit("fn a() {\n    two();\n}")],
+                "f.rs"
+            ),
+            Err("Could not find edits[1] in f.rs. The oldText must match exactly including all whitespace and newlines.\nThe closest text is at lines 1-3:\n```\nfn a() {\n    one();\n}\n```\nLine 2 differs: expected \"    two();\", found \"    one();\".".into())
+        );
+        assert_eq!(
+            apply_edits_to_normalized_content(&content, &[edit("nothing like it")], "f.rs"),
+            Err("Could not find the exact text in f.rs. The old text must match exactly including all whitespace and newlines.".into())
+        );
     }
 }

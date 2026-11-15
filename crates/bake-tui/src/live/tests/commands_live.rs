@@ -510,7 +510,7 @@ fn shift_tab_cycles_the_thinking_level_and_the_status_follows() {
     h.stop();
 }
 
-// Bake: `/permission` keeps Bake 0.3's runtime command: a named preset
+// Bake: `/permission` is Bake's own command: a named preset
 // switches at once and answers `preset NAME`, an unknown one is refused
 // with the usage and the presets, and without a name the table opens with
 // each preset's sandbox and approval and the one in force marked.

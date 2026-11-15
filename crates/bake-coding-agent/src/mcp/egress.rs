@@ -1,13 +1,12 @@
-//! D24 network admission for one Streamable HTTP MCP server: the URL and
+//! Network admission for one Streamable HTTP MCP server: the URL and
 //! headers `mcp.json` configured, the addresses one connection may use, and
 //! the HTTP client that reaches only them.
 //!
 //! The owner's `mcp.json` authorizes exactly the configured origin (scheme,
 //! host, port), as a stdio entry's `command` authorizes that program, so a
 //! loopback or private address is allowed: a local MCP server is the common
-//! case, and both Pi v1.3.0 (`packages/mcp/src/transports/streamable-http.ts`,
-//! which checks no address) and Bake 0.3 (`packages/mcp/mcp-client`, whose
-//! `url` is any string) connect to one. What the admission adds around that
+//! case, and Pi v1.3.0 (`packages/mcp/src/transports/streamable-http.ts`,
+//! which checks no address) connects to one. What the admission adds around that
 //! origin is Bake's own:
 //!
 //! - **One resolution per connection, pinned.** The host is resolved once,
@@ -32,20 +31,16 @@
 //!   another. Configure the endpoint a server redirects to, and a call is
 //!   sent once again.
 //! - **`https` for a public destination.** Plain `http` is allowed to a
-//!   loopback or otherwise local address, which is what Pi and Bake 0.3
-//!   allow and what a local server needs, and refused when the host resolves
+//!   loopback or otherwise local address, which is what Pi allows and what
+//!   a local server needs, and refused when the host resolves
 //!   to an address that reaches a public network, where the configured
 //!   `Authorization` header would cross it in clear text
 //!   ([`reaches_a_public_network`], over the web tools'
 //!   [`is_public_ip`](crate::web::policy::is_public_ip)).
 //! - **No proxy.** The client connects directly and reads neither
-//!   `HTTPS_PROXY` nor `NO_PROXY`. Bake 0.3 sent MCP HTTP through undici's
-//!   global dispatcher, which `installProxyFromEnvironment` built from those
-//!   variables (`packages/util/http-proxy/src/install.ts`); a proxy resolves
-//!   the origin itself, so a proxied request cannot be pinned, and Bake's
-//!   Rust HTTP clients, the web tools included
-//!   (`packages/web/web-fetch-http` in Rust), connect directly for that
-//!   reason. 0.4 therefore does not read the proxy environment for MCP.
+//!   `HTTPS_PROXY` nor `NO_PROXY`. A proxy resolves the origin itself, so a
+//!   proxied request cannot be pinned, and Bake's HTTP clients, the web
+//!   tools included, connect directly for that reason.
 //! - **No ambient credentials.** Only the entry's headers are sent, with
 //!   their values resolved as other configuration values are: `${NAME}`
 //!   references the environment and `!cmd` is refused, as for a stdio
@@ -55,7 +50,7 @@
 //!
 //! The connection is made by the `bake` process, not by a sandboxed
 //! child, so it is allowed in every sandbox mode, as the web tools are
-//! (D40): the owner configured the origin, and `bake-sandbox` has no network
+//!: the owner configured the origin, and `bake-sandbox` has no network
 //! policy for it to bypass.
 
 use std::net::IpAddr;
@@ -326,8 +321,8 @@ mod tests {
     }
 
     // The configured origin is authorized, whatever address it names: a
-    // loopback or private server is admitted over plain http, as Pi and
-    // Bake 0.3 admit one.
+    // loopback or private server is admitted over plain http, as Pi admits
+    // one.
     #[tokio::test]
     async fn a_private_destination_is_admitted_over_http() {
         let loopback = resolver(&["127.0.0.1"]);
@@ -345,7 +340,7 @@ mod tests {
             .expect("https to a public address");
     }
 
-    // Bake's own rule, stricter than Pi and 0.3: clear text to a globally
+    // Bake's own rule, stricter than Pi: clear text to a globally
     // reachable address would expose the configured headers.
     #[tokio::test]
     async fn http_to_a_public_address_is_refused() {

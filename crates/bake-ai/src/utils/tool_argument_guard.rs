@@ -1,7 +1,6 @@
 //! Guard against streamed tool calls that pad runaway whitespace after their
 //! arguments without closing the JSON object.
 //!
-//! Ported from Bake `packages/llm/llm-pi-ai/src/stream.ts` and `config.ts`.
 //! Some models finish a tool call's last argument value and then stream
 //! whitespace for minutes without closing the object; every padding delta
 //! resets any idle timeout, so counting trailing whitespace outside JSON
@@ -76,8 +75,6 @@ impl ArgumentScan {
 
 #[cfg(test)]
 mod tests {
-    //! Cases ported from `packages/llm/llm-pi-ai/tests/tool-argument-guard.spec.ts`.
-
     use super::*;
     use crate::providers::faux::faux_assistant_message;
     use crate::types::StopReason;

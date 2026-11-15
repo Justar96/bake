@@ -6,7 +6,7 @@
 //!
 //! This is a convenience, not a confidentiality boundary: `bash` and `read`
 //! still reach those paths, and a fragment match does not resolve links.
-//! D24's permission checks remain the enforcement floor.
+//! Bake's permission checks remain the enforcement floor.
 //!
 //! Matching is Pi's: a case-sensitive substring test on the `path` argument
 //! as the model wrote it, with no normalization. So `.ENV` on a

@@ -96,6 +96,8 @@ pub enum Scope {
     Inspect,
     /// One background shell's output.
     Shell,
+    /// One spawned agent's transcript ([`crate::crew`]).
+    Crew,
 }
 
 /// What a bound key asks the view to do.
@@ -172,6 +174,8 @@ pub enum Action {
     ToLatest,
     /// Ctrl+O: every call card's whole output, or its preview again.
     ToggleDetail,
+    /// Ctrl+X: a spawned agent's transcript, or the composer again.
+    ViewCrew,
 }
 
 /// One row of [`BINDINGS`]: `key` in `scope`, with every modifier in
@@ -211,6 +215,13 @@ pub const BINDINGS: &[Binding] = &[
         Mods::ALT,
         A::ToggleTasks,
     ),
+    bind(
+        S::Composer,
+        K::Char('x'),
+        Mods::CTRL,
+        Mods::ALT,
+        A::ViewCrew,
+    ),
     bind(S::Composer, K::Esc, ANY, ANY, A::Interrupt),
     bind(
         S::Composer,
@@ -228,7 +239,7 @@ pub const BINDINGS: &[Binding] = &[
     bind(S::Composer, K::Char('_'), Mods::CTRL, Mods::ALT, A::Undo),
     bind(S::Composer, K::Char('/'), Mods::CTRL, Mods::ALT, A::Undo),
     bind(S::Composer, K::Char('7'), Mods::CTRL, Mods::ALT, A::Undo),
-    // Readline editing, as the TypeScript composer's `editKey` binds it.
+    // Readline editing.
     bind(S::Composer, K::Backspace, Mods::ALT, ANY, A::KillWordLeft),
     bind(S::Composer, K::Delete, Mods::ALT, ANY, A::KillWordRight),
     bind(S::Composer, K::Delete, Mods::CTRL, ANY, A::KillWordRight),
@@ -322,7 +333,7 @@ pub const BINDINGS: &[Binding] = &[
         A::ToggleDetail,
     ),
     // After Ctrl+↑ and Ctrl+↓, which move the transcript. Alt+↑ sends the
-    // waiting prompts, as the oracle's does, so neither arrow moves with Alt.
+    // waiting prompts, so neither arrow moves with Alt.
     bind(S::Composer, K::Up, Mods::ALT, ANY, A::SendPending),
     bind(S::Composer, K::Up, ANY, Mods::ALT, A::CaretUp),
     bind(S::Composer, K::Down, ANY, Mods::ALT, A::CaretDown),
@@ -379,6 +390,17 @@ pub const BINDINGS: &[Binding] = &[
         Mods::ALT,
         A::ReturnToComposer,
     ),
+    // One spawned agent's transcript: ↑↓ and the page keys scroll it, ←→
+    // move to the agent before or after, and Esc or Ctrl+X closes it.
+    bind(S::Crew, K::Up, ANY, ANY, A::SelectPrevious),
+    bind(S::Crew, K::Down, ANY, ANY, A::SelectNext),
+    bind(S::Crew, K::PageUp, ANY, ANY, A::PageUp),
+    bind(S::Crew, K::PageDown, ANY, ANY, A::PageDown),
+    bind(S::Crew, K::End, ANY, ANY, A::ToLatest),
+    bind(S::Crew, K::Left, ANY, ANY, A::Left),
+    bind(S::Crew, K::Right, ANY, ANY, A::Right),
+    bind(S::Crew, K::Esc, ANY, ANY, A::ReturnToComposer),
+    bind(S::Crew, K::Char('x'), Mods::CTRL, Mods::ALT, A::ViewCrew),
     // Shift+Tab arrives as BackTab, or as Tab with Shift under the keyboard
     // protocol; either cycles the thinking level ahead of completion.
     bind(S::Composer, K::BackTab, ANY, ANY, A::CycleThinking),

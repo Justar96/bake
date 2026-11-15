@@ -1,20 +1,18 @@
 //! The child environment: nothing is inherited unless the caller asks.
 //!
 //! Pi's `StdioTransport` merges the whole parent environment by default
-//! (`inheritEnv`). Bake's TypeScript MCP transport instead passes
-//! `scrubbedParentEnv()` from `packages/subprocess/subprocess/src/index.ts`
-//! with `inheritEnv: false`, and Bake keeps that rule: credential-shaped
-//! names (`SENSITIVE_ENV_PATTERN`, `/KEY|PASSWORD|SECRET|TOKEN/i`), every
-//! `DSH_*` name, and the `BAKE_*` spellings of the facts the harness manages
-//! never reach a server implicitly. A credential a server needs goes through
+//! (`inheritEnv`). Bake instead starts a server from a scrubbed copy of its
+//! own environment: credential-shaped names (those containing `KEY`,
+//! `PASSWORD`, `SECRET`, or `TOKEN`, ignoring case) and the `BAKE_*` names
+//! of the facts the harness manages never reach a server implicitly. A credential a server needs goes through
 //! its explicit configured environment, set after the scrub.
 
 use std::ffi::{OsStr, OsString};
 
 use bake_process::environment::is_credential_name;
 
-/// The `BAKE_*` spellings of the facts the harness manages (`managedBakeNames`
-/// in the TypeScript source); other `BAKE_*` names are user settings and pass.
+/// The `BAKE_*` names of the facts the harness manages; other `BAKE_*` names
+/// are user settings and pass.
 const MANAGED_BAKE: [&str; 4] = [
     "BAKE_HOME",
     "BAKE_SHELL",
@@ -26,7 +24,7 @@ const MANAGED_BAKE: [&str; 4] = [
 /// Windows environment names do.
 pub fn is_scrubbed_name(name: &OsStr) -> bool {
     let upper = name.to_string_lossy().to_ascii_uppercase();
-    is_credential_name(name) || upper.starts_with("DSH_") || MANAGED_BAKE.contains(&upper.as_str())
+    is_credential_name(name) || MANAGED_BAKE.contains(&upper.as_str())
 }
 
 /// This process's environment without the names [`is_scrubbed_name`] drops:
@@ -46,10 +44,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn names_follow_the_typescript_scrub() {
-        // `SENSITIVE_ENV_PATTERN` cases from Bake's
-        // packages/subprocess/subprocess/tests/service.spec.ts, as the Rust
-        // exec port checks them, plus the `DSH_*` and managed `BAKE_*` rules.
+    fn credential_and_managed_names_are_scrubbed() {
+        // The credential filter's cases, plus the managed `BAKE_*` names.
         let dropped = [
             "SCRUB_PROBE_PASSWORD",
             "API_KEY",
@@ -57,8 +53,6 @@ mod tests {
             "myToken",
             "MONKEY",
             "key",
-            "DSH_HOME",
-            "dsh_session_id",
             "BAKE_HOME",
             "bake_session_id",
             "BAKE_PTY_SESSION_ID",

@@ -5,6 +5,7 @@
 //! |---|---|
 //! | [`read`], [`write`](mod@write), [`edit`], [`ls`], [`find`], [`grep`] | `src/core/tools/{read,write,edit,ls,find,grep}.ts` |
 //! | [`edit_diff`] | `src/core/tools/edit-diff.ts`, with jsdiff 8.0.4's line diff and patch |
+//! | [`edit_closest`] | Bake's own: the closest text a failed `edit`'s error names |
 //! | [`path_utils`] | `src/core/tools/path-utils.ts`, `src/utils/paths.ts` |
 //! | [`definition`] | `src/core/tools/tool-definition-wrapper.ts` |
 //! | [`index`] | `src/core/tools/index.ts`, and the tool selection of `settings-manager.ts`, `sdk.ts`, and `mcp-servers.ts` |
@@ -15,7 +16,9 @@
 //! | [`visualize`] | Bake's own: a render-only chart, table, diagram, and SVG image tool |
 //!
 //! Every tool is a [`bake_agent::AgentTool`] whose names, descriptions,
-//! schemas, results, and errors are Pi's. Blocking file work runs on
+//! schemas, results, and errors are Pi's, except where Bake adds to an
+//! error: the closest text of a failed `edit` and `bash`'s refusal of a
+//! `timeout` of 0 or less. Blocking file work runs on
 //! Tokio's blocking pool and is awaited, aborted or not; `write` and `edit`
 //! run inside the file's mutation queue. Tools built through
 //! [`index::ToolsOptions::owner`] put that work under the session's
@@ -31,6 +34,7 @@ pub mod bash;
 pub mod codemode;
 pub mod definition;
 pub mod edit;
+pub mod edit_closest;
 pub mod edit_diff;
 pub mod file_mutation_queue;
 pub mod find;

@@ -753,7 +753,11 @@ impl AgentSession {
     /// The replay class of the tool a resumed run would call by `name`,
     /// resolved as its execution activates tools.
     fn replay_class(&self, name: &str) -> Option<ToolReplay> {
-        if self.active_tool_names.iter().any(|active| active == name) {
+        let profile = super::model_profile(&self.settings, self.model().as_ref());
+        if super::profile_tool_names(&profile, &self.active_tool_names, &self.tools)
+            .iter()
+            .any(|active| active == name)
+        {
             return replay_of(&self.tools, name);
         }
         self.mcp.get().and_then(|mcp| replay_of(&mcp.tools(), name))

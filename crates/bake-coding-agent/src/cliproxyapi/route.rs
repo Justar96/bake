@@ -1,28 +1,25 @@
 //! The route a login saves and its Pi `models.json` provider config.
 //!
-//! The route is the `llm-pi-ai.providers.cliproxyapi` entry
-//! `configureCliProxyApi` writes (`apps/tui/packages/app/src/cliproxyapi.ts`),
-//! with the defaults `CLIPROXYAPI_ROUTE_DEFAULTS` and the in-place upgrade
-//! `planCliProxyRouteUpgrade`. [`CliProxyRoute::to_pi_provider_config`] maps
-//! it onto one provider of Pi's `models.json` (Pi v1.1.0
+//! The route is the `cliproxyapi` member a sign-in saves, with the defaults
+//! [`CLIPROXYAPI_ROUTE_DEFAULTS`] and the in-place upgrade
+//! [`plan_cli_proxy_route_upgrade`]. [`CliProxyRoute::to_pi_provider_config`]
+//! maps it onto one provider of Pi's `models.json` (Pi v1.1.0
 //! `packages/coding-agent/src/core/model-config.ts`, `ProviderConfigSchema`;
-//! `docs/models.md`), resolving each model as Bake's `llm-pi-ai` did
-//! (`packages/llm/llm-pi-ai/src/catalog.ts`, `resolveRouteCatalog` and
-//! `resolveModelReasoning`).
+//! `docs/models.md`), resolving each model's limits and reasoning levels.
 //!
 //! # Mapping onto Pi
 //!
 //! | Route field | Pi `models.json` |
 //! |---|---|
-//! | `displayName` | provider `name`, left out when empty, which 0.3 accepted and Pi refuses |
+//! | `displayName` | provider `name`, left out when empty, which the route accepts and Pi refuses |
 //! | `baseURL` | provider `baseUrl` |
 //! | `api` | provider `api` |
 //! | `apiKeyEnv` | provider `apiKey` as `$NAME`, Pi's environment reference; the key itself never enters the config |
-//! | `headers` | provider `headers`, each value escaped with [`escape_pi_config_literal`] so Pi's config-value resolver yields it unchanged: 0.3 sent header values literally, while Pi runs a value starting with `!` as a shell command and replaces `$NAME` and `${NAME}` from the environment |
+//! | `headers` | provider `headers`, each value escaped with [`escape_pi_config_literal`] so Pi's config-value resolver yields it unchanged: the route sends header values literally, while Pi runs a value starting with `!` as a shell command and replaces `$NAME` and `${NAME}` from the environment |
 //! | `compat` (`sendSessionAffinityHeaders`) | provider `compat`, which Pi merges into each model's under the model's own fields, as Bake's per-field route default did |
 //! | `retryPolicy` (`backoff.maxDelayMs` 60 s) | no field; Pi's `retry.provider.maxRetryDelayMs` and `retry.maxAgentDelayMs` settings already default to 60 s |
 //! | model `api`, `baseURL` | model `api`, `baseUrl`: the Anthropic Messages models' proxy root |
-//! | model `name` | model `name`; the id when the name is absent or empty, which 0.3 accepted and Pi refuses |
+//! | model `name` | model `name`; the id when the name is absent or empty, which the route accepts and Pi refuses |
 //! | model `reasoningEfforts` | model `reasoning` and `thinkingLevelMap`: each offered level maps to its wire value, every level not offered to `null` (unsupported), and a valueless `off` is left out; `false` or absent is `reasoning: false` |
 //! | model `compat.forceAdaptiveThinking` | model `compat.forceAdaptiveThinking`, which Pi's Anthropic adapter reads the same way |
 //! | a Chat-Completions-family id (`catalog::is_chat_completions_family`) | model `compat.supportsDeveloperRole: false`, unless the model's or the route's `compat` already states that key: Pi marks these vendors as having no `developer` role by provider id or the vendor's own host (`bake_ai::api::openai_completions::detect_compat`), and behind the proxy both are the proxy's, so a reasoning model would be sent the `developer` role the gateway refuses |
@@ -40,9 +37,9 @@ use super::catalog::{CliProxyModel, Modality, is_chat_completions_family};
 use super::endpoints::{CliProxyEndpoints, cli_proxy_endpoints};
 use super::{CLIPROXYAPI_ID, CLIPROXYAPI_KEY};
 
-/// `DEFAULT_CONTEXT_WINDOW` in `packages/llm/llm-pi-ai/src/config.ts`.
+/// A route model's context window when it states none.
 pub const DEFAULT_CONTEXT_WINDOW: u64 = 262_144;
-/// `DEFAULT_MAX_TOKENS` in `packages/llm/llm-pi-ai/src/config.ts`.
+/// A route model's output limit when it states none.
 pub const DEFAULT_MAX_TOKENS: u64 = 32_768;
 
 /// The pi-ai `compat` switch for the reasoning models' instruction role.
@@ -80,7 +77,7 @@ impl CliProxyRouteDefaults {
         json!({ "mode": self.retry_mode, "backoff": { "maxDelayMs": self.retry_max_delay_ms } })
     }
 
-    /// The defaults as the TypeScript constant spells them.
+    /// The defaults as JSON.
     pub fn to_json(&self) -> Value {
         json!({
             "retryPolicy": self.retry_policy_json(),
@@ -149,7 +146,7 @@ fn modalities(input: &[Modality]) -> Value {
 }
 
 impl RouteModel {
-    /// The model in Bake's settings shape, with the TypeScript's key order.
+    /// The model in Bake's settings shape.
     pub fn to_settings_json(&self) -> Value {
         let mut out = Map::new();
         out.insert("id".into(), json!(self.id));
@@ -303,7 +300,7 @@ fn optional_string(
     }
 }
 
-/// A string field the 0.3 schema accepts empty (`z.string()`): a model's
+/// A string field the route accepts empty: a model's
 /// `name` and the route's `displayName`.
 fn optional_text(
     object: &Map<String, Value>,
@@ -496,8 +493,7 @@ impl CliProxyRoute {
         })
     }
 
-    /// The route in Bake's settings shape, as `configureCliProxyApi` writes
-    /// it, with the TypeScript's key order.
+    /// The route in Bake's settings shape, as a sign-in writes it.
     pub fn to_settings_json(&self) -> Value {
         let mut out = Map::new();
         let mut put = |key: &str, value: Option<Value>| {
@@ -579,7 +575,7 @@ impl CliProxyRoute {
             }
         }
         let mut config = Map::new();
-        // Pi requires a non-empty `name`; 0.3 accepted an empty one.
+        // Pi requires a non-empty `name`; the route accepts an empty one.
         if let Some(name) = self.display_name.as_ref().filter(|name| !name.is_empty()) {
             config.insert("name".into(), json!(name));
         }
@@ -651,7 +647,7 @@ fn pi_model(
     out.insert("id".into(), json!(model.id));
     out.insert(
         "name".into(),
-        // Pi requires a non-empty `name`; 0.3 accepted an empty one, and
+        // Pi requires a non-empty `name`; the route accepts an empty one, and
         // the id stands in for it as it does for an absent one.
         json!(
             model

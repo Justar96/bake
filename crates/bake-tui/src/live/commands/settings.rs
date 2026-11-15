@@ -73,11 +73,7 @@ impl View {
         Self {
             auto: settings.compaction_enabled(),
             cached: settings.cached_compaction(),
-            compaction: settings.compaction_settings(
-                model
-                    .as_ref()
-                    .map(|model| (model.provider.as_str(), model.id.as_str())),
-            ),
+            compaction: settings.compaction_settings_for(model.as_ref()),
             window: model.map_or(0, |model| model.context_window),
             steering: session.steering_mode(),
             follow_up: session.follow_up_mode(),

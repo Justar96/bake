@@ -58,9 +58,9 @@ pub enum Token {
     Variable,
 }
 
-/// A token's style. Each colour comes from the TypeScript palette's light
-/// tones, so it reads on the call's box and on the terminal's own
-/// background; a comment and a flag recede instead of taking a colour.
+/// A token's style. Each colour comes from the palette's light tones, so it
+/// reads on the call's box and on the terminal's own background; a comment
+/// and a flag recede instead of taking a colour.
 pub fn style(token: Token, tones: Tones) -> Style {
     let dim = Style::new().add_modifier(Modifier::DIM);
     let (rgb, ansi) = match token {

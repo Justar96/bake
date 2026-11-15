@@ -166,6 +166,10 @@ impl Driver {
                 self.publish_background();
             }
             Request::CycleThinking => self.cycle_thinking().await,
+            Request::WatchCrew(id) => {
+                self.crew_watch = id.map(publish::CrewWatch::new);
+                self.publish_crew_log(true);
+            }
             // To the running command, which drops an answer for a dialog
             // it no longer shows.
             Request::Dialog { id, answer } => {

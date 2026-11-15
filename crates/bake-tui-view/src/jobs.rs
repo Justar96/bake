@@ -222,7 +222,7 @@ pub const COMMAND_ROWS: usize = 3;
 
 /// The transcript's rule across `width`, `label` near its right end with a
 /// rule cell after it, or the plain rule where the label does not fit.
-fn counted_rule(width: usize, label: &str, look: Look) -> Line<'static> {
+pub(crate) fn counted_rule(width: usize, label: &str, look: Look) -> Line<'static> {
     let rule = transcript::rule(width, transcript::RAIL, look);
     let label = format!(" {label} ");
     let cells = width.saturating_sub(2 * transcript::RAIL);

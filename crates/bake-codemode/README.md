@@ -1,6 +1,6 @@
 # bake-codemode
 
-The native engine of Pi's codemode for Bake. A script is model-written JavaScript, the body of an async function, whose only capability is calling the tools and globals its host declares. The crate runs it in the QuickJS-NG WebAssembly binary Pi v1.3.0 runs, with Wasmtime, inside the calling process. Like Pi's `packages/codemode`, it has no agent types: the host answers every call. Bake's `codemode` tool connects this engine to the session's tools; [the user guide](../bake-cli/docs/codemode.md) describes its settings, and the [code mode design](../../docs/roadmap/rust-0.4/code-mode.md) records its implementation decisions.
+The native engine of Pi's codemode for Bake. A script is model-written JavaScript, the body of an async function, whose only capability is calling the tools and globals its host declares. The crate runs it in the QuickJS-NG WebAssembly binary Pi v1.3.0 runs, with Wasmtime, inside the calling process. Like Pi's `packages/codemode`, it has no agent types: the host answers every call. Bake's `codemode` tool connects this engine to the session's tools; [the user guide](../bake-cli/docs/codemode.md) describes its settings.
 
 ## Table of Contents
 

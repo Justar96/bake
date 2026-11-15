@@ -15,8 +15,8 @@
 //! ported ([`crate::settings`]), so there is no decision for them to
 //! override. They are parsed rather than left unknown so the refusal says
 //! that, and so `-a` is not read as an unknown short option. Bake's
-//! `--approval` is a different thing: the session's approval policy (D24,
-//! [`crate::permissions`]).
+//! `--approval` is a different thing: the session's approval policy
+//! ([`crate::permissions`]).
 //!
 //! `--verbose` is accepted and changes nothing. Pi's flag forces verbose
 //! startup over its `quietStartup` setting; `bake` has no such setting
@@ -25,7 +25,7 @@
 //! warning, and each MCP server's failure.
 //!
 //! Bake adds `--permission <preset>`, `--sandbox <mode>`, and
-//! `--approval <policy>`, which select the session's permission (D24) the
+//! `--approval <policy>`, which select the session's permission the
 //! way Pi's `--thinking` selects its thinking level, and `--inline`, which
 //! keeps interactive mode in the terminal's scrollback.
 //!
@@ -513,7 +513,7 @@ mod tests {
     //! Each of Pi's 85 cases, by `describe` block, and the test here that
     //! ports it (a `test.each` row counts once, as Pi's file declares it).
     //! "Excluded" cases are for the extension, theme, and `--tui-mode` flags
-    //! scope 13 leaves out (D43); their port proves the flag is refused as
+    //! Bake leaves out; their port proves the flag is refused as
     //! an unknown option instead of parsed.
     //!
     //! | Pi case | Rust test |

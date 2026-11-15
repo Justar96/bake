@@ -24,7 +24,7 @@
 //! | [`utils::text`] | `utils/text.ts` |
 //! | [`utils::estimate`] | `utils/estimate.ts` |
 //! | [`utils::sse`] | the SSE decoder in `api/anthropic-messages.ts` |
-//! | [`utils::tool_argument_guard`] | Bake `packages/llm/llm-pi-ai/src/stream.ts` (runaway tool-argument whitespace guard) |
+//! | [`utils::tool_argument_guard`] | Bake's own runaway tool-argument whitespace guard |
 //! | [`transcript`] | `utils/transcript.ts` |
 //! | [`api::transform_messages`] | `api/transform-messages.ts` |
 //! | [`api::simple_options`] | `api/simple-options.ts` |

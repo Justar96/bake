@@ -6,9 +6,8 @@
 //! normalization (`_afterToolCall`, `tool_result`), and `Stop` where the
 //! run would settle (`_runBeforeSettleBoundary`, `agent_before_settle`).
 //!
-//! `SessionStart` deviates from both sources: Pi emits `session_start`
-//! when extensions bind (`bindExtensions`), and 0.3 ran the hook on
-//! `agent/created`, both before any prompt. Here it runs inside the first
+//! `SessionStart` deviates from Pi, which emits `session_start` when
+//! extensions bind (`bindExtensions`), before any prompt. Here it runs inside the first
 //! prompt's execution, before `UserPromptSubmit`, so its process is owned
 //! and stopped like the prompt's other hooks, and its context is written
 //! with that prompt. It counts as run once its decision is written (or no

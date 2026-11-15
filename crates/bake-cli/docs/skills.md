@@ -31,6 +31,12 @@ Read the changelog first, then …
 - `name` defaults to the name of the directory holding the file. The format allows lowercase letters, digits, and single hyphens, up to 64 characters.
 - `disable-model-invocation: true` leaves the skill out of the system prompt, so it runs only when a prompt asks for it by name.
 
+## The list in the system prompt
+
+Every session pays for the list of skills in each request, so it has a budget: `skills.listingTokens` in `settings.json`, an estimate of 4000 tokens when unset (`bake docs settings`). The budget covers the whole section: its opening lines and each skill's name and location as well as its description, so with many skills, or long locations, less of it is left for descriptions. A list within the budget carries every description whole. A longer list shortens the longest descriptions first, all to the same length, cut after a word and ending in `…`, but never below 120 characters; a description of 120 characters or fewer is never cut. When that is still too long, the skills at the end of the list, the ones given with `--skill` first and then your own, lose their description one by one and are listed by name and file only. Every skill is always listed, even when names and files alone exceed the budget. A shortened list says so in its opening lines, and the model can read the whole description in the skill's file.
+
+So put what matters first in a description: what the skill is for and when to use it, in its first 120 characters. Details after that may not reach the model when you have many skills.
+
 A relative path in a skill file is taken from the skill's directory. A skill file larger than 1 MiB is skipped. bake does not report skills it skips in print mode, so check a skill's frontmatter when it does not appear.
 
 ## Running a skill by name

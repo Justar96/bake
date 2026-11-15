@@ -1,7 +1,5 @@
-//! The interactive broker's lifecycle. Each test names the TypeScript case
-//! it follows: `apps/tui/packages/app/tests/interactions.spec.ts` for the
-//! queue, and `packages/interaction/user-approval/tests/approval.spec.ts`
-//! for the service in front of it. Waits are on published snapshots and
+//! The interactive broker's lifecycle: the queue, and the policy in front
+//! of it. Waits are on published snapshots and
 //! settled futures, never on time.
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -46,7 +44,7 @@ fn generations(broker: &ApprovalBroker) -> Vec<u64> {
     broker.pending().iter().map(|p| p.generation).collect()
 }
 
-// interactions.spec: "queues approvals and questions, rejects stale
+// "queues approvals and questions, rejects stale
 // answers, and preserves question detail" (the approval half).
 #[tokio::test]
 async fn requests_queue_in_order_and_a_stale_answer_settles_nothing() {
@@ -92,7 +90,7 @@ async fn requests_queue_in_order_and_a_stale_answer_settles_nothing() {
     );
 }
 
-// Bake: the prompt carries the mode and the wider answers it takes; an
+// The prompt carries the mode and the wider answers it takes; an
 // answer it does not offer settles nothing and leaves it waiting, and a
 // rejection's note comes back cleaned.
 #[tokio::test]
@@ -168,7 +166,7 @@ async fn two_requests_for_one_call_id_are_answered_apart() {
     assert_eq!(second.await.unwrap(), EscalationOutcome::Rejected);
 }
 
-// interactions.spec: "withdraws queued and visible requests on abort and
+// "withdraws queued and visible requests on abort and
 // settles every request on disposal".
 #[tokio::test]
 async fn an_abort_withdraws_its_request_and_closing_cancels_the_rest() {
@@ -220,7 +218,7 @@ async fn an_abort_withdraws_its_request_and_closing_cancels_the_rest() {
     broker.close();
 }
 
-// interactions.spec: "delegates requests for other agents and cancels only
+// "delegates requests for other agents and cancels only
 // the displayed request" (the cancel half).
 #[tokio::test]
 async fn cancel_settles_only_the_displayed_request() {
@@ -235,7 +233,7 @@ async fn cancel_settles_only_the_displayed_request() {
     assert_eq!(second.await.unwrap(), EscalationOutcome::Cancelled);
 }
 
-// approval.spec: "fails closed to unavailable when nobody listens".
+// "fails closed to unavailable when nobody listens".
 #[tokio::test]
 async fn without_a_frontend_a_request_is_unavailable() {
     let broker = ApprovalBroker::new();
@@ -293,7 +291,7 @@ async fn a_gone_or_panicking_frontend_fails_every_request_closed() {
     assert!(broker.is_closed());
 }
 
-// approval.spec: "a never config rejects deterministically without
+// "a never config rejects deterministically without
 // consulting any answerer".
 #[tokio::test]
 async fn the_never_policy_rejects_before_anything_is_shown() {

@@ -1,6 +1,6 @@
 //! Pi `test/session-context-edit.test.ts`: the cases that exercise the
 //! manager's projection. The cases about `prepareCompaction` and
-//! `estimateProjectedContextTokens` belong to compaction (scope 10).
+//! `estimateProjectedContextTokens` belong to compaction.
 
 use bake_coding_agent::session::{
     AgentMessage, EditContent, FileEntry, NewSessionOptions, SessionError, SessionManager,

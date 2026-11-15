@@ -1,6 +1,5 @@
 //! Third-party plugins as WebAssembly components, run in a helper process
-//! Bake owns: the host boundary of the native plugin design
-//! (`docs/roadmap/rust-0.4/native-plugins.md`).
+//! Bake owns: the host boundary of the native plugin design.
 //!
 //! A plugin is a `plugin.json` manifest ([`WasmManifest`]) and a WASI 0.2
 //! component built for `wasm32-wasip2` against `bake:plugin@0.1.0`

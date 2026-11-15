@@ -1,0 +1,37 @@
+{
+  "name": "skills listing",
+  "date": "2026-11-14",
+  "base": {
+    "path": "/home/jtar-wsl/bake/.artifacts/eval/bake-m4",
+    "version": "bake 0.4.8",
+    "bytes": 71521840
+  },
+  "candidate": {
+    "path": "/home/jtar-wsl/bake/.artifacts/eval/bake-m5a",
+    "version": "bake 0.4.8",
+    "bytes": 71661272
+  },
+  "same_executable": false,
+  "base_settings": {},
+  "candidate_settings": {},
+  "models": [
+    "cliproxyapi/gemini-4-hydrogen-xhigh:high",
+    "cliproxyapi/gpt-6.1-sol:high",
+    "cliproxyapi/claude-opus-5-5:high"
+  ],
+  "tasks": [
+    [
+      "skill-crowd",
+      "Product wants to show when each user last signed in, so we need a nullable `last_login_at` timestamp column on the `users` table. Can you write the migration for it?"
+    ],
+    [
+      "skill-procedure",
+      "We're shipping 2.3.0 of tidy today. Please prepare the release."
+    ]
+  ],
+  "trials": 10,
+  "jobs": 6,
+  "max_model_calls": 60,
+  "run_timeout_ms": 900000,
+  "host": "linux/x86_64"
+}

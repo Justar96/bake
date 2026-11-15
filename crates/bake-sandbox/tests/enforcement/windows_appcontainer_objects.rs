@@ -1,5 +1,5 @@
 //! Named objects, the registry, the null device, and loopback through the
-//! unqualified AppContainer runner: the scope-04 proofs that need Win32
+//! unqualified AppContainer runner: the confinement proofs that need Win32
 //! objects rather than files.
 //!
 //! As in [`super`], every case decides from what this unconfined process
@@ -863,7 +863,7 @@ pub(super) fn loopback_outcome(
         return format!("refused:{code}");
     }
     assert_eq!(result, "timeout", "the connect probe's result");
-    // D41: a timeout is inconclusive even with the probe's SYN unanswered in
+    // A timeout is inconclusive even with the probe's SYN unanswered in
     // the TCP table, since a slow host, a filter driver, or a firewall rule
     // drops the same way. It is a named gap, not a denial and not a
     // failure: loopback denial stays unproven.

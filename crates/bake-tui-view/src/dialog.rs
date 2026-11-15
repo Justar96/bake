@@ -8,12 +8,11 @@
 //!
 //! The list follows Pi v1.2.0's selectors
 //! (`packages/coding-agent/src/modes/interactive/components/model-selector.ts`,
-//! `thinking-selector.ts`, `settings-selector.ts`) and is drawn as the
-//! TypeScript terminal's picker (`apps/tui/packages/ui/src/picker.tsx`)
-//! ([`crate::render`]). The current item is marked `Current` and stays
+//! `thinking-selector.ts`, `settings-selector.ts`) and is drawn as Bake's
+//! picker ([`crate::render`]). The current item is marked `Current` and stays
 //! marked while another is browsed. Typing filters a filterable list by
-//! every word, in a row's label, detail, group, description, or value, and moves the
-//! selection to its first row (Pi regression 7209). ↑↓ (or Ctrl+P and
+//! every word, in a row's label, detail, group, description, or value, and
+//! moves the selection to its first row (Pi regression 7209). ↑↓ (or Ctrl+P and
 //! Ctrl+N) move one row and wrap; PgUp, PgDn, Home, and End move a page or
 //! to an end. Enter chooses for this session. Ctrl+S chooses and sets the
 //! default where the list offers it (`app.models.save`/`app.thinking.save`).

@@ -221,15 +221,15 @@ mod tests {
 
     #[test]
     fn only_versioned_sections_are_entries() {
-        let text = "# Changelog\n\nIntro.\n\n## [Unreleased]\n\n- soon\n\n## [0.3.8] - 2026-10-05\n\n- eight\n\n## Notes\n\n- skipped\n\n## 0.3.7\n- seven\n";
+        let text = "# Changelog\n\nIntro.\n\n## [Unreleased]\n\n- soon\n\n## [0.4.8] - 2026-11-05\n\n- eight\n\n## Notes\n\n- skipped\n\n## 0.4.7\n- seven\n";
         let entries = parse(text);
         assert_eq!(entries.len(), 2);
         assert_eq!(
             (entries[0].major, entries[0].minor, entries[0].patch),
-            (0, 3, 8)
+            (0, 4, 8)
         );
-        assert_eq!(entries[0].content, "## [0.3.8] - 2026-10-05\n\n- eight");
-        assert_eq!(entries[1].content, "## 0.3.7\n- seven");
+        assert_eq!(entries[0].content, "## [0.4.8] - 2026-11-05\n\n- eight");
+        assert_eq!(entries[1].content, "## 0.4.7\n- seven");
         assert!(parse("# Changelog\n\n## [Unreleased]\n- x\n").is_empty());
     }
 
@@ -238,8 +238,8 @@ mod tests {
     #[test]
     fn relative_links_are_pinned_to_the_entry_s_tag() {
         let markdown = [
-            "[Settings](rust/crates/bake-cli/docs/settings.md#members)",
-            "[Docs](docs/roadmap/)",
+            "[Settings](crates/bake-cli/docs/settings.md#members)",
+            "[Docs](docs/)",
             "[Scripts](scripts)",
             "[Root](/README.md)",
             "[Outside](../elsewhere.md)",
@@ -248,16 +248,14 @@ mod tests {
         .join("\n");
         let base = format!("https://github.com/{BAKE_REPOSITORY}");
         assert_eq!(
-            normalize_links(&markdown, &entry(0, 3, 8)),
+            normalize_links(&markdown, &entry(0, 4, 8)),
             [
-                format!(
-                    "[Settings]({base}/blob/v0.3.8/rust/crates/bake-cli/docs/settings.md#members)"
-                ),
-                format!("[Docs]({base}/tree/v0.3.8/docs/roadmap/)"),
-                format!("[Scripts]({base}/tree/v0.3.8/scripts)"),
-                format!("[Root]({base}/blob/v0.3.8/README.md)"),
+                format!("[Settings]({base}/blob/v0.4.8/crates/bake-cli/docs/settings.md#members)"),
+                format!("[Docs]({base}/tree/v0.4.8/docs/)"),
+                format!("[Scripts]({base}/tree/v0.4.8/scripts)"),
+                format!("[Root]({base}/blob/v0.4.8/README.md)"),
                 "[Outside](../elsewhere.md)".to_owned(),
-                format!("![Image]({base}/blob/v0.3.8/docs/a.png \"title\")"),
+                format!("![Image]({base}/blob/v0.4.8/docs/a.png \"title\")"),
             ]
             .join("\n")
         );
@@ -277,9 +275,9 @@ mod tests {
         ]
         .join("\n");
         assert_eq!(
-            normalize_links(&markdown, &entry(0, 3, 7)),
+            normalize_links(&markdown, &entry(0, 4, 7)),
             [
-                format!("[Readme]({base}/blob/v0.3.7/README.md)"),
+                format!("[Readme]({base}/blob/v0.4.7/README.md)"),
                 format!("[Issue]({base}/issues/12)"),
                 "[External](https://example.com/docs)".to_owned(),
                 "[Local anchor](#settings)".to_owned(),

@@ -1165,12 +1165,13 @@ fn block_images_replaces_runs_of_images() {
     );
 }
 
-// The prompt's round-trip rule says calls in one response run in order, so
-// the tools that change files or run commands are sequential; reads and
-// tools that set their own mode keep it.
-#[test]
-fn tools_that_change_files_or_run_commands_run_in_order() {
-    let tool = |name: &str, mode: Option<ToolExecutionMode>| {
+// The prompt's round-trip rule says calls in one response run in order: a
+// tool the session registers without an effect is `Exec`, unless it opts in
+// to running beside others with an explicit parallel mode; a declared effect
+// is kept.
+#[tokio::test]
+async fn undeclared_tools_run_in_order_unless_they_opt_in() {
+    let tool = |name: &str, effect: Option<ToolEffect>, mode: Option<ToolExecutionMode>| {
         let mut tool = AgentTool::new(
             name,
             name,
@@ -1178,45 +1179,93 @@ fn tools_that_change_files_or_run_commands_run_in_order() {
             json!({ "type": "object" }),
             |_, _, _, _, _ctx| Box::pin(async { Ok(AgentToolResult::default()) }),
         );
+        tool.effect = effect;
         tool.execution_mode = mode;
         Arc::new(tool)
     };
-    for name in ["bash", "edit", "write"] {
-        assert_eq!(
-            run_in_order(tool(name, None)).execution_mode,
-            Some(ToolExecutionMode::Sequential),
-            "{name}"
-        );
-    }
-    for name in ["read", "grep", "find", "ls"] {
-        assert_eq!(
-            run_in_order(tool(name, None)).execution_mode,
-            None,
-            "{name}"
-        );
-    }
+    let h = harness();
+    let dir = TempDir::new("tool-effects");
+    h.faux
+        .set_responses(vec![faux_assistant_message("done").into()]);
+    let mut opts = options(&h, new_file_session(&dir), &dir.path().to_string_lossy());
+    opts.tools = vec![
+        tool("sdk", None, None),
+        tool("sequential", None, Some(ToolExecutionMode::Sequential)),
+        tool("opt_in", None, Some(ToolExecutionMode::Parallel)),
+        tool("look", Some(ToolEffect::Read), None),
+        tool(
+            "change",
+            Some(ToolEffect::Write),
+            Some(ToolExecutionMode::Parallel),
+        ),
+    ];
+    opts.active_tool_names = ["sdk", "sequential", "opt_in", "look", "change"]
+        .map(str::to_owned)
+        .to_vec();
+    let session = AgentSession::create(opts).await.expect("session");
+    session.prompt("go", Vec::new()).await.expect("prompt");
+    let effects: Vec<(String, Option<ToolEffect>, Option<ToolExecutionMode>)> = session
+        .agent()
+        .tools()
+        .iter()
+        .map(|tool| (tool.name.clone(), tool.effect, tool.execution_mode))
+        .collect();
     assert_eq!(
-        run_in_order(tool("bash", Some(ToolExecutionMode::Parallel))).execution_mode,
-        Some(ToolExecutionMode::Parallel)
+        effects,
+        [
+            ("sdk".to_owned(), Some(ToolEffect::Exec), None),
+            (
+                "sequential".to_owned(),
+                Some(ToolEffect::Exec),
+                Some(ToolExecutionMode::Sequential)
+            ),
+            ("opt_in".to_owned(), None, Some(ToolExecutionMode::Parallel)),
+            ("look".to_owned(), Some(ToolEffect::Read), None),
+            (
+                "change".to_owned(),
+                Some(ToolEffect::Write),
+                Some(ToolExecutionMode::Parallel)
+            ),
+        ]
     );
-    // A failed file change stops the commands sent after it, whatever mode
-    // the tool sets.
-    for (name, mode, stops) in [
-        ("edit", None, true),
-        ("write", Some(ToolExecutionMode::Parallel), true),
-        ("bash", None, false),
-        ("read", None, false),
-    ] {
-        assert_eq!(
-            run_in_order(tool(name, mode)).failure_skips_dependents,
-            stops,
-            "{name}"
-        );
-    }
+    session.shutdown().await;
 }
 
-// Bake `packages/llm/llm-pi-ai/src/config.ts` `maxToolArgumentWhitespace`:
-// the setting fills each request's bound unless the request sets one.
+// The session's own effectful tools declare `Exec` in their constructors,
+// so none relies on the session's default for undeclared tools.
+#[tokio::test]
+async fn the_sessions_own_tools_declare_exec() {
+    let h = harness();
+    let dir = TempDir::new("own-tool-effects");
+    let options = options(&h, new_file_session(&dir), &dir.path().to_string_lossy());
+    let session = AgentSession::create(options).await.expect("session");
+    let mut tools = vec![task_documents::tool(Arc::clone(&session.core))];
+    tools.extend(schedules::tools(
+        &session.core,
+        &Arc::new(schedules::Schedules::new()),
+    ));
+    let declared: Vec<_> = tools
+        .iter()
+        .map(|tool| (tool.name.as_str(), tool.effect, tool.execution_mode))
+        .collect();
+    assert_eq!(
+        declared,
+        [
+            "task_document",
+            "schedule_create",
+            "schedule_list",
+            "schedule_delete"
+        ]
+        .map(|name| (
+            name,
+            Some(ToolEffect::Exec),
+            Some(ToolExecutionMode::Sequential)
+        ))
+    );
+    session.shutdown().await;
+}
+
+// `maxToolArgumentWhitespace`: the setting fills each request's bound unless the request sets one.
 #[test]
 fn the_tool_argument_whitespace_setting_reaches_each_request() {
     let h = harness();

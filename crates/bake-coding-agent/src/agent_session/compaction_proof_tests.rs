@@ -1,4 +1,4 @@
-//! The scope 10 compaction proof: tool-call pairing across every cut and
+//! The compaction proof: tool-call pairing across every cut and
 //! every compaction reason, summary retries, prompts queued behind a manual
 //! compaction, restart after compaction, and a writer killed while it
 //! appends the compaction entry.
@@ -12,7 +12,7 @@
 //! whose five cases the summary-retry tests below follow over the faux
 //! provider, named after the Pi case each follows. Pi has no test for the
 //! other cases; they are Bake's own and check the session file, the
-//! rebuilt request, and the queue as the scope 10 proof requires.
+//! rebuilt request, and the queue.
 
 use std::collections::HashSet;
 

@@ -1,0 +1,3 @@
+# Changes for the next release, one a line: <type> #<issue number> <text>
+# Types: security, removed, added, fixed, internal.
+# The release procedure empties this list.

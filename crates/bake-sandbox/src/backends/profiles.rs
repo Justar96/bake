@@ -1,8 +1,6 @@
-//! The platform profile builders, ported from
-//! `packages/sandbox/sandbox-local/src/profiles.ts` (`bwrapProfileArgs`,
-//! `landlockProfileArgs`, `sbplString`, `seatbeltProfileArgs`) and
-//! `grantArgs` in `@deepseek-ai/node-addon-system/landlock-run`
-//! (`native/system/packages/entry/src/index.ts`).
+//! The platform profile builders. The Landlock grant arguments follow
+//! `grantArgs` in `@deepseek-ai/node-addon-system/landlock-run` (see the
+//! crate `NOTICE`).
 //!
 //! Every builder takes its writable directories from
 //! [`SandboxPolicy::writable_roots`], so the three backends and the
@@ -14,19 +12,17 @@ use std::path::PathBuf;
 use crate::policy::SandboxPolicy;
 
 /// The bubblewrap profile arguments for `policy`, before the `--` separator
-/// and the command (`bwrapProfileArgs`): the whole tree bound read-only, a
-/// fresh `/dev`, a private PID namespace with its own `/proc`, death with
-/// the parent, a new terminal session (`--new-session`, which TypeScript did
-/// not pass: without it a command could inject keystrokes into Bake's
-/// terminal through `TIOCSTI`), and under `workspace-write` a read-write
-/// bind of every
-/// writable root, parents before the roots nested in them.
+/// and the command: the whole tree bound read-only, a fresh `/dev`, a
+/// private PID namespace with its own `/proc`, death with the parent, a new
+/// terminal session (`--new-session`: without it a command could inject
+/// keystrokes into Bake's terminal through `TIOCSTI`), and under
+/// `workspace-write` a read-write bind of every writable root, parents
+/// before the roots nested in them.
 ///
-/// The TypeScript profile mounted an ephemeral tmpfs on `/tmp` and bound only
-/// the workspace; this one binds the host's writable roots, `/tmp` and the
-/// temporary directory included, as Landlock, Seatbelt, and the file tools
-/// grant them, so a file one tool writes to `/tmp` is the file the next
-/// command reads.
+/// The profile binds the host's writable roots, `/tmp` and the temporary
+/// directory included, rather than an ephemeral tmpfs, as Landlock,
+/// Seatbelt, and the file tools grant them, so a file one tool writes to
+/// `/tmp` is the file the next command reads.
 pub fn bwrap_profile_args(policy: &SandboxPolicy) -> Vec<OsString> {
     let mut args: Vec<OsString> = [
         "--ro-bind",
@@ -108,8 +104,6 @@ pub fn seatbelt_profile_args(policy: &SandboxPolicy) -> Result<Vec<OsString>, Pa
 // expected argv spells POSIX paths.
 #[cfg(all(test, unix))]
 mod tests {
-    //! Follows `describe('profile dialects')` in
-    //! `packages/sandbox/sandbox-local/tests/local.spec.ts`.
     use super::*;
     use crate::mode::SandboxMode;
     use crate::paths::canonical_path;

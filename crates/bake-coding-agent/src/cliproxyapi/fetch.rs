@@ -1,6 +1,4 @@
-//! Reading the proxy's catalog: `fetchCliProxyModels`, `CliProxyCheckFailure`,
-//! `CliProxyCheckError`, and `cliProxyFailureText` in
-//! `apps/tui/packages/app/src/cliproxyapi.ts`.
+//! Reading the proxy's catalog and reporting why a check failed.
 //!
 //! `GET <root>/v1/models?client_version=pi` with the bearer key, no
 //! redirects followed, a 15-second bound, a 4 MiB body cap, and the caller's
@@ -81,8 +79,7 @@ impl CliProxyCheckFailure {
         }
     }
 
-    /// `cliProxyFailureText` with the English labels of
-    /// `apps/tui/packages/ui/src/copy.ts`: one line naming what went wrong.
+    /// One English line naming what went wrong.
     pub fn text(&self) -> String {
         match self {
             Self::Unreachable { host, detail } => format!("Could not reach {host} ({detail})"),
@@ -111,7 +108,7 @@ impl CliProxyCheckFailure {
 pub struct CliProxyCheckError {
     /// Why.
     pub failure: CliProxyCheckFailure,
-    /// The TypeScript's message.
+    /// The message shown for it.
     pub message: String,
 }
 
@@ -140,8 +137,8 @@ impl std::error::Error for CliProxyCheckError {}
 /// How a catalog read ended without models.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FetchCliProxyModelsError {
-    /// The caller's signal aborted. The TypeScript rethrows the caller's
-    /// own abort instead of reporting a check failure.
+    /// The caller's signal aborted; this is the caller's own abort, not a
+    /// check failure.
     Aborted,
     /// The models URL does not parse (`new URL` throws).
     InvalidUrl,
@@ -275,7 +272,7 @@ pub(crate) async fn fetch_with_timeout(
             None => std::future::pending::<()>().await,
         }
     };
-    // The TypeScript's timeout signal covers the whole read; a timeout
+    // The timeout covers the whole read; a timeout
     // during the body is reported as one too, rather than as a raw abort.
     tokio::select! {
         biased;

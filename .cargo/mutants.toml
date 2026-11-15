@@ -21,7 +21,6 @@ exclude_globs = [
     "**/http_test_server.rs",
     "**/test_support.rs",
     "test-support/**",
-    "probes/**",
     "plugins/fixtures/**",
 ]
 
