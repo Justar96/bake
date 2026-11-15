@@ -20,7 +20,7 @@ Bake is one Rust executable, `bake`, released for Linux x86_64 (glibc 2.34 or ne
 
 ## Priorities
 
-1. **The 0.5.0 runtime.** What remains of the [runtime design](runtime-0.5.md): plugin tools, which wait on the owner's decisions listed there, and the structure track. Commands as jobs, model profiles, the skills listing budget, context files found while working (off by default), and the recovery texts have landed, each with an evaluation record.
+1. **The 0.5.0 runtime.** What remains of the [runtime design](runtime-0.5.md): plugin tools, which wait on the owner's decisions listed there. Commands as jobs, model profiles, the skills listing budget, context files found while working (off by default), and the recovery texts have landed, each with an evaluation record.
 2. **Stability and cleanup.** Remove code, docs, and settings that no longer pay for themselves; keep crate docs and `docs/development.md` short enough to read; keep `cargo test --workspace` fast and free of flakes; fix the bugs users report before adding features.
 3. **Skills.** Make skills the first way to extend Bake: discovery, a clear listing in the prompt, and checks that a skill's file and frontmatter are valid (`bake docs skills`).
 4. **Plugins.** Grow the Wasm plugin API (`bake:plugin`, today a veto on tool calls) one capability at a time, each with a named consumer in `plugins/`, an isolation test, and a versioned WIT change (`bake docs plugins`, [plugins/README.md](../plugins/README.md)).

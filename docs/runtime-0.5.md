@@ -1,6 +1,6 @@
 # Core runtime design and the 0.5.0 roadmap
 
-**Status: accepted; in progress.** This page describes the runtime Bake 0.5.0 builds and the order to build it in. A section here is a plan, not current behavior: when a milestone lands, its rule moves into [direction](direction.md) and the owning crate's documentation, and its section and table row leave this page. Landed so far: evaluation ([evaluations](evaluations/README.md)); tool effects ([the loop](../crates/bake-agent/src/agent_loop.rs), [record](evaluations/2026-11-15-tool-effects/README.md)); commands as jobs ([record](evaluations/2026-11-15-commands-as-jobs/README.md), with two [probes](evaluations/README.md#records)); model profiles (no record: without a profile a request is unchanged, which the first-request fixtures prove); the skills listing budget ([record](evaluations/2026-11-15-skills-listing/README.md)); context files found while working, behind `nestedContextFiles` ([record](evaluations/2026-11-15-nested-context-files/README.md)); and the recovery texts ([record](evaluations/2026-11-15-recovery-texts/README.md)). The whole of it was then run against the base commit ([record](evaluations/2026-11-15-runtime-against-develop/README.md)). Their behavior is in the user documentation: [the command line](../crates/bake-cli/docs/cli.md), [settings](../crates/bake-cli/docs/settings.md), [skills](../crates/bake-cli/docs/skills.md), and [context](../crates/bake-cli/docs/context.md).
+**Status: accepted; in progress.** This page describes the runtime Bake 0.5.0 builds and the order to build it in. A section here is a plan, not current behavior: when a milestone lands, its rule moves into [direction](direction.md) and the owning crate's documentation, and its section and table row leave this page. Landed so far: evaluation ([evaluations](evaluations/README.md)); tool effects ([the loop](../crates/bake-agent/src/agent_loop.rs), [record](evaluations/2026-11-15-tool-effects/README.md)); commands as jobs ([record](evaluations/2026-11-15-commands-as-jobs/README.md), with two [probes](evaluations/README.md#records)); model profiles (no record: without a profile a request is unchanged, which the first-request fixtures prove); the skills listing budget ([record](evaluations/2026-11-15-skills-listing/README.md)); context files found while working, behind `nestedContextFiles` ([record](evaluations/2026-11-15-nested-context-files/README.md)); and the recovery texts ([record](evaluations/2026-11-15-recovery-texts/README.md)). Session storage became the `bake-session` crate, and `agent_session.rs` and `cli/mod.rs` were split by stage. The whole of it was run against the base commit ([record](evaluations/2026-11-15-runtime-against-develop/README.md)). Their behavior is in the user documentation: [the command line](../crates/bake-cli/docs/cli.md), [settings](../crates/bake-cli/docs/settings.md), [skills](../crates/bake-cli/docs/skills.md), and [context](../crates/bake-cli/docs/context.md).
 
 The design was written from a reading of the source at `4ed086385c` and the user documentation. Every model-visible change it proposes is unmeasured until its milestone's paired evaluation runs.
 
@@ -46,13 +46,6 @@ The stages exist today; the design names an owner and one contract for each.
 - **Execute under limits** (`bake-agent` and the tools): the run's deadline and model-call allowance (`RunControl`), and each tool's own budget.
 - **Finish turn** (`bake-coding-agent`, through `finish_turn`): recovery, retries, notices, steering, and follow-ups.
 
-## Structure
-
-`bake-coding-agent` holds about 176,000 of the workspace's Rust lines. Two extractions follow from how the modules already depend on each other; neither changes behavior.
-
-- **`bake-session`.** `session/` and `json_store/` (about 9,600 lines without tests) refer to the rest of the crate in a handful of places. Extracting them gives session storage, durability, and recovery their own test run.
-- **`agent_session.rs` and `cli/mod.rs`.** Each is about 3,600 lines. Split each by the stage it serves (composition, tool wiring, turn hooks) as its milestone touches it, not in one pass.
-
 ## Roadmap for 0.5.0
 
 Milestones are in dependency order. Each ends with the workspace checks in [development](development.md), its documentation, a changelog line, and a paired evaluation record read against the [noise floor](evaluations/README.md).
@@ -60,7 +53,6 @@ Milestones are in dependency order. Each ends with the workspace checks in [deve
 | Milestone | Delivers | Done when |
 |---|---|---|
 | **M6. Plugin tools** | The next `bake:plugin` capability: a plugin declares tools with a schema and an effect, called through the permission boundary, with a named consumer in `plugins/` and an isolation test | Direction's plugin rule is met. This may ship in 0.5.x without holding 0.5.0 |
-| **Track. Structure** | `bake-session` extracted; the two large files split as milestones touch them | `cargo test --workspace` is no slower, and the crate table is updated |
 
 **Release gate.** The Linux and Windows checks and the release steps in [the release guide](../distribution/README.md), with every model-visible milestone's record in `docs/evaluations/`.
 
