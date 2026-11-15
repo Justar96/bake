@@ -286,7 +286,7 @@ pub(crate) fn failed(error: String) -> McpConfig {
 /// #11191); `source` names it in errors.
 pub fn parse_mcp_config(text: &str, source: &Path) -> McpConfig {
     let shown = source.display();
-    let parsed: Value = match serde_json::from_str(crate::auth_storage::strip_bom(text)) {
+    let parsed: Value = match serde_json::from_str(crate::json_store::strip_bom(text)) {
         Ok(value) => value,
         Err(error) => return failed(format!("{shown}: {error}")),
     };

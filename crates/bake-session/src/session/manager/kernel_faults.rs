@@ -17,11 +17,11 @@ use std::ops::Range;
 
 /// Set to `1` (CI sets it) to make a crash test whose kernel feature is
 /// unavailable fail instead of skipping.
-pub(crate) const REQUIRE_KERNEL_FAULTS: &str = "BAKE_REQUIRE_KERNEL_FAULTS";
+pub const REQUIRE_KERNEL_FAULTS: &str = "BAKE_REQUIRE_KERNEL_FAULTS";
 
 /// A test needs `what`, which this kernel or sandbox refuses (`why`):
 /// print that it skips, or fail when [`REQUIRE_KERNEL_FAULTS`] is `1`.
-pub(crate) fn skip_unavailable(what: &str, why: &str) {
+pub fn skip_unavailable(what: &str, why: &str) {
     let required = std::env::var_os(REQUIRE_KERNEL_FAULTS).is_some_and(|value| value == "1");
     assert!(
         !required,
@@ -32,7 +32,7 @@ pub(crate) fn skip_unavailable(what: &str, why: &str) {
 
 /// The system calls a filter fails.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Calls {
+pub enum Calls {
     /// `write` and `pwrite64`.
     Write,
     /// `fsync` and `fdatasync`.
@@ -40,7 +40,7 @@ pub(crate) enum Calls {
 }
 
 impl Calls {
-    pub(crate) fn parse(text: &str) -> Option<Self> {
+    pub fn parse(text: &str) -> Option<Self> {
         match text {
             "write" => Some(Self::Write),
             "sync" => Some(Self::Sync),
@@ -59,10 +59,10 @@ impl Calls {
 /// A filter failing `calls` on the descriptors in `fds` with `EIO`; with
 /// `count`, only a write of exactly that many bytes.
 #[derive(Debug, Clone)]
-pub(crate) struct EioFilter {
-    pub(crate) calls: Calls,
-    pub(crate) fds: Range<u32>,
-    pub(crate) count: Option<u32>,
+pub struct EioFilter {
+    pub calls: Calls,
+    pub fds: Range<u32>,
+    pub count: Option<u32>,
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -156,13 +156,13 @@ impl EioFilter {
     }
 
     /// Install the filter on the calling thread, for good.
-    pub(crate) fn install(&self) -> io::Result<()> {
+    pub fn install(&self) -> io::Result<()> {
         self.install_with(0)
     }
 
     /// Install the filter on every thread of the process, for good, as a
     /// session's runtime writes from its worker and blocking threads.
-    pub(crate) fn install_on_every_thread(&self) -> io::Result<()> {
+    pub fn install_on_every_thread(&self) -> io::Result<()> {
         self.install_with(libc::SECCOMP_FILTER_FLAG_TSYNC)
     }
 
@@ -210,7 +210,7 @@ impl EioFilter {
 
 /// The descriptor the next `open` of this process returns, while no other
 /// thread opens or closes one: the lowest free.
-pub(crate) fn lowest_free_fd() -> u32 {
+pub fn lowest_free_fd() -> u32 {
     use std::os::fd::AsRawFd;
     let probe = std::fs::File::open("/dev/null").expect("open /dev/null");
     u32::try_from(probe.as_raw_fd()).expect("a descriptor")

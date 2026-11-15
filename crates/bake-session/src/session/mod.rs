@@ -14,6 +14,7 @@
 //! | [`file`](mod@file) | `core/session-manager.ts` (parsing, loading, migration, discovery) |
 //! | [`list`] | `core/session-manager.ts` (`buildSessionInfo`, `list`, `listAll`) |
 //! | [`search`] | `modes/interactive/components/session-selector-search.ts` (v1.2.0) |
+//! | [`fuzzy`] | `packages/tui/src/fuzzy.ts` (v1.2.0) |
 //! | [`messages`] | `core/messages.ts` |
 //! | [`cwd`] | `core/session-cwd.ts` |
 //! | [`paths`] | `utils/paths.ts` (`normalizePath`, `resolvePath`) |
@@ -107,6 +108,7 @@ pub mod cwd;
 mod durable;
 pub mod entry;
 pub mod file;
+pub mod fuzzy;
 pub mod id;
 pub mod json;
 pub mod json_line;
@@ -128,8 +130,8 @@ pub use context::{
     get_latest_compaction_entry, session_entry_to_context_messages,
 };
 pub use durable::FailedLine;
-#[cfg(test)]
-pub(crate) use durable::{Fault, FaultKind};
+#[cfg(any(test, feature = "testing"))]
+pub use durable::{Fault, FaultKind};
 pub use entry::{
     CURRENT_SESSION_VERSION, EditContent, FileEntry, SessionEntry, SessionHeader, TypedEntry,
 };

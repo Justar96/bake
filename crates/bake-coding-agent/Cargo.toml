@@ -9,6 +9,9 @@ description = "Pi's coding-agent services for Bake: sessions, the file tools (re
 
 [dependencies]
 bake-agent.workspace = true
+# Pi's session store, the Bake home, and the JSON file store (`session`,
+# `home`, `json_store`), re-exported under those paths.
+bake-session.workspace = true
 # The `codemode` tool's engine (`tools::codemode`).
 bake-codemode.workspace = true
 bake-ai.workspace = true
@@ -65,6 +68,7 @@ windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Securit
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "sync", "time", "macros", "net", "io-util", "test-util"] }
 loom = { version = "=0.7.2", default-features = false }
 bake-sandbox = { workspace = true, features = ["testing"] }
+bake-session = { workspace = true, features = ["testing"] }
 proptest.workspace = true
 
 [target.'cfg(windows)'.dev-dependencies]

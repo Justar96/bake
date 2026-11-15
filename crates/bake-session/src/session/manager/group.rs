@@ -178,7 +178,7 @@ impl SessionManager {
     /// A failed group must not be appended again: the file may hold its
     /// prefix, and a second copy would follow it under new ids. An owner
     /// treats the failure as a gap and writes nothing more, as
-    /// [`crate::agent_session::AgentSession`] does.
+    /// `bake_coding_agent::agent_session::AgentSession` does.
     pub fn append_group(
         &mut self,
         entries: impl IntoIterator<Item = GroupEntry>,
@@ -333,8 +333,8 @@ impl SessionManager {
     }
 
     /// Arm a fault for the next group write.
-    #[cfg(test)]
-    pub(crate) fn arm_group_fault(&mut self, fault: durable::Fault) {
+    #[cfg(any(test, feature = "testing"))]
+    pub fn arm_group_fault(&mut self, fault: durable::Fault) {
         self.faults.arm(fault);
     }
 }

@@ -126,11 +126,6 @@ impl fmt::Debug for AuthStorage {
     }
 }
 
-/// Strips a leading byte-order mark, Pi's `stripBom`.
-pub(crate) fn strip_bom(text: &str) -> &str {
-    text.strip_prefix('\u{feff}').unwrap_or(text)
-}
-
 /// Reads a small text file: `Ok(None)` when it does not exist.
 pub(crate) fn read_text_file(path: &Path, limit: u64) -> std::io::Result<Option<String>> {
     let file = match File::open(path) {

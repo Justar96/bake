@@ -6,8 +6,8 @@
 //! revision `06a466935536f8c9bcacb2d5efc0fc021be1bdff` (MIT; see the crate's
 //! `NOTICE`). Pi takes a lock, reads the file's current text, lets the caller
 //! compute the next text from it, and writes that. Both of Bake's writable
-//! files, `settings.json` ([`crate::settings::SettingsStore`]) and
-//! `auth.json` ([`crate::auth_storage::AuthStorage`]), share this backend, and
+//! files, `settings.json` (`bake_coding_agent::settings::SettingsStore`) and
+//! `auth.json` (`bake_coding_agent::auth_storage::AuthStorage`), share this backend, and
 //! every change is applied to the contents read under the lock. A process
 //! holding an old copy therefore changes only the keys it sets, and an
 //! update never discards another process's write.
@@ -97,7 +97,10 @@ use std::time::{Duration, Instant};
 
 use serde_json::{Map, Value};
 
-use crate::auth_storage::strip_bom;
+/// Strips a leading byte-order mark, Pi's `stripBom`.
+pub fn strip_bom(text: &str) -> &str {
+    text.strip_prefix('\u{feff}').unwrap_or(text)
+}
 
 #[cfg(test)]
 mod tests;
@@ -193,20 +196,20 @@ impl std::error::Error for StoreError {
 
 /// A JSON object file updated under a lock (see the module documentation).
 #[derive(Debug, Clone)]
-pub(crate) struct JsonFileStore {
+pub struct JsonFileStore {
     path: PathBuf,
     limit: u64,
     lock_timeout: Duration,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testing"))]
     fault: Option<Fault>,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testing"))]
     hook: Option<Hook>,
 }
 
 /// Where in an update a test runs [`Hook::run`].
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Stage {
+pub enum Stage {
     /// Under the lock, before the file is inspected or opened.
     BeforeOpen,
     /// Under the lock, after the bytes are read and before the check.
@@ -215,14 +218,14 @@ pub(crate) enum Stage {
 
 /// Code a test runs at one [`Stage`] of an update, under its lock: a
 /// deterministic point for a concurrent change.
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 #[derive(Clone)]
-pub(crate) struct Hook {
+pub struct Hook {
     stage: Stage,
     run: std::sync::Arc<dyn Fn() + Send + Sync>,
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 impl fmt::Debug for Hook {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Hook").field("stage", &self.stage).finish()
@@ -230,9 +233,9 @@ impl fmt::Debug for Hook {
 }
 
 /// A failure a test injects into an update.
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Fault {
+pub enum Fault {
     /// The replacement fails after the temporary file is written.
     BeforeRename,
     /// Flushing the directory fails after the rename.
@@ -257,22 +260,22 @@ struct Original {
 
 /// The result of an update that changed the file or found nothing to change.
 #[derive(Debug)]
-pub(crate) struct Updated {
+pub struct Updated {
     /// The object as now stored.
-    pub(crate) object: Map<String, Value>,
+    pub object: Map<String, Value>,
     /// [`StoreError::Unsynced`], when the file was replaced but its
     /// directory could not be flushed.
-    pub(crate) unsynced: Option<StoreError>,
+    pub unsynced: Option<StoreError>,
 }
 
 /// The held lock; dropping it closes the handle, which releases the lock.
-pub(crate) struct StoreLock {
+pub struct StoreLock {
     _file: File,
 }
 
 /// Parses JSON object text, after a byte-order mark. The error is the
 /// parser's message, which carries a position but none of the text.
-pub(crate) fn parse_object(text: &str) -> Result<Map<String, Value>, String> {
+pub fn parse_object(text: &str) -> Result<Map<String, Value>, String> {
     match serde_json::from_str::<Value>(strip_bom(text)) {
         Ok(Value::Object(object)) => Ok(object),
         Ok(_) => Err("expected a JSON object".to_owned()),
@@ -281,7 +284,7 @@ pub(crate) fn parse_object(text: &str) -> Result<Map<String, Value>, String> {
 }
 
 /// Sets `object[key]` to `value`; whether that changed it.
-pub(crate) fn set_member(object: &mut Map<String, Value>, key: &str, value: Value) -> bool {
+pub fn set_member(object: &mut Map<String, Value>, key: &str, value: Value) -> bool {
     if object.get(key) == Some(&value) {
         return false;
     }
@@ -291,7 +294,7 @@ pub(crate) fn set_member(object: &mut Map<String, Value>, key: &str, value: Valu
 
 /// Removes `object[key]`, keeping the order of the other members; whether it
 /// was there.
-pub(crate) fn remove_member(object: &mut Map<String, Value>, key: &str) -> bool {
+pub fn remove_member(object: &mut Map<String, Value>, key: &str) -> bool {
     object.shift_remove(key).is_some()
 }
 
@@ -355,41 +358,37 @@ impl Drop for TempFile {
 
 impl JsonFileStore {
     /// The store at `path`, refusing files larger than `limit` bytes.
-    pub(crate) fn new(path: PathBuf, limit: u64) -> Self {
+    pub fn new(path: PathBuf, limit: u64) -> Self {
         Self {
             path,
             limit,
             lock_timeout: DEFAULT_LOCK_TIMEOUT,
-            #[cfg(test)]
+            #[cfg(any(test, feature = "testing"))]
             fault: None,
-            #[cfg(test)]
+            #[cfg(any(test, feature = "testing"))]
             hook: None,
         }
     }
 
     /// The data file.
-    pub(crate) fn path(&self) -> &Path {
+    pub fn path(&self) -> &Path {
         &self.path
     }
 
-    #[cfg(test)]
-    pub(crate) fn with_lock_timeout(mut self, timeout: Duration) -> Self {
+    #[cfg(any(test, feature = "testing"))]
+    pub fn with_lock_timeout(mut self, timeout: Duration) -> Self {
         self.lock_timeout = timeout;
         self
     }
 
-    #[cfg(test)]
-    pub(crate) fn with_fault(mut self, fault: Fault) -> Self {
+    #[cfg(any(test, feature = "testing"))]
+    pub fn with_fault(mut self, fault: Fault) -> Self {
         self.fault = Some(fault);
         self
     }
 
-    #[cfg(test)]
-    pub(crate) fn with_hook(
-        mut self,
-        stage: Stage,
-        run: impl Fn() + Send + Sync + 'static,
-    ) -> Self {
+    #[cfg(any(test, feature = "testing"))]
+    pub fn with_hook(mut self, stage: Stage, run: impl Fn() + Send + Sync + 'static) -> Self {
         self.hook = Some(Hook {
             stage,
             run: std::sync::Arc::new(run),
@@ -397,14 +396,14 @@ impl JsonFileStore {
         self
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testing"))]
     fn run_hook(&self, stage: Stage) {
         if let Some(hook) = self.hook.as_ref().filter(|hook| hook.stage == stage) {
             (hook.run)();
         }
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testing"))]
     fn injected(&self, fault: Fault) -> Option<io::Error> {
         (self.fault == Some(fault)).then(|| io::Error::other("injected failure"))
     }
@@ -438,7 +437,7 @@ impl JsonFileStore {
     }
 
     /// Takes the lock, creating the directory and the lock file as needed.
-    pub(crate) fn lock(&self) -> Result<StoreLock, StoreError> {
+    pub fn lock(&self) -> Result<StoreLock, StoreError> {
         let dir = self.dir();
         private_dir(dir).map_err(io_error("create the directory", dir))?;
         let lock_path = self.sibling(".lock")?;
@@ -481,7 +480,7 @@ impl JsonFileStore {
         &self,
         check: impl FnOnce(&File) -> Result<(), String>,
     ) -> Result<Option<Current>, StoreError> {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "testing"))]
         self.run_hook(Stage::BeforeOpen);
         let metadata = match fs::symlink_metadata(&self.path) {
             Ok(metadata) => metadata,
@@ -515,7 +514,7 @@ impl JsonFileStore {
         if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > self.limit {
             return Err(too_large());
         }
-        #[cfg(test)]
+        #[cfg(any(test, feature = "testing"))]
         self.run_hook(Stage::AfterRead);
         check(&file).map_err(|reason| self.refused(reason))?;
         let text = String::from_utf8(bytes).map_err(|_| self.refused("it is not UTF-8"))?;
@@ -638,7 +637,7 @@ impl JsonFileStore {
             .map_err(io_error("write", &temp_path))?;
         file.sync_all().map_err(io_error("flush", &temp_path))?;
         drop(file);
-        #[cfg(test)]
+        #[cfg(any(test, feature = "testing"))]
         if let Some(error) = self.injected(Fault::BeforeRename) {
             return Err(io_error("replace", &self.path)(error));
         }
@@ -649,7 +648,7 @@ impl JsonFileStore {
 
     /// Flushes the directory after a rename, on Unix.
     fn sync_dir(&self) -> Result<(), StoreError> {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "testing"))]
         if let Some(source) = self.injected(Fault::DirectorySync) {
             return Err(StoreError::Unsynced {
                 path: self.path.clone(),
@@ -669,7 +668,7 @@ impl JsonFileStore {
     /// Applies `change` to the file's object under the lock, and writes the
     /// result when `change` reports that it changed something. A missing
     /// file reads as `{}`.
-    pub(crate) fn update(
+    pub fn update(
         &self,
         change: impl FnOnce(&mut Map<String, Value>) -> bool,
     ) -> Result<Updated, StoreError> {
@@ -684,7 +683,7 @@ impl JsonFileStore {
     /// written. It is not called when the file does not exist. What `check`
     /// observes about that object holds when it runs; a writer with access
     /// to the object can still change it afterwards.
-    pub(crate) fn update_checked(
+    pub fn update_checked(
         &self,
         check: impl FnOnce(&File) -> Result<(), String>,
         change: impl FnOnce(&mut Map<String, Value>) -> bool,

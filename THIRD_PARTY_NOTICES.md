@@ -34,6 +34,14 @@ The Rust `bake-coding-agent` crate ports Pi's coding-agent package, the line dif
 | [pi-cached-compaction](https://github.com/nicobailon/pi-cached-compaction), Copyright (c) 2026 Nico Bailon | 0.2.0 (`e1e20de0a7e433070414602f1105cdcac258ef4f`) | MIT (declared in its `package.json`) |
 | [pi-telecom](https://github.com/Justar96/pi-telecom), Copyright (c) 2026 Justar96, portions copyright (c) 2026 Tinoy Thomas | 0.8.0 (`b6fe4d8317b387facd8d764b76f9f127f7547a85`), design only | MIT |
 
+## Ported source (`crates/bake-session`)
+
+The Rust `bake-session` crate ports Pi's session manager and the code it uses from Pi's coding-agent, `ai`, and `tui` packages, which moved there from `bake-coding-agent`. Its [`NOTICE`](crates/bake-session/NOTICE) file reproduces the license text, and its module documentation names each source file.
+
+| Project | Ported revision | License |
+| --- | --- | --- |
+| [Pi](https://github.com/earendil-works/pi) `packages/coding-agent`, `packages/ai`, `packages/tui`, Copyright (c) 2025 Mario Zechner | v1.1.0 (`abe508e1b89912adde45528136c3221eb69acdd7`), with v1.2.0 and v1.3.0 additions | MIT |
+
 ## Ported source (`crates/bake-mermaid`)
 
 The Rust `bake-mermaid` crate adapts the `codex-mermaid` crate of OpenAI Codex, which is licensed under the Apache License, Version 2.0, not MIT. The adapted files remain under that license; Bake's own changes and additions are under the repository's MIT license. Its [`NOTICE`](crates/bake-mermaid/NOTICE) file names each adapted file and reproduces the upstream NOTICE and the full Apache-2.0 license text, and each adapted source file states at its head that it was adapted and how Bake changed it. `bake` links the crate, so native archives carry that NOTICE.

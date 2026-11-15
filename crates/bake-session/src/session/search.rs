@@ -5,7 +5,7 @@
 //! crate's `NOTICE`), with its tests from
 //! `packages/coding-agent/test/session-selector-search.test.ts`. Fuzzy
 //! tokens use the crate's port of Pi's `fuzzyMatch`
-//! ([`crate::cli::list_models::fuzzy_match`]).
+//! ([`super::fuzzy::fuzzy_match`]).
 //!
 //! A session's search text is Pi's: its id, name, the text of every user
 //! and assistant message in its file ([`SessionInfo::all_messages_text`],
@@ -43,7 +43,7 @@
 
 use regex::{Regex, RegexBuilder};
 
-use crate::cli::list_models::fuzzy_match_lowercase;
+use crate::session::fuzzy::fuzzy_match_lowercase;
 use crate::session::json::{is_js_whitespace, js_trim};
 use crate::session::list::SessionInfo;
 

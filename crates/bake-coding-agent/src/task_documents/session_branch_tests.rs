@@ -1,8 +1,11 @@
 //! Task-only forks must retain acknowledgements without changing Pi's ordinary
 //! lazy session creation. Each test owns its paths and writer lifetimes.
 
-use super::*;
-use crate::session::GroupEntry;
+use std::fs;
+
+use serde_json::Value;
+
+use crate::session::{GroupEntry, NewSessionOptions, SessionError, SessionManager};
 use crate::task_documents::{self, DocumentKind, DocumentRef, DocumentState, DocumentUpdate};
 use crate::test_support::TempDir;
 
@@ -108,7 +111,9 @@ fn a_failed_task_fork_does_not_acknowledge_and_copy_keeps_its_source() {
         // including when tests run as root. The source writer remains valid.
         let destination = dir.join("not-a-directory");
         fs::write(&destination, "owned obstruction").unwrap();
-        source.session_dir = destination.clone();
+        // Reopened with new and branched sessions placed there.
+        drop(source);
+        let mut source = SessionManager::open(&source_file, Some(&destination), None).unwrap();
         if copied {
             assert!(source.branched_copy(Some(&leaf)).is_err());
             assert_eq!(source.session_id(), source_id);

@@ -156,6 +156,7 @@ dependencies = [
  "bake-mermaid",
  "bake-process",
  "bake-sandbox",
+ "bake-session",
  "bake-svg",
  "base64",
  "encoding_rs",
@@ -236,6 +237,21 @@ dependencies = [
  "libc",
  "ring",
  "tokio",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "bake-session"
+version = "0.4.8"
+dependencies = [
+ "bake-agent",
+ "bake-ai",
+ "getrandom 0.4.3",
+ "indexmap",
+ "libc",
+ "regex",
+ "serde",
+ "serde_json",
  "windows-sys 0.61.2",
 ]
 

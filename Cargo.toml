@@ -13,6 +13,7 @@ members = [
     "crates/bake-process",
     "crates/bake-release",
     "crates/bake-sandbox",
+    "crates/bake-session",
     "crates/bake-svg",
     "crates/bake-tui",
     "crates/bake-tui-view",
@@ -40,6 +41,7 @@ bake-mcp = { path = "crates/bake-mcp" }
 bake-mermaid = { path = "crates/bake-mermaid" }
 bake-process = { path = "crates/bake-process" }
 bake-sandbox = { path = "crates/bake-sandbox" }
+bake-session = { path = "crates/bake-session" }
 bake-svg = { path = "crates/bake-svg" }
 bake-tui = { path = "crates/bake-tui" }
 bake-tui-view = { path = "crates/bake-tui-view" }

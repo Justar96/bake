@@ -22,8 +22,9 @@ use super::artifacts::ArtifactSet;
 use super::{DOCUMENT_TYPE, DocumentError, DocumentRef, DocumentSnapshot, invalid};
 use crate::session::{GroupEntry, SessionEntry, SessionManager};
 
-/// Pi custom-entry type for evidence about one exact document revision.
-pub const EVIDENCE_TYPE: &str = "bake.task.verification.v1";
+/// Pi custom-entry type for evidence about one exact document revision,
+/// which the session store keeps durable across a fork.
+pub const EVIDENCE_TYPE: &str = crate::session::entry::TASK_EVIDENCE_TYPE;
 /// Maximum UTF-8 command bytes retained in an evidence record.
 pub const MAX_COMMAND_BYTES: usize = 16 * 1024;
 

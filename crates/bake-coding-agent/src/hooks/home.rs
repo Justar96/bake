@@ -126,7 +126,7 @@ fn load(
     if read as u64 > MAX_HOOKS_FILE_BYTES {
         return Err(format!("larger than {MAX_HOOKS_FILE_BYTES} bytes"));
     }
-    let raw: Value = serde_json::from_str(crate::auth_storage::strip_bom(&text))
+    let raw: Value = serde_json::from_str(crate::json_store::strip_bom(&text))
         .map_err(|error| format!("is not valid JSON: {error}"))?;
     let parsed = parse_hooks(&raw, dialect)?;
     Ok((parsed.groups, parsed.skipped))

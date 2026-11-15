@@ -18,6 +18,15 @@ use crate::session::messages::AgentMessage;
 /// Pi's `CURRENT_SESSION_VERSION`.
 pub const CURRENT_SESSION_VERSION: u64 = 3;
 
+/// The `customType` of a task document snapshot, a Bake custom entry
+/// (`bake_coding_agent::task_documents`). A fork keeps such entries
+/// durable before the first prompt ([`super::SessionManager`]).
+pub const TASK_DOCUMENT_TYPE: &str = "bake.task.document.v1";
+
+/// The `customType` of evidence about one task document revision
+/// (`bake_coding_agent::task_documents::verification`).
+pub const TASK_EVIDENCE_TYPE: &str = "bake.task.verification.v1";
+
 /// The `{"type":"session"}` line that opens a session file.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SessionHeader {

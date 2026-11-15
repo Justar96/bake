@@ -210,4 +210,18 @@ mod tests {
         assert_eq!(slice_index(-30.0, 10), 0);
         assert_eq!(slice_index(1e300, 10), 10);
     }
+
+    // The fuzzy matcher (`session::fuzzy`) splits and finds word boundaries
+    // with the session store's `is_js_whitespace`, the same set as this one.
+    #[test]
+    fn whitespace_is_the_session_stores() {
+        for c in (0..=0x10FFFFu32).filter_map(char::from_u32) {
+            assert_eq!(
+                is_whitespace(c),
+                crate::session::json::is_js_whitespace(c),
+                "U+{:04X}",
+                c as u32
+            );
+        }
+    }
 }

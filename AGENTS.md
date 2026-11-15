@@ -21,7 +21,7 @@ Inspect the working tree before editing and preserve unrelated changes. Never ov
 
 ## Code ownership
 
-Follow the [architecture](docs/architecture.md) and [crate table](docs/development.md#crates). `bake-cli` owns executable entrypoints and embedded docs; `bake-coding-agent` owns sessions, tools, settings, and integrations; `bake-agent` owns the model/tool loop; `bake-ai` owns model protocols. Keep terminal effects in `bake-tui` and pure editor/view state in `bake-tui-view`. Process-tree ownership belongs in `bake-process`, confinement in `bake-sandbox`, and signed updates in `bake-update`.
+Follow the [architecture](docs/architecture.md) and [crate table](docs/development.md#crates). `bake-cli` owns executable entrypoints and embedded docs; `bake-coding-agent` owns agent sessions, tools, settings, and integrations; `bake-session` owns the session store and its files; `bake-agent` owns the model/tool loop; `bake-ai` owns model protocols. Keep terminal effects in `bake-tui` and pure editor/view state in `bake-tui-view`. Process-tree ownership belongs in `bake-process`, confinement in `bake-sandbox`, and signed updates in `bake-update`.
 
 Tool execution must cross the permission and approval boundary before side effects. Cancellation and teardown await owned work, stop owned descendants, restore terminal state, and leave no late callbacks. Rust must not panic on untrusted input. Keep changes in the crate that owns the contract rather than duplicating policy in callers.
 

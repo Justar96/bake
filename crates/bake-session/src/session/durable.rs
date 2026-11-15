@@ -439,11 +439,12 @@ pub(crate) struct LinesFailure {
     pub(crate) error: io::Error,
 }
 
-/// Faults the crate's unit tests inject into [`append_lines`] and
-/// [`replace`]; empty, and never consulted, outside tests.
+/// Faults the crate's unit tests, and with the `testing` feature its
+/// consumers' tests, inject into [`append_lines`] and [`replace`]; empty,
+/// and never consulted, otherwise.
 #[derive(Debug, Default)]
 pub(crate) struct Faults {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testing"))]
     next: Option<Fault>,
     #[cfg(test)]
     rewrite: Option<RewriteHold>,
@@ -543,14 +544,14 @@ impl std::fmt::Debug for RewriteHold {
 }
 
 /// A fault at one line of the next [`append_lines`] call.
-#[cfg(test)]
-pub(crate) struct Fault {
+#[cfg(any(test, feature = "testing"))]
+pub struct Fault {
     /// The index of the line, within the call, it strikes.
     pub line: usize,
     pub kind: FaultKind,
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 impl std::fmt::Debug for Fault {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Fault").field("line", &self.line).finish()
@@ -558,8 +559,8 @@ impl std::fmt::Debug for Fault {
 }
 
 /// What a [`Fault`] does at its line.
-#[cfg(test)]
-pub(crate) enum FaultKind {
+#[cfg(any(test, feature = "testing"))]
+pub enum FaultKind {
     /// Fail before writing any of its bytes.
     Refuse,
     /// Write its first `n` bytes, then fail.
@@ -573,13 +574,13 @@ pub(crate) enum FaultKind {
 
 impl Faults {
     /// Arm `fault` for the next [`append_lines`] call.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testing"))]
     pub(crate) fn arm(&mut self, fault: Fault) {
         self.next = Some(fault);
     }
 
     /// The fault armed for line `line`, taken.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testing"))]
     fn take(&mut self, line: usize) -> Option<FaultKind> {
         if self.next.as_ref().is_some_and(|fault| fault.line == line) {
             return self.next.take().map(|fault| fault.kind);
@@ -708,12 +709,12 @@ pub(crate) fn append_lines(
     if separator {
         write_counted(&mut file, path, b"\n").map_err(|(_, error)| not_written(error))?;
     }
-    #[cfg(not(test))]
+    #[cfg(not(any(test, feature = "testing")))]
     let _ = faults;
     for (index, line) in lines.iter().enumerate() {
         // The seam's own writes and syncs must succeed: a real failure of
         // one panics the test rather than pass for the injected stage.
-        #[cfg(test)]
+        #[cfg(any(test, feature = "testing"))]
         let real_write = |file: &mut File, bytes: &[u8]| {
             if let Err((written, error)) = write_counted(file, path, bytes) {
                 panic!("test seam: real write failed after {written} bytes: {error}");
@@ -721,7 +722,7 @@ pub(crate) fn append_lines(
         };
         // How many bytes a tear leaves: never the newline, so a torn line
         // stays the last line, and none reports the line not written.
-        #[cfg(test)]
+        #[cfg(any(test, feature = "testing"))]
         let torn = |n: usize| {
             let n = n.min(line.len().saturating_sub(1));
             let state = if n == 0 {
@@ -731,7 +732,7 @@ pub(crate) fn append_lines(
             };
             (n, state)
         };
-        #[cfg(test)]
+        #[cfg(any(test, feature = "testing"))]
         match faults.take(index) {
             None => {}
             Some(FaultKind::Refuse) => {

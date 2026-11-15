@@ -57,8 +57,9 @@ use bake_agent::QueueMode;
 use bake_ai::ModelThinkingLevel;
 use serde_json::{Map, Value};
 
-use crate::auth_storage::{read_text_file, strip_bom};
+use crate::auth_storage::read_text_file;
 use crate::compaction::CompactionSettings;
+use crate::json_store::strip_bom;
 use crate::json_store::{JsonFileStore, StoreError, remove_member, set_member};
 use crate::model_registry::resolver::parse_thinking_level;
 use crate::session::json::{js_number_to_string, js_truthy};

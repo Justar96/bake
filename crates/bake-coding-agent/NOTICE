@@ -6,11 +6,9 @@ license.
 Pi (packages/coding-agent)
 https://github.com/earendil-works/pi
 Release v1.1.0, revision abe508e1b89912adde45528136c3221eb69acdd7.
-Ported: the session manager (src/core/session-manager.ts), the session
-working-directory checks (src/core/session-cwd.ts), the coding-agent message
-types and converters (src/core/messages.ts), the path helpers the session
-manager uses (src/utils/paths.ts), Pi's UUIDv7 generator
-(packages/ai/src/utils/uuid.ts), and the session-manager tests under test/;
+The session manager and its message types, path helpers, ids, search, fuzzy
+matching, and locked file backends moved to bake-session, whose NOTICE names
+them. Ported:
 tool-output truncation and accumulation (src/core/tools/truncate.ts, output-accumulator.ts), exclusive
 output files (src/utils/output-files.ts), and the output cases of
 test/tools.test.ts and test/mcp-extension.test.ts;
@@ -75,21 +73,15 @@ getUserMessagesForForking, and the leaf rules and context refresh of
 src/core/agent-session.ts, adapted in agent_session/navigation.rs; and the
 runtime fork of src/core/agent-session-runtime.ts (its default position
 before a user message, createBranchedSession and newSession with a parent
-session) adapted in agent_session/navigation.rs, session/manager.rs
-(branched_copy), and src/cli/mod.rs (SessionFactory::fork). Cases of
+session) adapted in agent_session/navigation.rs, bake-session's
+src/session/manager.rs (branched_copy), and src/cli/mod.rs
+(SessionFactory::fork). Cases of
 test/agent-session-tree-navigation.test.ts,
 test/agent-session-branching.test.ts,
 test/suite/regressions/tree-during-streaming.test.ts,
 test/suite/regressions/9178-tree-during-compaction.test.ts, and
 test/suite/regressions/8724-in-memory-fork-active-tool.test.ts are adapted
 in agent_session/navigation_tests.rs.
-Also from v1.2.0, session search: src/modes/interactive/components/
-session-selector-search.ts (parseSearchQuery, matchSession,
-filterAndSortSessions, hasSessionName, without the threaded sort), adapted in
-src/session/search.rs, with the cases of
-test/session-selector-search.test.ts in src/session/search_tests.rs; and the
-fuzzy matching of packages/tui/src/fuzzy.ts (fuzzyMatch, fuzzyFilter) in
-src/cli/list_models.rs, with the cases of packages/tui/test/fuzzy.test.ts.
 Also from v1.2.0, interactive compaction: src/core/agent-session.ts (compact,
 abortCompaction, and the prompt's refusal during compaction), adapted as
 AgentSession::compact_when_idle in src/agent_session.rs and
@@ -98,11 +90,6 @@ test/agent-session-compaction.test.ts,
 test/suite/regressions/7150-rpc-prompt-during-compaction.test.ts, and
 test/suite/regressions/9340-9777-auto-compaction-cancellation.test.ts in
 src/agent_session/idle_compaction_tests.rs.
-From release v1.3.0, revision 71023aec1546d6d677a65669c5665c0927ce0dd0:
-the orphaned tool-call rule of transformMessages
-(packages/ai/src/api/transform-messages.ts, its second pass), adapted as the
-unanswered-call projection in src/session/unanswered.rs.
-
 From release v1.3.0, revision 71023aec1546d6d677a65669c5665c0927ce0dd0, the
 tool-call veto: ExtensionRunner.emitToolCall in
 src/core/extensions/runner.ts (handlers in order, the first block returned)

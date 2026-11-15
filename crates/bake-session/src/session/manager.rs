@@ -37,7 +37,9 @@ use crate::session::context::{
     session_path, text_blocks,
 };
 use crate::session::durable::{self, WriterLock};
-use crate::session::entry::{EditContent, FileEntry, SessionEntry, SessionHeader};
+use crate::session::entry::{
+    EditContent, FileEntry, SessionEntry, SessionHeader, TASK_DOCUMENT_TYPE, TASK_EVIDENCE_TYPE,
+};
 use crate::session::file::{
     HeaderError, Line, Repair, default_session_dir, default_session_dir_path,
     find_most_recent_session, is_jsonl, load_objects, migrate_lines, read_session_header,
@@ -188,7 +190,7 @@ fn usage_value(usage: &Usage) -> Value {
 
 /// Pi's `getCurrentSystemMessage` over stored messages, kept as JSON so the
 /// recorded tools keep every member they were declared with.
-pub(crate) fn current_system_message(messages: &[AgentMessage]) -> Option<JsonObject> {
+pub fn current_system_message(messages: &[AgentMessage]) -> Option<JsonObject> {
     let mut content: Vec<String> = Vec::new();
     let mut sections: IndexMap<String, Value> = IndexMap::new();
     let mut tools: IndexMap<String, Value> = IndexMap::new();
@@ -1313,10 +1315,7 @@ impl SessionManager {
                     entry.entry_type() == "custom"
                         && matches!(
                             entry.get("customType").and_then(Value::as_str),
-                            Some(
-                                crate::task_documents::DOCUMENT_TYPE
-                                    | crate::task_documents::verification::EVIDENCE_TYPE
-                            )
+                            Some(TASK_DOCUMENT_TYPE | TASK_EVIDENCE_TYPE)
                         )
                 });
         if self.has_conversation() || durable_tasks {
@@ -1691,13 +1690,9 @@ impl SessionManager {
     }
 }
 
-#[cfg(test)]
-#[path = "manager/task_branch_tests.rs"]
-mod task_branch_tests;
-
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 #[path = "manager/crash_support.rs"]
-pub(crate) mod crash_support;
+pub mod crash_support;
 
 #[cfg(test)]
 #[path = "manager/rewrite_tests.rs"]
@@ -1712,12 +1707,12 @@ mod kernel_write_tests;
 mod power_loss_tests;
 
 #[cfg(all(
-    test,
+    any(test, feature = "testing"),
     target_os = "linux",
     any(target_arch = "x86_64", target_arch = "aarch64")
 ))]
 #[path = "manager/kernel_faults.rs"]
-pub(crate) mod kernel_faults;
+pub mod kernel_faults;
 
 #[cfg(all(
     test,

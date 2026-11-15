@@ -61,7 +61,8 @@ use std::path::{Path, PathBuf};
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use serde_json::Value;
 
-use crate::auth_storage::{read_text_file, strip_bom};
+use crate::auth_storage::read_text_file;
+use crate::json_store::strip_bom;
 use crate::session::paths::{lexical_normalize, normalize_path, resolve_path};
 use crate::tools::js::trim;
 

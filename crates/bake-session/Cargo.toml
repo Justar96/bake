@@ -1,0 +1,37 @@
+[package]
+name = "bake-session"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Pi's session store for Bake: conversations as append-only JSON Lines trees with one writer per file, synced appends and rewrites, recovery of torn tails, listing and search; the Bake home; and the locked JSON file store behind settings.json and auth.json"
+
+[features]
+# Fault injection and crash-test helpers for the consumers' own tests
+# (`json_store::Fault`, `session::Fault`, `session::manager::crash_support`).
+# Enabled only as a dev-dependency.
+testing = []
+
+[dependencies]
+bake-ai.workspace = true
+# The agent's message type, which session entries carry (`session::messages`).
+bake-agent.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+# Session and entry ids, and temporary file names (`json_store`).
+getrandom.workspace = true
+indexmap.workspace = true
+# Regular-expression session search (`session::search`).
+regex.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+# Locks, `fsync`, and modes of session files and JSON stores.
+libc.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+# A JSON store replacement keeps its file's DACL (`json_store`).
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security"] }
+
+[dev-dependencies]
+proptest.workspace = true

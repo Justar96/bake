@@ -101,7 +101,7 @@ fn activity_time(entry: &JsonObject, message: &JsonObject) -> Option<f64> {
 
 /// Pi's `buildSessionInfo`; `None` for a file that is not a session or that
 /// Pi would fail to read.
-pub(crate) fn build_session_info(path: &Path, modified: Option<SystemTime>) -> Option<SessionInfo> {
+pub fn build_session_info(path: &Path, modified: Option<SystemTime>) -> Option<SessionInfo> {
     let modified = match modified {
         Some(modified) => modified,
         None => fs::metadata(path).ok()?.modified().ok()?,

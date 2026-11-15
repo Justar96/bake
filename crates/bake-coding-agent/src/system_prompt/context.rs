@@ -25,7 +25,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::auth_storage::{read_text_file, strip_bom};
+use crate::auth_storage::read_text_file;
+use crate::json_store::strip_bom;
 use crate::session::paths::{resolve_path, resolve_path_string};
 
 /// The largest context file read, in bytes.

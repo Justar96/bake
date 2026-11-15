@@ -2,18 +2,18 @@
 //!
 //! `bake-coding-agent` ports Pi's `packages/coding-agent` (release v1.1.0,
 //! revision `abe508e1b89912adde45528136c3221eb69acdd7`, MIT; see the crate's
-//! `NOTICE`). It holds Pi's session store, Pi's built-in tools (the file
-//! tools and bash) with their output handling and file-mutation ordering, and
-//! the headless agent runtime that `bake -p` uses, plus Bake's
-//! CLIProxyAPI route. [`session`] reads and writes Pi's session format and
-//! [`home`] places it under the Bake home.
+//! `NOTICE`). It holds Pi's built-in tools (the file tools and bash) with
+//! their output handling and file-mutation ordering, and the headless agent
+//! runtime that `bake -p` uses, plus Bake's CLIProxyAPI route. Pi's session
+//! store is `bake-session`, re-exported here: [`session`] reads and writes
+//! Pi's session format and [`home`] places it under the Bake home.
 //!
 //! | Module | Source |
 //! |---|---|
-//! | [`session`] | Pi `src/core/session-manager.ts`, `session-cwd.ts`, `messages.ts`, `src/utils/paths.ts` |
+//! | [`session`] | `bake-session`: Pi `src/core/session-manager.ts`, `session-cwd.ts`, `messages.ts`, `src/utils/paths.ts`, `packages/tui/src/fuzzy.ts` |
 //! | [`tools`] | Pi `src/core/tools/*.ts` (see the module's table), `src/utils/{output-files,shell,child-process}.ts` |
 //! | [`exec`] | Pi `src/core/exec.ts`; shares `src/utils/child-process.ts` handling with bash |
-//! | [`home`] | Bake: the Bake home (`BAKE_HOME`, else `~/.bake`) |
+//! | [`home`] | `bake-session`: the Bake home (`BAKE_HOME`, else `~/.bake`) |
 //! | [`agent_session`] | Pi `src/core/agent-session.ts`, `src/core/sdk.ts`, with auto-compaction, manual `compact`, and auto-retry |
 //! | [`compaction`] | Pi `src/core/compaction/{compaction,branch-summarization,utils}.ts` |
 //! | [`system_prompt`] | Pi `src/core/system-prompt.ts`, `src/core/resource-loader.ts` (context files) |
@@ -21,12 +21,12 @@
 //! | [`prompt_templates`] | Pi `src/core/prompt-templates.ts`, `src/core/resource-loader.ts` (`dedupePrompts`, v1.2.0) |
 //! | [`model_registry`] | Pi `src/core/{model-runtime,provider-composer,model-config,model-resolver}.ts`, `src/utils/json.ts` |
 //! | [`auth_storage`] | Pi `src/core/auth-storage.ts`, `src/core/runtime-credentials.ts` (writes from v1.2.0) |
-//! | [`json_store`] | Pi `src/core/auth-storage.ts` `FileAuthStorageBackend`, `src/core/settings-manager.ts` `FileSettingsStorage` (v1.2.0) |
+//! | [`json_store`] | `bake-session`: Pi `src/core/auth-storage.ts` `FileAuthStorageBackend`, `src/core/settings-manager.ts` `FileSettingsStorage` (v1.2.0) |
 //! | [`config_value`] | Pi `src/core/resolve-config-value.ts` |
 //! | [`settings`] | Pi `src/core/settings-manager.ts` (default model, thinking level, tools, images, compaction with per-model overrides, branch-summary reserve, and retry; the global-scope setters from v1.2.0) |
 //! | [`print_mode`], [`json_event`] | Pi `src/modes/print-mode.ts`, `src/modes/json-event.ts` |
 //! | [`rpc`] | Pi v1.3.0 `src/modes/rpc/{rpc-mode,rpc-types,jsonl}.ts`; approvals over Pi's `extension_ui_request` |
-//! | [`cli`] | Pi `src/main.ts`, `src/cli/args.ts`, `src/cli/initial-message.ts`, `src/cli/file-processor.ts`, `src/cli/list-models.ts`, `packages/tui/src/fuzzy.ts` |
+//! | [`cli`] | Pi `src/main.ts`, `src/cli/args.ts`, `src/cli/initial-message.ts`, `src/cli/file-processor.ts`, `src/cli/list-models.ts` |
 //! | [`mcp`] | Pi v1.3.0 `src/extensions/mcp/{index,runtime,tools,config}.ts`, `src/core/mcp-servers.ts`; Bake's tool names and permission admission |
 //! | [`hooks`] | Bake: Claude Code and Codex `hooks.json` hooks, run at Pi v1.3.0's extension events (`src/core/extensions/types.ts`, `runner.ts`) |
 //! | [`owned_work`] | Bake: a session's owner of its tasks, blocking work, and background lifetime, which shutdown cancels and drains |
@@ -49,11 +49,11 @@ pub mod compaction;
 pub mod config_value;
 pub mod exec;
 pub mod export_html;
-pub mod home;
 pub mod hooks;
 pub mod jobs;
 pub mod json_event;
-pub mod json_store;
+#[cfg(test)]
+mod json_store_process_tests;
 pub mod mcp;
 pub mod model_registry;
 pub mod owned_work;
@@ -64,7 +64,6 @@ pub mod prompt_templates;
 pub mod questions;
 pub mod rpc;
 pub mod schedules;
-pub mod session;
 pub mod session_export;
 pub mod settings;
 pub mod skills;
@@ -78,3 +77,7 @@ mod test_support;
 pub mod tools;
 pub mod web;
 pub(crate) mod yaml;
+
+// The session store, the Bake home, and the JSON file store live in
+// `bake-session`; their paths here are the crate's public API.
+pub use bake_session::{home, json_store, session};
