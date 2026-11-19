@@ -356,15 +356,7 @@ mod tests {
     fn an_svg_image_previews_up_to_its_source_s_limit() {
         let large = |kind: &str, bytes: usize| {
             let args = json!({ "kind": kind, "source": "x".repeat(bytes) });
-            let outcome = Outcome {
-                state: CallState::Running,
-                id: None,
-                summary: None,
-                output: Vec::new(),
-                calls: Vec::new(),
-                full_output_path: None,
-                wall_time: None,
-            };
+            let outcome = Outcome::running(Vec::new());
             match visual_row(&args, outcome, Args::Streaming) {
                 Row::Visual(visual) => visual.too_large,
                 _ => panic!("a visual"),

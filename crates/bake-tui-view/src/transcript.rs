@@ -424,6 +424,7 @@ fn sample_script() -> Row {
         state: CallState::Done,
         summary: None,
         calls,
+        omitted: codemode::NestedCounts::default(),
         output: [
             r#"["src/m3.ts","src/m9.ts"]"#,
             "<console_output>",
@@ -3637,6 +3638,7 @@ mod tests {
                 state,
                 summary: None,
                 calls: Vec::new(),
+                omitted: codemode::NestedCounts::default(),
                 output: Vec::new(),
                 full_output_path: None,
                 wall_time: None,

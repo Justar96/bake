@@ -9,7 +9,7 @@
 
 use std::time::Duration;
 
-use crate::codemode::{Codemode, NestedCall, NestedStatus};
+use crate::codemode::{Codemode, NestedCall, NestedCounts, NestedStatus};
 use crate::copy;
 use crate::transcript::{CallState, Row};
 
@@ -121,6 +121,7 @@ fn script(state: CallState, calls: Vec<NestedCall>) -> Codemode {
         state,
         summary: None,
         calls,
+        omitted: NestedCounts::default(),
         output: Vec::new(),
         full_output_path: None,
         wall_time: None,

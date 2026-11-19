@@ -78,6 +78,34 @@ pub struct NestedCall {
     pub error: Option<String>,
 }
 
+/// The calls a result counts by status but does not list: Bake keeps the
+/// last [256] in `details.calls` and counts the earlier ones in
+/// `details.omittedCalls`. A result saved before that field counts none.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct NestedCounts {
+    pub running: usize,
+    pub ok: usize,
+    pub error: usize,
+    pub cancelled: usize,
+}
+
+impl NestedCounts {
+    /// Every call counted.
+    pub fn total(&self) -> usize {
+        self.running + self.ok + self.error + self.cancelled
+    }
+
+    /// The calls counted with `status`.
+    pub fn of(&self, status: NestedStatus) -> usize {
+        match status {
+            NestedStatus::Running => self.running,
+            NestedStatus::Ok => self.ok,
+            NestedStatus::Error => self.error,
+            NestedStatus::Cancelled => self.cancelled,
+        }
+    }
+}
+
 /// A `codemode` call and what its result says.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Codemode {
@@ -86,8 +114,11 @@ pub struct Codemode {
     pub state: CallState,
     /// A status for the head after the calls, such as `interrupted`.
     pub summary: Option<String>,
-    /// The calls the script made, in the order it made them.
+    /// The calls the script made, in the order it made them: the latest
+    /// ones, when the result counts the earlier ones in `omitted`.
     pub calls: Vec<NestedCall>,
+    /// The earlier calls the result counts but does not list.
+    pub omitted: NestedCounts,
     /// What went back to the model, without the result's header; empty
     /// while the script runs.
     pub output: Vec<String>,
@@ -196,7 +227,14 @@ pub(crate) fn present(
     let mut lines = head(script, width, look);
     let code_rows = limit(CODE_PREVIEW_LINES);
     lines.extend(source(&script.code, code_rows, width, look, &gutter));
-    let calls = calls(&script.calls, detail, width, look, &gutter);
+    let calls = calls(
+        &script.calls,
+        script.omitted.total(),
+        detail,
+        width,
+        look,
+        &gutter,
+    );
     if !calls.is_empty() {
         lines.push(Line::from(gutter()));
         lines.extend(calls);
@@ -226,9 +264,11 @@ fn head(script: &Codemode, width: usize, look: Look) -> Vec<Line<'static>> {
     lines
 }
 
-/// The head's status: how many calls the script made; while it runs, how
-/// many are running; once it ended, how many failed or were cancelled and
-/// how long it took; then its own status, such as an interruption.
+/// The head's status: how many calls the script made, those its result
+/// lists and those it only counts; while it runs, how many are running;
+/// once it ended, how many failed or were cancelled and how long it took;
+/// then its own status, such as an interruption, or, while it runs, that
+/// it waits for a worker.
 fn status(script: &Codemode, look: Look) -> Vec<Span<'static>> {
     let mut parts: Vec<Span<'static>> = Vec::new();
     let mut push = |text: String, style: Style| {
@@ -238,14 +278,13 @@ fn status(script: &Codemode, look: Look) -> Vec<Span<'static>> {
         parts.push(Span::styled(text, style));
     };
     let calls = &script.calls;
-    let count = |status| calls.iter().filter(|call| call.status == status).count();
-    if !calls.is_empty() {
-        let noun = if calls.len() == 1 {
-            copy::CALL
-        } else {
-            copy::CALLS
-        };
-        push(format!("{} {noun}", calls.len()), transcript::dim());
+    let count = |status| {
+        calls.iter().filter(|call| call.status == status).count() + script.omitted.of(status)
+    };
+    let total = calls.len() + script.omitted.total();
+    if total > 0 {
+        let noun = if total == 1 { copy::CALL } else { copy::CALLS };
+        push(format!("{total} {noun}"), transcript::dim());
     }
     if script.state == CallState::Running {
         let running = count(NestedStatus::Running);
@@ -277,11 +316,13 @@ fn status(script: &Codemode, look: Look) -> Vec<Span<'static>> {
         if !parts.is_empty() {
             parts.push(transcript::pad(2));
         }
-        parts.extend(transcript::status_spans(
-            summary,
-            transcript::red(look),
-            look,
-        ));
+        // A running script's status, such as waiting, is not a failure.
+        let quiet = if script.state == CallState::Running {
+            transcript::dim()
+        } else {
+            transcript::red(look)
+        };
+        parts.extend(transcript::status_spans(summary, quiet, look));
     }
     parts
 }
@@ -430,9 +471,11 @@ fn hang_beside(
 /// name, its arguments, and its duration, and a failed or cancelled call's
 /// first [`ERROR_PREVIEW_ROWS`] rows of error under its name. Expanded, the
 /// latest calls within [`EXPANDED_ROWS`] rows, each with its arguments
-/// uncut and its whole error. Earlier calls are counted above them.
+/// uncut and its whole error. Earlier calls, `omitted` of them not listed
+/// at all, are counted above them.
 fn calls(
     calls: &[NestedCall],
+    omitted: usize,
     detail: Detail,
     width: usize,
     look: Look,
@@ -516,7 +559,7 @@ fn calls(
         built += rows.len();
         blocks.push(rows);
     }
-    let hidden = calls.len() - blocks.len();
+    let hidden = calls.len() - blocks.len() + omitted;
     let mut rows = Vec::new();
     if hidden > 0 {
         let mut spans = gutter();
@@ -596,6 +639,7 @@ mod tests {
             state,
             summary: None,
             calls: Vec::new(),
+            omitted: NestedCounts::default(),
             output: Vec::new(),
             full_output_path: None,
             wall_time: None,
@@ -976,5 +1020,104 @@ mod tests {
         assert_eq!(took(Duration::from_millis(600)), "0.6s");
         assert_eq!(took(Duration::from_secs(125)), "2m 5s");
         assert_eq!(took(Duration::from_secs(3_725)), "1h 2m 5s");
+    }
+
+    /// Past the calls a result lists, the head counts every call by status
+    /// and the earlier-calls row counts the ones not listed too.
+    #[test]
+    fn counts_the_calls_a_result_only_counts() {
+        let mut ran = script(CallState::Failed);
+        ran.calls = vec![
+            call("read", r#"{"path":"a"}"#, NestedStatus::Ok, Some(5)),
+            NestedCall {
+                error: Some("exit 1".into()),
+                ..call("bash", "{}", NestedStatus::Error, Some(9))
+            },
+        ];
+        ran.omitted = NestedCounts {
+            running: 0,
+            ok: 740,
+            error: 3,
+            cancelled: 1,
+        };
+        let expected = [
+            "  ✗ codemode  746 calls · 4 failed · 1 cancelled",
+            "  │",
+            "  │ ⋯ 744 earlier calls",
+            r#"  │ ✓ read  {"path":"a"}  5ms"#,
+            "  │ ✗ bash  {}  9ms",
+            "  │   exit 1",
+        ];
+        assert_eq!(render(ran.clone(), 80, PLAIN), expected);
+        let ansi = Look {
+            tones: Tones::Ansi,
+            ..PLAIN
+        };
+        // On colour the head draws its mark as braces, and on truecolour in
+        // a box.
+        let drawn = render(ran.clone(), 80, ansi);
+        assert_eq!(
+            drawn[0],
+            "  {} codemode  746 calls · 4 failed · 1 cancelled"
+        );
+        assert_eq!(drawn[1..], expected[1..]);
+        let truecolor = render(
+            ran.clone(),
+            80,
+            Look {
+                tones: Tones::TrueColor,
+                ..PLAIN
+            },
+        );
+        assert_eq!(
+            truecolor[0],
+            "╭─ {} codemode  746 calls · 4 failed · 1 cancelled ─╮"
+        );
+        assert_eq!(
+            truecolor[2..],
+            [
+                "│    ⋯ 744 earlier calls                            │",
+                r#"│    ✓ read  {"path":"a"}  5ms                      │"#,
+                "│    ✗ bash  {}  9ms                                │",
+                "│      exit 1                                       │",
+                "╰───────────────────────────────────────────────────╯",
+            ]
+        );
+        // Expanded, the calls not listed are still counted.
+        let full = present_rows(&[Row::Codemode(ran.clone())], 0, 80, PLAIN);
+        assert!(
+            full.iter()
+                .any(|line| line.to_string().trim_end() == "  │ ⋯ 744 earlier calls")
+        );
+        // While it runs, the running ones it only counts are counted too.
+        ran.state = CallState::Running;
+        ran.omitted.running = 4;
+        assert_eq!(
+            render(ran, 80, PLAIN)[0],
+            "  ● codemode  750 calls · 4 running"
+        );
+    }
+
+    /// A script waiting for a worker says so in its head, as a quiet
+    /// status rather than a failure's.
+    #[test]
+    fn a_script_waiting_for_a_worker_says_so_in_its_head() {
+        let mut waiting = script(CallState::Running);
+        waiting.summary = Some(copy::WAITING.into());
+        assert_eq!(
+            render(waiting.clone(), 60, PLAIN),
+            ["  ● codemode  waiting"]
+        );
+        let truecolor = Look {
+            tones: Tones::TrueColor,
+            ..PLAIN
+        };
+        let drawn = present_rows(&[Row::Codemode(waiting)], 0, 60, truecolor);
+        let status = drawn[0]
+            .spans
+            .iter()
+            .find(|span| span.content == copy::WAITING)
+            .expect("the status");
+        assert_eq!(status.style, transcript::dim());
     }
 }
