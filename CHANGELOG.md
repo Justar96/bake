@@ -4,6 +4,8 @@ Notable changes to Bake. `bake` compiles this file in, and `/changelog` shows it
 
 ## [Unreleased]
 
+Bake 0.4.10 makes asks between team members unable to deadlock, holds or queues messages and reports instead of losing or refusing them, queues spawned agents and subagents past their limits, and keeps every code mode script within a bound.
+
 - **Telecom asks no longer wait on each other.** A waiting `ask` now ends as soon as anything else arrives for the asking session, such as another member's ask or a finished job, so two members asking each other, or a ring of asks, no longer sit out their timeouts; the ask stays open and its reply arrives as a message. A reply that comes just as the wait ends is no longer lost, Esc no longer waits on a member that does not answer, and a `timeoutSec` of 0 or less returns at once. A reply to an ask whose asker left or withdrew it is a note, not an error, and such asks drop off the board.
 - **A wake budget for team messages.** Messages and asks from other members' models now share a limit of six turns a minute. Past it, a message is still delivered but held, the sender is told so (`held: bravo reads it within a minute`), and the recipient reads it at its next step, or in a turn of its own once the minute's window reopens, in the terminal and over RPC alike. Your own messages and the replies to the session's asks always start a turn (`bake docs team`).
 - **The team update reaches every turn.** Who joined or left, new tasks, broadcasts (the latest 20), and the asks the session still owes now reach the model in turns opened for a message or notice and between the steps of a run, not only before a typed prompt; a broadcast never starts a turn by itself.
