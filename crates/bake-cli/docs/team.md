@@ -14,12 +14,12 @@ The model has the `telecom` tool, with these actions:
 |---|---|
 | `board` | Lists the team: each member's callsign, state (working, idle, or the tool it runs), branch, model, and task |
 | `send` | Messages one member, or several separated by commas, and reports who received it |
-| `ask` | Asks one member and waits for the reply, 300 seconds by default and at most 3600; with `wait: false` it returns at once and the reply arrives later as a message |
-| `reply` | Answers an ask; `askId` may be left out when only one is waiting |
-| `broadcast` | Tells every member |
+| `ask` | Asks one member and waits for the reply, 300 seconds by default and at most 3600; with `wait: false` or `timeoutSec: 0` it returns at once. A reply that comes after the wait arrives as a message |
+| `reply` | Answers an ask; `askId` may be left out when only one is waiting. An ask whose asker left or withdrew it needs no answer |
+| `broadcast` | Tells every member and reports any it did not reach |
 | `status` | Sets this session's task, the line the board shows |
 
-A message is delivered to the recipient's session, which reports it delivered only once the session holds it, so the sender knows who got it. The recipient's terminal shows it as one line, such as `← bravo: the tests pass`, or `← bravo's person: ...` when the person typed it. An idle recipient starts a turn for it, at most six a minute; an ask always starts one. Before each prompt, the model is given a brief of the team when it changed: the whole roster the first time, then who joined or left, held broadcasts, and asks it still owes.
+A message is delivered to the recipient's session, which reports it delivered only once the session holds it, so the sender knows who got it. The recipient's terminal shows it as one line, such as `← bravo: the tests pass`, or `← bravo's person: ...` when the person typed it. An idle recipient starts a turn for it, at most six a minute; an ask always starts one. A waiting ask ends early when anything else arrives for the asking session, such as another member's ask or a finished job, so two members asking each other never wait on each other; the ask stays open and its reply arrives as a message. Before each prompt, the model is given a brief of the team when it changed: the whole roster the first time, then who joined or left, held broadcasts, and asks it still owes.
 
 Telecom uses Unix domain sockets in `telecom/` in the Bake home, or in `BAKE_TELECOM_DIR`, readable only by you. Messages travel only between your own processes on this machine. It does not start on Windows.
 

@@ -9,10 +9,22 @@
 //! delivered as job notices are: inside a run at its next step, else by a
 //! turn its owner opens within the wake budget. Broadcasts never start a
 //! turn; they are held for the next prompt's brief.
+//!
+//! A waiting `ask` never holds a session that has something to read: it
+//! ends at the answer, cancellation, its deadline, its peer's session
+//! leaving, or this session's own undelivered mail, whichever comes first.
+//! A cycle of waiting asks needs a member blocked while it holds an unread
+//! ask, so none can form. An ask that ends unanswered stays open, and its
+//! answer arrives as a message; an answer sent as a wait ends is taken, not
+//! dropped. The directory reads of deliveries and waits, and the
+//! publisher's writes, run on the blocking pool under the session's
+//! [`WorkGate`]; no write is made under a lock another task takes.
 
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::future::Future;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
+use std::task::Poll;
 use std::time::{Duration, Instant};
 
 use serde_json::json;
@@ -68,12 +80,27 @@ pub struct Owed {
     pub at: i64,
 }
 
+/// How many asks this station stopped owing unanswered it remembers, so
+/// a later reply to one is told why ([`Station::reply`]).
+const CLOSED_KEPT: usize = 32;
+
 /// An ask this station made and has no answer to.
 struct Waiting {
-    to: String,
+    /// The peer's session: only it may answer, and the ask fails when it
+    /// leaves, whoever takes the callsign next.
+    session: String,
     /// The tool call waiting for it; `None` once nobody waits, so a late
     /// answer arrives as a message.
     answer: Option<oneshot::Sender<String>>,
+}
+
+/// An ask this station owed and stopped owing without answering it: its
+/// asker left or withdrew it.
+struct Closed {
+    ask_id: String,
+    from: String,
+    /// What a reply to it is told.
+    note: String,
 }
 
 /// What the last brief told the model about one peer.
@@ -88,6 +115,8 @@ struct State {
     task_pinned: bool,
     waiting: HashMap<String, Waiting>,
     owed: Vec<Owed>,
+    /// The latest asks closed unanswered, at most [`CLOSED_KEPT`].
+    closed: VecDeque<Closed>,
     /// Broadcasts held for the next brief.
     held: Vec<String>,
     /// The roster the last brief described; `None` before the first.
@@ -95,11 +124,29 @@ struct State {
     wakes: VecDeque<Instant>,
 }
 
+impl State {
+    fn close_owed(&mut self, ask: &Owed, note: String) {
+        self.owed.retain(|owed| owed.ask_id != ask.ask_id);
+        if self.closed.len() == CLOSED_KEPT {
+            self.closed.pop_front();
+        }
+        self.closed.push_back(Closed {
+            ask_id: ask.ask_id.clone(),
+            from: ask.from.clone(),
+            note,
+        });
+    }
+}
+
 struct Inner {
-    membership: Mutex<Option<Membership>>,
+    /// Shared so the publisher writes outside the lock; the last holder's
+    /// drop gives the callsign back, after any write in progress.
+    membership: Mutex<Option<Arc<Membership>>>,
     team: Team,
     state: Mutex<State>,
     jobs: JobRegistry,
+    /// The session's gate: it owns the station's tasks and blocking reads.
+    work: WorkGate,
     dirty: Notify,
 }
 
@@ -192,18 +239,20 @@ impl Station {
                 .map_err(|error| format!("telecom: {error}"))?;
             let station = Self {
                 inner: Arc::new(Inner {
-                    membership: Mutex::new(Some(membership)),
+                    membership: Mutex::new(Some(Arc::new(membership))),
                     team,
                     state: Mutex::new(State {
                         presence,
                         task_pinned: false,
                         waiting: HashMap::new(),
                         owed: Vec::new(),
+                        closed: VecDeque::new(),
                         held: Vec::new(),
                         briefed: None,
                         wakes: VecDeque::new(),
                     }),
                     jobs,
+                    work: work.clone(),
                     dirty: Notify::new(),
                 }),
             };
@@ -242,6 +291,61 @@ impl Station {
         }
         let me = self.callsign();
         self.inner.team.members(Some(&me))
+    }
+
+    /// [`Self::peers`], read on the blocking pool under the session's gate;
+    /// inline once the gate is closing.
+    async fn live_peers(&self) -> Vec<Presence> {
+        if lock(&self.inner.membership).is_none() {
+            return Vec::new();
+        }
+        let team = self.inner.team.clone();
+        let me = self.callsign();
+        match self
+            .inner
+            .work
+            .spawn_blocking(move || team.members(Some(&me)))
+        {
+            Ok(read) => read.await.unwrap_or_default(),
+            Err(_) => self.peers(),
+        }
+    }
+
+    /// Forgets the asks owed to members no longer in `peers`, remembering
+    /// why ([`Self::reply`]).
+    fn prune_owed(&self, peers: &[Presence]) {
+        if lock(&self.inner.membership).is_none() {
+            return;
+        }
+        let mut state = lock(&self.inner.state);
+        let gone: Vec<Owed> = state
+            .owed
+            .iter()
+            .filter(|ask| !peers.iter().any(|peer| peer.session == ask.from_session))
+            .cloned()
+            .collect();
+        for ask in gone {
+            let note = format!(
+                "{} is gone; nothing more to do for ask {}",
+                ask.from, ask.ask_id
+            );
+            state.close_owed(&ask, note);
+        }
+    }
+
+    /// Why an ask matching `ask_id`, else from `from`, is no longer owed.
+    fn closed_note(&self, ask_id: Option<&str>, from: Option<&str>) -> Option<String> {
+        let state = lock(&self.inner.state);
+        state
+            .closed
+            .iter()
+            .rev()
+            .find(|closed| match (ask_id, from) {
+                (Some(id), _) => closed.ask_id == id,
+                (None, Some(from)) => closed.from == from.trim(),
+                (None, None) => false,
+            })
+            .map(|closed| closed.note.clone())
     }
 
     /// The asks waiting on this member, oldest first.
@@ -342,6 +446,7 @@ impl Station {
             }
         }
         let peers = self.peers();
+        self.prune_owed(&peers);
         let mut state = lock(&self.inner.state);
         let roster: BTreeMap<String, Seen> = peers
             .iter()
@@ -423,6 +528,7 @@ impl Station {
     pub fn board(&self) -> String {
         let me = self.presence();
         let peers = self.peers();
+        self.prune_owed(&peers);
         let mut lines = vec![format!(
             "You are {}.",
             board_line(&me).trim_start_matches("- ")
@@ -450,76 +556,82 @@ impl Station {
     /// The peer `to` names: a callsign, or a session id or its prefix of
     /// at least 4 characters.
     pub fn resolve(&self, to: &str) -> Result<Presence, String> {
-        let to = to.trim();
-        let peers = self.peers();
-        if let Some(peer) = peers.iter().find(|peer| peer.callsign == to) {
-            return Ok(peer.clone());
-        }
-        let by_id: Vec<&Presence> = peers
-            .iter()
-            .filter(|peer| to.len() >= 4 && peer.session.starts_with(to))
-            .collect();
-        match by_id.as_slice() {
-            [peer] => Ok((*peer).clone()),
-            _ if to == self.callsign() => Err("that is you".to_owned()),
-            _ => {
-                let names: Vec<&str> = peers.iter().map(|peer| peer.callsign.as_str()).collect();
-                Err(if names.is_empty() {
-                    format!("no agent \"{to}\": no other agent works in this repository")
-                } else {
-                    format!("no agent \"{to}\"; the team is {}", names.join(", "))
-                })
-            }
-        }
+        pick(&self.peers(), &self.callsign(), to)
     }
 
     async fn deliver(&self, peer: &Presence, body: Body) -> Result<(), String> {
-        let frame = Frame::new(self.sender(), body);
-        match endpoint::deliver(&self.inner.team.socket(&peer.callsign), &frame).await {
-            Ok(Outcome::Accepted) => Ok(()),
-            Ok(Outcome::Refused { reason }) => Err(reason),
-            Err(error) => Err(error),
+        match self.exchange(peer, body).await? {
+            Outcome::Accepted => Ok(()),
+            Outcome::Refused { reason } => Err(reason),
         }
     }
 
-    /// Messages each of `to` (comma-separated callsigns, at most
-    /// [`wire::GROUP_CAP`]). Returns who got it and who did not.
+    /// Delivers `body` to `peer`: what it answered, or why it could not.
+    async fn exchange(&self, peer: &Presence, body: Body) -> Result<Outcome, String> {
+        let frame = Frame::new(self.sender(), body);
+        endpoint::deliver(&self.inner.team.socket(&peer.callsign), &frame).await
+    }
+
+    /// Withdraws `ask_id` from `peer` on a task the session's gate owns,
+    /// so the caller does not wait on a wedged peer.
+    fn withdraw(&self, peer: &Presence, ask_id: String) {
+        let station = self.clone();
+        let peer = peer.clone();
+        // Refused only while the session closes, when nobody reads it.
+        let _withdrawal = self.inner.work.spawn(move |scope| async move {
+            tokio::select! {
+                () = scope.signal().cancelled() => {}
+                _ = station.deliver(&peer, Body::Withdraw { ask_id }) => {}
+            }
+        });
+    }
+
+    /// Messages each of `to` (comma-separated callsigns or session ids),
+    /// each named once: concurrently, in batches of [`wire::GROUP_CAP`],
+    /// where each recipient sees the others of its batch as the group.
+    /// Returns who got it and who did not.
     pub async fn send(&self, to: &str, text: &str, human: bool) -> Result<String, String> {
         let text = checked_text(text)?;
-        let names: Vec<&str> = to
+        let mut names: Vec<&str> = to
             .split(',')
             .map(str::trim)
             .filter(|name| !name.is_empty())
             .collect();
+        let mut seen = HashSet::new();
+        names.retain(|name| seen.insert(*name));
         if names.is_empty() {
             return Err("to: name an agent".to_owned());
         }
-        if names.len() > wire::GROUP_CAP {
-            return Err(format!(
-                "to: at most {} agents; use broadcast for the whole team",
-                wire::GROUP_CAP
-            ));
-        }
-        let peers = names
+        let live = self.live_peers().await;
+        let me = self.callsign();
+        let mut peers = names
             .iter()
-            .map(|name| self.resolve(name))
+            .map(|name| pick(&live, &me, name))
             .collect::<Result<Vec<_>, _>>()?;
+        // A callsign and a session id may name the same member.
+        let mut sessions = HashSet::new();
+        peers.retain(|peer| sessions.insert(peer.session.clone()));
         let mut reached = Vec::new();
         let mut failed = Vec::new();
-        for peer in &peers {
-            let group = peers
-                .iter()
-                .filter(|other| other.callsign != peer.callsign)
-                .map(|other| other.callsign.clone())
-                .collect();
-            let body = Body::Message {
-                text: text.clone(),
-                group,
-                human,
-            };
-            match self.deliver(peer, body).await {
-                Ok(()) => reached.push(peer.callsign.clone()),
-                Err(reason) => failed.push(format!("{}: {reason}", peer.callsign)),
+        for batch in peers.chunks(wire::GROUP_CAP) {
+            let deliveries = batch.iter().map(|peer| {
+                let group = batch
+                    .iter()
+                    .filter(|other| other.session != peer.session)
+                    .map(|other| other.callsign.clone())
+                    .collect();
+                let body = Body::Message {
+                    text: text.clone(),
+                    group,
+                    human,
+                };
+                async move { (peer, self.deliver(peer, body).await) }
+            });
+            for (peer, result) in join_all(deliveries.collect()).await {
+                match result {
+                    Ok(()) => reached.push(peer.callsign.clone()),
+                    Err(reason) => failed.push(format!("{}: {reason}", peer.callsign)),
+                }
             }
         }
         if reached.is_empty() {
@@ -532,36 +644,42 @@ impl Station {
         Ok(report)
     }
 
-    /// Messages every peer; it starts no turn. Returns who got it.
+    /// Messages every peer, concurrently; it starts no turn. Returns who
+    /// got it and who did not.
     pub async fn broadcast(&self, text: &str) -> Result<String, String> {
         let text = checked_text(text)?;
-        let peers = self.peers();
+        let peers = self.live_peers().await;
         if peers.is_empty() {
             return Err("no other agent works in this repository".to_owned());
         }
+        let deliveries = peers.iter().map(|peer| {
+            let body = Body::Broadcast { text: text.clone() };
+            async move { (peer, self.deliver(peer, body).await) }
+        });
         let mut reached = Vec::new();
-        for peer in &peers {
-            if self
-                .deliver(peer, Body::Broadcast { text: text.clone() })
-                .await
-                .is_ok()
-            {
-                reached.push(peer.callsign.clone());
+        let mut failed = Vec::new();
+        for (peer, result) in join_all(deliveries.collect()).await {
+            match result {
+                Ok(()) => reached.push(peer.callsign.clone()),
+                Err(reason) => failed.push(format!("{}: {reason}", peer.callsign)),
             }
         }
-        Ok(format!(
-            "broadcast to {}",
-            if reached.is_empty() {
-                "nobody".to_owned()
-            } else {
-                reached.join(", ")
-            }
-        ))
+        if reached.is_empty() {
+            return Err(format!("not delivered ({})", failed.join("; ")));
+        }
+        let mut report = format!("broadcast to {}", reached.join(", "));
+        if !failed.is_empty() {
+            report.push_str(&format!(" (failed: {})", failed.join("; ")));
+        }
+        Ok(report)
     }
 
-    /// Asks `to` and, with `wait`, waits up to `timeout` for the answer.
-    /// Without `wait`, or once the wait ends without one, the answer
-    /// arrives later as a message.
+    /// Asks `to` and, with `wait`, waits up to `timeout` for the answer,
+    /// ending early when the peer's session leaves, the call is cancelled,
+    /// or mail waits for this session ([`AskOutcome::Interrupted`]).
+    /// Without `wait`, or once the wait ends without an answer, the ask
+    /// stays open and its answer arrives later as a message; cancellation
+    /// or the peer leaving closes it.
     pub async fn ask(
         &self,
         to: &str,
@@ -571,13 +689,14 @@ impl Station {
         signal: Option<bake_ai::AbortSignal>,
     ) -> Result<AskOutcome, String> {
         let text = checked_text(text)?;
-        let peer = self.resolve(to)?;
+        let peers = self.live_peers().await;
+        let peer = pick(&peers, &self.callsign(), to)?;
         let ask_id = short_id();
-        let (answer, answered) = oneshot::channel();
+        let (answer, mut answered) = oneshot::channel();
         lock(&self.inner.state).waiting.insert(
             ask_id.clone(),
             Waiting {
-                to: peer.callsign.clone(),
+                session: peer.session.clone(),
                 answer: wait.then_some(answer),
             },
         );
@@ -596,43 +715,40 @@ impl Station {
             });
         }
         let outcome = self
-            .await_answer(
-                &peer.callsign,
-                answered,
-                timeout.min(ASK_TIMEOUT_MAX),
-                signal,
-            )
+            .await_answer(&peer, &mut answered, timeout.min(ASK_TIMEOUT_MAX), signal)
             .await;
-        if !matches!(outcome, AskOutcome::Answered { .. }) {
-            // Nobody waits now: a late answer arrives as a message.
-            if let Some(waiting) = lock(&self.inner.state).waiting.get_mut(&ask_id) {
-                waiting.answer = None;
+        match outcome {
+            AskOutcome::Answered { .. } | AskOutcome::Sent { .. } => {}
+            AskOutcome::TimedOut { .. } | AskOutcome::Interrupted { .. } => {
+                // Nobody waits now: a late answer arrives as a message.
+                if let Some(waiting) = lock(&self.inner.state).waiting.get_mut(&ask_id) {
+                    waiting.answer = None;
+                }
             }
-            if matches!(
-                outcome,
-                AskOutcome::Gone { .. } | AskOutcome::Cancelled { .. }
-            ) {
+            AskOutcome::Gone { .. } => {
                 lock(&self.inner.state).waiting.remove(&ask_id);
-                let _ = self
-                    .deliver(
-                        &peer,
-                        Body::Withdraw {
-                            ask_id: ask_id.clone(),
-                        },
-                    )
-                    .await;
+            }
+            AskOutcome::Cancelled { .. } => {
+                lock(&self.inner.state).waiting.remove(&ask_id);
+                self.withdraw(&peer, ask_id.clone());
             }
         }
         Ok(outcome.with_id(ask_id))
     }
 
+    /// Waits for `answered` until the first of: cancellation (this
+    /// session's own shutdown included), the answer, undelivered mail for
+    /// this session, the deadline, or `peer`'s session leaving. Whatever
+    /// ends it, an answer already sent is taken: `answered` is closed
+    /// first, so a reply after that is posted as a message instead.
     async fn await_answer(
         &self,
-        to: &str,
-        mut answered: oneshot::Receiver<String>,
+        peer: &Presence,
+        answered: &mut oneshot::Receiver<String>,
         timeout: Duration,
         signal: Option<bake_ai::AbortSignal>,
     ) -> AskOutcome {
+        let to = peer.callsign.clone();
         let deadline = tokio::time::Instant::now() + timeout;
         let cancelled = async {
             match &signal {
@@ -641,30 +757,61 @@ impl Station {
             }
         };
         tokio::pin!(cancelled);
-        loop {
+        // Subscribed before the first look at the mail, so nothing posted
+        // after that look is missed.
+        let mut events = self.inner.jobs.subscribe();
+        let mut check =
+            tokio::time::interval_at(tokio::time::Instant::now() + PEER_CHECK, PEER_CHECK);
+        check.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let ended = loop {
+            if self.inner.jobs.has_undelivered() {
+                break AskOutcome::Interrupted {
+                    ask_id: String::new(),
+                    to: to.clone(),
+                };
+            }
             tokio::select! {
-                answer = &mut answered => {
+                biased;
+                () = &mut cancelled => break AskOutcome::Cancelled { ask_id: String::new() },
+                answer = &mut *answered => {
                     return match answer {
-                        Ok(text) => AskOutcome::Answered { ask_id: String::new(), from: to.to_owned(), text },
-                        Err(_) => AskOutcome::Gone { ask_id: String::new(), to: to.to_owned() },
+                        Ok(text) => AskOutcome::Answered { ask_id: String::new(), from: to, text },
+                        // Only `leave` drops a waiter unanswered: this
+                        // session is closing.
+                        Err(_) => AskOutcome::Cancelled { ask_id: String::new() },
                     };
                 }
-                () = &mut cancelled => return AskOutcome::Cancelled { ask_id: String::new() },
-                () = tokio::time::sleep_until(deadline) => {
-                    return AskOutcome::TimedOut { ask_id: String::new(), to: to.to_owned() };
+                open = events.changed() => {
+                    if !open {
+                        // The registry closed: this session is closing.
+                        break AskOutcome::Cancelled { ask_id: String::new() };
+                    }
                 }
-                () = tokio::time::sleep(PEER_CHECK) => {
-                    if !self.peers().iter().any(|peer| peer.callsign == to) {
-                        return AskOutcome::Gone { ask_id: String::new(), to: to.to_owned() };
+                () = tokio::time::sleep_until(deadline) => {
+                    break AskOutcome::TimedOut { ask_id: String::new(), to: to.clone() };
+                }
+                _ = check.tick() => {
+                    if !self.live_peers().await.iter().any(|live| live.session == peer.session) {
+                        break AskOutcome::Gone { ask_id: String::new(), to: to.clone() };
                     }
                 }
             }
+        };
+        answered.close();
+        match answered.try_recv() {
+            Ok(text) => AskOutcome::Answered {
+                ask_id: String::new(),
+                from: to,
+                text,
+            },
+            Err(_) => ended,
         }
     }
 
     /// Answers an ask: `ask_id`, else the only one waiting, else the only
     /// one from `to`. With `to` and no ask of theirs open, the text goes
-    /// as a message.
+    /// as a message. An ask whose asker left, withdrew it, or refuses the
+    /// answer is closed, and replying to it says so without failing.
     pub async fn reply(
         &self,
         text: &str,
@@ -672,6 +819,8 @@ impl Station {
         to: Option<&str>,
     ) -> Result<String, String> {
         let text = checked_text(text)?;
+        let peers = self.live_peers().await;
+        self.prune_owed(&peers);
         let chosen = {
             let state = lock(&self.inner.state);
             let open: Vec<&Owed> = state
@@ -688,6 +837,11 @@ impl Station {
         let ask = match chosen {
             Ok(ask) => ask,
             Err(0) => {
+                let named_live =
+                    to.is_some_and(|to| peers.iter().any(|peer| peer.callsign == to.trim()));
+                if let Some(note) = self.closed_note(ask_id, to.filter(|_| !named_live)) {
+                    return Ok(note);
+                }
                 if let (Some(to), None) = (to, ask_id) {
                     return self.send(to, &text, false).await;
                 }
@@ -708,22 +862,38 @@ impl Station {
                 ));
             }
         };
-        let peer = self
-            .resolve(&ask.from)
-            .map_err(|_| format!("{} has left; the answer cannot be delivered", ask.from))?;
-        self.deliver(
-            &peer,
-            Body::Reply {
-                ask_id: ask.ask_id.clone(),
-                text,
-            },
-        )
-        .await
-        .map_err(|reason| format!("{} did not get the answer: {reason}", ask.from))?;
-        lock(&self.inner.state)
-            .owed
-            .retain(|owed| owed.ask_id != ask.ask_id);
-        Ok(format!("answered {} ({})", ask.from, ask.ask_id))
+        let gone = || {
+            format!(
+                "{} is gone; nothing more to do for ask {}",
+                ask.from, ask.ask_id
+            )
+        };
+        let Some(peer) = peers.iter().find(|peer| peer.session == ask.from_session) else {
+            let note = gone();
+            lock(&self.inner.state).close_owed(&ask, note.clone());
+            return Ok(note);
+        };
+        let body = Body::Reply {
+            ask_id: ask.ask_id.clone(),
+            text,
+        };
+        match self.exchange(peer, body).await {
+            Ok(Outcome::Accepted) => {
+                lock(&self.inner.state)
+                    .owed
+                    .retain(|owed| owed.ask_id != ask.ask_id);
+                Ok(format!("answered {} ({})", ask.from, ask.ask_id))
+            }
+            Ok(Outcome::Refused { reason }) => {
+                let note = format!(
+                    "{} no longer waits on ask {} ({reason}); nothing more to do",
+                    ask.from, ask.ask_id
+                );
+                lock(&self.inner.state).close_owed(&ask, note.clone());
+                Ok(note)
+            }
+            Err(reason) => Err(format!("{} did not get the answer: {reason}", ask.from)),
+        }
     }
 
     /// Takes an arriving frame.
@@ -770,29 +940,29 @@ impl Station {
                 )
             }
             Body::Reply { ask_id, text } => {
-                let Some(waiting) = state.waiting.remove(&ask_id) else {
-                    return refused("that ask is not open here");
-                };
-                if waiting.to != from {
-                    state.waiting.insert(ask_id, waiting);
-                    return refused("that ask was not put to you");
-                }
-                if let Some(answer) = waiting.answer {
-                    match answer.send(text) {
-                        Ok(()) => return Outcome::Accepted,
-                        Err(text) => (
-                            format!("[telecom] {from} answered your ask {ask_id}:\n{text}"),
-                            true,
-                            json!({ "kind": "reply", "from": from, "askId": ask_id }),
-                        ),
+                // An answer nobody waits on now, or to an ask this station
+                // no longer holds (withdrawn, or ended with its wait), is
+                // still the model's to read: it is posted as a message.
+                let (text, earlier) = match state.waiting.remove(&ask_id) {
+                    Some(waiting) if waiting.session != frame.from.session => {
+                        state.waiting.insert(ask_id, waiting);
+                        return refused("that ask was not put to you");
                     }
-                } else {
-                    (
-                        format!("[telecom] {from} answered your ask {ask_id}:\n{text}"),
-                        true,
-                        json!({ "kind": "reply", "from": from, "askId": ask_id }),
-                    )
-                }
+                    Some(Waiting {
+                        answer: Some(answer),
+                        ..
+                    }) => match answer.send(text) {
+                        Ok(()) => return Outcome::Accepted,
+                        Err(text) => (text, ""),
+                    },
+                    Some(Waiting { answer: None, .. }) => (text, ""),
+                    None => (text, "earlier "),
+                };
+                (
+                    format!("[telecom] {from} answered your {earlier}ask {ask_id}:\n{text}"),
+                    true,
+                    json!({ "kind": "reply", "from": from, "askId": ask_id }),
+                )
             }
             Body::Broadcast { text } => {
                 state
@@ -801,9 +971,15 @@ impl Station {
                 return Outcome::Accepted;
             }
             Body::Withdraw { ask_id } => {
-                state
+                let withdrawn = state
                     .owed
-                    .retain(|ask| !(ask.ask_id == ask_id && ask.from == from));
+                    .iter()
+                    .find(|ask| ask.ask_id == ask_id && ask.from_session == frame.from.session)
+                    .cloned();
+                if let Some(ask) = withdrawn {
+                    let note = format!("{from} withdrew ask {ask_id}; nothing more to do");
+                    state.close_owed(&ask, note);
+                }
                 return Outcome::Accepted;
             }
         };
@@ -843,6 +1019,12 @@ pub enum AskOutcome {
         ask_id: String,
         to: String,
     },
+    /// The wait ended because mail arrived for this session; the ask
+    /// stays open and its answer arrives as a message.
+    Interrupted {
+        ask_id: String,
+        to: String,
+    },
     Cancelled {
         ask_id: String,
     },
@@ -859,9 +1041,55 @@ impl AskOutcome {
             Self::Sent { to, .. } => Self::Sent { ask_id: id, to },
             Self::TimedOut { to, .. } => Self::TimedOut { ask_id: id, to },
             Self::Gone { to, .. } => Self::Gone { ask_id: id, to },
+            Self::Interrupted { to, .. } => Self::Interrupted { ask_id: id, to },
             Self::Cancelled { .. } => Self::Cancelled { ask_id: id },
         }
     }
+}
+
+/// The peer of `peers` that `to` names: a callsign, or a session id or
+/// its prefix of at least 4 characters. `me` is this member's callsign.
+fn pick(peers: &[Presence], me: &str, to: &str) -> Result<Presence, String> {
+    let to = to.trim();
+    if let Some(peer) = peers.iter().find(|peer| peer.callsign == to) {
+        return Ok(peer.clone());
+    }
+    let by_id: Vec<&Presence> = peers
+        .iter()
+        .filter(|peer| to.len() >= 4 && peer.session.starts_with(to))
+        .collect();
+    match by_id.as_slice() {
+        [peer] => Ok((*peer).clone()),
+        _ if to == me => Err("that is you".to_owned()),
+        _ => {
+            let names: Vec<&str> = peers.iter().map(|peer| peer.callsign.as_str()).collect();
+            Err(if names.is_empty() {
+                format!("no agent \"{to}\": no other agent works in this repository")
+            } else {
+                format!("no agent \"{to}\"; the team is {}", names.join(", "))
+            })
+        }
+    }
+}
+
+/// Runs `futures` together on the caller's task; their outputs in order.
+async fn join_all<F: Future>(futures: Vec<F>) -> Vec<F::Output> {
+    let mut pending: Vec<_> = futures.into_iter().map(Box::pin).collect();
+    let mut outputs: Vec<Option<F::Output>> = pending.iter().map(|_| None).collect();
+    std::future::poll_fn(|cx| {
+        let mut done = true;
+        for (future, output) in pending.iter_mut().zip(outputs.iter_mut()) {
+            if output.is_none() {
+                match future.as_mut().poll(cx) {
+                    Poll::Ready(value) => *output = Some(value),
+                    Poll::Pending => done = false,
+                }
+            }
+        }
+        if done { Poll::Ready(()) } else { Poll::Pending }
+    })
+    .await;
+    outputs.into_iter().flatten().collect()
 }
 
 fn refused(reason: &str) -> Outcome {
@@ -964,8 +1192,14 @@ async fn publisher(inner: Weak<Inner>, scope: crate::owned_work::TaskScope) {
             () = inner.dirty.notified() => {}
         }
         let record = lock(&inner.state).presence.clone();
-        if let Some(membership) = lock(&inner.membership).as_ref() {
-            let _ = membership.publish(&record);
+        let membership = lock(&inner.membership).clone();
+        if let Some(membership) = membership
+            && let Ok(write) = scope
+                .permit()
+                .spawn_blocking(move || membership.publish(&record))
+        {
+            // Awaited, so records are written in order.
+            let _ = write.await;
         }
     }
     // The session is ending: give the callsign back now rather than when
