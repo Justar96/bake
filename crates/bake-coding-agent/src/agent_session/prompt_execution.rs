@@ -477,11 +477,7 @@ impl PromptExecution {
         if self.closed_reason().is_some() {
             return Ok((RunOutcome::FinishedTurn, false));
         }
-        if self.jobs.has_held() && !self.jobs.notice_would_wake() {
-            // A held message waits in the registry for its release, which
-            // opens the turn; claimed now, it could open none.
-            return Ok((RunOutcome::FinishedTurn, false));
-        }
+        // Held mail stays in the registry: its release opens the turn.
         let (notices, depth): (Vec<CustomMessage>, usize) = job_notices::claim_at(&self.jobs);
         if notices.is_empty() {
             return Ok((RunOutcome::FinishedTurn, false));

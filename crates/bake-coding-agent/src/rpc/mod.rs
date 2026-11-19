@@ -710,11 +710,10 @@ impl Handler {
         }
         if !jobs.notice_would_wake() {
             // Kept for the next prompt; no turn opens. A held message
-            // stays in the registry instead: its release opens the turn,
-            // as a spawned agent has no person to prompt it.
-            if !jobs.has_held() {
-                let _ = session.deliver_job_notices().await;
-            }
+            // stays in the registry instead (the claim never takes it):
+            // its release opens the turn, as a spawned agent has no person
+            // to prompt it.
+            let _ = session.deliver_job_notices().await;
             return Delivery::Done;
         }
         // A prompt holds the claim: its run is starting.

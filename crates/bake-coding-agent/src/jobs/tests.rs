@@ -1409,3 +1409,42 @@ async fn held_mail_opens_no_turn_until_released() {
     assert!(!registry.release_held());
     registry.close().await;
 }
+
+// A turn's claim never takes held mail: posted between a caller's look at
+// the registry and the claim, it stays queued for its release or a step.
+#[tokio::test]
+async fn a_turns_claim_leaves_held_mail_posted_after_the_look() {
+    let (_gate, registry) = registry(JobLimits::default());
+    let notice = |text: &str| crate::session::messages::CustomMessage {
+        custom_type: "test.notice".into(),
+        content: bake_ai::UserContent::Text(text.into()),
+        display: true,
+        details: None,
+        timestamp: 0,
+    };
+    // A notice that cannot wake the session: it is kept for a prompt.
+    registry
+        .post_at(notice("for the next prompt"), MAX_CONSECUTIVE_WAKES)
+        .expect("posted");
+    // The look a caller makes before claiming finds nothing held ...
+    assert!(!registry.has_held());
+    assert!(!registry.notice_would_wake());
+    // ... and held mail arrives before the claim.
+    registry.post_held(notice("held")).expect("posted");
+    let (claimed, depth) = crate::agent_session::job_notices::claim_at(&registry);
+    assert_eq!(claimed, vec![notice("for the next prompt")]);
+    assert_eq!(depth, MAX_CONSECUTIVE_WAKES);
+    assert!(
+        registry.has_held(),
+        "the held mail was taken by a turn's claim"
+    );
+    // Released, it opens a turn of its own; claimed once.
+    assert!(registry.release_held());
+    assert!(registry.notice_would_wake());
+    assert_eq!(
+        crate::agent_session::job_notices::claim_at(&registry).0,
+        vec![notice("held")]
+    );
+    assert!(!registry.has_undelivered());
+    registry.close().await;
+}

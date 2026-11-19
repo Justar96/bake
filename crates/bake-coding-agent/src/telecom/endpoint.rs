@@ -9,10 +9,12 @@
 //! failed delivery, never a silent one. Both sides read at most
 //! [`FRAME_CAP`] bytes and give up after [`IO_TIMEOUT`], so a stalled or
 //! hostile peer costs one bounded task. A frame sent longer ago than that
-//! is refused unread, since its sender has stopped waiting and counts it
-//! undelivered. The server reads a bounded number of connections at once;
-//! the rest wait inside their own time limit, never in the accept loop, so
-//! cancellation stops the server at once.
+//! is dropped unread and unanswered, so its sender counts it undelivered
+//! and may send it again, never as a refusal it would take as final. The
+//! server reads [`CONCURRENT`] connections at once and keeps at most
+//! [`BACKLOG`] more waiting, inside their own time limit, never in the
+//! accept loop; past that a connection is closed at once, so silent
+//! connections cannot pile up, and cancellation stops the server at once.
 
 use std::path::Path;
 use std::time::Duration;
@@ -31,6 +33,10 @@ const ACCEPT_BACKOFF: Duration = Duration::from_millis(100);
 
 /// The most deliveries a member reads at once; more wait to be accepted.
 const CONCURRENT: usize = 16;
+
+/// The most accepted connections that wait for a reading slot; past them a
+/// new connection is closed at once.
+const BACKLOG: usize = 16;
 
 /// Takes an arriving frame: returns what to answer.
 pub type Handler = std::sync::Arc<dyn Fn(Frame) -> Outcome + Send + Sync>;
@@ -105,6 +111,8 @@ impl Listener {
     pub async fn serve(self, handler: Handler, scope: TaskScope) {
         let mut connections = tokio::task::JoinSet::new();
         let slots = std::sync::Arc::new(tokio::sync::Semaphore::new(CONCURRENT));
+        // Every connection the server keeps holds one, reading or waiting.
+        let kept = std::sync::Arc::new(tokio::sync::Semaphore::new(CONCURRENT + BACKLOG));
         loop {
             tokio::select! {
                 biased;
@@ -120,10 +128,17 @@ impl Listener {
                             () = tokio::time::sleep(ACCEPT_BACKOFF) => continue,
                         }
                     };
+                    // Past the backlog the connection is dropped: its
+                    // sender counts it undelivered.
+                    let Ok(place) = std::sync::Arc::clone(&kept).try_acquire_owned() else {
+                        drop(stream);
+                        continue;
+                    };
                     let slots = std::sync::Arc::clone(&slots);
                     let handler = std::sync::Arc::clone(&handler);
                     let signal = scope.signal().clone();
                     connections.spawn(async move {
+                        let _place = place;
                         // The wait for a slot counts against the delivery's
                         // time, so a frame that waited past its sender's
                         // patience is refused as stale, not taken late.
@@ -158,15 +173,9 @@ async fn answer(mut stream: tokio::net::UnixStream, handler: Handler, signal: &A
         },
     };
     let (id, outcome) = match Frame::decode(&line) {
-        Ok(frame) if is_stale(frame.sent_at) => (
-            frame.id,
-            Outcome::Refused {
-                reason: format!(
-                    "sent more than {} s ago; its sender has stopped waiting",
-                    IO_TIMEOUT.as_secs()
-                ),
-            },
-        ),
+        // Its sender has stopped waiting, or a clock moved: no answer, so
+        // the sender reads a failed delivery and keeps what it owes.
+        Ok(frame) if is_stale(frame.sent_at) => return,
         Ok(frame) => (frame.id.clone(), handler(frame)),
         Err(error) => {
             // Answer under the frame's id when it carries a usable one, so
@@ -271,7 +280,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_frame_older_than_its_senders_wait_is_refused_unread() {
+    async fn a_frame_older_than_its_senders_wait_is_dropped_unread_and_unanswered() {
         let dir = std::env::temp_dir().join(format!("bt-{}", crate::session::id::uuid_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let socket = dir.join("bravo.sock");
@@ -291,11 +300,9 @@ mod tests {
 
         let mut late = frame("from a sender that gave up");
         late.sent_at -= i64::try_from(IO_TIMEOUT.as_millis()).unwrap() + 1000;
-        let outcome = deliver(&socket, &late).await.unwrap();
-        assert!(
-            matches!(&outcome, Outcome::Refused { reason } if reason.contains("stopped waiting")),
-            "{outcome:?}"
-        );
+        // A failed delivery, not a refusal its sender would take as final.
+        let outcome = deliver(&socket, &late).await;
+        assert!(outcome.is_err(), "{outcome:?}");
         assert_eq!(*seen.lock().unwrap(), 0);
         assert_eq!(
             deliver(&socket, &frame("fresh")).await,
@@ -303,6 +310,43 @@ mod tests {
         );
         assert_eq!(*seen.lock().unwrap(), 1);
 
+        gate.close().await;
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn connections_past_the_backlog_are_closed_at_once() {
+        let dir = std::env::temp_dir().join(format!("bt-{}", crate::session::id::uuid_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let socket = dir.join("bravo.sock");
+        let handler: Handler = Arc::new(|_frame: Frame| Outcome::Accepted { held: false });
+        let gate = WorkGate::default();
+        let listener = Listener::bind(&socket).unwrap();
+        let _task = gate
+            .spawn(move |scope| listener.serve(handler, scope))
+            .unwrap();
+        // Silent connections fill every reading slot and the backlog.
+        let mut idle = Vec::new();
+        for _ in 0..CONCURRENT + BACKLOG {
+            idle.push(tokio::net::UnixStream::connect(&socket).await.unwrap());
+        }
+        // Accepted after them, the next one is closed unread. The property
+        // is the bound: at once, not after a read timeout.
+        let mut extra = tokio::net::UnixStream::connect(&socket).await.unwrap();
+        let mut rest = Vec::new();
+        let read = tokio::time::timeout(IO_TIMEOUT / 2, extra.read_to_end(&mut rest)).await;
+        assert!(matches!(read, Ok(Ok(0))), "{read:?}");
+        // Once they go, deliveries are taken again.
+        drop(idle);
+        let mut delivered = deliver(&socket, &frame("hi")).await;
+        for _ in 0..200 {
+            if delivered.is_ok() {
+                break;
+            }
+            tokio::task::yield_now().await;
+            delivered = deliver(&socket, &frame("hi")).await;
+        }
+        assert_eq!(delivered, Ok(Outcome::Accepted { held: false }));
         gate.close().await;
         std::fs::remove_dir_all(dir).unwrap();
     }

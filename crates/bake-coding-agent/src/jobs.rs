@@ -1541,6 +1541,28 @@ impl JobRegistry {
     pub fn claim_mail_at(&self) -> (Vec<CustomMessage>, Option<usize>) {
         let wakes = self.inner.wakes.load(Ordering::SeqCst);
         let mail = std::mem::take(&mut self.inner.state().mail);
+        if mail.iter().any(|mail| mail.held) {
+            // Whoever owes the release learns there is nothing to release.
+            self.inner.announce();
+        }
+        let depth = mail.iter().map(|mail| mail.depth(wakes)).min();
+        (mail.into_iter().map(|mail| mail.message).collect(), depth)
+    }
+
+    /// [`Self::claim_mail_at`] for deciding whether to open a turn: held
+    /// mail ([`Self::post_held`]) is never taken, so it stays queued until
+    /// it is released or a run's step reads it, whatever is posted between
+    /// a caller's look and this claim.
+    pub fn claim_waking_mail_at(&self) -> (Vec<CustomMessage>, Option<usize>) {
+        let wakes = self.inner.wakes.load(Ordering::SeqCst);
+        let mail: Vec<Mail> = {
+            let mut state = self.inner.state();
+            let (held, waking) = std::mem::take(&mut state.mail)
+                .into_iter()
+                .partition(|mail| mail.held);
+            state.mail = held;
+            waking
+        };
         let depth = mail.iter().map(|mail| mail.depth(wakes)).min();
         (mail.into_iter().map(|mail| mail.message).collect(), depth)
     }

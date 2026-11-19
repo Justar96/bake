@@ -212,15 +212,19 @@ impl Team {
         Ok(None)
     }
 
+    /// [`Self::read_members`], with a team that cannot be read taken as
+    /// empty: for listings, never to decide that a member left.
+    pub fn members(&self, except: Option<&str>) -> Vec<Presence> {
+        self.read_members(except).unwrap_or_default()
+    }
+
     /// The live members other than `except`, by callsign. A member whose
     /// lock is free is gone: its files are removed. A live member whose
     /// record is missing or invalid (one starting, or one mid-rename) is
-    /// left out.
-    pub fn members(&self, except: Option<&str>) -> Vec<Presence> {
-        let Ok(entries) = fs::read_dir(&self.dir) else {
-            return Vec::new();
-        };
-        let mut callsigns: Vec<String> = entries
+    /// left out. A directory or lock that cannot be read is an error, not
+    /// an empty team: who is there is unknown, not gone.
+    pub fn read_members(&self, except: Option<&str>) -> io::Result<Vec<Presence>> {
+        let mut callsigns: Vec<String> = fs::read_dir(&self.dir)?
             .filter_map(Result::ok)
             .filter_map(|entry| {
                 let name = entry.file_name().into_string().ok()?;
@@ -230,33 +234,39 @@ impl Team {
             .filter(|callsign| Some(callsign.as_str()) != except)
             .collect();
         callsigns.sort();
-        callsigns
-            .into_iter()
-            .filter(|callsign| self.is_live(callsign))
-            .filter_map(|callsign| {
-                let bytes = fs::read(self.file(&callsign, "json")).ok()?;
-                Presence::decode(&bytes, &callsign)
-            })
-            .collect()
+        let mut members = Vec::new();
+        for callsign in callsigns {
+            if !self.is_live(&callsign)? {
+                continue;
+            }
+            let record = fs::read(self.file(&callsign, "json"))
+                .ok()
+                .and_then(|bytes| Presence::decode(&bytes, &callsign));
+            members.extend(record);
+        }
+        Ok(members)
     }
 
     /// Whether `callsign`'s lock is held. A free lock means its member is
-    /// gone; its files are removed under that lock.
-    fn is_live(&self, callsign: &str) -> bool {
+    /// gone; its files are removed under that lock. A lock file that is
+    /// gone is a member gone; one that cannot be opened is an error.
+    fn is_live(&self, callsign: &str) -> io::Result<bool> {
         let path = self.file(callsign, "lock");
-        let Ok(file) = OpenOptions::new().read(true).write(true).open(&path) else {
-            return false;
+        let file = match OpenOptions::new().read(true).write(true).open(&path) {
+            Ok(file) => file,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => return Err(error),
         };
         match file.try_lock() {
-            Err(fs::TryLockError::WouldBlock) => true,
-            Err(fs::TryLockError::Error(_)) => true,
+            Err(fs::TryLockError::WouldBlock) => Ok(true),
+            Err(fs::TryLockError::Error(_)) => Ok(true),
             Ok(()) => {
                 if same_file(&file, &path) {
                     let _ = fs::remove_file(self.file(callsign, "json"));
                     let _ = fs::remove_file(self.socket(callsign));
                     let _ = fs::remove_file(&path);
                 }
-                false
+                Ok(false)
             }
         }
     }
