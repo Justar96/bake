@@ -297,9 +297,10 @@ async fn a_child_settling_around_a_parent_stop_is_admitted_once() {
                 [(1, first.to_owned())],
                 "{case}: one notice for run 1"
             );
-            let (_, run) = bounded("the message", resumed.host.message_child(&id, "resume"))
+            let run = bounded("the message", resumed.host.message_child(&id, "resume"))
                 .await
-                .expect("continue");
+                .expect("continue")
+                .run();
             assert_eq!(run, Some(2), "{case}");
             settled(&resumed).await;
             assert_eq!(

@@ -67,8 +67,8 @@ pub fn claim(jobs: &JobRegistry) -> Vec<CustomMessage> {
 /// ([`JobRegistry::notice_depth`]).
 pub fn claim_at(jobs: &JobRegistry) -> (Vec<CustomMessage>, usize) {
     let settled = jobs.claim_unreported();
-    let mail = jobs.claim_mail();
-    let depth = jobs.notice_depth(&settled, !mail.is_empty());
+    let (mail, mail_depth) = jobs.claim_mail_at();
+    let depth = jobs.notice_depth(&settled, mail_depth);
     let mut notices: Vec<CustomMessage> = settled.iter().map(completion_notice).collect();
     notices.extend(mail);
     (notices, depth)

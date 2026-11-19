@@ -358,9 +358,10 @@ async fn a_killed_parent_reports_each_child_run_once_and_reruns_none() {
         // A background child continues from its file as run 2.
         if background {
             let id = listed[0].id.clone();
-            let (_, run) = bounded("the message", resumed.host.message_child(&id, "resume"))
+            let run = bounded("the message", resumed.host.message_child(&id, "resume"))
                 .await
-                .expect("continue the child");
+                .expect("continue the child")
+                .run();
             assert_eq!(run, Some(2), "{mode}");
             settled(&resumed).await;
             assert_eq!(child_requests(), 1, "{mode}");

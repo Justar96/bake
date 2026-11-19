@@ -564,7 +564,10 @@ async fn messages_flow_both_ways_and_an_idle_child_runs_again() {
     assert_eq!(sent[0].1["from"], json!(id));
     assert_eq!(sent[0].1["to"], json!(parent.host.parent_id()));
     let delivered = tool_results(&parent.session, "send_message");
-    assert_eq!(delivered[0].0, format!("message delivered to agent {id}"));
+    assert_eq!(
+        delivered[0].0,
+        format!("message delivered to agent {id}; it starts a new run")
+    );
     assert_eq!(delivered[0].2["runId"], 2);
     let notices = customs(&parent.session, messages::NOTICE_TYPE);
     assert_eq!(
@@ -927,11 +930,12 @@ async fn a_resumed_parent_reports_lost_runs_and_resumes_children() {
         "nothing was re-run: {:#?}",
         h.requests.lock().expect("requests")
     );
-    let (_, run) = resumed
+    let run = resumed
         .host
         .message_child(&id, "resume")
         .await
-        .expect("resume");
+        .expect("resume")
+        .run();
     assert_eq!(run, Some(2), "run ids continue past the recorded ones");
     settled(&resumed).await;
     let notices = customs(&resumed.session, messages::NOTICE_TYPE);
@@ -949,10 +953,12 @@ async fn a_resumed_parent_reports_lost_runs_and_resumes_children() {
 }
 
 // At the limit the least recently used idle child is evicted to `ready`
-// and stays continuable from its file; with every child running, a start
-// is refused with the limit text.
+// and stays continuable from its file. With every child running, a
+// background start and a message to a `ready` child wait in the queue and
+// run, in order, once slots free; a foreground start waits for a slot
+// until its call is dropped; and a full queue refuses with what to do.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn the_limit_evicts_idle_children_and_refuses_when_all_run() {
+async fn the_limit_evicts_idle_children_and_queues_when_all_run() {
     let h = harness("subagent-limit");
     h.think(Arc::new(|_, messages| {
         if last_user(messages).contains("sent a message: answer") {
@@ -1004,7 +1010,7 @@ async fn the_limit_evicts_idle_children_and_refuses_when_all_run() {
         )
     );
     let _ = extra;
-    // Every resident child running: the next start is refused.
+    // Every resident child running.
     let mut hanging = Vec::new();
     for index in 0..MAX_ACTIVE {
         match parent
@@ -1019,13 +1025,95 @@ async fn the_limit_evicts_idle_children_and_refuses_when_all_run() {
             break;
         }
     }
+    let waits = parent
+        .host
+        .start("waits", "Do.", route.clone(), false)
+        .await
+        .expect("a background start queues");
+    assert!(waits.queued);
+    assert!(waits.settled.is_none());
+    assert!(
+        parent
+            .host
+            .listing()
+            .iter()
+            .any(|(row, queued)| row.id == waits.id && *queued && row.status == Status::Starting)
+    );
+    let ready = parent
+        .host
+        .list()
+        .into_iter()
+        .find(|row| row.status == Status::Ready)
+        .expect("an evicted child")
+        .id;
+    let sent = parent
+        .host
+        .message_child(&ready, "answer")
+        .await
+        .expect("a message to a ready child queues");
+    assert!(
+        matches!(sent.delivery, Delivery::Queued(Some(_))),
+        "{sent:?}"
+    );
+    {
+        let foreground = parent.host.start("foreground", "Do.", route.clone(), true);
+        tokio::pin!(foreground);
+        tokio::select! {
+            biased;
+            _ = &mut foreground => panic!("no slot is free"),
+            () = std::future::ready(()) => {}
+        }
+    }
+    assert!(
+        parent
+            .host
+            .list()
+            .iter()
+            .all(|row| row.label != "foreground"),
+        "a dropped foreground wait leaves nothing"
+    );
+    for index in 2..MAX_QUEUED {
+        let started = parent
+            .host
+            .start(&format!("queued {index}"), "Hang.", route.clone(), false)
+            .await
+            .expect("queued");
+        assert!(started.queued);
+    }
     assert_eq!(
         parent.host.start("too many", "Hang.", route, false).await.err(),
         Some(
-            "subagent limit reached: 8 subagents are already active, the most allowed at once. A notice arrives when one finishes; retry then, or do this work yourself."
+            "subagent queue is full: 8 subagents are busy and 32 more wait. Wait for a notice that one finished, or do this work yourself."
                 .to_owned()
         )
     );
+    // A freed slot starts the queue's head; as it settles, the next.
+    assert_eq!(parent.host.interrupt(&hanging[0]), Ok(Interrupt::Requested));
+    let jobs = parent.session.jobs().clone();
+    let mut posted = Vec::new();
+    bounded("the queued work ran", async {
+        loop {
+            let mut events = jobs.subscribe();
+            posted.extend(jobs.claim_mail().iter().map(|notice| {
+                (
+                    notice.details.clone().unwrap_or_default(),
+                    bake_ai::utils::text::user_content_text(&notice.content, "\n"),
+                )
+            }));
+            let done = |id: &str, closing: &str| {
+                posted
+                    .iter()
+                    .any(|(details, text): &(serde_json::Value, String)| {
+                        details["agentId"] == json!(id) && text.ends_with(closing)
+                    })
+            };
+            if done(&waits.id, "done") && done(&ready, "answered") {
+                return;
+            }
+            events.changed().await;
+        }
+    })
+    .await;
     tokio::time::timeout(Duration::from_secs(10), parent.session.shutdown())
         .await
         .expect("shutdown awaited every child");
@@ -1107,6 +1195,467 @@ async fn every_subagent_tool_has_a_replay_class() {
         [class("send_message", ToolReplay::Never)]
     );
     work.close().await;
+}
+
+// A foreground call honours its abort: Esc on the parent ends the call at
+// once with a result naming the child, whose run is stopped and settles
+// with no notice to the parent.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn aborting_the_parent_ends_a_foreground_call_promptly() {
+    let h = harness("subagent-foreground-abort");
+    let entered = Arc::new(tokio::sync::Notify::new());
+    {
+        let entered = Arc::clone(&entered);
+        h.think(Arc::new(move |_, messages| {
+            if is_child(messages) {
+                entered.notify_one();
+                return None;
+            }
+            if after_tool(messages) {
+                return Some(faux_assistant_message("done"));
+            }
+            Some(call(
+                "subagent",
+                json!({ "description": "hold", "prompt": "Hold.", "run_in_background": false }),
+            ))
+        }));
+    }
+    let parent = parent(&h, None).await;
+    let running = Arc::clone(&parent.session);
+    let prompt = tokio::spawn(async move { running.prompt("delegate", Vec::new()).await });
+    bounded("the child's request", entered.notified()).await;
+    bounded("the abort", parent.session.abort()).await;
+    let _ = bounded("the parent's turn", prompt).await.expect("joined");
+    let results = tool_results(&parent.session, "subagent");
+    assert_eq!(results.len(), 1, "{results:#?}");
+    let (text, is_error, details) = &results[0];
+    let id = details["subagent"]["agentId"].as_str().expect("id");
+    assert!(is_error);
+    assert_eq!(
+        text,
+        &format!(
+            "subagent run was cancelled; agent {id} was stopped and keeps its context. send_message continues it."
+        )
+    );
+    let jobs = parent.session.jobs().clone();
+    bounded("the child's run settled", async {
+        loop {
+            let mut events = jobs.subscribe();
+            if parent.host.running() == 0 && jobs.live() == 0 {
+                return;
+            }
+            events.changed().await;
+        }
+    })
+    .await;
+    let row = &parent.host.list()[0];
+    assert_eq!(row.status, Status::Idle);
+    assert_eq!(
+        row.settled.as_ref().map(|settled| settled.stop),
+        Some(StopReason::Aborted)
+    );
+    assert!(
+        !jobs.has_undelivered(),
+        "the call reported the run; no notice follows"
+    );
+    parent.session.shutdown().await;
+}
+
+/// Scripts the model for children that each wait for a permit of `gate`
+/// and then answer; the parent acknowledges everything.
+fn gated_children(h: &Harness, gate: &Arc<tokio::sync::Semaphore>) {
+    let steps = (0..64)
+        .map(|_| {
+            let gate = Arc::clone(gate);
+            FauxResponseStep::Factory(Arc::new(move |context, _, _, _| {
+                let messages = context.messages().to_vec();
+                let gate = Arc::clone(&gate);
+                Box::pin(async move {
+                    if is_child(&messages) {
+                        gate.acquire().await.expect("gate").forget();
+                        return Ok(faux_assistant_message("answer"));
+                    }
+                    Ok(faux_assistant_message("ok"))
+                })
+            }))
+        })
+        .collect();
+    h.faux.set_responses(steps);
+}
+
+// Children started side by side in one turn each wake the idle parent when
+// they finish, one after another, however many wake turns came before:
+// their notices carry the depth of the turn that started them.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_fourth_child_to_finish_still_wakes_an_idle_parent() {
+    let h = harness("subagent-wakes");
+    let gate = Arc::new(tokio::sync::Semaphore::new(0));
+    gated_children(&h, &gate);
+    let parent = parent(&h, None).await;
+    let route = parent
+        .host
+        .resolve(&models::RouteRequest::default())
+        .expect("route");
+    for index in 0..4 {
+        parent
+            .host
+            .start(&format!("child {index}"), "Work.", route.clone(), false)
+            .await
+            .expect("start");
+    }
+    let jobs = parent.session.jobs().clone();
+    for index in 0..4 {
+        gate.add_permits(1);
+        bounded("a notice", async {
+            loop {
+                let mut events = jobs.subscribe();
+                if jobs.has_undelivered() {
+                    return;
+                }
+                events.changed().await;
+            }
+        })
+        .await;
+        assert!(jobs.notice_would_wake(), "notice {index} wakes the parent");
+        assert!(
+            bounded("the notice turn", parent.session.deliver_job_notices())
+                .await
+                .expect("turn"),
+            "notice {index} opened a turn"
+        );
+    }
+    assert_eq!(customs(&parent.session, messages::NOTICE_TYPE).len(), 4);
+    parent.session.shutdown().await;
+}
+
+// A message the parent sent that the child's run ended without reading is
+// kept, said in the notice, kept through an eviction, and read first by
+// the child's next run.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_message_unread_at_settlement_survives_eviction() {
+    let h = harness("subagent-unread");
+    let entered = Arc::new(tokio::sync::Notify::new());
+    {
+        let entered = Arc::clone(&entered);
+        h.think(Arc::new(move |_, messages| {
+            let texts: Vec<String> = messages.iter().filter_map(user_text).collect();
+            let sent = |text: &str| texts.iter().any(|line| line.ends_with(text));
+            if sent("sent a message: go") {
+                return Some(faux_assistant_message(if sent("sent a message: first") {
+                    "read first"
+                } else {
+                    "missed first"
+                }));
+            }
+            if last_user(messages).starts_with("Hold.") {
+                entered.notify_one();
+                return None;
+            }
+            Some(faux_assistant_message("done"))
+        }));
+    }
+    let parent = parent(&h, None).await;
+    let route = parent
+        .host
+        .resolve(&models::RouteRequest::default())
+        .expect("route");
+    let id = parent
+        .host
+        .start("holder", "Hold.", route.clone(), false)
+        .await
+        .expect("start")
+        .id;
+    bounded("the child's request", entered.notified()).await;
+    let sent = parent
+        .host
+        .message_child(&id, "first")
+        .await
+        .expect("message");
+    assert_eq!(sent.delivery, Delivery::Running);
+    assert_eq!(parent.host.interrupt(&id), Ok(Interrupt::Requested));
+    settled(&parent).await;
+    let notices = customs(&parent.session, messages::NOTICE_TYPE);
+    assert!(
+        notices[0].0.starts_with(&format!(
+            "Background subagent {id} was stopped before it finished.\n1 message you sent it is unread; its next run reads it first."
+        )),
+        "{notices:#?}"
+    );
+    // Enough children that finish at once evict the holder to `ready`.
+    for index in 0..MAX_ACTIVE {
+        parent
+            .host
+            .start(&format!("filler {index}"), "Do.", route.clone(), false)
+            .await
+            .expect("start");
+    }
+    settled(&parent).await;
+    let row = |id: &str| {
+        parent
+            .host
+            .list()
+            .into_iter()
+            .find(|row| row.id == id)
+            .expect("row")
+    };
+    assert_eq!(row(&id).status, Status::Ready);
+    let sent = parent.host.message_child(&id, "go").await.expect("resume");
+    assert!(matches!(sent.delivery, Delivery::Started(_)));
+    settled(&parent).await;
+    assert_eq!(
+        row(&id).settled.and_then(|settled| settled.closing),
+        Some("read first".to_owned())
+    );
+    parent.session.shutdown().await;
+}
+
+/// A host over a standalone registry whose children are built by the
+/// harness once `release` is notified; `entered` is notified as each
+/// build begins. With `job`, each built child starts a background job that
+/// runs until `job` is notified or the child stops.
+fn gated_host(
+    h: &Arc<Harness>,
+    entered: &Arc<tokio::sync::Notify>,
+    release: Option<Arc<tokio::sync::Notify>>,
+    job: Option<Arc<tokio::sync::Notify>>,
+) -> (SubagentHost, JobRegistry, WorkGate) {
+    let work = WorkGate::default();
+    let jobs = JobRegistry::new(work.clone(), crate::jobs::JobLimits::default());
+    let inner = builder(h, "parent".into(), None);
+    let entered = Arc::clone(entered);
+    let gated: ChildBuilder = Arc::new(move |spec| {
+        let (inner, entered, release, job) = (
+            Arc::clone(&inner),
+            Arc::clone(&entered),
+            release.clone(),
+            job.clone(),
+        );
+        Box::pin(async move {
+            entered.notify_one();
+            if let Some(release) = release {
+                release.notified().await;
+            }
+            let session = inner(spec).await?;
+            if let Some(finish) = job {
+                session
+                    .jobs()
+                    .start(
+                        crate::jobs::JobSpec {
+                            kind: "bash",
+                            label: "serve".into(),
+                            output: crate::jobs::OutputMode::Final,
+                        },
+                        move |context| async move {
+                            tokio::select! {
+                                () = finish.notified() => crate::jobs::JobOutcome::completed("served"),
+                                () = context.signal().cancelled() => crate::jobs::JobOutcome::killed("stopped"),
+                            }
+                        },
+                    )
+                    .map_err(|error| error.to_string())?;
+            }
+            Ok(session)
+        })
+    });
+    let host = SubagentHost::new(HostOptions {
+        parent_id: "parent".into(),
+        parent_file: None,
+        jobs: jobs.clone(),
+        work: work.clone(),
+        selection: SessionSelection::default(),
+        registry: h.runtime.clone(),
+        settings: Settings::default(),
+        builder: gated,
+        recovered: Recovered::default(),
+    });
+    (host, jobs, work)
+}
+
+/// Waits for the next notice posted to `jobs` and takes it.
+async fn next_notice(jobs: &JobRegistry) -> CustomMessage {
+    loop {
+        let mut events = jobs.subscribe();
+        if let Some(notice) = jobs.claim_mail().into_iter().next() {
+            return notice;
+        }
+        events.changed().await;
+    }
+}
+
+fn notice_text(notice: &CustomMessage) -> String {
+    bake_ai::utils::text::user_content_text(&notice.content, "\n")
+}
+
+// An interrupt that comes before the child's run has begun still stops
+// that run; one for a child with no run says there is nothing to stop.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_interrupt_before_the_run_begins_stops_it() {
+    let h = harness("subagent-early-interrupt");
+    h.think(Arc::new(|_, _| Some(faux_assistant_message("answered"))));
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Notify::new());
+    let (host, jobs, work) = gated_host(&h, &entered, Some(Arc::clone(&release)), None);
+    let route = ChildRoute {
+        model: h.model("faux-1"),
+        thinking_level: None,
+    };
+    let start = {
+        let host = host.clone();
+        tokio::spawn(async move { host.start("early", "Answer.", route, false).await })
+    };
+    bounded("the build began", entered.notified()).await;
+    let id = host.list()[0].id.clone();
+    assert_eq!(host.interrupt(&id), Ok(Interrupt::Requested));
+    release.notify_one();
+    bounded("the start", start)
+        .await
+        .expect("joined")
+        .expect("started");
+    let notice = bounded("the notice", next_notice(&jobs)).await;
+    assert!(
+        notice_text(&notice).starts_with(&format!(
+            "Background subagent {id} was stopped before it finished."
+        )),
+        "{}",
+        notice_text(&notice)
+    );
+    assert_eq!(
+        notice
+            .details
+            .as_ref()
+            .map(|details| details["stopReason"].clone()),
+        Some(json!("aborted"))
+    );
+    assert!(
+        h.requests.lock().expect("requests").is_empty(),
+        "the stopped run sent no request"
+    );
+    bounded("the run's end", async {
+        loop {
+            let mut events = jobs.subscribe();
+            if host.running() == 0 && jobs.live() == 0 {
+                return;
+            }
+            events.changed().await;
+        }
+    })
+    .await;
+    assert_eq!(host.interrupt(&id), Ok(Interrupt::NotRunning("idle")));
+    assert_eq!(
+        host.interrupt("nobody"),
+        Err("unknown agent nobody; use list_agents to find a subagent id.".to_owned())
+    );
+    work.close().await;
+}
+
+// A child whose turn finished while its own job still runs reports that
+// turn after the job wait, naming the job; the job's end then continues
+// the child in a run of its own, with its own notice. Virtual time.
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn a_child_with_a_live_job_still_reports_its_turn() {
+    let h = harness("subagent-live-job");
+    h.think(Arc::new(|_, messages| {
+        if last_user(messages).starts_with("background job") {
+            return Some(faux_assistant_message("the server finished"));
+        }
+        Some(faux_assistant_message("started the server"))
+    }));
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let finish = Arc::new(tokio::sync::Notify::new());
+    let (host, jobs, work) = gated_host(&h, &entered, None, Some(Arc::clone(&finish)));
+    let route = ChildRoute {
+        model: h.model("faux-1"),
+        thinking_level: None,
+    };
+    let started = tokio::time::Instant::now();
+    let id = host
+        .start("server", "Serve.", route, false)
+        .await
+        .expect("start")
+        .id;
+    let notice = next_notice(&jobs).await;
+    assert!(started.elapsed() >= JOB_WAIT, "the run waited for its job");
+    assert_eq!(
+        notice_text(&notice),
+        format!(
+            "Background subagent {id} finished its turn, but its background jobs still run: bash-1. When one finishes it continues, and you are notified again.\nIts closing message:\nstarted the server"
+        )
+    );
+    assert_eq!(host.list()[0].status, Status::Idle);
+    assert_eq!(jobs.live(), 0, "a settled run holds nothing live");
+    finish.notify_one();
+    let notice = next_notice(&jobs).await;
+    assert_eq!(
+        notice_text(&notice),
+        format!(
+            "Background subagent {id} finished and will do no further work unless you send it more.\nIts closing message:\nthe server finished"
+        )
+    );
+    assert_eq!(host.list()[0].run, 2);
+    work.close().await;
+}
+
+// A notice says what its run left: messages it did not read, those lost
+// when Bake stopped, and jobs still running. A restart reports the unread
+// messages of a run whose notice was never delivered as lost.
+#[test]
+fn a_notice_names_what_its_run_left_behind() {
+    let notice = |stop, leftovers: Leftovers| {
+        notice_text(&messages::settlement_notice_with(
+            "c", 1, stop, None, &leftovers,
+        ))
+    };
+    assert_eq!(
+        notice(
+            StopReason::Aborted,
+            Leftovers {
+                unread: 2,
+                ..Leftovers::default()
+            }
+        ),
+        "Background subagent c was stopped before it finished.\n2 messages you sent it are unread; its next run reads them first.\nIt left no closing message."
+    );
+    assert_eq!(
+        notice(
+            StopReason::MaxTokens,
+            Leftovers {
+                jobs: vec!["bash-1".into()],
+                ..Leftovers::default()
+            }
+        ),
+        "Background subagent c ran out of room before it finished.\nIts background jobs still run: bash-1. When one finishes it continues, and you are notified again.\nIt left no closing message."
+    );
+    let mut store =
+        SessionManager::in_memory(Some("/tmp"), NewSessionOptions::default(), Vec::new())
+            .expect("store");
+    store
+        .append_message(crate::session::AgentMessage::from_json(
+            json!({
+                "role": "toolResult",
+                "toolCallId": "call-1",
+                "toolName": "send_message",
+                "content": [{ "type": "text", "text": "message delivered to agent c; it reads it at its next step" }],
+                "details": { "agentId": "c", "messageId": "m", "runId": 4 },
+                "isError": false,
+                "timestamp": 0,
+            })
+            .as_object()
+            .expect("object")
+            .clone(),
+        ))
+        .expect("result");
+    store
+        .append_custom_entry(
+            SETTLED_TYPE,
+            Some(json!({ "version": 1, "agentId": "c", "runId": 4, "stopReason": "aborted", "closing": null, "unread": 1 })),
+        )
+        .expect("fact");
+    let lost = lost_runs(&store);
+    assert_eq!(lost.len(), 1);
+    assert_eq!(
+        notice_text(&lost[0]),
+        "Background subagent c was stopped before it finished.\n1 message you sent it was unread when Bake stopped and is lost.\nIt left no closing message."
+    );
 }
 
 #[path = "barrier_tests.rs"]
