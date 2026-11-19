@@ -7,7 +7,7 @@
 //! by Wasmtime inside the calling process. Bake implements the module's
 //! twelve imports and drives its C API itself; the script environment
 //! (`tools`, `ALL_TOOLS`, `text`, `image`, `exit`, `console`, `store`, `load`)
-//! is Pi's prelude, verbatim. Like Pi's `packages/codemode`, the crate has no
+//! is Pi's prelude, with Bake's changes listed in the README. Like Pi's `packages/codemode`, the crate has no
 //! agent types: the host answers every call.
 //!
 //! ```no_run
@@ -32,7 +32,8 @@
 //!
 //! [`CodemodeEngine`] is compiled once per process. Each [`Run`] owns one OS
 //! thread with a 40 MiB stack; dropping it aborts the script and joins the
-//! thread. A script stops at its deadline or [`Run::abort`] through
+//! thread. A script stops at its deadline, after running JavaScript for
+//! [`Limits::busy`] without waiting on the host, or at [`Run::abort`], through
 //! Wasmtime's epoch interruption (so long built-ins stop too), QuickJS's
 //! interrupt poll, and checks between promise job batches. QuickJS's heap is
 //! limited to 256 MiB by default and the guest's linear memory to 320 MiB.
@@ -74,9 +75,9 @@ pub use tool_search::{
     create_tool_search_document, tokenize,
 };
 pub use types::{
-    AnswerError, CallError, CallResult, Completion, DEFAULT_HEAP_BYTES,
+    AnswerError, CallError, CallResult, Completion, DEFAULT_BUSY_BUDGET, DEFAULT_HEAP_BYTES,
     DEFAULT_LINEAR_MEMORY_BYTES, Deterministic, During, EngineError, Event, ExecuteRequest,
     ExitHook, Failure, GlobalDeclaration, HostCall, Limits, MAX_PENDING_ARGUMENT_BYTES,
-    MAX_PENDING_CALLS, MAX_STACK_BYTES, Outcome, OutputItem, ScriptError, StartError, StoreValues,
-    StoreWrites, ToolDeclaration, discovery_globals,
+    MAX_PENDING_CALLS, MAX_STACK_BYTES, Outcome, OutputItem, PENDING_CALL_BYTES, ScriptError,
+    StartError, StoreValues, StoreWrites, ToolDeclaration, discovery_globals,
 };

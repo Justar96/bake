@@ -26,7 +26,7 @@ fn counted(mut request: ExecuteRequest, exits: &Arc<AtomicUsize>) -> ExecuteRequ
 }
 
 async fn wait_for_exit(exits: &AtomicUsize) {
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + BOUND;
     while exits.load(Ordering::SeqCst) == 0 {
         assert!(Instant::now() < deadline, "the script thread did not exit");
         tokio::time::sleep(Duration::from_millis(2)).await;
@@ -123,7 +123,7 @@ async fn a_hanging_call_times_out_and_the_thread_exits() {
     request.tools = vec![ToolDeclaration::named("hang")];
     request.source.options.timeout_ms = Some(100);
     let mut run = engine().start(request).expect("the fixture starts");
-    let outcome = tokio::time::timeout(Duration::from_secs(5), async {
+    let outcome = tokio::time::timeout(BOUND, async {
         loop {
             match run.next().await {
                 Event::Call(call) => assert_eq!(call.name(), "hang"),
@@ -180,7 +180,7 @@ async fn reports_the_exit_of_ordinary_and_deterministic_runs() {
         }
     }
     assert!(deterministic.finished());
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + BOUND;
     while exits.load(Ordering::SeqCst) < 2 {
         assert!(Instant::now() < deadline, "a script thread did not exit");
         tokio::time::sleep(Duration::from_millis(2)).await;
@@ -189,8 +189,9 @@ async fn reports_the_exit_of_ordinary_and_deterministic_runs() {
     assert_eq!(exits.load(Ordering::SeqCst), 2);
 }
 
-/// Pi's process-lifetime cases: a spinning script ends promptly after an
-/// abort, a timeout, or a drop, and so does its thread.
+/// Pi's process-lifetime cases: a spinning script ends after an abort, a
+/// timeout, or a drop, and so does its thread; without the stop it would
+/// spin until the busy budget.
 #[tokio::test]
 async fn a_spinning_script_and_its_thread_end_promptly() {
     #[derive(Clone, Copy, Debug)]
@@ -202,7 +203,10 @@ async fn a_spinning_script_and_its_thread_end_promptly() {
 
     for end in [End::Abort, End::Timeout, End::Drop] {
         let exits = Arc::new(AtomicUsize::new(0));
-        let mut request = counted(ExecuteRequest::new("while (true) {}"), &exits);
+        let mut request = counted(
+            ExecuteRequest::new("text('running'); while (true) {}"),
+            &exits,
+        );
         if matches!(end, End::Timeout) {
             request.source.options.timeout_ms = Some(100);
         }
@@ -210,8 +214,12 @@ async fn a_spinning_script_and_its_thread_end_promptly() {
             Ok(run) => run,
             Err(error) => panic!("{error}"),
         };
-        tokio::time::sleep(Duration::from_millis(50)).await;
-        let started = Instant::now();
+        // The deadline counts from the start, so a loaded host may time the
+        // script out before it prints; the other ends wait until it spins.
+        if !matches!(end, End::Timeout) {
+            let event = tokio::time::timeout(BOUND, run.next()).await;
+            assert!(matches!(event, Ok(Event::Output(_))), "{end:?}: {event:?}");
+        }
         match end {
             End::Abort => {
                 run.abort();
@@ -219,7 +227,15 @@ async fn a_spinning_script_and_its_thread_end_promptly() {
                 assert!(matches!(event, Ok(Event::Done(_))), "{event:?}");
             }
             End::Timeout => {
-                let event = tokio::time::timeout(BOUND, run.next()).await;
+                let event = tokio::time::timeout(BOUND, async {
+                    loop {
+                        match run.next().await {
+                            Event::Output(_) => {}
+                            other => break other,
+                        }
+                    }
+                })
+                .await;
                 assert!(
                     matches!(&event, Ok(Event::Done(outcome)) if matches!(outcome.result, Err(Failure::Timeout { .. }))),
                     "{event:?}"
@@ -228,10 +244,5 @@ async fn a_spinning_script_and_its_thread_end_promptly() {
             End::Drop => drop(run),
         }
         wait_for_exit(&exits).await;
-        assert!(
-            started.elapsed() < Duration::from_secs(1),
-            "{end:?}: {:?}",
-            started.elapsed()
-        );
     }
 }

@@ -545,6 +545,16 @@ fn formats_each_failure_kind_with_the_calls_that_ran() {
         ),
         "Script aborted: This operation was aborted\n\nNo tool calls were made."
     );
+    // The engine's busy-budget message says what to do; it is shown as is.
+    assert_eq!(
+        format_error(
+            &Failure::Busy {
+                message: "Script ran JavaScript for 30 s without waiting on a tool call (an endless loop?). Await tool calls in the loop, or set timeout_ms to allow a longer computation.".to_owned()
+            },
+            std::slice::from_ref(&call)
+        ),
+        "Script ran JavaScript for 30 s without waiting on a tool call (an endless loop?). Await tool calls in the loop, or set timeout_ms to allow a longer computation.\n\nTool calls made before the failure (they are not undone): echo (ok)"
+    );
     assert_eq!(
         format_error(
             &Failure::Protocol {

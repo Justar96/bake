@@ -15,7 +15,7 @@
 //! after it runs, as Pi's host stops the VM on `done`.
 
 use std::borrow::Cow;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -31,7 +31,7 @@ use crate::js::utf16_len;
 use crate::prelude::{MAX_OUTPUT_CHARS, MAX_OUTPUT_ITEMS};
 use crate::types::{
     Completion, During, Event, Failure, HostCall, MAX_PENDING_ARGUMENT_BYTES, MAX_PENDING_CALLS,
-    Outcome, OutputItem, ScriptError, StoreWrites,
+    Outcome, OutputItem, PENDING_CALL_BYTES, ScriptError, StoreWrites,
 };
 
 /// WASI `errno` values.
@@ -48,33 +48,47 @@ const MAX_BRIDGE_ARGS: u32 = 8;
 pub(crate) enum StopReason {
     Aborted = 1,
     TimedOut = 2,
+    Busy = 3,
 }
 
 /// The message of an abort without one, Pi's default.
 pub(crate) const ABORTED_MESSAGE: &str = "Execution aborted";
 
-/// The stop flag and deadline one run's thread, its owner, its deadline
+/// What the watchdog waits on.
+struct Watch {
+    /// Set when the script thread has its outcome.
+    finished: bool,
+    /// When the VM last started running JavaScript; `None` while it waits
+    /// for an answer.
+    busy_since: Option<Instant>,
+}
+
+/// The stop flag, deadline, and busy budget one run's thread, its owner, its
 /// watchdog, and the engine's epoch callback share.
 pub(crate) struct RunControl {
     stop: AtomicU8,
     abort_message: Mutex<Option<String>>,
     deadline: Option<Instant>,
     timeout: Option<Duration>,
+    busy: Duration,
     engine: Engine,
-    /// Set when the script thread has its outcome; wakes the watchdog.
-    finished: Mutex<bool>,
+    watch: Mutex<Watch>,
     wake: Condvar,
 }
 
 impl RunControl {
-    pub(crate) fn new(engine: Engine, timeout: Option<Duration>) -> Self {
+    pub(crate) fn new(engine: Engine, timeout: Option<Duration>, busy: Duration) -> Self {
         Self {
             stop: AtomicU8::new(0),
             abort_message: Mutex::new(None),
             deadline: timeout.and_then(|timeout| Instant::now().checked_add(timeout)),
             timeout,
+            busy,
             engine,
-            finished: Mutex::new(false),
+            watch: Mutex::new(Watch {
+                finished: false,
+                busy_since: None,
+            }),
             wake: Condvar::new(),
         }
     }
@@ -107,37 +121,76 @@ impl RunControl {
         self.engine.increment_epoch();
     }
 
-    /// Stops the run at its deadline whether or not anything else is
+    fn watch(&self) -> std::sync::MutexGuard<'_, Watch> {
+        self.watch.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// The VM starts running JavaScript: the busy budget starts.
+    pub(crate) fn enter_vm(&self) {
+        self.watch().busy_since = Some(Instant::now());
+        self.wake.notify_all();
+    }
+
+    /// The VM is about to wait for an answer: the busy budget stops.
+    /// Returns whether the run was stopped first. The watchdog stops a busy
+    /// run only while holding the same lock, so a run that is not stopped
+    /// here is never stopped as busy while it waits, which only an answer or
+    /// a [`crate::vm::Command::Stop`] would end.
+    pub(crate) fn leave_vm(&self) -> bool {
+        let mut watch = self.watch();
+        watch.busy_since = None;
+        self.stopped()
+    }
+
+    /// Stops the run at its deadline, or once the VM has run JavaScript for
+    /// the busy budget without waiting, whether or not anything else is
     /// running: the guest may be inside one long built-in that neither polls
-    /// QuickJS's interrupt handler nor returns to the driver, and only an
-    /// epoch increment reaches it. Returns once the deadline passed or the
-    /// script thread called [`RunControl::finish`].
-    pub(crate) fn watch_deadline(&self) {
-        let Some(deadline) = self.deadline else {
-            return;
-        };
-        let mut finished = self.finished.lock().unwrap_or_else(PoisonError::into_inner);
+    /// QuickJS's interrupt handler nor returns to the driver, or in a promise
+    /// job loop that never lets the driver wait, and only an epoch increment
+    /// reaches it. Returns once it stopped the run or the script thread
+    /// called [`RunControl::finish`].
+    pub(crate) fn watch_run(&self) {
+        let mut watch = self.watch();
         loop {
-            if *finished {
+            if watch.finished {
                 return;
             }
             let now = Instant::now();
-            if now >= deadline {
-                drop(finished);
+            if self.deadline.is_some_and(|deadline| now >= deadline) {
+                drop(watch);
                 self.stop(StopReason::TimedOut);
                 return;
             }
-            finished = self
-                .wake
-                .wait_timeout(finished, deadline - now)
-                .unwrap_or_else(PoisonError::into_inner)
-                .0;
+            let busy_until = watch
+                .busy_since
+                .map(|since| since.checked_add(self.busy).unwrap_or(since));
+            if busy_until.is_some_and(|until| now >= until) {
+                // Under the lock: see `leave_vm`.
+                self.stop(StopReason::Busy);
+                return;
+            }
+            let wake_at = match (self.deadline, busy_until) {
+                (Some(deadline), Some(until)) => Some(deadline.min(until)),
+                (deadline, until) => deadline.or(until),
+            };
+            watch = match wake_at {
+                Some(at) => {
+                    self.wake
+                        .wait_timeout(watch, at.saturating_duration_since(now))
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .0
+                }
+                None => self
+                    .wake
+                    .wait(watch)
+                    .unwrap_or_else(PoisonError::into_inner),
+            };
         }
     }
 
-    /// Releases the deadline watchdog: the script thread has its outcome.
+    /// Releases the watchdog: the script thread has its outcome.
     pub(crate) fn finish(&self) {
-        *self.finished.lock().unwrap_or_else(PoisonError::into_inner) = true;
+        self.watch().finished = true;
         self.wake.notify_all();
     }
 
@@ -178,9 +231,25 @@ impl RunControl {
                     self.timeout.map_or(0, |timeout| timeout.as_millis())
                 ),
             }),
+            3 => Some(Failure::Busy {
+                message: busy_message(self.busy),
+            }),
             _ => None,
         }
     }
+}
+
+/// [`Failure::Busy`]'s message: what happened and what the script can do.
+pub(crate) fn busy_message(budget: Duration) -> String {
+    let millis = budget.as_millis();
+    let span = if millis.is_multiple_of(1000) {
+        format!("{} s", millis / 1000)
+    } else {
+        format!("{millis} ms")
+    };
+    format!(
+        "Script ran JavaScript for {span} without waiting on a tool call (an endless loop?). Await tool calls in the loop, or set timeout_ms to allow a longer computation."
+    )
 }
 
 /// Calls waiting for an answer and the result numbers used, shared by the
@@ -380,11 +449,16 @@ pub(crate) struct HostState {
     events: UnboundedSender<Event>,
     book: Arc<Mutex<CallBook>>,
     deterministic: bool,
-    /// Calls the script has issued, tools and globals.
+    /// Calls reported to the host, tools and globals.
     pub(crate) issued: u32,
-    /// Calls whose answers the VM has applied; `issued - settled` calls wait.
+    /// Calls whose answers the VM has applied; `issued - settled` calls wait
+    /// for the host, at most [`MAX_PENDING_CALLS`].
     pub(crate) settled: u32,
-    /// The JSON argument bytes of each call that waits, by id.
+    /// Calls the script made past the window, reported in order as answers
+    /// free room.
+    held: VecDeque<HostCall>,
+    /// What each waiting call, reported or held, counts toward the byte
+    /// budget, by id.
     waiting_argument_bytes: HashMap<u32, usize>,
     /// Their sum, at most [`MAX_PENDING_ARGUMENT_BYTES`].
     waiting_argument_total: usize,
@@ -441,6 +515,7 @@ impl HostState {
             deterministic: setup.deterministic.is_some(),
             issued: 0,
             settled: 0,
+            held: VecDeque::new(),
             waiting_argument_bytes: HashMap::new(),
             waiting_argument_total: 0,
             output_chars: 0,
@@ -452,12 +527,46 @@ impl HostState {
         }
     }
 
-    /// Call `id`'s answer was applied: it no longer waits.
-    pub(crate) fn settle(&mut self, id: u32) {
+    /// Call `id`'s answer was applied: it no longer waits, and the first
+    /// held call, if any, is reported in its place.
+    pub(crate) fn settle(&mut self, id: u32) -> GuestResult<()> {
         self.settled = self.settled.saturating_add(1);
         if let Some(bytes) = self.waiting_argument_bytes.remove(&id) {
             self.waiting_argument_total = self.waiting_argument_total.saturating_sub(bytes);
         }
+        while self.window_open() {
+            let Some(call) = self.held.pop_front() else {
+                break;
+            };
+            self.report(call)?;
+        }
+        Ok(())
+    }
+
+    fn window_open(&self) -> bool {
+        (self.issued.saturating_sub(self.settled) as usize) < MAX_PENDING_CALLS
+    }
+
+    /// Records a call the script made, `charge` bytes toward the budget, and
+    /// reports it, or holds it while the window is full.
+    fn make_call(&mut self, call: HostCall, charge: usize) -> GuestResult<()> {
+        self.waiting_argument_total += charge;
+        self.waiting_argument_bytes.insert(call.id(), charge);
+        if self.held.is_empty() && self.window_open() {
+            self.report(call)
+        } else {
+            self.held.push_back(call);
+            Ok(())
+        }
+    }
+
+    fn report(&mut self, call: HostCall) -> GuestResult<()> {
+        if !lock(&self.book).pending.insert(call.id()) {
+            return Err(bridge_broken(&format!("duplicate call id {}", call.id())));
+        }
+        self.issued = self.issued.saturating_add(1);
+        self.emit(Event::Call(call));
+        Ok(())
     }
 
     pub(crate) fn emit(&self, event: Event) {
@@ -849,53 +958,37 @@ fn host_call(
                 return Err(GuestError::Protocol(format!("a call has the id {id}")));
             }
             let id = id as u32;
-            // A script that issues calls without awaiting them never lets
-            // the VM apply an answer, so its calls, answers, and promises
-            // would pile up until the heap limit, and the host's queues with
-            // them. The prelude calls the bridge inside a Promise executor,
-            // so an error thrown into the script here would only reject the
-            // call, and a loop that does not await would go on; the run
-            // fails instead.
-            let waiting = caller.data().issued.saturating_sub(caller.data().settled);
-            if waiting as usize >= MAX_PENDING_CALLS {
-                return Err(GuestError::Protocol(format!(
-                    "The script has {MAX_PENDING_CALLS} calls waiting for results, the most a run allows; await calls before making more, or batch them"
-                )));
-            }
             let name = required(
                 string_arg(caller, &exports, bridge.scratch, arg(2), None)?,
                 "call name",
             )?;
-            let remaining =
-                MAX_PENDING_ARGUMENT_BYTES.saturating_sub(caller.data().waiting_argument_total);
+            // Calls past the window are held, not refused: the prelude calls
+            // the bridge inside a Promise executor, so an error thrown into
+            // the script here would only reject that call, and a loop that
+            // never awaits would go on. Held calls count toward the byte
+            // budget, so such a loop ends the run there instead of filling
+            // the heap, and the host's queues, with calls it cannot settle.
+            let fixed = PENDING_CALL_BYTES.saturating_add(name.len());
+            let Some(remaining) = MAX_PENDING_ARGUMENT_BYTES
+                .saturating_sub(caller.data().waiting_argument_total)
+                .checked_sub(fixed)
+            else {
+                return Err(budget_passed());
+            };
             let json = match string_arg(caller, &exports, bridge.scratch, arg(3), Some(remaining)) {
-                Err(GuestError::TooLarge) => {
-                    return Err(GuestError::Protocol(format!(
-                        "The arguments of the script's calls waiting for results would exceed {MAX_PENDING_ARGUMENT_BYTES} bytes, the most a run allows; await calls before making more, or batch them"
-                    )));
-                }
+                Err(GuestError::TooLarge) => return Err(budget_passed()),
                 other => other?,
             };
-            let argument_bytes = json.as_ref().map_or(0, String::len);
+            let charge = fixed + json.as_ref().map_or(0, String::len);
             let args = json
                 .map(|json| parse_bridge_json(&json, "call arguments"))
                 .transpose()?;
-            {
-                let state = caller.data();
-                let mut book = lock(&state.book);
-                if !book.pending.insert(id) {
-                    return Err(bridge_broken(&format!("duplicate call id {id}")));
-                }
-            }
-            let state = caller.data_mut();
-            state.issued = state.issued.saturating_add(1);
-            state.waiting_argument_total += argument_bytes;
-            state.waiting_argument_bytes.insert(id, argument_bytes);
-            state.emit(Event::Call(if kind == "call" {
+            let call = if kind == "call" {
                 HostCall::Tool { id, name, args }
             } else {
                 HostCall::Global { id, name, args }
-            }));
+            };
+            caller.data_mut().make_call(call, charge)?;
         }
         "output" => {
             let sub = required(
@@ -991,6 +1084,14 @@ fn host_call(
     Ok(exports.dup_value.call(&mut *caller, bridge.undefined)?)
 }
 
+/// The failure of a call that would pass the byte budget.
+fn budget_passed() -> GuestError {
+    GuestError::Protocol(format!(
+        "The script's calls waiting for results would take more than {} MiB, the most a run allows; await calls before making more, or batch them",
+        MAX_PENDING_ARGUMENT_BYTES >> 20
+    ))
+}
+
 fn output_limit() -> GuestError {
     GuestError::OutputLimit(format!(
         "script output exceeded the limit of {MAX_OUTPUT_CHARS} characters or {MAX_OUTPUT_ITEMS} text(), image(), and console calls"
@@ -1027,7 +1128,11 @@ mod tests {
             Ok(engine) => engine,
             Err(error) => panic!("{error}"),
         };
-        let control = Arc::new(RunControl::new(engine.wasmtime_engine().clone(), None));
+        let control = Arc::new(RunControl::new(
+            engine.wasmtime_engine().clone(),
+            None,
+            crate::types::DEFAULT_BUSY_BUDGET,
+        ));
         let (events, _) = tokio::sync::mpsc::unbounded_channel();
         let mut store = Store::new(
             engine.wasmtime_engine(),
@@ -1397,5 +1502,17 @@ mod tests {
         assert!(again.fill(&mut same).is_ok());
         assert_eq!(bytes, same);
         assert_ne!(bytes, [0; 6]);
+    }
+
+    #[test]
+    fn the_busy_message_names_the_budget_and_the_way_out() {
+        assert_eq!(
+            busy_message(crate::types::DEFAULT_BUSY_BUDGET),
+            "Script ran JavaScript for 30 s without waiting on a tool call (an endless loop?). Await tool calls in the loop, or set timeout_ms to allow a longer computation."
+        );
+        assert!(
+            busy_message(Duration::from_millis(250))
+                .starts_with("Script ran JavaScript for 250 ms ")
+        );
     }
 }

@@ -1,10 +1,14 @@
-// The script environment of Bake's code mode: Pi's codemode prelude, copied
-// verbatim (the evaluated text of PRELUDE_SOURCE, its limits substituted) from
+// The script environment of Bake's code mode: Pi's codemode prelude (the
+// evaluated text of PRELUDE_SOURCE, its limits substituted) from
 // packages/codemode/src/runtime/prelude-source.ts of Pi v1.5.2, revision
-// b4afdddf44e059c67ccf5097e5317d913521b470; it differs from v1.3.0's, revision
-// 71023aec1546d6d677a65669c5665c0927ce0dd0, only in format()'s handling of
-// numbers (33cd7e507). `src/prelude.rs` evaluates the text after the start
-// marker below, and a test pins its FNV-1a hash to Pi's.
+// b4afdddf44e059c67ccf5097e5317d913521b470, which differs from v1.3.0's,
+// revision 71023aec1546d6d677a65669c5665c0927ce0dd0, only in format()'s
+// handling of numbers (33cd7e507). Bake's changes, each marked "Bake:": a
+// Promise (any thenable) given to text(), image(), console.*, store(), a call,
+// or inside the return value is a TypeError naming where it is instead of
+// printing as {}, and error positions on the script's first line do not count
+// the wrapper's prefix. `src/prelude.rs` evaluates the text after the start
+// marker below, and a test pins its FNV-1a hash.
 //
 // MIT License
 //
@@ -138,8 +142,11 @@
 		bridge("done", ok, payload, writes);
 	}
 
-	function serialize(value) {
-		return value === undefined ? undefined : stringify(value);
+	// Bake: the script's first line follows "(async (tools, console) => {", whose
+	// characters its columns would otherwise count.
+	const SCRIPT_PREFIX_COLUMNS = 28;
+	function scriptPosition(line) {
+		return line.replace(/codemode\.js:1:(\d+)/, (_, column) => "codemode.js:1:" + Math.max(1, Number(column) - SCRIPT_PREFIX_COLUMNS));
 	}
 
 	// QuickJS stacks list frames only. Prefix "Name: message" like V8 so the
@@ -148,20 +155,55 @@
 		const head = error.message ? error.name + ": " + error.message : String(error.name);
 		const frames =
 			typeof error.stack === "string"
-				? error.stack.split("\n").filter((line) => line.trim() && !line.includes("codemode-prelude.js"))
+				? error.stack.split("\n").filter((line) => line.trim() && !line.includes("codemode-prelude.js")).map(scriptPosition)
 				: [];
 		return [head, ...frames].join("\n");
 	}
 
-	function format(value) {
+	// Bake: JSON writes a Promise as {}, which reads as an empty result. stringifyAwaited is
+	// stringify() refusing any thenable it would write, with a TypeError naming its path from root.
+	const IDENTIFIER = /^[A-Za-z_$][\w$]*$/;
+	let refusal;
+	function refuse(label, root, path) {
+		refusal = new TypeErrorCtor(
+			label === "return"
+				? path + " is a Promise; await it first"
+				: label + " got a Promise" + (path === root ? "" : " at " + path) + "; await it first",
+		);
+		return refusal;
+	}
+	function stringifyAwaited(value, label, root) {
+		if (value !== null && typeof value === "object" && typeof value.then === "function") throw refuse(label, root, root);
+		const paths = new Map();
+		return stringify(value, function (key, item) {
+			if (item !== null && typeof item === "object") {
+				const parent = paths.get(this);
+				const path =
+					parent === undefined
+						? root
+						: Array.isArray(this)
+							? parent + "[" + key + "]"
+							: IDENTIFIER.test(key)
+								? parent + "." + key
+								: parent + "[" + stringify(key) + "]";
+				if (typeof item.then === "function") throw refuse(label, root, path);
+				paths.set(item, path);
+			}
+			return item;
+		});
+	}
+
+	// Bake: with a label, a thenable in value is refused as stringifyAwaited refuses it.
+	function format(value, label, root) {
 		if (typeof value === "string") return value;
 		if (value instanceof ErrorCtor) return errorText(value);
 		// JSON.stringify turns NaN and Infinity into "null".
 		if (typeof value === "number") return String(value);
 		try {
-			const json = stringify(value);
+			const json = label === undefined ? stringify(value) : stringifyAwaited(value, label, root);
 			return json === undefined ? String(value) : json;
-		} catch {
+		} catch (error) {
+			if (label !== undefined && error === refusal) throw error;
 			return String(value);
 		}
 	}
@@ -180,11 +222,13 @@
 	}
 
 	function caller(kind, name, spread) {
+		const label = (kind === "call" ? "tools." + name : name) + "()";
 		return (...args) =>
 			new Promise((resolve, reject) => {
 				let json;
 				try {
-					json = serialize(spread ? args : args[0]);
+					const value = spread ? args : args[0];
+					json = value === undefined ? undefined : stringifyAwaited(value, label, "args");
 				} catch (error) {
 					reject(error);
 					return;
@@ -279,8 +323,9 @@
 		}
 		let json;
 		try {
-			json = stringify(value);
+			json = stringifyAwaited(value, "store(" + stringify(key) + ")", "value");
 		} catch (error) {
+			if (error === refusal) throw error;
 			throw new TypeError("store(" + stringify(key) + ") value is not JSON-serializable: " + format(error));
 		}
 		if (json === undefined) {
@@ -344,7 +389,7 @@
 		if (value === undefined || value === null || typeof value !== "object" && typeof value !== "function") {
 			return String(value);
 		}
-		const json = stringify(value);
+		const json = stringifyAwaited(value, "text()", "value");
 		return json === undefined ? String(value) : json;
 	}
 
@@ -386,6 +431,7 @@
 	];
 
 	function image(value) {
+		if (value !== null && typeof value === "object" && typeof value.then === "function") throw refuse("image()", "value", "value");
 		const url = imageUrl(value);
 		if (url === "") throw new TypeErrorCtor("image expects a non-empty image URL string, an object with image_url, or an image block { type: \"image\", data, mimeType }");
 		const colon = url.indexOf(":");
@@ -428,7 +474,7 @@
 	const console = {};
 	for (const level of ["log", "info", "warn", "error", "debug"]) {
 		console[level] = (...args) => {
-			output("console", args.map(format).join(" "));
+			output("console", args.map((arg, index) => format(arg, "console." + level + "()", "arguments[" + index + "]")).join(" "));
 		};
 	}
 	Object.freeze(console);
@@ -479,7 +525,7 @@
 				(value) => {
 					let json;
 					try {
-						json = serialize(value);
+						json = value === undefined ? undefined : stringifyAwaited(value, "return", "return value");
 					} catch (error) {
 						done(false, describeError(error));
 						return;

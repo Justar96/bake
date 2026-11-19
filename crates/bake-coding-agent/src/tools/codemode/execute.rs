@@ -337,6 +337,7 @@ pub(super) fn format_error(failure: &Failure, calls: &[CodemodeNestedCall]) -> S
             })
         }
         Failure::Timeout { message } => format!("Script timed out: {message}"),
+        Failure::Busy { message } => message.clone(),
         Failure::Aborted { message } => format!("Script aborted: {message}"),
         other => format!("Script sandbox failed: {}", other.message()),
     };
