@@ -133,7 +133,12 @@ pub async fn run_rpc_mode(session: AgentSession, options: RpcModeOptions) -> i32
             let noticing = Arc::clone(&noticing);
             rpc.tasks.spawn(async move {
                 loop {
-                    handler.deliver_notices().await;
+                    if handler.deliver_notices().await == Delivery::Busy {
+                        // The running turn takes the notices at its next
+                        // step; whatever it leaves is tried once it ends,
+                        // not in a loop that spins meanwhile.
+                        handler.session().wait_for_idle().await;
+                    }
                     noticing.store(false, Ordering::SeqCst);
                     // A notice posted while the turn ran, after its last
                     // step, woke a loop that found this task busy.
@@ -249,6 +254,16 @@ impl Rpc {
             .unwrap_or_else(PoisonError::into_inner);
         let _ = std::io::Write::flush(&mut *out);
     }
+}
+
+/// What [`Handler::deliver_notices`] did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Delivery {
+    /// Delivered, kept for the next prompt, or found nothing.
+    Done,
+    /// Declined: a turn, a compaction, or a starting prompt holds the
+    /// session.
+    Busy,
 }
 
 /// The prompt waiting for the session's next `agent_start`: the key it
@@ -681,23 +696,26 @@ impl Handler {
     /// next step instead. The turn is decided under the same hold and
     /// run-start claim as a `prompt`, so a client's prompt and a notice
     /// turn never both start; its events stream as a prompt's do.
-    async fn deliver_notices(&self) {
+    async fn deliver_notices(&self) -> Delivery {
         let session = self.session();
+        #[cfg(test)]
+        tests::count_notice_attempt(&session);
         let jobs = session.jobs();
         if !jobs.has_undelivered() {
-            return;
+            return Delivery::Done;
         }
         let deciding = self.prompting.lock().await;
         if session.is_streaming() || session.is_compacting() {
-            return;
+            return Delivery::Busy;
         }
         if !jobs.notice_would_wake() {
             // Kept for the next prompt; no turn opens.
             let _ = session.deliver_job_notices().await;
-            return;
+            return Delivery::Done;
         }
+        // A prompt holds the claim: its run is starting.
         let (Some(key), started) = self.claim_run_start(&session) else {
-            return;
+            return Delivery::Busy;
         };
         let run = session.deliver_job_notices();
         tokio::pin!(run);
@@ -712,6 +730,7 @@ impl Handler {
         if running {
             let _ = run.await;
         }
+        Delivery::Done
     }
 
     /// Claims the session's next `agent_start` for one prompt, with the

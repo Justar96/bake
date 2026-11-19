@@ -1143,6 +1143,11 @@ impl AgentSession {
         self.core.activity.borrow().run
     }
 
+    /// Waits until no prompt, compaction, or tree navigation runs.
+    pub async fn wait_for_idle(&self) {
+        self.core.wait_for_idle().await;
+    }
+
     /// Pi's `autoCompactionEnabled`.
     pub fn auto_compaction_enabled(&self) -> bool {
         read_settings(&self.settings).compaction_enabled()
