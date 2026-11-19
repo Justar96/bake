@@ -1579,5 +1579,6 @@ fn the_session_summary_reads_in_plain_words() {
 mod agents_live;
 mod commands_live;
 mod mcp_live;
+mod notices_live;
 mod sessions_live;
 mod share_live;
