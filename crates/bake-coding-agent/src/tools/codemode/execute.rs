@@ -25,8 +25,9 @@ use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 
 use super::{
-    CODEMODE_TOOL_NAME, CodemodeCallCounts, CodemodeHost, CodemodeNamespace, CodemodeNestedCall,
-    CodemodeNestedCallStatus, CodemodeStoreEntryData, codemode_details, to_codemode_declaration,
+    CODEMODE_TOOL_NAME, CODEMODE_WAITING_DETAIL, CodemodeCallCounts, CodemodeHost,
+    CodemodeNamespace, CodemodeNestedCall, CodemodeNestedCallStatus, CodemodeStoreEntryData,
+    codemode_details, to_codemode_declaration,
 };
 use crate::owned_work::WorkGate;
 use crate::tools::truncate::format_size;
@@ -1112,7 +1113,11 @@ async fn reserve_slot(
                     "Waiting for a free codemode worker: all {} are running other scripts.",
                     admission.limit()
                 )))],
-                details: Some(CallView::default().details(None)),
+                details: Some({
+                    let mut details = CallView::default().details(None);
+                    details[CODEMODE_WAITING_DETAIL] = Value::Bool(true);
+                    details
+                }),
                 ..AgentToolResult::default()
             });
         })

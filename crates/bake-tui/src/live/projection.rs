@@ -45,7 +45,7 @@ use bake_coding_agent::session::messages::CustomMessage;
 use bake_coding_agent::subagents::SUBAGENT_DETAIL;
 use bake_coding_agent::subagents::messages as subagents;
 use bake_coding_agent::tools::bash::BACKGROUND_JOB_DETAIL;
-use bake_coding_agent::tools::codemode::CODEMODE_TOOL_NAME;
+use bake_coding_agent::tools::codemode::{CODEMODE_TOOL_NAME, CODEMODE_WAITING_DETAIL};
 use bake_coding_agent::tools::job_tools::STILL_RUNNING;
 use bake_coding_agent::tools::visualize::VISUALIZE_TOOL_NAME;
 use bake_coding_agent::tools::web_tools::EXTERNAL_WEB_CONTENT_NOTICE;

@@ -1579,10 +1579,8 @@ fn a_codemode_card_counts_the_calls_its_result_does_not_list() {
     let rows = live_rows(run(
         &mut projector,
         partial(
-            vec![UserContentBlock::Text(TextContent::new(
-                "Waiting for a free codemode worker: all 2 are running other scripts.",
-            ))],
-            json!({ "calls": [] }),
+            vec![UserContentBlock::Text(TextContent::new("any wording"))],
+            json!({ "calls": [], CODEMODE_WAITING_DETAIL: true }),
         ),
     ));
     assert_eq!(codemode(&rows[0]).summary.as_deref(), Some(copy::WAITING));

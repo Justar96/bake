@@ -455,19 +455,17 @@ pub(super) fn learn(labels: &mut Labels, details: Option<&Value>) {
     }
 }
 
-/// The start of the partial result `codemode` publishes while its script
-/// waits for a worker, in `bake-coding-agent`'s
-/// `tools/codemode/execute.rs`.
-const WAITING_FOR_A_WORKER: &str = "Waiting for a free codemode worker";
-
 /// A running call's outcome from a partial result: its output so far, or
 /// for a `codemode` call the calls its script has made, and whether it
 /// waits for a worker.
 pub(super) fn partial(tool: &str, result: &AgentToolResult) -> Outcome {
     if tool == CODEMODE_TOOL_NAME {
-        let waiting = result.content.iter().any(|block| {
-            matches!(block, UserContentBlock::Text(text) if text.text.starts_with(WAITING_FOR_A_WORKER))
-        });
+        let waiting = result
+            .details
+            .as_ref()
+            .and_then(|details| details.get(CODEMODE_WAITING_DETAIL))
+            .and_then(Value::as_bool)
+            == Some(true);
         return Outcome {
             calls: nested_calls(result.details.as_ref()),
             omitted: omitted_calls(result.details.as_ref()),

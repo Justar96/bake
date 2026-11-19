@@ -1099,7 +1099,10 @@ async fn waiting_for_a_worker(
         if partial.content.first().is_some_and(|block| {
             matches!(block, UserContentBlock::Text(text) if text.text == WAITING_FOR_A_WORKER)
         }) {
-            assert_eq!(partial.details, Some(json!({ "calls": [] })));
+            assert_eq!(
+                partial.details,
+                Some(json!({ "calls": [], CODEMODE_WAITING_DETAIL: true }))
+            );
             seen += 1;
         }
     }

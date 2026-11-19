@@ -304,10 +304,16 @@ impl CodemodeCallCounts {
     }
 }
 
+/// The `details` member, `true`, of the partial result a script publishes
+/// while it waits for a free worker: `{ calls: [], waitingForWorker: true }`.
+/// Bake's own; a frontend reads it rather than the partial's text.
+pub const CODEMODE_WAITING_DETAIL: &str = "waitingForWorker";
+
 /// The `details` of a codemode result, Pi's `CodemodeToolDetails`:
 /// `{ calls, fullOutputPath? }`, with Bake's `omittedCalls` when a script
 /// made more calls than `calls` lists ([`MAX_LISTED_CALLS`], the latest
-/// ones).
+/// ones). A partial result while the script waits for a worker adds
+/// [`CODEMODE_WAITING_DETAIL`].
 pub fn codemode_details(
     calls: &[CodemodeNestedCall],
     omitted: &CodemodeCallCounts,
