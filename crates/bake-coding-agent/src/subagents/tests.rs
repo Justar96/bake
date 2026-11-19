@@ -213,6 +213,17 @@ impl Harness {
 /// A builder of children in the harness's directory, with only the
 /// child's `send_message`.
 fn builder(h: &Arc<Harness>, parent_id: String, parent_file: Option<PathBuf>) -> ChildBuilder {
+    builder_saved(h, parent_id, parent_file, true)
+}
+
+/// [`builder`], whose new children are saved in files only when
+/// `persisted`.
+fn builder_saved(
+    h: &Arc<Harness>,
+    parent_id: String,
+    parent_file: Option<PathBuf>,
+    persisted: bool,
+) -> ChildBuilder {
     let h = Arc::clone(h);
     Arc::new(move |spec: ChildSpec| {
         let h = Arc::clone(&h);
@@ -223,7 +234,7 @@ fn builder(h: &Arc<Harness>, parent_id: String, parent_file: Option<PathBuf>) ->
                 ChildSource::New { id, label } => new_child_store(
                     "/tmp",
                     &h.place,
-                    true,
+                    persisted,
                     &parent_id,
                     parent_file.as_deref(),
                     id,
@@ -1656,6 +1667,456 @@ fn a_notice_names_what_its_run_left_behind() {
         notice_text(&lost[0]),
         "Background subagent c was stopped before it finished.\n1 message you sent it was unread when Bake stopped and is lost.\nIt left no closing message."
     );
+}
+
+/// What the children of a [`scripted_host`] do, by their label.
+#[derive(Clone, Default)]
+struct Script {
+    /// The build of the child with this label first notifies `entered`,
+    /// then waits for `release`: (label, entered, release).
+    gate: Option<(
+        &'static str,
+        Arc<tokio::sync::Notify>,
+        Arc<tokio::sync::Notify>,
+    )>,
+    /// Children whose label starts with this start a job that runs until
+    /// `finish` wakes its waiters or the child stops: (prefix, finish).
+    jobs: Option<(&'static str, Arc<tokio::sync::Notify>)>,
+    /// The build of the child with this label fails.
+    fail: Option<&'static str>,
+    /// New children are kept in memory, with no file.
+    unsaved: bool,
+}
+
+/// A host over a standalone registry whose children the harness builds as
+/// `script` says.
+fn scripted_host(h: &Arc<Harness>, script: Script) -> (SubagentHost, JobRegistry, WorkGate) {
+    let work = WorkGate::default();
+    let jobs = JobRegistry::new(work.clone(), crate::jobs::JobLimits::default());
+    let inner = builder_saved(h, "parent".into(), None, !script.unsaved);
+    let built: ChildBuilder = Arc::new(move |spec| {
+        let (inner, script) = (Arc::clone(&inner), script.clone());
+        Box::pin(async move {
+            let label = match &spec.source {
+                ChildSource::New { label, .. } => label.clone(),
+                ChildSource::Open { .. } => String::new(),
+            };
+            if let Some((gated, entered, release)) = &script.gate
+                && label == *gated
+            {
+                entered.notify_one();
+                release.notified().await;
+            }
+            if script.fail == Some(label.as_str()) {
+                return Err("the child could not be built".to_owned());
+            }
+            let session = inner(spec).await?;
+            if let Some((prefix, finish)) = script.jobs
+                && label.starts_with(prefix)
+            {
+                session
+                    .jobs()
+                    .start(
+                        crate::jobs::JobSpec {
+                            kind: "bash",
+                            label: "serve".into(),
+                            output: crate::jobs::OutputMode::Final,
+                        },
+                        move |context| async move {
+                            tokio::select! {
+                                () = finish.notified() => crate::jobs::JobOutcome::completed("served"),
+                                () = context.signal().cancelled() => crate::jobs::JobOutcome::killed("stopped"),
+                            }
+                        },
+                    )
+                    .map_err(|error| error.to_string())?;
+            }
+            Ok(session)
+        })
+    });
+    let host = SubagentHost::new(HostOptions {
+        parent_id: "parent".into(),
+        parent_file: None,
+        jobs: jobs.clone(),
+        work: work.clone(),
+        selection: SessionSelection::default(),
+        registry: h.runtime.clone(),
+        settings: Settings::default(),
+        builder: built,
+        recovered: Recovered::default(),
+    });
+    (host, jobs, work)
+}
+
+fn faux_route(h: &Harness) -> ChildRoute {
+    ChildRoute {
+        model: h.model("faux-1"),
+        thinking_level: None,
+    }
+}
+
+/// Takes the notices posted to `jobs` into `seen` until one is about
+/// child `id`, and returns its text.
+async fn notice_about(jobs: &JobRegistry, seen: &mut Vec<CustomMessage>, id: &str) -> String {
+    loop {
+        let mut events = jobs.subscribe();
+        seen.extend(jobs.claim_mail());
+        if let Some(notice) = seen.iter().find(|notice| {
+            notice
+                .details
+                .as_ref()
+                .map(|details| details["agentId"].clone())
+                == Some(json!(id))
+        }) {
+            return notice_text(notice);
+        }
+        events.changed().await;
+    }
+}
+
+/// Polls `future` once, with a waker that does nothing.
+fn poll_once<F: std::future::Future + Unpin>(future: &mut F) -> std::task::Poll<F::Output> {
+    let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+    std::pin::Pin::new(future).poll(&mut cx)
+}
+
+fn status_of(host: &SubagentHost, id: &str) -> Status {
+    host.list()
+        .into_iter()
+        .find(|row| row.id == id)
+        .map_or(Status::Unavailable, |row| row.status)
+}
+
+// An idle child whose own job still runs is never set aside, since its
+// shutdown would stop the job its notice promised to report: an idle
+// child without one is chosen instead, and with only such children a
+// start queues until a job ends. Virtual time.
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn an_idle_child_whose_job_runs_is_not_set_aside() {
+    let h = harness("subagent-evict-jobs");
+    h.think(Arc::new(|_, messages| {
+        if last_user(messages).starts_with("background job") {
+            return Some(faux_assistant_message("the job ended"));
+        }
+        Some(faux_assistant_message("turn done"))
+    }));
+    let finish = Arc::new(tokio::sync::Notify::new());
+    let (host, jobs, work) = scripted_host(
+        &h,
+        Script {
+            jobs: Some(("server", Arc::clone(&finish))),
+            ..Script::default()
+        },
+    );
+    let mut seen = Vec::new();
+    let server = host
+        .start("server", "Serve.", faux_route(&h), false)
+        .await
+        .expect("start")
+        .id;
+    assert!(
+        notice_about(&jobs, &mut seen, &server)
+            .await
+            .contains("still run: bash-1")
+    );
+    let mut plain = Vec::new();
+    for index in 1..MAX_ACTIVE {
+        let id = host
+            .start(&format!("plain {index}"), "Do.", faux_route(&h), false)
+            .await
+            .expect("start")
+            .id;
+        notice_about(&jobs, &mut seen, &id).await;
+        plain.push(id);
+    }
+    let extra = host
+        .start("extra", "Do.", faux_route(&h), false)
+        .await
+        .expect("an idle child without jobs makes room");
+    assert!(!extra.queued);
+    assert_eq!(status_of(&host, &server), Status::Idle, "the server stays");
+    assert_eq!(status_of(&host, &plain[0]), Status::Ready);
+    assert_eq!(h.child_jobs.lock().unwrap()[0].live(), 1, "its job runs");
+    notice_about(&jobs, &mut seen, &extra.id).await;
+    work.close().await;
+
+    // Only children whose jobs run: a start queues and kills no job.
+    let h = harness("subagent-evict-jobs-all");
+    h.think(Arc::new(|_, messages| {
+        if last_user(messages).starts_with("background job") {
+            return Some(faux_assistant_message("the job ended"));
+        }
+        Some(faux_assistant_message("turn done"))
+    }));
+    let finish = Arc::new(tokio::sync::Notify::new());
+    let (host, jobs, work) = scripted_host(
+        &h,
+        Script {
+            jobs: Some(("server", Arc::clone(&finish))),
+            ..Script::default()
+        },
+    );
+    let mut seen = Vec::new();
+    for index in 0..MAX_ACTIVE {
+        let id = host
+            .start(&format!("server {index}"), "Serve.", faux_route(&h), false)
+            .await
+            .expect("start")
+            .id;
+        notice_about(&jobs, &mut seen, &id).await;
+    }
+    let queued = host
+        .start("extra", "Do.", faux_route(&h), false)
+        .await
+        .expect("queued");
+    assert!(queued.queued);
+    assert!(host.list().iter().all(|row| row.status != Status::Ready));
+    assert!(
+        h.child_jobs
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|jobs| jobs.live() == 1),
+        "no job was stopped"
+    );
+    finish.notify_waiters();
+    assert!(
+        notice_about(&jobs, &mut seen, &queued.id)
+            .await
+            .ends_with("turn done")
+    );
+    work.close().await;
+}
+
+// A message sent to a queued child that never starts is counted in the
+// notice: when its build fails, and when no slot can ever free for it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_queued_child_that_never_starts_reports_its_messages() {
+    for unsaved in [false, true] {
+        let h = harness("subagent-queued-messages");
+        h.think(Arc::new(|_, messages| {
+            if last_user(messages).starts_with("Hang.") {
+                return None;
+            }
+            Some(faux_assistant_message("done"))
+        }));
+        let (host, jobs, work) = scripted_host(
+            &h,
+            Script {
+                fail: (!unsaved).then_some("broken"),
+                unsaved,
+                ..Script::default()
+            },
+        );
+        let mut hanging = Vec::new();
+        for index in 0..MAX_ACTIVE {
+            let started = bounded(
+                "a start",
+                host.start(&format!("hang {index}"), "Hang.", faux_route(&h), false),
+            )
+            .await
+            .expect("start");
+            hanging.push(started.id);
+        }
+        let queued = host
+            .start("broken", "Do.", faux_route(&h), false)
+            .await
+            .expect("queued");
+        assert!(queued.queued);
+        let sent = host
+            .message_child(&queued.id, "hello")
+            .await
+            .expect("message");
+        assert_eq!(sent.delivery, Delivery::Queued(None));
+        // A failed build needs one slot; no slot ever freeing needs every
+        // unsaved child idle.
+        let stop = if unsaved { hanging.len() } else { 1 };
+        for id in &hanging[..stop] {
+            assert_eq!(host.interrupt(id), Ok(Interrupt::Requested));
+        }
+        let mut seen = Vec::new();
+        let text = bounded(
+            "the failure notice",
+            notice_about(&jobs, &mut seen, &queued.id),
+        )
+        .await;
+        let reason = if unsaved {
+            "subagent limit reached: 8 subagents are kept in this unsaved session and none can be set aside. Continue one with send_message, or do this work yourself."
+        } else {
+            "the child could not be built"
+        };
+        assert_eq!(
+            text,
+            format!(
+                "Background subagent {} could not start: {reason}\nThe message you sent it was not delivered.",
+                queued.id
+            )
+        );
+        assert!(host.list().iter().all(|row| row.id != queued.id));
+        work.close().await;
+    }
+}
+
+// A resume dropped while it waits for an evicted child's shutdown leaves
+// that wait on the record: the next resume waits for the shutdown too,
+// rather than opening the file the old session still holds.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_dropped_resume_keeps_the_wait_for_the_old_session() {
+    let h = harness("subagent-retiring");
+    h.think(Arc::new(|_, messages| {
+        let texts: Vec<String> = messages.iter().filter_map(user_text).collect();
+        if texts
+            .iter()
+            .any(|text| text.ends_with("sent a message: go on"))
+        {
+            return Some(faux_assistant_message("went on"));
+        }
+        Some(faux_assistant_message("done"))
+    }));
+    let parent = parent(&h, None).await;
+    let route = faux_route(&h);
+    let first = parent
+        .host
+        .start("first", "Do.", route.clone(), false)
+        .await
+        .expect("start")
+        .id;
+    settled(&parent).await;
+    // The first child's shutdown waits for this task of its own.
+    let release = Arc::new(tokio::sync::Notify::new());
+    {
+        let release = Arc::clone(&release);
+        let gate = h.child_gates.lock().unwrap()[0].clone();
+        drop(
+            gate.spawn(move |_| async move { release.notified().await })
+                .expect("a task"),
+        );
+    }
+    for index in 0..MAX_ACTIVE {
+        parent
+            .host
+            .start(&format!("filler {index}"), "Do.", route.clone(), false)
+            .await
+            .expect("start");
+    }
+    settled(&parent).await;
+    assert_eq!(status_of(&parent.host, &first), Status::Ready);
+    {
+        let resume = parent.host.message_child(&first, "go");
+        tokio::pin!(resume);
+        tokio::select! {
+            biased;
+            _ = &mut resume => panic!("the old session is still shutting down"),
+            () = std::future::ready(()) => {}
+        }
+    }
+    // The next resume builds nothing while the old session shuts down.
+    let built = h.child_gates.lock().unwrap().len();
+    let again = parent.host.message_child(&first, "go on");
+    tokio::pin!(again);
+    assert!(poll_once(&mut again).is_pending());
+    assert_eq!(
+        h.child_gates.lock().unwrap().len(),
+        built,
+        "the resume opened the file the old session holds"
+    );
+    release.notify_one();
+    let sent = bounded("the resume", again)
+        .await
+        .expect("the resume waited for the old session");
+    assert!(matches!(sent.delivery, Delivery::Started(_)));
+    settled(&parent).await;
+    let row = parent
+        .host
+        .list()
+        .into_iter()
+        .find(|row| row.id == first)
+        .expect("row");
+    assert_eq!(
+        row.settled.and_then(|settled| settled.closing),
+        Some("went on".to_owned())
+    );
+    parent.session.shutdown().await;
+}
+
+// A queued child holds the parent's live count from the moment it is
+// queued: once the children ahead of it settle, an owner waiting for live
+// work still sees it while it is built, until its own run settles.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_queued_child_holds_the_live_count_while_it_waits_and_builds() {
+    let h = harness("subagent-queued-live");
+    h.think(Arc::new(|_, messages| {
+        if last_user(messages).starts_with("Hang.") {
+            return None;
+        }
+        Some(faux_assistant_message("done"))
+    }));
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Notify::new());
+    let (host, jobs, work) = scripted_host(
+        &h,
+        Script {
+            gate: Some(("queued", Arc::clone(&entered), Arc::clone(&release))),
+            ..Script::default()
+        },
+    );
+    let mut hanging = Vec::new();
+    for index in 0..MAX_ACTIVE {
+        hanging.push(
+            host.start(&format!("hang {index}"), "Hang.", faux_route(&h), false)
+                .await
+                .expect("start")
+                .id,
+        );
+    }
+    let queued = host
+        .start("queued", "Do.", faux_route(&h), false)
+        .await
+        .expect("queued");
+    assert!(queued.queued);
+    for id in &hanging {
+        assert_eq!(host.interrupt(id), Ok(Interrupt::Requested));
+    }
+    bounded("the queued build began", entered.notified()).await;
+    bounded("the children ahead settled", async {
+        loop {
+            let mut events = jobs.subscribe();
+            if hanging
+                .iter()
+                .all(|id| matches!(status_of(&host, id), Status::Idle | Status::Ready))
+            {
+                return;
+            }
+            events.changed().await;
+        }
+    })
+    .await;
+    // The settled children's holds go; the queued child's stays.
+    bounded("the settled children released", async {
+        loop {
+            let mut events = jobs.subscribe();
+            if jobs.live() <= 1 {
+                return;
+            }
+            events.changed().await;
+        }
+    })
+    .await;
+    assert_eq!(jobs.live(), 1, "the queued child is live while it is built");
+    release.notify_one();
+    let mut seen = Vec::new();
+    bounded("its notice", notice_about(&jobs, &mut seen, &queued.id)).await;
+    bounded("its run's end", async {
+        loop {
+            let mut events = jobs.subscribe();
+            if jobs.live() == 0 {
+                return;
+            }
+            events.changed().await;
+        }
+    })
+    .await;
+    work.close().await;
 }
 
 #[path = "barrier_tests.rs"]

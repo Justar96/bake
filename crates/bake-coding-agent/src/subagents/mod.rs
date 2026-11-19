@@ -20,10 +20,11 @@
 //! - **States.** `running` while a run is in progress (or the child is
 //!   being started), `idle` when resident between runs, and `ready` when
 //!   saved in its file and not resident. At [`MAX_ACTIVE`] resident
-//!   children the least recently used idle one with a file is evicted to
-//!   `ready`. With none, a background start and the resume a message to a
+//!   children the least recently used idle one with a file and no jobs of
+//!   its own still running is evicted to `ready`. With none, a background start and the resume a message to a
 //!   `ready` child needs wait in a queue of at most [`MAX_QUEUED`], oldest
-//!   first, and start as runs settle; a foreground start waits for a slot
+//!   first, and start as runs settle, holding the parent's live count
+//!   from the moment they are queued; a foreground start waits for a slot
 //!   until its call is dropped. A start is refused only when the queue is
 //!   full, or when no slot can ever free (every slot holds an idle child
 //!   with no file).
@@ -84,7 +85,7 @@ use serde_json::{Value, json};
 use tokio::sync::{Notify, mpsc, oneshot};
 
 use crate::agent_session::{AgentSession, SessionSelection};
-use crate::jobs::JobRegistry;
+use crate::jobs::{JobRegistry, LiveHold};
 use crate::model_registry::ModelRuntime;
 use crate::owned_work::{OwnedTask, TaskScope, WorkGate};
 use crate::session::SessionManager;
@@ -436,6 +437,11 @@ struct Child {
     waiting: Vec<CustomMessage>,
     /// `Starting` and waiting in the host's queue for a resident slot.
     queued: bool,
+    /// The parent's live count, held from the moment the child's start or
+    /// resume is queued until its run takes it over ([`Command::Run`]) or the
+    /// entry is refused, so an owner waiting for live work never sees none
+    /// while queued work waits or is being built.
+    queued_hold: Option<LiveHold>,
     /// An interrupt that came while the child was starting; its run stops
     /// as soon as it begins.
     interrupt_pending: bool,
@@ -445,6 +451,13 @@ struct Child {
 }
 
 impl Child {
+    /// Whether the resident child's own jobs still run.
+    fn has_live_jobs(&self) -> bool {
+        self.resident
+            .as_ref()
+            .is_some_and(|resident| resident.session.jobs().live() > 0)
+    }
+
     fn new(id: String, label: String, provider: String, model: String, status: Status) -> Self {
         Self {
             id,
@@ -460,6 +473,7 @@ impl Child {
             resident: None,
             waiting: Vec::new(),
             queued: false,
+            queued_hold: None,
             interrupt_pending: false,
             retiring: None,
         }
@@ -484,6 +498,8 @@ enum Command {
         run: u64,
         depth: usize,
         waiter: Option<oneshot::Sender<(Settlement, Leftovers)>>,
+        /// A queued child's live hold, kept until the run settles.
+        hold: Option<LiveHold>,
     },
     Evict,
 }
@@ -499,8 +515,8 @@ enum Input {
 /// Why [`HostState::make_room`] found no slot.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Cap {
-    /// A running or starting child holds a slot, which frees when it
-    /// settles.
+    /// A running or starting child, or an idle one whose own jobs still
+    /// run, holds a slot, which frees when it settles.
     Busy,
     /// Every slot holds an idle child with no file to set it aside to, so
     /// none will free.
@@ -581,7 +597,9 @@ impl HostState {
     }
 
     /// Makes room for one more resident child: evicts the least recently
-    /// used idle child that has a file, or says why there is none.
+    /// used idle child that has a file and no jobs of its own still running
+    /// (its shutdown would stop them, and its notice promised their end),
+    /// or says why there is none.
     fn make_room(&mut self) -> Result<(), Cap> {
         let resident = self
             .children
@@ -600,7 +618,9 @@ impl HostState {
         if let Some(evictable) = self
             .children
             .iter_mut()
-            .filter(|child| child.status == Status::Idle && child.file.is_some())
+            .filter(|child| {
+                child.status == Status::Idle && child.file.is_some() && !child.has_live_jobs()
+            })
             .min_by_key(|child| child.last_used)
         {
             evictable.status = Status::Ready;
@@ -611,7 +631,9 @@ impl HostState {
             return Ok(());
         }
         let busy = self.children.iter().any(|child| {
-            !child.queued && matches!(child.status, Status::Starting | Status::Running)
+            !child.queued
+                && (matches!(child.status, Status::Starting | Status::Running)
+                    || (child.status == Status::Idle && child.has_live_jobs()))
         });
         Err(if busy { Cap::Busy } else { Cap::Stuck })
     }
@@ -654,11 +676,13 @@ fn dispatch(
     if !matches!(input, Input::Jobs) {
         jobs.reset_wakes();
     }
+    let hold = child.queued_hold.take();
     let _ = resident.commands.send(Command::Run {
         input,
         run,
         depth,
         waiter,
+        hold,
     });
 }
 
@@ -670,6 +694,24 @@ enum Undo {
     Remove,
     /// Return the child being resumed to `ready`, keeping its messages.
     Ready,
+}
+
+/// An evicted child's task a resume waits for; dropped before the task
+/// ended, it puts the task back on the child's record.
+struct Retiring<'a> {
+    host: &'a SubagentHost,
+    id: &'a str,
+    task: Option<OwnedTask<()>>,
+}
+
+impl Drop for Retiring<'_> {
+    fn drop(&mut self) {
+        if let Some(task) = self.task.take()
+            && let Some(child) = lock(&self.host.inner.state).child(self.id)
+        {
+            child.retiring = Some(task);
+        }
+    }
 }
 
 /// Undoes a start or resume whose future is dropped or fails while the
@@ -839,6 +881,9 @@ impl SubagentHost {
                         child.depth = depth;
                         child.last_used = tick;
                         child.queued = queued;
+                        if queued {
+                            child.queued_hold = self.inner.jobs.hold_live();
+                        }
                         state.children.push(child);
                         if queued {
                             let started = Started {
@@ -875,7 +920,8 @@ impl SubagentHost {
         };
         let launched = self
             .launch(&id, label, task, route, run, depth, waiter)
-            .await?;
+            .await
+            .map_err(|failed| failed.error)?;
         Ok(Started {
             id,
             run,
@@ -890,7 +936,8 @@ impl SubagentHost {
 
     /// Builds new child `id`, recorded as starting with a slot, makes it
     /// resident, and dispatches its first run. A call dropped or failing
-    /// while the child is built leaves no record behind.
+    /// while the child is built leaves no record behind; a failure reports
+    /// what the record held ([`StartFailed`]).
     #[allow(clippy::too_many_arguments)]
     async fn launch(
         &self,
@@ -901,7 +948,7 @@ impl SubagentHost {
         run: u64,
         depth: usize,
         waiter: Option<oneshot::Sender<(Settlement, Leftovers)>>,
-    ) -> Result<Launched, String> {
+    ) -> Result<Launched, StartFailed> {
         let spec = ChildSpec {
             source: ChildSource::New {
                 id: id.to_owned(),
@@ -915,7 +962,13 @@ impl SubagentHost {
             id,
             undo: Undo::Remove,
         };
-        let session = Arc::new((self.inner.builder)(spec).await?);
+        let session = match (self.inner.builder)(spec).await {
+            Ok(session) => Arc::new(session),
+            Err(error) => {
+                pending.undo = Undo::Nothing;
+                return Err(self.abandon(id, error));
+            }
+        };
         let file = session.session_file();
         let (provider, model) = session
             .model()
@@ -924,7 +977,8 @@ impl SubagentHost {
         let thinking_level = session.thinking_level().as_str().to_owned();
         if let Err(error) = self.make_resident(id, Arc::clone(&session), file.clone()) {
             session.shutdown().await;
-            return Err(error);
+            pending.undo = Undo::Nothing;
+            return Err(self.abandon(id, error));
         }
         pending.undo = Undo::Nothing;
         dispatch(
@@ -941,6 +995,27 @@ impl SubagentHost {
             model,
             thinking_level,
         })
+    }
+
+    /// Removes new child `id`, whose start failed with `error`, and lets
+    /// what waits for a slot take the one it held. The messages sent to it
+    /// are counted, and its live hold is kept for the caller to drop once
+    /// it has reported the failure.
+    fn abandon(&self, id: &str, error: String) -> StartFailed {
+        let (undelivered, hold) = {
+            let mut state = lock(&self.inner.state);
+            let index = state.children.iter().position(|child| child.id == id);
+            match index.map(|index| state.children.remove(index)) {
+                Some(child) => (child.waiting.len(), child.queued_hold),
+                None => (0, None),
+            }
+        };
+        self.pump();
+        StartFailed {
+            error,
+            undelivered,
+            hold,
+        }
     }
 
     /// Spawns the child's task on the parent's gate and records it
@@ -1061,6 +1136,7 @@ impl SubagentHost {
                         Then::Resume(run, file)
                     } else {
                         child.queued = true;
+                        child.queued_hold = self.inner.jobs.hold_live();
                         state.queue.push_back(Queued::Resume { id: id.to_owned() });
                         Then::Done(Delivery::Queued(Some(run)))
                     }
@@ -1098,12 +1174,19 @@ impl SubagentHost {
             id,
             undo: Undo::Ready,
         };
-        // An evicted child's file is released once its task ends.
-        let retiring = lock(&self.inner.state)
-            .child(id)
-            .and_then(|child| child.retiring.take());
-        if let Some(retiring) = retiring {
-            let _ = retiring.await;
+        // An evicted child's file is released once its task ends. The task
+        // stays on the record until it has, so a resume dropped meanwhile
+        // leaves the next one waiting for it too.
+        let mut retiring = Retiring {
+            host: self,
+            id,
+            task: lock(&self.inner.state)
+                .child(id)
+                .and_then(|child| child.retiring.take()),
+        };
+        if let Some(task) = &mut retiring.task {
+            let _ = task.await;
+            retiring.task = None;
         }
         let spec = ChildSpec {
             source: ChildSource::Open { path: file.clone() },
@@ -1161,18 +1244,21 @@ impl SubagentHost {
                                 continue;
                             };
                             let (run, depth) = (child.run, child.depth);
-                            let (what, undelivered) = match entry {
-                                Queued::Start { .. } => ("start", 0),
+                            let undelivered = std::mem::take(&mut child.waiting).len();
+                            let hold = child.queued_hold.take();
+                            child.queued = false;
+                            child.interrupt_pending = false;
+                            let what = match entry {
+                                Queued::Start { .. } => {
+                                    state.children.retain(|child| child.id != id);
+                                    "start"
+                                }
                                 Queued::Resume { .. } => {
                                     child.status = Status::Ready;
-                                    child.queued = false;
-                                    ("resume", std::mem::take(&mut child.waiting).len())
+                                    "resume"
                                 }
                             };
-                            if what == "start" {
-                                state.children.retain(|child| child.id != id);
-                            }
-                            failed.push(((id, run, depth), what, undelivered));
+                            failed.push(((id, run, depth), what, undelivered, hold));
                         }
                         break;
                     }
@@ -1189,9 +1275,12 @@ impl SubagentHost {
             });
             drop(task);
         }
-        for ((id, run, depth), what, undelivered) in failed {
+        for ((id, run, depth), what, undelivered, hold) in failed {
             let notice = messages::start_failure_notice(&id, run, what, &stuck(), undelivered);
             let _ = self.inner.jobs.post_at(notice, depth);
+            // Released once the notice is posted, so an owner waiting for
+            // live work sees it.
+            drop(hold);
         }
         self.inner.slots.notify_waiters();
     }
@@ -1207,12 +1296,19 @@ impl SubagentHost {
                 else {
                     return;
                 };
-                if let Err(error) = self
+                if let Err(failed) = self
                     .launch(&id, &label, task, *route, run, depth, None)
                     .await
                 {
-                    let notice = messages::start_failure_notice(&id, run, "start", &error, 0);
+                    let notice = messages::start_failure_notice(
+                        &id,
+                        run,
+                        "start",
+                        &failed.error,
+                        failed.undelivered,
+                    );
                     let _ = self.inner.jobs.post_at(notice, depth);
+                    drop(failed.hold);
                 }
             }
             Queued::Resume { id } => {
@@ -1227,13 +1323,21 @@ impl SubagentHost {
                     None => Err(unavailable(&id)),
                 };
                 if let Err(error) = resumed {
-                    let undelivered = lock(&self.inner.state).child(&id).map_or(0, |child| {
-                        child.status = Status::Ready;
-                        std::mem::take(&mut child.waiting).len()
-                    });
+                    let (undelivered, hold) =
+                        lock(&self.inner.state)
+                            .child(&id)
+                            .map_or((0, None), |child| {
+                                child.status = Status::Ready;
+                                child.interrupt_pending = false;
+                                (
+                                    std::mem::take(&mut child.waiting).len(),
+                                    child.queued_hold.take(),
+                                )
+                            });
                     let notice =
                         messages::start_failure_notice(&id, run, "resume", &error, undelivered);
                     let _ = self.inner.jobs.post_at(notice, depth);
+                    drop(hold);
                 }
             }
         }
@@ -1314,6 +1418,14 @@ impl SubagentHost {
             .filter(|child| matches!(child.status, Status::Starting | Status::Running))
             .count()
     }
+}
+
+/// A start that failed: why, how many messages sent to the child were
+/// not delivered, and its live hold while queued.
+struct StartFailed {
+    error: String,
+    undelivered: usize,
+    hold: Option<LiveHold>,
 }
 
 /// What [`SubagentHost::launch`] reports of a built child.
@@ -1402,13 +1514,15 @@ async fn drive(
             run,
             depth,
             waiter,
+            hold,
         }) = command
         else {
             break;
         };
         // Held until the notice is posted, so an owner waiting for live
-        // work sees the notice before the count drops.
-        let live = parent_jobs.hold_live();
+        // work sees the notice before the count drops; a queued child's
+        // run keeps the hold it was queued with.
+        let live = hold.or_else(|| parent_jobs.hold_live());
         let Some((settlement, leftovers)) =
             activate(&scope, &session, input, run, &host, &id, job_wait).await
         else {
