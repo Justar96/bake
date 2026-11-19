@@ -22,6 +22,7 @@ pub(super) fn call_row(tool: &str, args: &Value, labels: &Labels, outcome: Outco
             state: outcome.state,
             summary: outcome.summary,
             calls: outcome.calls,
+            omitted: outcome.omitted,
             output: outcome.output,
             full_output_path: outcome.full_output_path,
             wall_time: outcome.wall_time,
@@ -455,11 +456,20 @@ pub(super) fn learn(labels: &mut Labels, details: Option<&Value>) {
 }
 
 /// A running call's outcome from a partial result: its output so far, or
-/// for a `codemode` call the calls its script has made.
+/// for a `codemode` call the calls its script has made, and whether it
+/// waits for a worker.
 pub(super) fn partial(tool: &str, result: &AgentToolResult) -> Outcome {
     if tool == CODEMODE_TOOL_NAME {
+        let waiting = result
+            .details
+            .as_ref()
+            .and_then(|details| details.get(CODEMODE_WAITING_DETAIL))
+            .and_then(Value::as_bool)
+            == Some(true);
         return Outcome {
             calls: nested_calls(result.details.as_ref()),
+            omitted: omitted_calls(result.details.as_ref()),
+            summary: waiting.then(|| copy::WAITING.to_owned()),
             ..Outcome::running(Vec::new())
         };
     }
@@ -526,6 +536,28 @@ fn nested_calls(details: Option<&Value>) -> Vec<NestedCall> {
         .collect()
 }
 
+/// The earlier calls a `codemode` result's `details.omittedCalls` counts
+/// by status without listing them. A result saved before Bake kept that
+/// field, or with a count this frontend cannot read, counts none of them.
+fn omitted_calls(details: Option<&Value>) -> NestedCounts {
+    let Some(counts) = details.and_then(|details| details.get("omittedCalls")) else {
+        return NestedCounts::default();
+    };
+    let count = |key: &str| {
+        counts
+            .get(key)
+            .and_then(Value::as_u64)
+            .and_then(|count| usize::try_from(count).ok())
+            .unwrap_or(0)
+    };
+    NestedCounts {
+        running: count("running"),
+        ok: count("ok"),
+        error: count("error"),
+        cancelled: count("cancelled"),
+    }
+}
+
 /// A settled call's outcome from its result.
 pub(super) fn settled(tool: &str, failed: bool, result: &AgentToolResult) -> Outcome {
     outcome(tool, failed, &result.content, result.details.as_ref())
@@ -582,6 +614,7 @@ pub(super) fn outcome(
             };
             outcome.output = result_lines(rest, None);
             outcome.calls = nested_calls(details);
+            outcome.omitted = omitted_calls(details);
             outcome.full_output_path = details
                 .and_then(|details| details.get("fullOutputPath"))
                 .and_then(Value::as_str)

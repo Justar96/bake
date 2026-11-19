@@ -785,6 +785,51 @@ fn telecom_messages_and_spawn_notices_show_who_said_what() {
     );
     assert_eq!(
         row(
+            spawned,
+            "[spawn] alpha-1, which you started on \"t\", could not start its task: busy",
+            json!({ "agent": "alpha-1", "status": "failed" })
+        )
+        .as_deref(),
+        Some("← alpha-1 failed: busy")
+    );
+    assert_eq!(
+        row(
+            spawned,
+            "[spawn] alpha-1, which you started on \"t\", was interrupted and is idle. Its last answer:\nhalf",
+            json!({ "agent": "alpha-1", "status": "interrupted" })
+        )
+        .as_deref(),
+        Some("← alpha-1 was interrupted: half")
+    );
+    assert_eq!(
+        row(
+            spawned,
+            "[spawn] alpha-1, which you started on \"t\", exited: bake exit status: 1",
+            json!({ "agent": "alpha-1", "status": "exited" })
+        )
+        .as_deref(),
+        Some("← alpha-1 exited: bake exit status: 1")
+    );
+    assert_eq!(
+        row(
+            spawned,
+            "[spawn] alpha-1, which you started on \"t\", exited.",
+            json!({ "agent": "alpha-1", "status": "exited" })
+        )
+        .as_deref(),
+        Some("← alpha-1 exited")
+    );
+    assert_eq!(
+        row(
+            spawned,
+            "[spawn] alpha-1 has waited 60 s for the person to approve bash; it continues when they answer, or stop it with stop_agent",
+            json!({ "agent": "alpha-1", "status": "waiting" })
+        )
+        .as_deref(),
+        Some("← alpha-1 waits for you to approve bash")
+    );
+    assert_eq!(
+        row(
             telecom,
             "[telecom] alpha asks you (ask a2) and waits for your answer:\nwhich port?\nAnswer with telecom action \"reply\", askId \"a2\".",
             json!({ "kind": "ask", "from": "alpha", "askId": "a2" })
@@ -1421,6 +1466,7 @@ fn a_codemode_call_shows_its_calls_live_and_reads_the_same_replayed() {
                 error: Some("exit 1".into()),
             },
         ],
+        omitted: NestedCounts::default(),
         output: vec!["alpha".into()],
         full_output_path: Some("/tmp/out.txt".into()),
         wall_time: Some(Duration::from_millis(100)),
@@ -1490,6 +1536,197 @@ fn an_unfinished_codemode_call_is_interrupted_live_and_replayed() {
     );
     // The log holds the call and no result, and replays the same block.
     assert_eq!(replay(&[Message::Assistant(assistant).into()]), committed);
+}
+
+/// A script past the calls its result lists: the partial results and the
+/// result count the earlier calls in `omittedCalls`, live and replayed,
+/// and a result saved before that field counts none. While the script
+/// waits for a worker its card says so, until a partial says otherwise.
+#[test]
+fn a_codemode_card_counts_the_calls_its_result_does_not_list() {
+    let assistant = faux_assistant_blocks(
+        vec![faux_tool_call(
+            CODEMODE_TOOL_NAME,
+            json!({ "code": SCRIPT }),
+            Some("c"),
+        )],
+        StopReason::ToolUse,
+    );
+    let mut projector = Projector::default();
+    projector.begin(None);
+    run(
+        &mut projector,
+        AgentEvent::MessageEnd {
+            message: Message::Assistant(assistant.clone()).into(),
+        },
+    );
+    run(
+        &mut projector,
+        start("c", CODEMODE_TOOL_NAME, json!({ "code": SCRIPT })),
+    );
+    let partial =
+        |content: Vec<UserContentBlock>, details: Value| AgentEvent::ToolExecutionUpdate {
+            tool_call_id: "c".into(),
+            tool_name: CODEMODE_TOOL_NAME.into(),
+            args: json!({ "code": SCRIPT }),
+            partial_result: AgentToolResult {
+                content,
+                details: Some(details),
+                ..AgentToolResult::default()
+            },
+            parent_tool_call_id: None,
+        };
+    let rows = live_rows(run(
+        &mut projector,
+        partial(
+            vec![UserContentBlock::Text(TextContent::new("any wording"))],
+            json!({ "calls": [], CODEMODE_WAITING_DETAIL: true }),
+        ),
+    ));
+    assert_eq!(codemode(&rows[0]).summary.as_deref(), Some(copy::WAITING));
+    // The partial the tool publishes once the script has its worker, before
+    // any call, has no marker, and the card stops saying it waits.
+    let rows = live_rows(run(
+        &mut projector,
+        partial(Vec::new(), json!({ "calls": [] })),
+    ));
+    assert_eq!(codemode(&rows[0]).summary, None);
+    let rows = live_rows(run(
+        &mut projector,
+        partial(
+            Vec::new(),
+            json!({
+                "calls": [{ "id": "c/?", "name": "read", "args": "{}", "status": "running" }],
+                "omittedCalls": { "running": 2, "ok": 300, "error": 1, "cancelled": 0 },
+            }),
+        ),
+    ));
+    let script = codemode(&rows[0]);
+    assert_eq!(script.summary, None);
+    assert_eq!(
+        script.omitted,
+        NestedCounts {
+            running: 2,
+            ok: 300,
+            error: 1,
+            cancelled: 0
+        }
+    );
+    let mut result = codemode_result();
+    result.details = Some(json!({
+        "calls": [{ "id": "c/304", "name": "read", "args": "{}", "status": "ok", "durationMs": 1 }],
+        "omittedCalls": { "running": 0, "ok": 300, "error": 2, "cancelled": 1 },
+    }));
+    run(
+        &mut projector,
+        AgentEvent::ToolExecutionEnd {
+            tool_call_id: "c".into(),
+            tool_name: CODEMODE_TOOL_NAME.into(),
+            result: result.clone(),
+            is_error: false,
+            duration_ms: Some(130),
+            parent_tool_call_id: None,
+        },
+    );
+    let Some(RuntimeUpdate::Commit(committed)) = projector.finish().pop() else {
+        panic!("the turn commits");
+    };
+    let omitted = NestedCounts {
+        running: 0,
+        ok: 300,
+        error: 2,
+        cancelled: 1,
+    };
+    assert_eq!(codemode(&committed[0]).omitted, omitted);
+    assert_eq!(codemode(&committed[0]).summary, None);
+    let logged = |details: Value| {
+        Message::ToolResult(ToolResultMessage {
+            tool_call_id: "c".into(),
+            tool_name: CODEMODE_TOOL_NAME.into(),
+            content: result.content.clone(),
+            details: Some(details),
+            usage: None,
+            nested_calls: None,
+            is_error: false,
+            timestamp: 0,
+            duration_ms: Some(130),
+        })
+    };
+    let replayed = replay(&[
+        Message::Assistant(assistant.clone()).into(),
+        logged(result.details.clone().expect("details")).into(),
+    ]);
+    assert_eq!(replayed, committed);
+    // Drawn, the head counts all 304 calls and the row above the listed
+    // one counts the 303 earlier ones.
+    let drawn: Vec<String> = bake_tui_view::transcript::present(
+        &replayed,
+        0,
+        80,
+        bake_tui_view::transcript::Look {
+            tones: bake_tui_view::activity::Tones::None,
+            classic: false,
+            lit: true,
+            mermaid: bake_tui_view::mermaid::Mermaid::Streaming,
+        },
+    )
+    .iter()
+    .map(|line| line.to_string().trim_end().to_owned())
+    .collect();
+    assert!(
+        drawn
+            .iter()
+            .any(|line| line.contains("codemode  304 calls · 2 failed · 1 cancelled")),
+        "{drawn:?}"
+    );
+    assert!(
+        drawn
+            .iter()
+            .any(|line| line.ends_with("⋯ 303 earlier calls")),
+        "{drawn:?}"
+    );
+    // A session saved before `omittedCalls` existed replays its listed
+    // calls only, and malformed counts count nothing.
+    for details in [
+        json!({ "calls": [] }),
+        json!({ "calls": [], "omittedCalls": { "ok": -1, "error": "2", "running": 1.5 } }),
+        json!({ "calls": [], "omittedCalls": 3 }),
+    ] {
+        let rows = replay(&[
+            Message::Assistant(assistant.clone()).into(),
+            logged(details).into(),
+        ]);
+        assert_eq!(codemode(&rows[0]).omitted, NestedCounts::default());
+    }
+    // The largest counts a session file can hold are read and drawn
+    // without overflowing.
+    let rows = replay(&[
+        Message::Assistant(assistant).into(),
+        logged(json!({
+            "calls": [{ "id": "c/1", "name": "read", "args": "{}", "status": "error", "error": "x" }],
+            "omittedCalls": { "running": u64::MAX, "ok": u64::MAX, "error": u64::MAX, "cancelled": u64::MAX },
+        }))
+        .into(),
+    ]);
+    let most = usize::try_from(u64::MAX).unwrap_or(usize::MAX);
+    assert_eq!(codemode(&rows[0]).omitted.ok, most);
+    let drawn = bake_tui_view::transcript::present(
+        &rows,
+        0,
+        80,
+        bake_tui_view::transcript::Look {
+            tones: bake_tui_view::activity::Tones::None,
+            classic: false,
+            lit: true,
+            mermaid: bake_tui_view::mermaid::Mermaid::Streaming,
+        },
+    );
+    assert!(
+        drawn
+            .iter()
+            .any(|line| line.to_string().contains(&format!("{} calls", usize::MAX))),
+        "{drawn:?}"
+    );
 }
 
 #[test]

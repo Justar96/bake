@@ -301,8 +301,10 @@ impl Driver {
             return None;
         }
         if !jobs.notice_would_wake() {
-            // Kept for the next prompt; no turn opens.
-            let _ = self.session.deliver_job_notices().await;
+            // Kept for the next prompt; no turn opens here, even if a
+            // release lands meanwhile. A held message stays in the
+            // registry: its release opens the turn on the next pass.
+            self.session.keep_job_notices();
             return None;
         }
         self.projector

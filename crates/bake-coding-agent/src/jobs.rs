@@ -125,7 +125,8 @@ pub const MAX_TEXT_BYTES: usize = 1024;
 /// opens a turn one deeper. Jobs started side by side in one turn each wake
 /// the session at the same depth, however many there are, so a session
 /// that runs one job after another from its prompt's turn is never left
-/// waiting on a notice that cannot wake it.
+/// waiting on a notice that cannot wake it. Mail posted on behalf of work a
+/// turn started ([`JobRegistry::post_at`]) keeps that turn's depth too.
 pub const MAX_CONSECUTIVE_WAKES: usize = 3;
 
 /// The output a viewer sees of each stream job: its newest bytes, read or
@@ -507,7 +508,14 @@ struct Inner {
     events: watch::Sender<Events>,
     recorder: OnceLock<JobRecorder>,
     facts: OnceLock<FactRecorder>,
+    /// What the model is told with the next request a run makes anyway
+    /// ([`JobRegistry::set_update_source`]).
+    update: Mutex<Option<UpdateSource>>,
 }
+
+/// A source of an update for the session's model, such as telecom's team
+/// update: `None` when there is nothing new to say.
+pub(crate) type UpdateSource = Arc<dyn Fn() -> Option<CustomMessage> + Send + Sync>;
 
 /// A session's durable lifecycle writer. The driver awaits it before
 /// invoking the producer and before publishing a terminal outcome.
@@ -540,10 +548,29 @@ struct State {
     records: Vec<Record>,
     /// Notices other agents addressed to the session
     /// ([`JobRegistry::post`]), in arrival order.
-    mail: Vec<CustomMessage>,
+    mail: Vec<Mail>,
     /// Live work outside the registry, such as a running subagent
     /// ([`JobRegistry::hold_live`]).
     holds: usize,
+}
+
+/// A posted notice and the wake depth it carries
+/// ([`JobRegistry::post_at`]); `None` takes the session's depth when read.
+/// Held mail ([`JobRegistry::post_held`]) wakes nothing until released.
+struct Mail {
+    message: CustomMessage,
+    depth: Option<usize>,
+    held: bool,
+}
+
+impl Mail {
+    fn depth(&self, wakes: usize) -> usize {
+        if self.held {
+            MAX_CONSECUTIVE_WAKES
+        } else {
+            self.depth.unwrap_or(wakes)
+        }
+    }
 }
 
 /// The ids of one kind: those at or below `floor` were issued by an
@@ -864,6 +891,7 @@ impl JobRegistry {
                 events: watch::Sender::new(Events::default()),
                 recorder: OnceLock::new(),
                 facts: OnceLock::new(),
+                update: Mutex::new(None),
             }),
         }
     }
@@ -977,7 +1005,7 @@ impl JobRegistry {
             .filter(|record| record.status.is_terminal() && record.claim == Claim::Unclaimed)
             .map(|record| record.depth)
             .min();
-        let mail = (!state.mail.is_empty()).then_some(wakes);
+        let mail = state.mail.iter().map(|mail| mail.depth(wakes)).min();
         jobs.into_iter().chain(mail).min().unwrap_or(wakes) < MAX_CONSECUTIVE_WAKES
     }
 
@@ -988,14 +1016,19 @@ impl JobRegistry {
     }
 
     /// The depth of notices taken now: the shallowest job's
-    /// ([`JobSnapshot::depth`]), and the current depth for posted mail.
-    pub fn notice_depth(&self, jobs: &[JobSnapshot], mail: bool) -> usize {
+    /// ([`JobSnapshot::depth`]) and `mail`, the claimed mail's
+    /// ([`Self::claim_mail_at`]).
+    pub fn notice_depth(&self, jobs: &[JobSnapshot], mail: Option<usize>) -> usize {
         let wakes = self.inner.wakes.load(Ordering::SeqCst);
         let jobs = jobs.iter().map(|job| job.depth).min();
-        jobs.into_iter()
-            .chain(mail.then_some(wakes))
-            .min()
-            .unwrap_or(wakes)
+        jobs.into_iter().chain(mail).min().unwrap_or(wakes)
+    }
+
+    /// The wake depth of the session's current or last turn: what a job
+    /// started now records, and what mail posted on behalf of work started
+    /// now carries ([`Self::post_at`]).
+    pub fn wake_depth(&self) -> usize {
+        self.inner.wakes.load(Ordering::SeqCst)
     }
 
     /// Opens a turn for notices of `depth`: true, with the session one
@@ -1413,20 +1446,157 @@ impl JobRegistry {
     /// wake budget ([`Self::has_undelivered`], [`Self::subscribe`]).
     /// Refused once the registry is closed.
     pub fn post(&self, message: CustomMessage) -> Result<(), StartError> {
+        self.push_mail(message, None, false)
+    }
+
+    /// [`Self::post`], for work that a turn of wake depth `depth` started
+    /// ([`Self::wake_depth`]): the notice wakes the session as that work's
+    /// own job notice would, whatever the session's depth is by then.
+    pub fn post_at(&self, message: CustomMessage, depth: usize) -> Result<(), StartError> {
+        self.push_mail(message, Some(depth), false)
+    }
+
+    /// [`Self::post`], held: a run takes it at its next step as any
+    /// notice, but it opens no turn until [`Self::release_held`], which the
+    /// poster owes, as a sender past its wake budget.
+    pub fn post_held(&self, message: CustomMessage) -> Result<(), StartError> {
+        self.push_mail(message, None, true)
+    }
+
+    /// Lets every held notice still queued open a turn, at depth 0.
+    /// Returns whether any was.
+    pub fn release_held(&self) -> bool {
+        let released = {
+            let mut state = self.inner.state();
+            let mut released = false;
+            for mail in state.mail.iter_mut().filter(|mail| mail.held) {
+                mail.held = false;
+                mail.depth = Some(0);
+                released = true;
+            }
+            released
+        };
+        if released {
+            self.inner.announce();
+        }
+        released
+    }
+
+    /// Whether a held notice is queued ([`Self::post_held`]).
+    pub fn has_held(&self) -> bool {
+        self.inner.state().mail.iter().any(|mail| mail.held)
+    }
+
+    fn push_mail(
+        &self,
+        message: CustomMessage,
+        depth: Option<usize>,
+        held: bool,
+    ) -> Result<(), StartError> {
         {
             let mut state = self.inner.state();
             if state.closed {
                 return Err(StartError::Closed);
             }
-            state.mail.push(message);
+            state.mail.push(Mail {
+                message,
+                depth,
+                held,
+            });
         }
         self.inner.announce();
         Ok(())
     }
 
+    /// Sets the source of the update a run's model gets with a request it
+    /// makes anyway: at a step boundary or in a notice turn, never a turn
+    /// of its own ([`Self::take_update`]). Replaces an earlier source.
+    pub(crate) fn set_update_source(&self, source: UpdateSource) {
+        *self
+            .inner
+            .update
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(source);
+    }
+
+    /// The update to add to a request about to be made, if the source has
+    /// one ([`Self::set_update_source`]).
+    pub fn take_update(&self) -> Option<CustomMessage> {
+        let source = self
+            .inner
+            .update
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        source.and_then(|source| source())
+    }
+
     /// Takes every queued notice ([`Self::post`]), in arrival order.
     pub fn claim_mail(&self) -> Vec<CustomMessage> {
-        std::mem::take(&mut self.inner.state().mail)
+        self.claim_mail_at().0
+    }
+
+    /// [`Self::claim_mail`], with the shallowest depth the notices carry
+    /// ([`Self::post_at`]); `None` when there were none.
+    pub fn claim_mail_at(&self) -> (Vec<CustomMessage>, Option<usize>) {
+        let wakes = self.inner.wakes.load(Ordering::SeqCst);
+        let mail = std::mem::take(&mut self.inner.state().mail);
+        if mail.iter().any(|mail| mail.held) {
+            // Whoever owes the release learns there is nothing to release.
+            self.inner.announce();
+        }
+        let depth = mail.iter().map(|mail| mail.depth(wakes)).min();
+        (mail.into_iter().map(|mail| mail.message).collect(), depth)
+    }
+
+    /// [`Self::claim_mail_at`] for deciding whether to open a turn: held
+    /// mail ([`Self::post_held`]) is never taken, so it stays queued until
+    /// it is released or a run's step reads it, whatever is posted between
+    /// a caller's look and this claim.
+    pub fn claim_waking_mail_at(&self) -> (Vec<CustomMessage>, Option<usize>) {
+        let wakes = self.inner.wakes.load(Ordering::SeqCst);
+        let mail: Vec<Mail> = {
+            let mut state = self.inner.state();
+            let (held, waking) = std::mem::take(&mut state.mail)
+                .into_iter()
+                .partition(|mail| mail.held);
+            state.mail = held;
+            waking
+        };
+        let depth = mail.iter().map(|mail| mail.depth(wakes)).min();
+        (mail.into_iter().map(|mail| mail.message).collect(), depth)
+    }
+
+    /// Claims, under one lock, only the notices that could not open a turn
+    /// now: terminal jobs not yet reported and unheld mail, each of depth
+    /// [`MAX_CONSECUTIVE_WAKES`] or more. Held mail, and a notice that could
+    /// wake (a shallower job, mail released since a caller's look), stays
+    /// queued for a turn. Empty once the registry is closed.
+    pub fn claim_unwaking(&self) -> (Vec<JobSnapshot>, Vec<CustomMessage>) {
+        let wakes = self.inner.wakes.load(Ordering::SeqCst);
+        let claim = self.inner.delivery_claim();
+        let mut state = self.inner.state();
+        if state.closed {
+            return (Vec::new(), Vec::new());
+        }
+        let jobs = state
+            .records
+            .iter_mut()
+            .filter(|record| {
+                record.status.is_terminal()
+                    && record.claim == Claim::Unclaimed
+                    && record.depth >= MAX_CONSECUTIVE_WAKES
+            })
+            .map(|record| {
+                record.claim = claim;
+                record.snapshot()
+            })
+            .collect();
+        let (kept, waiting): (Vec<Mail>, Vec<Mail>) = std::mem::take(&mut state.mail)
+            .into_iter()
+            .partition(|mail| !mail.held && mail.depth(wakes) >= MAX_CONSECUTIVE_WAKES);
+        state.mail = waiting;
+        (jobs, kept.into_iter().map(|mail| mail.message).collect())
     }
 
     /// Whether a terminal job is unreported or a posted notice waits.

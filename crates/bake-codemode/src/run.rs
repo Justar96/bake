@@ -169,7 +169,15 @@ pub(crate) fn start(
             Value::Object(entry)
         })
         .collect();
-    let control = Arc::new(RunControl::new(engine.wasmtime_engine().clone(), timeout));
+    // An explicit deadline is the script's own bound: it raises the budget.
+    let busy = timeout.map_or(request.limits.busy, |timeout| {
+        timeout.max(request.limits.busy)
+    });
+    let control = Arc::new(RunControl::new(
+        engine.wasmtime_engine().clone(),
+        timeout,
+        busy,
+    ));
     let book = Arc::new(Mutex::new(CallBook::default()));
     let (event_sender, events) = unbounded_channel();
     let (commands, command_receiver) = std::sync::mpsc::channel();
@@ -195,7 +203,7 @@ pub(crate) fn start(
         .stack_size(SCRIPT_THREAD_STACK_BYTES)
         .spawn(move || {
             let _guard = guard;
-            let outcome = run_with_deadline(input, &thread_control);
+            let outcome = run_watched(input, &thread_control);
             lock(&thread_book).finished = true;
             let _ = event_sender.send(Event::Done(Arc::new(outcome)));
         })
@@ -213,36 +221,29 @@ pub(crate) fn start(
     })
 }
 
-/// The deadline watchdog's stack; it only waits on a condition variable.
+/// The watchdog's stack; it only waits on a condition variable.
 const WATCHDOG_STACK_BYTES: usize = 64 << 10;
 
-/// Runs the script with a watchdog thread that stops it at its deadline, so
-/// the deadline holds while nothing awaits [`Run::next`]. The watchdog is
-/// joined before the script thread exits.
-fn run_with_deadline(input: ScriptInput, control: &Arc<RunControl>) -> Outcome {
-    let watchdog = match control.deadline() {
-        None => None,
-        Some(_) => {
-            let watched = Arc::clone(control);
-            let spawned = std::thread::Builder::new()
-                .name("bake-codemode-deadline".to_owned())
-                .stack_size(WATCHDOG_STACK_BYTES)
-                .spawn(move || watched.watch_deadline());
-            match spawned {
-                Ok(watchdog) => Some(watchdog),
-                Err(error) => {
-                    return Outcome::failed(Failure::Protocol {
-                        message: format!("The script's deadline thread could not start: {error}"),
-                    });
-                }
-            }
+/// Runs the script with a watchdog thread that stops it at its deadline or
+/// at the busy budget, so both hold while nothing awaits [`Run::next`]. The
+/// watchdog is joined before the script thread exits.
+fn run_watched(input: ScriptInput, control: &Arc<RunControl>) -> Outcome {
+    let watched = Arc::clone(control);
+    let spawned = std::thread::Builder::new()
+        .name("bake-codemode-watchdog".to_owned())
+        .stack_size(WATCHDOG_STACK_BYTES)
+        .spawn(move || watched.watch_run());
+    let watchdog = match spawned {
+        Ok(watchdog) => watchdog,
+        Err(error) => {
+            return Outcome::failed(Failure::Protocol {
+                message: format!("The script's watchdog thread could not start: {error}"),
+            });
         }
     };
     let outcome = run_script(input);
     control.finish();
-    if let Some(watchdog) = watchdog {
-        let _ = watchdog.join();
-    }
+    let _ = watchdog.join();
     outcome
 }
 
@@ -289,8 +290,9 @@ impl Run {
     /// [`Event::Done`], which every later call returns again (the same
     /// [`Arc`], not a copy).
     ///
-    /// The run's deadline (`timeout_ms`) is enforced by the run's own
-    /// threads, whether or not this is awaited; it needs no Tokio timer.
+    /// The run's deadline (`timeout_ms`) and busy budget are enforced by the
+    /// run's own threads, whether or not this is awaited; they need no Tokio
+    /// timer.
     pub async fn next(&mut self) -> Event {
         if let Some(done) = &self.done {
             return Event::Done(Arc::clone(done));

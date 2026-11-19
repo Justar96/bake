@@ -270,15 +270,35 @@ fn telecom_notice(text: &str, details: &Value) -> Option<String> {
 /// A spawned agent's settlement as one line: its answer or failure.
 fn spawn_notice(text: &str, details: &Value) -> Option<String> {
     let agent = details.get("agent").and_then(Value::as_str)?;
-    if details.get("status").and_then(Value::as_str) == Some("failed") {
+    let status = details.get("status").and_then(Value::as_str);
+    if status == Some("failed") {
         let reason = text
             .split_once(" failed its run: ")
+            .or_else(|| text.split_once(" could not start its task: "))
             .map_or(text, |(_, why)| why);
         return Some(format!("← {agent} failed: {}", clip(reason)));
     }
+    if status == Some("exited") {
+        return Some(match text.split_once(" exited: ") {
+            Some((_, why)) => format!("← {agent} exited: {}", clip(why)),
+            None => format!("← {agent} exited"),
+        });
+    }
+    if status == Some("waiting") {
+        let what = text
+            .split_once(" for the person to ")
+            .and_then(|(_, rest)| rest.split_once(';'))
+            .map_or("you", |(what, _)| what);
+        return Some(format!("← {agent} waits for you to {}", clip(what)));
+    }
+    let ended = if status == Some("interrupted") {
+        "was interrupted"
+    } else {
+        "finished"
+    };
     Some(match text.split_once("Its last answer:\n") {
-        Some((_, answer)) => format!("← {agent} finished: {}", clip(answer)),
-        None => format!("← {agent} finished, with no answer"),
+        Some((_, answer)) => format!("← {agent} {ended}: {}", clip(answer)),
+        None => format!("← {agent} {ended}, with no answer"),
     })
 }
 

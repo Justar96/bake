@@ -477,6 +477,7 @@ impl PromptExecution {
         if self.closed_reason().is_some() {
             return Ok((RunOutcome::FinishedTurn, false));
         }
+        // Held mail stays in the registry: its release opens the turn.
         let (notices, depth): (Vec<CustomMessage>, usize) = job_notices::claim_at(&self.jobs);
         if notices.is_empty() {
             return Ok((RunOutcome::FinishedTurn, false));
@@ -501,6 +502,8 @@ impl PromptExecution {
                 .map(job_notices::live),
         );
         messages.extend(notices.into_iter().map(job_notices::live));
+        // The team update rides on a turn that opens anyway.
+        messages.extend(self.jobs.take_update().map(job_notices::live));
         self.record_thinking_level().await?;
         self.run_agent_input(Some(messages), control)
             .await
@@ -986,7 +989,8 @@ impl PromptExecution {
             }
             None => (Vec::new(), Vec::new()),
         };
-        // The team, when it changed since the last prompt.
+        // The team, when it changed since the model was last told; the
+        // prompt may become this member's task.
         let brief = self
             .telecom
             .as_ref()
@@ -1107,10 +1111,14 @@ impl PromptExecution {
                     .map_err(|e| e.to_string());
                 continue;
             }
-            let notices: Vec<LiveMessage> = job_notices::claim(&self.jobs)
+            let mut notices: Vec<LiveMessage> = job_notices::claim(&self.jobs)
                 .into_iter()
                 .map(job_notices::live)
                 .collect();
+            if !notices.is_empty() {
+                // The run goes on for the notices; the update rides along.
+                notices.extend(self.jobs.take_update().map(job_notices::live));
+            }
             if notices.is_empty() {
                 // `Stop` hooks may continue a run that would settle.
                 let continuation = match (&installed, &result) {

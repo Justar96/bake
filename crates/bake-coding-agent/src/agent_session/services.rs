@@ -220,10 +220,12 @@ impl AgentSession {
         // before its permit is released.
         // The jobs' drivers are the gate's tasks, so the drain below waits
         // for every job to become terminal; this future need not be kept.
-        drop(self.jobs.close());
+        // The team is left first: a frame is accepted only while its
+        // notice can still be read, and closing the jobs clears them.
         if let Some(Ok(station)) = &self.telecom {
             station.leave();
         }
+        drop(self.jobs.close());
         if let Some(questions) = &self.questions {
             questions.close();
         }

@@ -1,9 +1,13 @@
 //! The script environment: Pi's codemode prelude, evaluated in each VM before
-//! the script. The JavaScript is `assets/prelude.js`, copied verbatim from Pi
-//! v1.5.2's `packages/codemode/src/runtime/prelude-source.ts` with its notice
-//! (MIT, see `NOTICE`); it differs from v1.3.0's only in printing numbers
-//! with `String()` in `console.*` and thrown values, so `NaN` and `Infinity`
-//! no longer print as `null`.
+//! the script. The JavaScript is `assets/prelude.js`, Pi v1.5.2's
+//! `packages/codemode/src/runtime/prelude-source.ts` with its notice (MIT,
+//! see `NOTICE`) and Bake's changes, each marked `Bake:` in the file: a
+//! Promise given to `text()`, `image()`, `console.*`, `store()`, or a call,
+//! or held in the return value, is a `TypeError` naming its path instead of
+//! printing as `{}`, and error positions on the script's first line do not
+//! count the wrapper's prefix. Pi's v1.5.2 differs from v1.3.0's only in
+//! printing numbers with `String()` in `console.*` and thrown values, so
+//! `NaN` and `Infinity` no longer print as `null`.
 //!
 //! The prelude keeps the host bridge in a closure and builds `tools`,
 //! `ALL_TOOLS`, `text`, `image`, `exit`, `console`, `store`, `load`, and the
@@ -27,7 +31,7 @@ pub const MAX_OUTPUT_CHARS: usize = 16 * 1024 * 1024;
 /// `text()`, `image()`, and `console.*` calls one script may make.
 pub const MAX_OUTPUT_ITEMS: usize = 100_000;
 
-/// The prelude's JavaScript, exactly Pi's `PRELUDE_SOURCE`.
+/// The prelude's JavaScript.
 pub(crate) fn source() -> &'static str {
     static SOURCE: OnceLock<&'static str> = OnceLock::new();
     SOURCE.get_or_init(|| {
@@ -54,12 +58,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn is_pi_v1_5_2s_prelude_byte_for_byte() {
-        // Pi v1.5.2's `fnv1a(PRELUDE_SOURCE)` and the source's length, computed
-        // from `prelude-source.ts` itself by evaluating its template literal
-        // (the same evaluation gives v1.3.0's `8c6c9242` and 17,233).
-        assert_eq!(hash(), "4dce1bde");
-        assert_eq!(source().len(), 17_344);
+    fn is_pi_v1_5_2s_prelude_with_bakes_changes() {
+        // Pi v1.5.2's `fnv1a(PRELUDE_SOURCE)` is `4dce1bde` over 17,344
+        // characters, computed from `prelude-source.ts` itself by evaluating
+        // its template literal (the same evaluation gives v1.3.0's `8c6c9242`
+        // and 17,233). Bake's changes give this hash; the deterministic
+        // fingerprint names it.
+        assert_eq!(hash(), "96ceb1aa");
+        assert_eq!(source().len(), 19_561);
+        assert!(source().contains(&format!(
+            "const SCRIPT_PREFIX_COLUMNS = {};",
+            crate::vm::SCRIPT_PREFIX.len()
+        )));
         assert!(source().starts_with("(function (bridge, toolsJson, globalsJson, storeJson) {"));
         assert!(source().ends_with("})"));
         assert!(source().contains(&format!("json.length > {MAX_STORE_VALUE_CHARS}")));

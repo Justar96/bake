@@ -45,12 +45,12 @@ use bake_coding_agent::session::messages::CustomMessage;
 use bake_coding_agent::subagents::SUBAGENT_DETAIL;
 use bake_coding_agent::subagents::messages as subagents;
 use bake_coding_agent::tools::bash::BACKGROUND_JOB_DETAIL;
-use bake_coding_agent::tools::codemode::CODEMODE_TOOL_NAME;
+use bake_coding_agent::tools::codemode::{CODEMODE_TOOL_NAME, CODEMODE_WAITING_DETAIL};
 use bake_coding_agent::tools::job_tools::STILL_RUNNING;
 use bake_coding_agent::tools::visualize::VISUALIZE_TOOL_NAME;
 use bake_coding_agent::tools::web_tools::EXTERNAL_WEB_CONTENT_NOTICE;
 use bake_tui_view::cards;
-use bake_tui_view::codemode::{self, Codemode, NestedCall, NestedStatus};
+use bake_tui_view::codemode::{self, Codemode, NestedCall, NestedCounts, NestedStatus};
 use bake_tui_view::copy;
 use bake_tui_view::jobs::{self, JobState};
 use bake_tui_view::runtime::{Pending, RuntimeUpdate, Target};
@@ -122,6 +122,8 @@ struct Outcome {
     output: Vec<String>,
     /// A `codemode` call's record of the calls its script made.
     calls: Vec<NestedCall>,
+    /// The earlier calls a `codemode` result counts but does not list.
+    omitted: NestedCounts,
     /// The file the result's whole output went to, when the tool cut it.
     full_output_path: Option<String>,
     /// How long a `codemode` script ran, from its result's header.
@@ -136,6 +138,7 @@ impl Outcome {
             summary: None,
             output,
             calls: Vec::new(),
+            omitted: NestedCounts::default(),
             full_output_path: None,
             wall_time: None,
         }
@@ -518,17 +521,17 @@ impl Projector {
                     *summary = outcome.summary;
                 }
             }
-            // Each partial result holds every call so far, so the latest
-            // one replaces the record.
+            // Each partial result holds every call so far, and whether the
+            // script still waits for a worker, so the latest one replaces
+            // the record.
             Row::Codemode(script) => {
                 script.state = outcome.state;
                 script.calls = outcome.calls;
+                script.omitted = outcome.omitted;
                 script.output = outcome.output;
                 script.full_output_path = outcome.full_output_path;
                 script.wall_time = outcome.wall_time;
-                if !running {
-                    script.summary = outcome.summary;
-                }
+                script.summary = outcome.summary;
             }
             _ => {}
         }

@@ -1341,3 +1341,124 @@ async fn should_export_to_html() {
     input.close();
     assert_eq!(mode.await.expect("the loop ends"), 0);
 }
+
+/// How many times each session's notice delivery was tried, by session id.
+static NOTICE_ATTEMPTS: Mutex<Vec<(String, usize)>> = Mutex::new(Vec::new());
+
+pub(super) fn count_notice_attempt(session: &AgentSession) {
+    let id = session.session_id();
+    let mut attempts = NOTICE_ATTEMPTS
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    match attempts.iter_mut().find(|(each, _)| *each == id) {
+        Some((_, count)) => *count += 1,
+        None => attempts.push((id, 1)),
+    }
+}
+
+fn notice_attempts(id: &str) -> usize {
+    NOTICE_ATTEMPTS
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .iter()
+        .find(|(each, _)| each == id)
+        .map_or(0, |(_, count)| *count)
+}
+
+fn mail(text: &str) -> crate::session::messages::CustomMessage {
+    crate::session::messages::CustomMessage {
+        custom_type: "test.notice".to_owned(),
+        content: bake_ai::UserContent::Text(text.to_owned()),
+        display: true,
+        details: None,
+        timestamp: 0,
+    }
+}
+
+// A notice posted while a turn runs waits for the turn: the delivery task
+// tries it a bounded number of times, rather than spinning until the turn
+// takes it, and nothing is left undelivered once the turn ends.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_notice_during_a_held_turn_does_not_spin() {
+    let dir = TempDir::new("rpc-notice-spin");
+    let h = harness();
+    let (started, mut requested) = tokio::sync::mpsc::unbounded_channel();
+    let release = Arc::new(Notify::new());
+    h.faux.set_responses(vec![
+        held_reply(started, Arc::clone(&release), "held"),
+        faux_assistant_message("noted").into(),
+        faux_assistant_message("noted again").into(),
+    ]);
+    let session = session(&dir, &h).await;
+    let id = session.session_id();
+    let jobs = session.jobs().clone();
+    let (input, pipe) = Input::new();
+    let out = Output(Arc::new(Mutex::new(Vec::new())));
+    let mode = start(session, pipe, &out, None);
+    input.send(json!({ "id": "p", "type": "prompt", "message": "hold" }));
+    requested.recv().await.expect("the turn's request started");
+
+    jobs.post(mail("first")).expect("posted");
+    let start = Instant::now();
+    while notice_attempts(&id) == 0 {
+        assert!(start.elapsed() < Duration::from_secs(10), "never tried");
+        tokio::task::yield_now().await;
+    }
+    jobs.post(mail("second")).expect("posted");
+    // The property is over time: a spinning task would try thousands of
+    // times while the turn is held.
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(
+        notice_attempts(&id) <= 2,
+        "tried {} times during the turn",
+        notice_attempts(&id)
+    );
+
+    release.notify_one();
+    let start = Instant::now();
+    while jobs.has_undelivered() {
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "the notices were never delivered"
+        );
+        tokio::task::yield_now().await;
+    }
+    assert!(notice_attempts(&id) <= 4, "{}", notice_attempts(&id));
+    input.close();
+    assert_eq!(mode.await.expect("the loop ends"), 0);
+}
+
+// A held message (a peer's past the wake budget) is neither parked nor
+// lost: the idle session keeps it until its release, which opens a turn
+// with no prompt, as a spawned agent has no person to type one.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_held_message_opens_a_turn_when_released() {
+    let dir = TempDir::new("rpc-held-mail");
+    let h = harness();
+    h.faux
+        .set_responses(vec![faux_assistant_message("read it").into()]);
+    let session = session(&dir, &h).await;
+    let id = session.session_id();
+    let jobs = session.jobs().clone();
+    let (input, pipe) = Input::new();
+    let out = Output(Arc::new(Mutex::new(Vec::new())));
+    let mode = start(session, pipe, &out, None);
+    jobs.post_held(mail("held")).expect("posted");
+    let start = Instant::now();
+    while notice_attempts(&id) == 0 {
+        assert!(start.elapsed() < Duration::from_secs(10), "never tried");
+        tokio::task::yield_now().await;
+    }
+    assert!(jobs.has_held(), "a held message is not parked for a prompt");
+    assert_eq!(h.faux.call_count(), 0, "no turn opened for it yet");
+
+    assert!(jobs.release_held());
+    out.wait_for("agent_settled", |out| {
+        !out.of_kind("agent_settled").is_empty()
+    })
+    .await;
+    assert!(!jobs.has_undelivered());
+    assert_eq!(h.faux.call_count(), 1);
+    input.close();
+    assert_eq!(mode.await.expect("the loop ends"), 0);
+}

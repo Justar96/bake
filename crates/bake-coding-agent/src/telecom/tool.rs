@@ -20,11 +20,11 @@ pub const TOOL_NAME: &str = "telecom";
 
 const DESCRIPTION: &str = "Coordinate with the other Bake agents working in this repository, each known by a callsign (alpha, bravo, ...; a spawned agent is <parent>-1, ...).
 board: who works here, on what, and the asks waiting on you.
-send: message agents (to = callsign, or several comma-separated); an idle one starts a turn. ask: message one agent and wait for its answer (wait false: return at once; the answer arrives later as a message). reply: answer an ask put to you (askId; optional when only one waits).
+send: message agents (to = callsign, or several comma-separated); an idle one starts a turn. ask: message one agent and wait for its answer; the wait ends early when something else arrives for you (wait false: return at once). An answer not waited for arrives later as a message. reply: answer an ask put to you (askId; optional when only one waits).
 broadcast: tell every agent here; it starts no turn and reaches them at their next prompt. status: set the one-line task the others see.";
 
 const GUIDELINES: [&str; 3] = [
-    "When telecom shows other agents in this repository, reply promptly to an ask put to you: the asker is blocked until you answer.",
+    "When telecom shows other agents in this repository, reply promptly to an ask put to you: the asker may be waiting on it.",
     "Message other agents only for real coordination (requests, handoffs, shared-interface changes), never to acknowledge; each message costs the recipient a turn.",
     "To hear when another agent's long task ends, ask with wait false, rather than waiting with a long timeout or polling the board.",
 ];
@@ -52,7 +52,7 @@ fn parameters() -> Value {
             },
             "timeoutSec": {
                 "type": "number",
-                "description": "ask: seconds to wait for the answer (default 300, at most 3600)."
+                "description": "ask: seconds to wait for the answer (default 300, at most 3600; 0 does not wait)."
             },
             "wait": {
                 "type": "boolean",
@@ -149,11 +149,15 @@ async fn run(
         "ask" => {
             let to = required(args, "to", action)?;
             let message = required(args, "message", action)?;
-            let wait = args.get("wait").and_then(Value::as_bool).unwrap_or(true);
-            let timeout = args
+            let seconds = args
                 .get("timeoutSec")
                 .and_then(Value::as_f64)
-                .filter(|seconds| seconds.is_finite() && *seconds > 0.0)
+                .filter(|seconds| seconds.is_finite());
+            // A timeout of 0 or less is no wait at all.
+            let wait = args.get("wait").and_then(Value::as_bool).unwrap_or(true)
+                && seconds.is_none_or(|seconds| seconds > 0.0);
+            let timeout = seconds
+                .filter(|seconds| *seconds > 0.0)
                 .map_or(ASK_TIMEOUT, |seconds| {
                     Duration::from_secs_f64(seconds.min(3600.0))
                 });
@@ -172,8 +176,14 @@ fn ask_result(outcome: AskOutcome) -> AgentToolResult {
             format!("{from} answered:\n{text}"),
             json!({ "action": "ask", "askId": ask_id, "status": "answered", "from": from }),
         ),
-        AskOutcome::Sent { ask_id, to } => ok(
-            format!("asked {to} (ask {ask_id}); the answer will arrive as a message"),
+        AskOutcome::Sent { ask_id, to, held } => ok(
+            if held {
+                format!(
+                    "asked {to} (ask {ask_id}; held: {to} reads it within a minute); the answer will arrive as a message"
+                )
+            } else {
+                format!("asked {to} (ask {ask_id}); the answer will arrive as a message")
+            },
             json!({ "action": "ask", "askId": ask_id, "status": "sent", "to": to }),
         ),
         AskOutcome::TimedOut { ask_id, to } => ok(
@@ -181,6 +191,12 @@ fn ask_result(outcome: AskOutcome) -> AgentToolResult {
                 "{to} has not answered yet (ask {ask_id}); a later answer will arrive as a message"
             ),
             json!({ "action": "ask", "askId": ask_id, "status": "timeout", "to": to }),
+        ),
+        AskOutcome::Interrupted { ask_id, to } => ok(
+            format!(
+                "{to} has not answered yet (ask {ask_id}); something else arrived for you meanwhile. The ask stays open, so do not ask again: its answer will arrive as a message."
+            ),
+            json!({ "action": "ask", "askId": ask_id, "status": "interrupted", "to": to }),
         ),
         AskOutcome::Gone { ask_id, to } => {
             let mut result = ok(
@@ -194,5 +210,46 @@ fn ask_result(outcome: AskOutcome) -> AgentToolResult {
             format!("the ask was withdrawn (ask {ask_id})"),
             json!({ "action": "ask", "askId": ask_id, "status": "cancelled" }),
         ),
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use crate::jobs::{JobLimits, JobRegistry};
+    use crate::owned_work::WorkGate;
+    use crate::telecom::StationOptions;
+
+    fn join(root: &std::path::Path, cwd: &std::path::Path, session: &str) -> (Station, WorkGate) {
+        let work = WorkGate::default();
+        let jobs = JobRegistry::new(work.clone(), JobLimits::default());
+        let options = StationOptions {
+            root: root.to_path_buf(),
+            cwd: cwd.to_path_buf(),
+            session_id: session.into(),
+            callsign: None,
+            parent: None,
+            model: None,
+        };
+        (Station::start(options, jobs, &work).unwrap(), work)
+    }
+
+    #[tokio::test]
+    async fn an_ask_with_a_timeout_of_zero_does_not_wait() {
+        let base = std::env::temp_dir().join(format!("bt-{}", crate::session::id::uuid_v4()));
+        let (root, cwd) = (base.join("root"), base.join("cwd"));
+        std::fs::create_dir_all(&cwd).unwrap();
+        let (alpha, alpha_work) = join(&root, &cwd, "s-alpha");
+        let (bravo, bravo_work) = join(&root, &cwd, "s-bravo");
+        for timeout in [0.0, -5.0] {
+            let args = json!({ "action": "ask", "to": "bravo", "message": "ping me", "timeoutSec": timeout });
+            let result = run(&alpha, &args, None).await.unwrap();
+            let details = result.details.unwrap();
+            assert_eq!(details["status"], "sent", "{details}");
+        }
+        assert_eq!(bravo.owed().len(), 2);
+        alpha_work.close().await;
+        bravo_work.close().await;
+        std::fs::remove_dir_all(base).unwrap();
     }
 }

@@ -13,6 +13,10 @@
 //!   nothing that can ever resume it ([`Failure::NeverSettles`]).
 //! - The VM never decides on its own that it is finished: the prelude reports
 //!   the end through the bridge, which unwinds the guest.
+//! - The driver tells the run's control when the VM starts running
+//!   JavaScript and when it waits, so the watchdog can stop a script that
+//!   runs for the busy budget without waiting (`Failure::Busy`), Bake's
+//!   addition: Pi's host has no bound for a script without a deadline.
 //!
 //! Deterministic mode fixes what remains nondeterministic: the clock and
 //! randomness (see `host.rs`), UTC, no `WeakRef` or `FinalizationRegistry`,
@@ -47,6 +51,36 @@ const INTRINSIC_WEAK_REF: u32 = 1 << 9;
 /// The engine's file names; the prelude drops its own frames from stacks.
 const PRELUDE_FILE: &str = "codemode-prelude.js";
 const SCRIPT_FILE: &str = "codemode.js";
+/// What precedes the script on its first line. The prelude's
+/// `SCRIPT_PREFIX_COLUMNS` is its length.
+pub(crate) const SCRIPT_PREFIX: &str = "(async (tools, console) => {";
+
+/// `stack` with each position on the script's first line moved left by the
+/// prefix's length, as the prelude's `scriptPosition` moves them.
+fn script_positions(stack: &str) -> String {
+    const MARKER: &str = "codemode.js:1:";
+    let mut out = String::with_capacity(stack.len());
+    let mut rest = stack;
+    while let Some(at) = rest.find(MARKER) {
+        let (before, after) = rest.split_at(at + MARKER.len());
+        out.push_str(before);
+        let digits = after.bytes().take_while(u8::is_ascii_digit).count();
+        match after[..digits].parse::<usize>() {
+            Ok(column) => {
+                out.push_str(
+                    &column
+                        .saturating_sub(SCRIPT_PREFIX.len())
+                        .max(1)
+                        .to_string(),
+                );
+            }
+            Err(_) => out.push_str(&after[..digits]),
+        }
+        rest = &after[digits..];
+    }
+    out.push_str(rest);
+    out
+}
 
 /// An answer for the script thread.
 pub(crate) struct Delivery {
@@ -136,6 +170,7 @@ pub(crate) fn run_script(input: ScriptInput) -> Outcome {
             Ok(UpdateDeadline::Continue(1))
         }
     });
+    control.enter_vm();
     if control.should_interrupt() {
         return conclude_store(&mut store, &control, GuestError::Finished);
     }
@@ -145,14 +180,30 @@ pub(crate) fn run_script(input: ScriptInput) -> Outcome {
     };
     let result = driver.run(&script, limits, deterministic.is_some(), &commands);
     match result {
-        Ok(outcome) => outcome,
+        Ok(mut outcome) => {
+            outcome.held = driver.store.data().held_calls();
+            outcome
+        }
         Err(error) => conclude_store(&mut driver.store, &control, error),
+    }
+}
+
+/// The outcome once the VM stopped with `error`, with the calls still held.
+fn conclude_store(
+    store: &mut Store<HostState>,
+    control: &RunControl,
+    error: GuestError,
+) -> Outcome {
+    let held = store.data().held_calls();
+    Outcome {
+        held,
+        ..stopped_outcome(store, control, error)
     }
 }
 
 /// The outcome once the VM stopped with `error`: the end the script reported,
 /// a failure an import recorded, the memory limit, a stop, then `error`.
-fn conclude_store(
+fn stopped_outcome(
     store: &mut Store<HostState>,
     control: &RunControl,
     error: GuestError,
@@ -271,8 +322,10 @@ impl Driver {
         }
 
         // The prefix shares the first line with the script so reported line
-        // numbers match the script as written.
-        let wrapped = format!("(async (tools, console) => {{{}\n}})", script.code);
+        // numbers match the script as written; columns on that line are
+        // corrected where errors are described (`script_positions` and the
+        // prelude's `scriptPosition`).
+        let wrapped = format!("{SCRIPT_PREFIX}{}\n}})", script.code);
         let function = self
             .exports
             .eval_raw(&mut self.store, &wrapped, SCRIPT_FILE)?;
@@ -281,7 +334,8 @@ impl Driver {
             if self.control.should_interrupt() {
                 return Err(GuestError::Finished);
             }
-            let error = self.describe_exception()?;
+            let mut error = self.describe_exception()?;
+            error.stack = error.stack.as_deref().map(script_positions);
             return Ok(Outcome::failed(Failure::Exception(error)));
         }
         let result = self.exports.call_raw(
@@ -301,6 +355,9 @@ impl Driver {
         let mut early: BTreeMap<u32, Delivery> = BTreeMap::new();
         let mut next_seq: u32 = 1;
         loop {
+            if self.control.leave_vm() {
+                return Err(GuestError::Finished);
+            }
             let command = match self.control.deadline() {
                 Some(deadline) => match commands
                     .recv_timeout(deadline.saturating_duration_since(Instant::now()))
@@ -314,6 +371,7 @@ impl Driver {
                 },
                 None => commands.recv().unwrap_or(Command::Stop),
             };
+            self.control.enter_vm();
             let delivery = match command {
                 Command::Answer(delivery) => delivery,
                 Command::Stop => {
@@ -400,7 +458,7 @@ impl Driver {
 
     /// Settles call `id` in the prelude, then runs the script until it waits again.
     fn apply(&mut self, delivery: &Delivery) -> GuestResult<()> {
-        self.store.data_mut().settle(delivery.id);
+        self.store.data_mut().settle(delivery.id)?;
         let (ok, payload, properties) = match &delivery.result {
             Ok(value) => (true, value.as_ref().map(Value::to_string), None),
             Err(error) => (
@@ -556,5 +614,29 @@ impl Driver {
 
     fn free(&mut self, value: u32) -> GuestResult<()> {
         Ok(self.exports.free_value.call(&mut self.store, value)?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn script_positions_moves_only_first_line_columns_by_the_prefix() {
+        assert_eq!(
+            script_positions(
+                "SyntaxError: x\n    at codemode.js:1:39\n    at f (codemode.js:12:39)"
+            ),
+            "SyntaxError: x\n    at codemode.js:1:11\n    at f (codemode.js:12:39)"
+        );
+        // Never below column 1, and text that is not a position is kept.
+        assert_eq!(
+            script_positions("codemode.js:1:3 codemode.js:1:x"),
+            "codemode.js:1:1 codemode.js:1:x"
+        );
+        assert_eq!(
+            script_positions("codemode.js:1:99999999999999999999999"),
+            "codemode.js:1:99999999999999999999999"
+        );
     }
 }

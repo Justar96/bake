@@ -1235,6 +1235,49 @@ async fn posted_notices_and_live_holds_follow_the_registry() {
     assert!(registry.hold_live().is_none());
 }
 
+// Mail posted for work a turn started keeps that turn's depth: it wakes a
+// session whose own depth used the budget up, while mail posted at the
+// session's depth, or for work a deep wake turn started, does not.
+#[tokio::test]
+async fn mail_posted_at_a_depth_wakes_as_the_work_that_sent_it() {
+    let (_gate, registry) = registry(JobLimits::default());
+    let notice = |text: &str| crate::session::messages::CustomMessage {
+        custom_type: "test.notice".into(),
+        content: bake_ai::UserContent::Text(text.into()),
+        display: true,
+        details: None,
+        timestamp: 0,
+    };
+    assert_eq!(registry.wake_depth(), 0);
+    let started_at = registry.wake_depth();
+    for depth in 0..MAX_CONSECUTIVE_WAKES {
+        assert!(registry.wake_at(depth));
+    }
+    assert_eq!(registry.wake_depth(), MAX_CONSECUTIVE_WAKES);
+    registry.post(notice("now")).expect("posted");
+    assert!(
+        !registry.notice_would_wake(),
+        "the session's depth is spent"
+    );
+    registry
+        .post_at(notice("from the prompt's turn"), started_at)
+        .expect("posted");
+    assert!(registry.notice_would_wake());
+    let (claimed, depth) = registry.claim_mail_at();
+    assert_eq!(claimed.len(), 2);
+    assert_eq!(depth, Some(started_at));
+    assert_eq!(registry.notice_depth(&[], depth), started_at);
+    registry
+        .post_at(notice("from a deep turn"), MAX_CONSECUTIVE_WAKES)
+        .expect("posted");
+    assert!(
+        !registry.notice_would_wake(),
+        "a self-waking chain still ends"
+    );
+    assert_eq!(registry.claim_mail_at().1, Some(MAX_CONSECUTIVE_WAKES));
+    assert_eq!(registry.claim_mail_at(), (Vec::new(), None));
+}
+
 // A viewer sees a stream job's newest output whether or not the model read
 // it, and its look consumes nothing and claims no report.
 #[tokio::test]
@@ -1331,4 +1374,110 @@ async fn a_user_stop_leaves_the_report_for_the_notice() {
         text.text
     );
     bounded("the close", registry.close()).await;
+}
+
+// Held mail is undelivered, read by a run as any notice, yet opens no turn
+// until released, then at depth 0 whatever the session's depth.
+#[tokio::test]
+async fn held_mail_opens_no_turn_until_released() {
+    let (_gate, registry) = registry(JobLimits::default());
+    let notice = |text: &str| crate::session::messages::CustomMessage {
+        custom_type: "test.notice".into(),
+        content: bake_ai::UserContent::Text(text.into()),
+        display: true,
+        details: None,
+        timestamp: 0,
+    };
+    assert!(!registry.release_held(), "nothing held");
+    registry.post_held(notice("held")).expect("posted");
+    assert!(registry.has_undelivered());
+    assert!(registry.has_held());
+    assert!(!registry.notice_would_wake());
+    let mut events = registry.subscribe();
+    assert!(registry.release_held());
+    assert!(bounded("a release wakes", events.changed()).await);
+    assert!(!registry.has_held());
+    while registry.wake_depth() < MAX_CONSECUTIVE_WAKES {
+        assert!(registry.spend_wake());
+    }
+    assert!(registry.notice_would_wake());
+    assert_eq!(registry.claim_mail_at(), (vec![notice("held")], Some(0)));
+
+    // A run takes held mail at its next step as it is.
+    registry.post_held(notice("read in a run")).expect("posted");
+    assert_eq!(registry.claim_mail(), vec![notice("read in a run")]);
+    assert!(!registry.release_held());
+    registry.close().await;
+}
+
+// A turn's claim never takes held mail: posted between a caller's look at
+// the registry and the claim, it stays queued for its release or a step.
+#[tokio::test]
+async fn a_turns_claim_leaves_held_mail_posted_after_the_look() {
+    let (_gate, registry) = registry(JobLimits::default());
+    let notice = |text: &str| crate::session::messages::CustomMessage {
+        custom_type: "test.notice".into(),
+        content: bake_ai::UserContent::Text(text.into()),
+        display: true,
+        details: None,
+        timestamp: 0,
+    };
+    // A notice that cannot wake the session: it is kept for a prompt.
+    registry
+        .post_at(notice("for the next prompt"), MAX_CONSECUTIVE_WAKES)
+        .expect("posted");
+    // The look a caller makes before claiming finds nothing held ...
+    assert!(!registry.has_held());
+    assert!(!registry.notice_would_wake());
+    // ... and held mail arrives before the claim.
+    registry.post_held(notice("held")).expect("posted");
+    let (claimed, depth) = crate::agent_session::job_notices::claim_at(&registry);
+    assert_eq!(claimed, vec![notice("for the next prompt")]);
+    assert_eq!(depth, MAX_CONSECUTIVE_WAKES);
+    assert!(
+        registry.has_held(),
+        "the held mail was taken by a turn's claim"
+    );
+    // Released, it opens a turn of its own; claimed once.
+    assert!(registry.release_held());
+    assert!(registry.notice_would_wake());
+    assert_eq!(
+        crate::agent_session::job_notices::claim_at(&registry).0,
+        vec![notice("held")]
+    );
+    assert!(!registry.has_undelivered());
+    registry.close().await;
+}
+
+// Keeping notices for the next prompt never takes one that could open a
+// turn: held mail, mail released since the caller looked, or shallow mail.
+#[tokio::test]
+async fn keeping_notices_for_a_prompt_takes_only_those_that_cannot_wake() {
+    let (_gate, registry) = registry(JobLimits::default());
+    let notice = |text: &str| crate::session::messages::CustomMessage {
+        custom_type: "test.notice".into(),
+        content: bake_ai::UserContent::Text(text.into()),
+        display: true,
+        details: None,
+        timestamp: 0,
+    };
+    registry
+        .post_at(notice("deep"), MAX_CONSECUTIVE_WAKES)
+        .expect("posted");
+    registry.post_held(notice("held")).expect("posted");
+    assert!(!registry.notice_would_wake());
+    assert_eq!(
+        registry.claim_unwaking(),
+        (Vec::new(), vec![notice("deep")])
+    );
+    assert!(registry.has_held());
+    // Released after the look, it is a turn's to take.
+    assert!(registry.release_held());
+    registry.post_at(notice("shallow"), 0).expect("posted");
+    assert_eq!(registry.claim_unwaking(), (Vec::new(), Vec::new()));
+    assert_eq!(
+        registry.claim_mail(),
+        vec![notice("held"), notice("shallow")]
+    );
+    registry.close().await;
 }

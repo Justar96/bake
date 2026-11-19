@@ -8,7 +8,13 @@
 //! not; a connection refused, a timeout, or a malformed answer is a
 //! failed delivery, never a silent one. Both sides read at most
 //! [`FRAME_CAP`] bytes and give up after [`IO_TIMEOUT`], so a stalled or
-//! hostile peer costs one bounded task.
+//! hostile peer costs one bounded task. A frame sent longer ago than that
+//! is dropped unread and unanswered, so its sender counts it undelivered
+//! and may send it again, never as a refusal it would take as final. The
+//! server reads [`CONCURRENT`] connections at once and keeps at most
+//! [`BACKLOG`] more waiting, inside their own time limit, never in the
+//! accept loop; past that a connection is closed at once, so silent
+//! connections cannot pile up, and cancellation stops the server at once.
 
 use std::path::Path;
 use std::time::Duration;
@@ -17,12 +23,20 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 
 use super::wire::{FRAME_CAP, Frame, Outcome, Response, WIRE_VERSION};
 use crate::owned_work::TaskScope;
+use bake_ai::AbortSignal;
 
 /// How long either side of a delivery waits for the other.
 pub const IO_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// How long the server pauses after a failed accept.
+const ACCEPT_BACKOFF: Duration = Duration::from_millis(100);
+
 /// The most deliveries a member reads at once; more wait to be accepted.
 const CONCURRENT: usize = 16;
+
+/// The most accepted connections that wait for a reading slot; past them a
+/// new connection is closed at once.
+const BACKLOG: usize = 16;
 
 /// Takes an arriving frame: returns what to answer.
 pub type Handler = std::sync::Arc<dyn Fn(Frame) -> Outcome + Send + Sync>;
@@ -43,6 +57,13 @@ async fn read_line<R: tokio::io::AsyncRead + Unpin>(reader: R) -> Result<Vec<u8>
         _ if line.len() > FRAME_CAP => Err("line too long".to_owned()),
         _ => Err("connection closed before a full line".to_owned()),
     }
+}
+
+/// Whether a frame sent at `sent_at` (Unix milliseconds, this machine's
+/// clock) is older than its sender's wait for an answer.
+fn is_stale(sent_at: i64) -> bool {
+    let limit = i64::try_from(IO_TIMEOUT.as_millis()).unwrap_or(i64::MAX);
+    bake_ai::now_ms().saturating_sub(sent_at) > limit
 }
 
 /// Delivers `frame` to the member listening on `socket`.
@@ -85,23 +106,52 @@ impl Listener {
     }
 
     /// Serves until `scope` is cancelled, then awaits the deliveries in
-    /// progress (each bounded by [`IO_TIMEOUT`]).
+    /// progress: one whose frame is unread ends at once, one whose frame
+    /// was taken finishes its answer (each bounded by [`IO_TIMEOUT`]).
     pub async fn serve(self, handler: Handler, scope: TaskScope) {
         let mut connections = tokio::task::JoinSet::new();
         let slots = std::sync::Arc::new(tokio::sync::Semaphore::new(CONCURRENT));
+        // Every connection the server keeps holds one, reading or waiting.
+        let kept = std::sync::Arc::new(tokio::sync::Semaphore::new(CONCURRENT + BACKLOG));
         loop {
             tokio::select! {
+                biased;
                 () = scope.signal().cancelled() => break,
                 Some(_) = connections.join_next(), if !connections.is_empty() => {}
                 accepted = self.0.accept() => {
-                    let Ok((stream, _)) = accepted else { continue };
-                    let Ok(slot) = std::sync::Arc::clone(&slots).acquire_owned().await else {
-                        break;
+                    let Ok((stream, _)) = accepted else {
+                        // A failed accept (out of descriptors, say) is
+                        // tried again after a pause, not at once.
+                        tokio::select! {
+                            biased;
+                            () = scope.signal().cancelled() => break,
+                            () = tokio::time::sleep(ACCEPT_BACKOFF) => continue,
+                        }
                     };
+                    // Past the backlog the connection is dropped: its
+                    // sender counts it undelivered.
+                    let Ok(place) = std::sync::Arc::clone(&kept).try_acquire_owned() else {
+                        drop(stream);
+                        continue;
+                    };
+                    let slots = std::sync::Arc::clone(&slots);
                     let handler = std::sync::Arc::clone(&handler);
+                    let signal = scope.signal().clone();
                     connections.spawn(async move {
-                        let _slot = slot;
-                        let _ = tokio::time::timeout(IO_TIMEOUT, answer(stream, handler)).await;
+                        let _place = place;
+                        // The wait for a slot counts against the delivery's
+                        // time, so a frame that waited past its sender's
+                        // patience is refused as stale, not taken late.
+                        let _ = tokio::time::timeout(IO_TIMEOUT, async {
+                            let slot = tokio::select! {
+                                biased;
+                                () = signal.cancelled() => return,
+                                slot = slots.acquire_owned() => slot,
+                            };
+                            let Ok(_slot) = slot else { return };
+                            answer(stream, handler, &signal).await;
+                        })
+                        .await;
                     });
                 }
             }
@@ -111,12 +161,21 @@ impl Listener {
 }
 
 #[cfg(unix)]
-async fn answer(mut stream: tokio::net::UnixStream, handler: Handler) {
-    let line = match read_line(&mut stream).await {
-        Ok(line) => line,
-        Err(_) => return,
+async fn answer(mut stream: tokio::net::UnixStream, handler: Handler, signal: &AbortSignal) {
+    // Until the frame is read nothing is taken, so a cancelled server
+    // drops the connection, which its sender counts as undelivered.
+    let line = tokio::select! {
+        biased;
+        () = signal.cancelled() => return,
+        line = read_line(&mut stream) => match line {
+            Ok(line) => line,
+            Err(_) => return,
+        },
     };
     let (id, outcome) = match Frame::decode(&line) {
+        // Its sender has stopped waiting, or a clock moved: no answer, so
+        // the sender reads a failed delivery and keeps what it owes.
+        Ok(frame) if is_stale(frame.sent_at) => return,
         Ok(frame) => (frame.id.clone(), handler(frame)),
         Err(error) => {
             // Answer under the frame's id when it carries a usable one, so
@@ -182,7 +241,7 @@ mod tests {
                     };
                 }
                 seen.lock().unwrap().push(text);
-                Outcome::Accepted
+                Outcome::Accepted { held: false }
             })
         };
         let gate = WorkGate::default();
@@ -191,7 +250,10 @@ mod tests {
             .spawn(move |scope| listener.serve(handler, scope))
             .unwrap();
 
-        assert_eq!(deliver(&socket, &frame("hi")).await, Ok(Outcome::Accepted));
+        assert_eq!(
+            deliver(&socket, &frame("hi")).await,
+            Ok(Outcome::Accepted { held: false })
+        );
         assert_eq!(
             deliver(&socket, &frame("no")).await,
             Ok(Outcome::Refused {
@@ -214,6 +276,112 @@ mod tests {
 
         gate.close().await;
         assert!(deliver(&socket, &frame("late")).await.is_err());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_frame_older_than_its_senders_wait_is_dropped_unread_and_unanswered() {
+        let dir = std::env::temp_dir().join(format!("bt-{}", crate::session::id::uuid_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let socket = dir.join("bravo.sock");
+        let seen = Arc::new(Mutex::new(0));
+        let handler: Handler = {
+            let seen = Arc::clone(&seen);
+            Arc::new(move |_frame: Frame| {
+                *seen.lock().unwrap() += 1;
+                Outcome::Accepted { held: false }
+            })
+        };
+        let gate = WorkGate::default();
+        let listener = Listener::bind(&socket).unwrap();
+        let _task = gate
+            .spawn(move |scope| listener.serve(handler, scope))
+            .unwrap();
+
+        let mut late = frame("from a sender that gave up");
+        late.sent_at -= i64::try_from(IO_TIMEOUT.as_millis()).unwrap() + 1000;
+        // A failed delivery, not a refusal its sender would take as final.
+        let outcome = deliver(&socket, &late).await;
+        assert!(outcome.is_err(), "{outcome:?}");
+        assert_eq!(*seen.lock().unwrap(), 0);
+        assert_eq!(
+            deliver(&socket, &frame("fresh")).await,
+            Ok(Outcome::Accepted { held: false })
+        );
+        assert_eq!(*seen.lock().unwrap(), 1);
+
+        gate.close().await;
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn connections_past_the_backlog_are_closed_at_once() {
+        let dir = std::env::temp_dir().join(format!("bt-{}", crate::session::id::uuid_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let socket = dir.join("bravo.sock");
+        let handler: Handler = Arc::new(|_frame: Frame| Outcome::Accepted { held: false });
+        let gate = WorkGate::default();
+        let listener = Listener::bind(&socket).unwrap();
+        let _task = gate
+            .spawn(move |scope| listener.serve(handler, scope))
+            .unwrap();
+        // Silent connections fill every reading slot and the backlog.
+        let mut idle = Vec::new();
+        for _ in 0..CONCURRENT + BACKLOG {
+            idle.push(tokio::net::UnixStream::connect(&socket).await.unwrap());
+        }
+        // Accepted after them, the next one is closed unread. The property
+        // is the bound: at once, not after a read timeout.
+        let mut extra = tokio::net::UnixStream::connect(&socket).await.unwrap();
+        let mut rest = Vec::new();
+        let read = tokio::time::timeout(IO_TIMEOUT / 2, extra.read_to_end(&mut rest)).await;
+        assert!(matches!(read, Ok(Ok(0))), "{read:?}");
+        // Once they go, deliveries are taken again.
+        drop(idle);
+        let mut delivered = deliver(&socket, &frame("hi")).await;
+        for _ in 0..200 {
+            if delivered.is_ok() {
+                break;
+            }
+            tokio::task::yield_now().await;
+            delivered = deliver(&socket, &frame("hi")).await;
+        }
+        assert_eq!(delivered, Ok(Outcome::Accepted { held: false }));
+        gate.close().await;
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_cancelled_server_stops_without_waiting_on_idle_connections() {
+        let dir = std::env::temp_dir().join(format!("bt-{}", crate::session::id::uuid_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let socket = dir.join("bravo.sock");
+        let handler: Handler = Arc::new(|_frame: Frame| Outcome::Accepted { held: false });
+        let gate = WorkGate::default();
+        let listener = Listener::bind(&socket).unwrap();
+        let _task = gate
+            .spawn(move |scope| listener.serve(handler, scope))
+            .unwrap();
+        assert_eq!(
+            deliver(&socket, &frame("hi")).await,
+            Ok(Outcome::Accepted { held: false })
+        );
+        // More silent connections than the server reads at once: every
+        // slot is taken and the rest wait for one.
+        let mut idle = Vec::new();
+        for _ in 0..CONCURRENT + 2 {
+            idle.push(tokio::net::UnixStream::connect(&socket).await.unwrap());
+        }
+        tokio::task::yield_now().await;
+        // The property is the bound: a silent peer must not hold the
+        // session's close for its read timeout.
+        let started = std::time::Instant::now();
+        gate.close().await;
+        assert!(started.elapsed() < IO_TIMEOUT, "{:?}", started.elapsed());
+        for mut stream in idle {
+            let mut rest = Vec::new();
+            assert_eq!(stream.read_to_end(&mut rest).await.unwrap(), 0);
+        }
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

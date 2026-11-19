@@ -18,16 +18,25 @@ pub const DEFAULT_HEAP_BYTES: u32 = 256 << 20;
 /// for the allocator's own overhead; growing past it ends the run as
 /// [`Failure::OutOfMemory`].
 pub const DEFAULT_LINEAR_MEMORY_BYTES: usize = 320 << 20;
-/// The most calls a script may have waiting for results; the next one fails
-/// the run as [`Failure::Protocol`]. Pi has no limit, but a script that calls
-/// in a loop without awaiting would otherwise fill the heap, and the host's
-/// queues, with calls the VM can never settle. High enough that a
-/// `Promise.all` over a realistic list never reaches it.
+/// The most calls the host is given to answer at once. A script may make
+/// more: the engine holds the later ones, in order, and reports each as
+/// [`Event::Call`] once an earlier call's answer has been applied, so a
+/// `Promise.all` over thousands of items runs instead of failing. Pi has no
+/// window.
 pub const MAX_PENDING_CALLS: usize = 1024;
-/// The most bytes the JSON arguments of the calls waiting for results may
-/// take together; a call that would pass it fails the run as
-/// [`Failure::Protocol`] before the host copies its arguments.
+/// The most bytes the calls waiting for results, those given to the host and
+/// those held back, may take together: each counts its JSON arguments, its
+/// name, and [`PENDING_CALL_BYTES`]. A call that would pass it fails the run
+/// as [`Failure::Protocol`] before the host copies its arguments, so a loop
+/// that calls without ever awaiting ends with a message saying what to do.
 pub const MAX_PENDING_ARGUMENT_BYTES: usize = 64 << 20;
+/// What each waiting call counts toward [`MAX_PENDING_ARGUMENT_BYTES`]
+/// besides its arguments and name: its records in the host and the VM. It
+/// bounds calls without arguments too, to 262,144, well before the heap limit.
+pub const PENDING_CALL_BYTES: usize = 256;
+/// How long a VM may run JavaScript without waiting on the host by default
+/// ([`Limits::busy`]).
+pub const DEFAULT_BUSY_BUDGET: Duration = Duration::from_secs(30);
 /// QuickJS's guard on its own stack, `quickjs-wasi`'s `MAX_STACK_SIZE`: deep
 /// recursion is a catchable `RangeError`.
 pub const MAX_STACK_BYTES: u32 = 512 * 1024;
@@ -105,6 +114,15 @@ pub struct Limits {
     pub heap_bytes: Option<u32>,
     /// The store's limit on the guest's linear memory (`StoreLimits`).
     pub linear_memory_bytes: usize,
+    /// How long the VM may run JavaScript without waiting for an answer
+    /// before the run ends as [`Failure::Busy`]: a loop that never waits on
+    /// the host, with or without `await`, ends even when the script has no
+    /// deadline. Time spent waiting for answers never counts, and the budget
+    /// restarts each time the VM waits, so a loop whose every turn waits for
+    /// an answer, such as one that only sleeps through a host global, is not
+    /// bounded here: its host bounds it, or `timeout_ms` does. A `timeout_ms` longer than the budget raises it to
+    /// the deadline, which then is the script's bound.
+    pub busy: Duration,
 }
 
 impl Default for Limits {
@@ -112,6 +130,7 @@ impl Default for Limits {
         Self {
             heap_bytes: Some(DEFAULT_HEAP_BYTES),
             linear_memory_bytes: DEFAULT_LINEAR_MEMORY_BYTES,
+            busy: DEFAULT_BUSY_BUDGET,
         }
     }
 }
@@ -158,8 +177,9 @@ impl fmt::Debug for ExitHook {
 #[derive(Debug, Default)]
 pub struct ExecuteRequest {
     /// The script, an async function body, with its options; `timeout_ms` is
-    /// the run's deadline, including time spent in calls. No deadline without
-    /// it.
+    /// the run's deadline, including time spent in calls. Without it the
+    /// engine bounds the run only by [`Limits::busy`], which a loop that
+    /// waits on the host every turn never reaches: the host bounds that.
     pub source: Source,
     /// The tools on `tools`. Names must be unique.
     pub tools: Vec<ToolDeclaration>,
@@ -327,6 +347,12 @@ pub enum Failure {
         /// `Execution timed out after N ms`.
         message: String,
     },
+    /// The VM ran JavaScript for [`Limits::busy`] without waiting for an
+    /// answer.
+    Busy {
+        /// What happened and what to do instead.
+        message: String,
+    },
     /// The run was aborted.
     Aborted {
         /// `Execution aborted`, or the message given to
@@ -346,8 +372,7 @@ pub enum Failure {
     },
     /// The VM failed outside the script's control: a malformed bridge
     /// message, a guest pointer outside its memory, a trap, or a call past
-    /// [`MAX_PENDING_CALLS`] or [`MAX_PENDING_ARGUMENT_BYTES`] (Pi's `sandbox`
-    /// kind).
+    /// [`MAX_PENDING_ARGUMENT_BYTES`] (Pi's `sandbox` kind).
     Protocol {
         /// What failed.
         message: String,
@@ -360,6 +385,7 @@ impl Failure {
         match self {
             Self::Exception(error) | Self::NeverSettles(error) => &error.message,
             Self::Timeout { message }
+            | Self::Busy { message }
             | Self::Aborted { message }
             | Self::OutOfMemory { message }
             | Self::OutputLimit { message }
@@ -386,6 +412,11 @@ pub struct Outcome {
     pub result: Result<Completion, Failure>,
     /// Deterministic mode, for a script that ended itself: where it ended.
     pub during: Option<During>,
+    /// Calls the script made that were still held back past the window
+    /// ([`MAX_PENDING_CALLS`]) when the run ended. They were never given to
+    /// the host as [`Event::Call`]s, so a host that counts the calls the
+    /// script made adds them, as calls that never ran.
+    pub held: usize,
 }
 
 impl Outcome {
@@ -393,6 +424,7 @@ impl Outcome {
         Self {
             result: Err(failure),
             during: None,
+            held: 0,
         }
     }
 }

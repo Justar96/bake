@@ -7,7 +7,9 @@
 //! message and the runtime's account of a settled child are different
 //! custom types ([`MESSAGE_TYPE`], [`NOTICE_TYPE`]), so a transcript never
 //! credits one agent with another's words or with the runtime's account.
-//! The lost-run notice is Bake's own.
+//! The lost-run notice, the lines on what a settled run left behind
+//! ([`Leftovers`]), and the notice of a queued child that could not start
+//! are Bake's own.
 
 use bake_ai::{TextContent, UserContent, UserContentBlock};
 use serde_json::json;
@@ -107,6 +109,52 @@ pub fn settlement_summary(child_id: &str, stop: StopReason) -> String {
     }
 }
 
+/// What a settled run left behind: messages from the parent it did not
+/// read, which wait for its next run, and its own background jobs still
+/// running, whose notices start a new run.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Leftovers {
+    /// Parent messages the run did not read.
+    pub unread: usize,
+    /// The ids of the child's jobs still running.
+    pub jobs: Vec<String>,
+    /// Parent messages the run did not read, lost since, as Bake stopped.
+    pub lost: usize,
+}
+
+impl Leftovers {
+    /// One line for each kind of leftover, each ending in a newline.
+    pub fn lines(&self) -> String {
+        let mut text = String::new();
+        match self.unread {
+            0 => {}
+            1 => text.push_str(
+                "1 message you sent it is unread; its next run reads it first.
+",
+            ),
+            n => text.push_str(&format!(
+                "{n} messages you sent it are unread; its next run reads them first.
+"
+            )),
+        }
+        match self.lost {
+            0 => {}
+            1 => text.push_str("1 message you sent it was unread when Bake stopped and is lost.\n"),
+            n => text.push_str(&format!(
+                "{n} messages you sent it were unread when Bake stopped and are lost.\n"
+            )),
+        }
+        if !self.jobs.is_empty() {
+            text.push_str(&format!(
+                "Its background jobs still run: {}. When one finishes it continues, and you are notified again.
+",
+                self.jobs.join(", ")
+            ));
+        }
+        text
+    }
+}
+
 /// `createSettlementMessage`: the summary, then the child's closing text
 /// or that it left none.
 pub fn settlement_notice(
@@ -115,7 +163,33 @@ pub fn settlement_notice(
     stop: StopReason,
     closing: Option<&str>,
 ) -> CustomMessage {
-    let summary = settlement_summary(child_id, stop);
+    settlement_notice_with(child_id, run_id, stop, closing, &Leftovers::default())
+}
+
+/// [`settlement_notice`], with what the run left behind after the summary.
+pub fn settlement_notice_with(
+    child_id: &str,
+    run_id: u64,
+    stop: StopReason,
+    closing: Option<&str>,
+    leftovers: &Leftovers,
+) -> CustomMessage {
+    let mut rest = leftovers.clone();
+    // A finished turn whose jobs still run is not done, as Pi's summary
+    // would say.
+    let mut summary = if stop == StopReason::Completed && !rest.jobs.is_empty() {
+        format!(
+            "Background subagent {child_id} finished its turn, but its background jobs still run: {}. When one finishes it continues, and you are notified again.",
+            std::mem::take(&mut rest.jobs).join(", ")
+        )
+    } else {
+        settlement_summary(child_id, stop)
+    };
+    let lines = rest.lines();
+    if !lines.is_empty() {
+        summary.push('\n');
+        summary.push_str(lines.trim_end());
+    }
     let text = match closing.filter(|text| !text.is_empty()) {
         Some(closing) => format!("{summary}\nIts closing message:\n{closing}"),
         None if stop == StopReason::Interrupted => summary,
@@ -125,6 +199,30 @@ pub fn settlement_notice(
         NOTICE_TYPE,
         text,
         json!({ "agentId": child_id, "runId": run_id, "stopReason": stop.as_str() }),
+    )
+}
+
+/// The notice for a queued child that could not `start` or `resume`:
+/// its run never began, and `undelivered` messages it was sent are gone.
+pub fn start_failure_notice(
+    child_id: &str,
+    run_id: u64,
+    what: &str,
+    error: &str,
+    undelivered: usize,
+) -> CustomMessage {
+    let mut text = format!("Background subagent {child_id} could not {what}: {error}");
+    match undelivered {
+        0 => {}
+        1 => text.push_str("\nThe message you sent it was not delivered."),
+        n => text.push_str(&format!(
+            "\nThe {n} messages you sent it were not delivered."
+        )),
+    }
+    text_message(
+        NOTICE_TYPE,
+        text,
+        json!({ "agentId": child_id, "runId": run_id, "stopReason": StopReason::Error.as_str() }),
     )
 }
 

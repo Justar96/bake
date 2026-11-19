@@ -17,7 +17,7 @@ use serde_json::{Value, json};
 
 use super::messages;
 use super::models::{self, RouteRequest};
-use super::{ParentLink, Status, SubagentHost};
+use super::{Delivery, Interrupt, ParentLink, Status, SubagentHost};
 use crate::tools::definition::ToolDefinition;
 
 /// A parent's tools, in the order they are declared.
@@ -50,6 +50,22 @@ fn text(text: impl Into<String>, details: Option<Value>) -> AgentToolResult {
     let mut result = AgentToolResult::text(text);
     result.details = details;
     result
+}
+
+/// Runs `work` until it ends or `signal` aborts first, which drops it:
+/// `None` then.
+async fn unless_aborted<T>(
+    signal: Option<&AbortSignal>,
+    work: impl std::future::Future<Output = T>,
+) -> Option<T> {
+    let Some(signal) = signal else {
+        return Some(work.await);
+    };
+    tokio::select! {
+        biased;
+        value = work => Some(value),
+        () = signal.cancelled() => None,
+    }
 }
 
 fn string_arg<'a>(args: &'a Value, key: &str) -> Result<&'a str, String> {
@@ -185,7 +201,13 @@ async fn delegate(
     if signal.as_ref().is_some_and(AbortSignal::aborted) {
         return Err("subagent run was cancelled".to_owned());
     }
-    let started = host.start(label, prompt, route, foreground).await?;
+    // A start dropped by the abort leaves no child behind.
+    let started = unless_aborted(
+        signal.as_ref(),
+        host.start(label, prompt, route, foreground),
+    )
+    .await
+    .ok_or_else(|| "subagent run was cancelled".to_owned())??;
     let details = json!({ super::SUBAGENT_DETAIL: {
         "agentId": started.id,
         "label": label,
@@ -197,34 +219,60 @@ async fn delegate(
         "foreground": foreground,
     } });
     let Some(settled) = started.settled else {
-        return Ok(text(
-            format!("started subagent {}", started.id),
-            Some(details),
-        ));
+        let shown = if started.queued {
+            format!(
+                "queued subagent {}: {} subagents are busy. It starts when one finishes; you are notified when it is done.",
+                started.id,
+                super::MAX_ACTIVE
+            )
+        } else {
+            format!("started subagent {}", started.id)
+        };
+        return Ok(text(shown, Some(details)));
     };
+    // Dropped unsettled, as when the abort ends the wait, it interrupts the
+    // child, whose run then settles with no one to tell.
     let mut guard = Foreground {
         host,
         id: &started.id,
         settled: false,
     };
-    let settled = settled.await;
+    let Some(settled) = unless_aborted(signal.as_ref(), settled).await else {
+        let mut result = text(
+            format!(
+                "subagent run was cancelled; agent {} was stopped and keeps its context. send_message continues it.",
+                started.id
+            ),
+            Some(details),
+        );
+        result.is_error = true;
+        return Ok(result);
+    };
     guard.settled = true;
-    let Ok(settlement) = settled else {
+    let Ok((settlement, leftovers)) = settled else {
         let mut result = text("subagent run was cancelled", Some(details));
         result.is_error = true;
         return Ok(result);
     };
+    let left = leftovers.lines();
     Ok(match messages::foreground_error(settlement.stop) {
-        None => text(settlement.closing.unwrap_or_default(), Some(details)),
+        None => text(
+            format!("{}{left}", settlement.closing.unwrap_or_default())
+                .trim_end()
+                .to_owned(),
+            Some(details),
+        ),
         Some(headline) => {
-            let mut result = text(
-                messages::foreground_failure(
-                    headline,
-                    settlement.diagnostic.as_deref(),
-                    settlement.closing.as_deref(),
-                ),
-                Some(details),
+            let mut shown = messages::foreground_failure(
+                headline,
+                settlement.diagnostic.as_deref(),
+                settlement.closing.as_deref(),
             );
+            if !left.is_empty() {
+                shown.push('\n');
+                shown.push_str(left.trim_end());
+            }
+            let mut result = text(shown, Some(details));
             result.is_error = true;
             result
         }
@@ -272,20 +320,36 @@ fn parent_send_message_tool(host: SubagentHost) -> ToolDefinition {
         "send_message",
         SEND_MESSAGE,
         send_message_parameters(),
-        move |_id, args, _signal, _update, _ctx| {
+        move |_id, args, signal, _update, _ctx| {
             let host = host.clone();
             Box::pin(async move {
                 let agent = string_arg(&args, "agent_id")?.to_owned();
                 let message = args.get("message").and_then(Value::as_str).unwrap_or("");
-                let (message_id, run) = host.message_child(&agent, message).await?;
-                let mut details = json!({ "agentId": agent, "messageId": message_id });
-                if let Some(run) = run {
+                // Only resuming a `ready` child waits; dropped by the abort,
+                // the child stays `ready` with the message.
+                let sent = unless_aborted(signal.as_ref(), host.message_child(&agent, message))
+                    .await
+                    .ok_or_else(|| {
+                        format!(
+                            "send_message was cancelled while agent {agent} resumed; the message waits for its next run"
+                        )
+                    })??;
+                let mut details = json!({ "agentId": agent, "messageId": sent.message_id });
+                if let Some(run) = sent.run() {
                     details["runId"] = json!(run);
                 }
-                Ok(text(
-                    format!("message delivered to agent {agent}"),
-                    Some(details),
-                ))
+                let shown = match sent.delivery {
+                    Delivery::Running => {
+                        format!("message delivered to agent {agent}; it reads it at its next step")
+                    }
+                    Delivery::Started(_) => {
+                        format!("message delivered to agent {agent}; it starts a new run")
+                    }
+                    Delivery::Queued(_) => format!(
+                        "message queued for agent {agent}; it reads it when its next run starts"
+                    ),
+                };
+                Ok(text(shown, Some(details)))
             })
         },
     );
@@ -308,8 +372,14 @@ fn interrupt_tool(host: SubagentHost) -> ToolDefinition {
         parameters,
         move |_id, args, _signal, _update, _ctx| {
             let result = string_arg(&args, "agent_id").and_then(|agent| {
-                host.interrupt(agent)?;
-                Ok(text(format!("interrupt requested for agent {agent}"), None))
+                Ok(match host.interrupt(agent)? {
+                    Interrupt::Requested => {
+                        text(format!("interrupt requested for agent {agent}"), None)
+                    }
+                    Interrupt::NotRunning(status) => {
+                        text(format!("agent {agent} is {status}; nothing to stop"), None)
+                    }
+                })
             });
             Box::pin(async move { result })
         },
@@ -327,17 +397,17 @@ fn list_agents_tool(host: SubagentHost) -> ToolDefinition {
         "List your continuable subagents: agent id, status (running, idle, or ready = saved, resumable, not a result), label, and model. For ids only; you are notified on finish.",
         json!({ "type": "object", "properties": {} }),
         move |_id, _args, _signal, _update, _ctx| {
-            let rows = host.list();
+            let rows = host.listing();
             let listing = if rows.is_empty() {
                 "(no subagents)".to_owned()
             } else {
                 rows.iter()
-                    .map(|row| match row.status {
+                    .map(|(row, queued)| match row.status {
                         Status::Unavailable => format!("{} [diagnostic: unavailable]", row.id),
                         status => format!(
                             "{} [{}] — {} · {}",
                             row.id,
-                            status.word(),
+                            if *queued { "queued" } else { status.word() },
                             row.label,
                             row.route
                         ),

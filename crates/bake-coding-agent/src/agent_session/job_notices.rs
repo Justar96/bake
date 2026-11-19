@@ -60,18 +60,32 @@ pub fn completion_notice(snapshot: &JobSnapshot) -> CustomMessage {
 /// terminal job not yet reported, then the notices other agents posted
 /// ([`JobRegistry::post`]), in arrival order.
 pub fn claim(jobs: &JobRegistry) -> Vec<CustomMessage> {
-    claim_at(jobs).0
+    let settled = jobs.claim_unreported();
+    let mut notices: Vec<CustomMessage> = settled.iter().map(completion_notice).collect();
+    notices.extend(jobs.claim_mail());
+    notices
 }
 
-/// [`claim`], with the depth a turn they open would be woken at
-/// ([`JobRegistry::notice_depth`]).
+/// [`claim`] for deciding whether to open a turn, with the depth that turn
+/// would be woken at ([`JobRegistry::notice_depth`]). Held mail is left
+/// queued ([`JobRegistry::claim_waking_mail_at`]): it opens a turn when
+/// released, or a run reads it at its next step.
 pub fn claim_at(jobs: &JobRegistry) -> (Vec<CustomMessage>, usize) {
     let settled = jobs.claim_unreported();
-    let mail = jobs.claim_mail();
-    let depth = jobs.notice_depth(&settled, !mail.is_empty());
+    let (mail, mail_depth) = jobs.claim_waking_mail_at();
+    let depth = jobs.notice_depth(&settled, mail_depth);
     let mut notices: Vec<CustomMessage> = settled.iter().map(completion_notice).collect();
     notices.extend(mail);
     (notices, depth)
+}
+
+/// The notices that could not open a turn now, for the next prompt
+/// ([`JobRegistry::claim_unwaking`]).
+pub fn claim_unwaking(jobs: &JobRegistry) -> Vec<CustomMessage> {
+    let (settled, mail) = jobs.claim_unwaking();
+    let mut notices: Vec<CustomMessage> = settled.iter().map(completion_notice).collect();
+    notices.extend(mail);
+    notices
 }
 
 /// The notice for a job an earlier process of the session started and did

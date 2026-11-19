@@ -16,8 +16,8 @@ use bake_codemode::{Failure, OutputItem, ScriptError, ToolNamespace};
 use serde_json::{Value, json};
 
 use super::execute::{
-    Admission, Item, execute_with, format_error, format_output, join_adjacent_text, save_images,
-    truncate_output,
+    Admission, CallView, Ending, Item, Records, StatusCounts, execute_codemode, execute_with,
+    format_error, format_output, join_adjacent_text, save_images, truncate_output,
 };
 use super::*;
 use crate::session::SessionEntry;
@@ -186,7 +186,7 @@ fn lists_only_namespaces_with_a_zero_budget() {
 }
 
 /// Without tools, the description is Pi's intro and globals with `models`
-/// off, exactly.
+/// off, exactly, but for Bake's options line and `sleep()`.
 #[test]
 fn the_description_without_tools_is_pis_text() {
     let description = create_codemode_description(&[], &CodemodeDescriptionOptions::default());
@@ -195,11 +195,12 @@ fn the_description_without_tools_is_pis_text() {
         [
             "Run JavaScript that calls other tools. The input is raw JavaScript (not JSON, no code fence), run as an async function body in a QuickJS sandbox: top-level `await` and `return` work. No Node, file system, network, or timers.",
             "- `await tools.<name>({ ...args })` resolves to a string, or an object if the tool's declaration says so, and rejects with an Error on failure. A tool whose declaration returns an object resolves on failure too when it returned that object; check its fields. Calls still running when the script ends are cancelled.",
-            "- Optional first line: `// @options: {\"max_output_tokens\": 10000, \"timeout_ms\": 60000}`",
+            "- Optional first line: `// @options: {\"max_output_tokens\": 10000}`. Adding `\"timeout_ms\": N` ends the script and cancels its calls after N ms.",
             "",
             "Globals:",
             "- `text(value)`, `image(dataUrlOrImageBlock)`, `console.log(...)`, and top-level `return` add output; `exit()` ends the script. With several text items, each starts with a `==> text N/M <==` line, and `console` lines follow the other output in one `<console_output>` block. `image()` also saves the image to a temp file and the result names its path.",
             "- `store(key, value)` and `load(key)` keep JSON values across codemode calls.",
+            "- `await sleep(ms)` waits, at most 300000 ms per call.",
             "- `ALL_TOOLS`, `await searchTools(query, { limit?, namespace? })`, `await describeTool(name)`, `await describeNamespace(name)`: find unlisted tools, such as MCP tools.",
         ]
         .join("\n")
@@ -508,23 +509,43 @@ fn joins_text_around_images_on_their_own_lines() {
     );
 }
 
+fn nested_call(name: &str, args: &str, status: CodemodeNestedCallStatus) -> CodemodeNestedCall {
+    CodemodeNestedCall {
+        id: format!("c/{name}"),
+        name: name.to_owned(),
+        args: args.to_owned(),
+        status,
+        duration_ms: Some(1.0),
+        error: (status == CodemodeNestedCallStatus::Error).then(|| "no such file".to_owned()),
+    }
+}
+
+fn ending(calls: Vec<CodemodeNestedCall>) -> Ending<'static> {
+    Ending {
+        calls: CallView {
+            listed: calls,
+            omitted: StatusCounts::default(),
+        },
+        ..Ending::default()
+    }
+}
+
+fn exception(name: &str, message: &str) -> Failure {
+    Failure::Exception(ScriptError {
+        name: Some(name.to_owned()),
+        message: message.to_owned(),
+        stack: None,
+    })
+}
+
 #[test]
 fn formats_each_failure_kind_with_the_calls_that_ran() {
-    let call = CodemodeNestedCall {
-        id: "c/1".to_owned(),
-        name: "echo".to_owned(),
-        args: "{}".to_owned(),
-        status: CodemodeNestedCallStatus::Ok,
-        duration_ms: Some(1.0),
-        error: None,
-    };
-    let script = Failure::Exception(ScriptError {
-        name: Some("TypeError".to_owned()),
-        message: "x is not a function".to_owned(),
-        stack: None,
-    });
+    let ok = || vec![nested_call("echo", "{}", CodemodeNestedCallStatus::Ok)];
     assert_eq!(
-        format_error(&script, std::slice::from_ref(&call)),
+        format_error(
+            &exception("TypeError", "x is not a function"),
+            &ending(ok())
+        ),
         "TypeError: x is not a function\n\nTool calls made before the failure (they are not undone): echo (ok)"
     );
     assert_eq!(
@@ -532,7 +553,7 @@ fn formats_each_failure_kind_with_the_calls_that_ran() {
             &Failure::Timeout {
                 message: "Execution timed out after 5 ms".to_owned()
             },
-            &[]
+            &Ending::default()
         ),
         "Script timed out: Execution timed out after 5 ms\n\nNo tool calls were made."
     );
@@ -541,18 +562,154 @@ fn formats_each_failure_kind_with_the_calls_that_ran() {
             &Failure::Aborted {
                 message: CODEMODE_ABORT_MESSAGE.to_owned()
             },
-            &[]
+            &Ending::default()
         ),
         "Script aborted: This operation was aborted\n\nNo tool calls were made."
+    );
+    // The engine's busy-budget message says what to do; it is shown as is.
+    assert_eq!(
+        format_error(
+            &Failure::Busy {
+                message: "Script ran JavaScript for 30 s without waiting on a tool call (an endless loop?). Await tool calls in the loop, or set timeout_ms to allow a longer computation.".to_owned()
+            },
+            &ending(ok())
+        ),
+        "Script ran JavaScript for 30 s without waiting on a tool call (an endless loop?). Await tool calls in the loop, or set timeout_ms to allow a longer computation.\n\nTool calls made before the failure (they are not undone): echo (ok)"
     );
     assert_eq!(
         format_error(
             &Failure::Protocol {
                 message: "broken".to_owned()
             },
-            &[]
+            &Ending::default()
         ),
         "Script sandbox failed: broken\n\nNo tool calls were made."
+    );
+}
+
+#[test]
+fn a_timeout_names_the_calls_still_running() {
+    let running = ["write".to_owned(), "bash".to_owned()];
+    let ending = Ending {
+        calls: CallView {
+            listed: vec![
+                nested_call("read", "{}", CodemodeNestedCallStatus::Ok),
+                nested_call("write", "{}", CodemodeNestedCallStatus::Cancelled),
+                nested_call("bash", "{}", CodemodeNestedCallStatus::Cancelled),
+            ],
+            omitted: StatusCounts::default(),
+        },
+        running: &running,
+        web_fetch: false,
+        idle: false,
+    };
+    assert_eq!(
+        format_error(
+            &Failure::Timeout {
+                message: "Execution timed out after 5 ms".to_owned()
+            },
+            &ending
+        ),
+        "Script timed out: Execution timed out after 5 ms\nStill running when it timed out: write, bash.\n\nTool calls made before the failure (they are not undone): read (ok), write (cancelled), bash (cancelled)"
+    );
+}
+
+#[test]
+fn a_failed_call_is_summarized_with_its_arguments_and_the_start_of_its_error() {
+    let mut failed = nested_call("read", r#"{"path":"x"}"#, CodemodeNestedCallStatus::Error);
+    failed.error = Some("e".repeat(300));
+    let text = format_error(&exception("Error", "boom"), &ending(vec![failed]));
+    assert_eq!(
+        text,
+        format!(
+            "Error: boom\n\nTool calls made before the failure (they are not undone): read {{\"path\":\"x\"}} (error: {}…)",
+            "e".repeat(200)
+        )
+    );
+}
+
+#[test]
+fn past_the_listed_calls_the_summary_counts_them_by_status() {
+    let mut omitted = StatusCounts::default();
+    for _ in 0..700 {
+        omitted.add(CodemodeNestedCallStatus::Ok);
+    }
+    for _ in 0..44 {
+        omitted.add(CodemodeNestedCallStatus::Error);
+    }
+    let mut listed: Vec<CodemodeNestedCall> = (0..255)
+        .map(|_| nested_call("echo", "{}", CodemodeNestedCallStatus::Ok))
+        .collect();
+    listed.push(nested_call(
+        "read",
+        r#"{"path":"y"}"#,
+        CodemodeNestedCallStatus::Error,
+    ));
+    let ending = Ending {
+        calls: CallView { listed, omitted },
+        ..Ending::default()
+    };
+    assert_eq!(
+        format_error(&exception("Error", "boom"), &ending),
+        "Error: boom\n\nTool calls made before the failure (they are not undone): 1000 calls (955 ok, 45 error). Failed among the last 256: read {\"path\":\"y\"} (error: no such file)"
+    );
+}
+
+#[test]
+fn hints_at_what_to_use_for_a_global_the_sandbox_lacks() {
+    let hint = |name: &str, web_fetch: bool| {
+        let text = format_error(
+            &exception("ReferenceError", &format!("{name} is not defined")),
+            &Ending {
+                web_fetch,
+                ..Ending::default()
+            },
+        );
+        let head = text.split("\n\n").next().unwrap_or_default().to_owned();
+        head.split_once('\n').map(|(_, hint)| hint.to_owned())
+    };
+    let timers = "There are no timers: await tool calls, or `await sleep(ms)`.";
+    let node = "There are no Node APIs: use tools.read, tools.bash and the other tools.";
+    let absent = "Not available in the sandbox.";
+    let cases = [
+        ("setTimeout", false, Some(timers)),
+        ("setInterval", false, Some(timers)),
+        (
+            "fetch",
+            false,
+            Some("There is no network access from scripts."),
+        ),
+        (
+            "fetch",
+            true,
+            Some("There is no fetch: use `tools.web_fetch({ url })`."),
+        ),
+        ("require", false, Some(node)),
+        ("process", false, Some(node)),
+        (
+            "structuredClone",
+            false,
+            Some("Use JSON.parse(JSON.stringify(value))."),
+        ),
+        ("TextEncoder", false, Some(absent)),
+        ("TextDecoder", false, Some(absent)),
+        ("URL", false, Some(absent)),
+        ("URLSearchParams", false, Some(absent)),
+        ("crypto", false, Some(absent)),
+        ("Intl", false, Some(absent)),
+        ("someVariable", false, None),
+    ];
+    for (name, web_fetch, expected) in cases {
+        assert_eq!(hint(name, web_fetch).as_deref(), expected, "{name}");
+    }
+    // Only a ReferenceError for a missing name gets a hint.
+    let other = format_error(
+        &exception("TypeError", "setTimeout is not defined"),
+        &Ending::default(),
+    );
+    assert_eq!(
+        other,
+        "TypeError: setTimeout is not defined\n\nNo tool calls were made."
     );
 }
 
@@ -897,15 +1054,59 @@ fn run_admitted(
     signal: Option<bake_ai::AbortSignal>,
     admission: &Admission,
 ) -> impl Future<Output = Result<AgentToolResult, String>> + Send + 'static {
+    run_watched(code, signal, admission, AgentToolUpdateCallback::ignore())
+}
+
+fn run_watched(
+    code: &str,
+    signal: Option<bake_ai::AbortSignal>,
+    admission: &Admission,
+    on_update: AgentToolUpdateCallback,
+) -> impl Future<Output = Result<AgentToolResult, String>> + Send + 'static {
     execute_with(
         "worker-admission".to_owned(),
         json!({ "code": code }),
         signal,
-        AgentToolUpdateCallback::ignore(),
+        on_update,
         ToolContext::detached(),
         None,
         admission.clone(),
     )
+}
+
+/// A callback that sends each partial result to the returned receiver.
+fn updates() -> (
+    AgentToolUpdateCallback,
+    tokio::sync::mpsc::UnboundedReceiver<AgentToolResult>,
+) {
+    let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+    let callback = AgentToolUpdateCallback::new(move |partial| {
+        let _ = sender.send(partial);
+    });
+    (callback, receiver)
+}
+
+const WAITING_FOR_A_WORKER: &str =
+    "Waiting for a free codemode worker: all 2 are running other scripts.";
+
+/// Waits for `count` partial results that say a script waits for a slot.
+async fn waiting_for_a_worker(
+    receiver: &mut tokio::sync::mpsc::UnboundedReceiver<AgentToolResult>,
+    count: usize,
+) {
+    let mut seen = 0;
+    while seen < count {
+        let partial = receiver.recv().await.expect("an update");
+        if partial.content.first().is_some_and(|block| {
+            matches!(block, UserContentBlock::Text(text) if text.text == WAITING_FOR_A_WORKER)
+        }) {
+            assert_eq!(
+                partial.details,
+                Some(json!({ "calls": [], CODEMODE_WAITING_DETAIL: true }))
+            );
+            seen += 1;
+        }
+    }
 }
 
 /// Waits until `free` slots are free, as when the scripts that held the
@@ -939,14 +1140,18 @@ async fn a_script_waits_for_a_slot_and_starts_when_one_comes_free() {
         .try_acquire_owned()
         .expect("slot");
 
-    let waiting = tokio::spawn(run_admitted("return 3", None, &admission));
+    let (on_update, mut waiting_updates) = updates();
+    let waiting = tokio::spawn(run_watched("return 3", None, &admission, on_update));
+    waiting_for_a_worker(&mut waiting_updates, 1).await;
     let controller = bake_ai::AbortController::new();
-    let aborted = tokio::spawn(run_admitted(
+    let (on_update, mut receiver) = updates();
+    let aborted = tokio::spawn(run_watched(
         "while (true) {}",
         Some(controller.signal()),
         &admission,
+        on_update,
     ));
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    waiting_for_a_worker(&mut receiver, 1).await;
     controller.abort();
     let aborted = aborted.await.expect("task").expect("result");
     assert!(aborted.is_error);
@@ -966,7 +1171,7 @@ async fn a_script_waits_for_a_slot_and_starts_when_one_comes_free() {
     assert!(timed_out.is_error);
     assert_eq!(
         result_text(&timed_out),
-        "Script error:\nScript timed out: Execution timed out after 50 ms while waiting for a free codemode worker\n\nThe script did not start."
+        "Script error:\nScript timed out: Execution timed out after 50 ms while waiting for a free codemode worker. Make these tool calls directly instead of through codemode, or retry later.\n\nThe script did not start."
     );
 
     assert!(!waiting.is_finished());
@@ -978,6 +1183,13 @@ async fn a_script_waits_for_a_slot_and_starts_when_one_comes_free() {
     let admitted = waiting.await.expect("task").expect("result");
     assert!(!admitted.is_error);
     assert_eq!(result_text(&admitted), "3");
+    // Once it has its slot, a partial result without the waiting marker
+    // replaces the one that had it, though the script made no call.
+    let mut after = Vec::new();
+    while let Ok(partial) = waiting_updates.try_recv() {
+        after.push(partial.details);
+    }
+    assert_eq!(after, [Some(json!({ "calls": [] }))]);
     wait_for_free_slots(&admission, 1).await;
     drop(held_two);
 }
@@ -1010,17 +1222,20 @@ async fn an_aborted_script_takes_no_slot() {
 async fn queues_a_concurrent_burst_behind_two_scripts() {
     let admission = Admission::new(MAX_CONCURRENT_CODEMODE_SCRIPTS);
     let controller = bake_ai::AbortController::new();
+    let (on_update, mut receiver) = updates();
     let runs: Vec<_> = (0..6)
         .map(|_| {
-            tokio::spawn(run_admitted(
+            tokio::spawn(run_watched(
                 "while (true) {}",
                 Some(controller.signal()),
                 &admission,
+                on_update.clone(),
             ))
         })
         .collect();
+    drop(on_update);
     wait_for_free_slots(&admission, 0).await;
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    waiting_for_a_worker(&mut receiver, 4).await;
     assert!(runs.iter().all(|run| !run.is_finished()));
     controller.abort();
     let (mut stopped, mut never_started) = (0, 0);
@@ -1034,6 +1249,257 @@ async fn queues_a_concurrent_burst_behind_two_scripts() {
     }
     assert_eq!((stopped, never_started), (2, 4));
     wait_for_free_slots(&admission, MAX_CONCURRENT_CODEMODE_SCRIPTS).await;
+}
+
+/// A host that is, or is not, a subagent's session.
+struct SessionKind {
+    subagent: bool,
+}
+
+impl CodemodeHost for SessionKind {
+    fn tool_namespace(&self, _name: &str) -> Option<CodemodeNamespace> {
+        None
+    }
+
+    fn tool_guidelines(&self, _name: &str) -> Vec<String> {
+        Vec::new()
+    }
+
+    fn tool_description(&self, _name: &str) -> Option<String> {
+        None
+    }
+
+    fn load_store(&self) -> BoxFuture<'static, Result<bake_codemode::StoreValues, String>> {
+        Box::pin(async { Ok(bake_codemode::StoreValues::new()) })
+    }
+
+    fn append_store(
+        &self,
+        _data: CodemodeStoreEntryData,
+    ) -> BoxFuture<'static, Result<(), String>> {
+        Box::pin(async { Ok(()) })
+    }
+
+    fn work(&self) -> Option<crate::owned_work::WorkGate> {
+        None
+    }
+
+    fn is_subagent(&self) -> bool {
+        self.subagent
+    }
+}
+
+async fn run_in_session(code: &str, subagent: bool) -> AgentToolResult {
+    execute_codemode(
+        "pools".to_owned(),
+        json!({ "code": code }),
+        None,
+        AgentToolUpdateCallback::ignore(),
+        ToolContext::detached(),
+        Some(Arc::new(SessionKind { subagent })),
+    )
+    .await
+    .expect("result")
+}
+
+/// A subagent's script does not wait behind its parent's: subagents'
+/// sessions draw from slots of their own, so with every top-level slot
+/// taken a subagent's script still runs, and a top-level one waits.
+#[tokio::test]
+async fn subagent_scripts_draw_from_slots_of_their_own() {
+    let process = Admission::process();
+    let held: Vec<_> = (0..MAX_CONCURRENT_CODEMODE_SCRIPTS)
+        .map(|_| {
+            Arc::clone(process.slots())
+                .try_acquire_owned()
+                .expect("slot")
+        })
+        .collect();
+    let child = run_in_session("return 'child'", true).await;
+    assert!(!child.is_error, "{}", result_text(&child));
+    assert_eq!(result_text(&child), "child");
+    let parent = run_in_session("// @options: {\"timeout_ms\": 20}\nreturn 'parent'", false).await;
+    assert!(parent.is_error);
+    assert!(
+        result_text(&parent).ends_with("while waiting for a free codemode worker. Make these tool calls directly instead of through codemode, or retry later.\n\nThe script did not start."),
+        "{}",
+        result_text(&parent)
+    );
+    drop(held);
+}
+
+/// Without `timeout_ms`, a script waits for a slot for ten minutes, not
+/// one, and then says to make the calls directly.
+#[tokio::test(start_paused = true)]
+async fn a_script_without_a_timeout_waits_ten_minutes_for_a_slot() {
+    let admission = Admission::new(MAX_CONCURRENT_CODEMODE_SCRIPTS);
+    let held: Vec<_> = (0..MAX_CONCURRENT_CODEMODE_SCRIPTS)
+        .map(|_| {
+            Arc::clone(admission.slots())
+                .try_acquire_owned()
+                .expect("slot")
+        })
+        .collect();
+    let (on_update, mut receiver) = updates();
+    let started = tokio::time::Instant::now();
+    let waiting = tokio::spawn(run_watched("return 1", None, &admission, on_update));
+    waiting_for_a_worker(&mut receiver, 1).await;
+    tokio::time::advance(std::time::Duration::from_secs(61)).await;
+    tokio::task::yield_now().await;
+    assert!(!waiting.is_finished());
+    let refused = waiting.await.expect("task").expect("result");
+    assert_eq!(started.elapsed(), std::time::Duration::from_secs(600));
+    assert!(refused.is_error);
+    assert_eq!(
+        result_text(&refused),
+        "Script error:\nNo codemode worker became free within 10 minutes: all 2 are running other scripts in this process. Make these tool calls directly instead of through codemode.\n\nThe script did not start."
+    );
+    drop(held);
+}
+
+/// `sleep(ms)` waits on Tokio's clock, at most five minutes a call, and
+/// keeps the script from failing as one that waits on nothing; anything
+/// but a non-negative number rejects.
+#[tokio::test(start_paused = true)]
+async fn sleep_waits_at_most_five_minutes_and_rejects_bad_durations() {
+    let started = tokio::time::Instant::now();
+    let slept = run_detached("await sleep(1e12);\nreturn 'woke'")
+        .await
+        .expect("result");
+    assert!(!slept.is_error, "{}", result_text(&slept));
+    assert_eq!(result_text(&slept), "woke");
+    assert_eq!(
+        started.elapsed(),
+        std::time::Duration::from_millis(MAX_SLEEP_MS)
+    );
+
+    let rejected = run_detached(
+        "const attempt = async (ms) => { try { await sleep(ms); return 'ok'; } catch (error) { return error.message; } };\nreturn [await attempt(-1), await attempt('5'), await attempt()]",
+    )
+    .await
+    .expect("result");
+    assert_eq!(
+        serde_json::from_str::<Value>(&result_text(&rejected)).unwrap(),
+        json!([
+            "sleep(ms) expects a non-negative number of milliseconds",
+            "sleep(ms) expects a non-negative number of milliseconds",
+            "sleep(ms) expects a non-negative number of milliseconds",
+        ])
+    );
+}
+
+/// A sleep the script does not await ends with the script instead of
+/// holding its result. The bound is the property: an uncancelled sleep
+/// would hold it for five minutes.
+#[tokio::test]
+async fn an_unawaited_sleep_is_cancelled_with_the_script() {
+    let started = std::time::Instant::now();
+    let result = run_detached("sleep(300000);\nreturn 1")
+        .await
+        .expect("result");
+    assert!(!result.is_error, "{}", result_text(&result));
+    assert_eq!(result_text(&result), "1");
+    assert!(started.elapsed() < std::time::Duration::from_secs(120));
+}
+
+/// Call records publish at most every 100 ms, and list at most the last
+/// `MAX_LISTED_CALLS` calls with counts by status of the others.
+#[tokio::test(start_paused = true)]
+async fn publishes_call_records_at_most_ten_times_a_second_and_lists_the_last_256() {
+    let published: Arc<Mutex<Vec<Value>>> = Arc::default();
+    let seen = Arc::clone(&published);
+    let records = Records::new(
+        "c".to_owned(),
+        AgentToolUpdateCallback::new(move |partial| {
+            seen.lock().unwrap().push(partial.details.expect("details"));
+        }),
+    );
+    let tool = echo();
+    for n in 0..1000 {
+        let index = records.record(&tool, "{}");
+        records.settle(index, |call| {
+            call.status = if n % 10 == 0 {
+                CodemodeNestedCallStatus::Error
+            } else {
+                CodemodeNestedCallStatus::Ok
+            };
+        });
+    }
+    assert_eq!(published.lock().unwrap().len(), 1);
+    let due = records.flush_at().expect("a change to publish");
+    tokio::time::advance(std::time::Duration::from_millis(100)).await;
+    assert!(tokio::time::Instant::now() >= due);
+    records.flush();
+    assert_eq!(records.flush_at(), None);
+    let published = published.lock().unwrap();
+    assert_eq!(published.len(), 2);
+    let last = &published[1];
+    assert_eq!(
+        last["calls"].as_array().map(Vec::len),
+        Some(MAX_LISTED_CALLS)
+    );
+    assert_eq!(
+        last["omittedCalls"],
+        json!({ "running": 0, "ok": 669, "error": 75, "cancelled": 0 })
+    );
+    let view = records.finish();
+    assert_eq!(view.counts().total(), 1000);
+    assert_eq!(view.counts().error, 100);
+}
+
+/// A script without `timeout_ms` that only sleeps fails once it has gone
+/// `CODEMODE_IDLE_BOUND` without a tool call, on Tokio's clock.
+#[tokio::test(start_paused = true)]
+async fn a_script_that_only_sleeps_ends_at_the_idle_bound() {
+    let started = tokio::time::Instant::now();
+    let result = run_detached("for (;;) await sleep(1000);")
+        .await
+        .expect("result");
+    assert_eq!(started.elapsed(), CODEMODE_IDLE_BOUND);
+    assert!(result.is_error);
+    assert_eq!(
+        result_text(&result),
+        "Script error:\nScript made no tool call for 10 minutes (a loop that only sleeps?). End the script when there is nothing to call, or set timeout_ms to allow a longer wait.\n\nNo tool calls were made."
+    );
+    // A script's own timeout_ms replaces the bound.
+    let started = tokio::time::Instant::now();
+    let result = run_detached("// @options: {\"timeout_ms\": 1200000}\nfor (let i = 0; i < 4; i++) await sleep(300000);\nreturn 'slept'")
+        .await
+        .expect("result");
+    assert_eq!(result_text(&result), "slept");
+    assert_eq!(started.elapsed(), std::time::Duration::from_secs(1200));
+}
+
+/// Waits the host answers at once, a discovery global or `sleep(0)`, end
+/// at the idle bound too: each answer checks it.
+#[tokio::test(start_paused = true)]
+async fn a_loop_of_instant_answers_ends_at_the_idle_bound() {
+    for code in [
+        "for (;;) await describeTool(\"read\");",
+        "for (;;) await sleep(0);",
+    ] {
+        let mut run = tokio::spawn(run_detached(code));
+        // Virtual time moves only here; the script starts on its own thread
+        // in real time, so steps go on until it has ended, within a
+        // generous bound against a hang.
+        let hang = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        let result = loop {
+            tokio::select! {
+                result = &mut run => break result.expect("task").expect("result"),
+                () = tokio::time::advance(std::time::Duration::from_secs(60)) => {
+                    assert!(std::time::Instant::now() < hang, "{code} never ended");
+                    tokio::task::yield_now().await;
+                }
+            }
+        };
+        assert!(result.is_error, "{code}");
+        assert!(
+            result_text(&result)
+                .starts_with("Script error:\nScript made no tool call for 10 minutes"),
+            "{code}: {}",
+            result_text(&result)
+        );
+    }
 }
 
 /// Pi's "reads the limit from PI_CODEMODE_MAX_WORKERS" and "ignores an

@@ -53,6 +53,10 @@ pub(super) fn next_turn_hook(
             update
                 .messages
                 .extend(job_notices::claim(&jobs).into_iter().map(job_notices::live));
+            // The team update (telecom's) rides on the request made anyway.
+            update
+                .messages
+                .extend(jobs.take_update().map(job_notices::live));
             // Context `PostToolUse` hooks added during the step.
             if let Some(hooks) = &hooks {
                 update.messages.extend(hooks.take_pending());

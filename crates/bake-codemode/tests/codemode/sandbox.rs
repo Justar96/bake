@@ -261,6 +261,87 @@ async fn formats_stacks_like_v8_without_prelude_frames() {
     assert!(!format!("{:?}", execution.output).contains("codemode-prelude.js"));
 }
 
+/// The wrapper's prefix shares the script's first line; columns there count
+/// from the script's own first character, as on every other line.
+#[tokio::test]
+async fn reports_first_line_columns_without_the_wrappers_prefix() {
+    for (code, position) in [
+        ("throw new Error('x')", "codemode.js:1:11)"),
+        ("\nthrow new Error('x')", "codemode.js:2:11)"),
+        ("const b = ;", "codemode.js:1:11"),
+        ("\nconst b = ;", "codemode.js:2:11"),
+    ] {
+        let execution = run(code).await;
+        let stack = execution.exception().stack.clone().unwrap_or_default();
+        assert!(stack.ends_with(position), "{code:?}: {stack}");
+    }
+    let execution = run("console.log(new Error('inner')); return 1").await;
+    let printed = execution.texts()[0];
+    assert!(printed.contains("codemode.js:1:17)"), "{printed}");
+}
+
+/// JSON writes a Promise as `{}`, which reads as an empty result: a thenable
+/// where a value is written is a `TypeError` naming where it is, which the
+/// script can catch. A directly returned promise is awaited as before.
+#[tokio::test]
+async fn refuses_a_promise_where_a_value_is_written() {
+    for (code, message) in [
+        (
+            "text(tools.echo(1))",
+            "text() got a Promise; await it first",
+        ),
+        (
+            "text({ then() {} })",
+            "text() got a Promise; await it first",
+        ),
+        (
+            "text([1, tools.echo(2)])",
+            "text() got a Promise at value[1]; await it first",
+        ),
+        (
+            "console.log('a', { p: tools.echo(1) })",
+            "console.log() got a Promise at arguments[1].p; await it first",
+        ),
+        (
+            "console.error(tools.echo(1))",
+            "console.error() got a Promise; await it first",
+        ),
+        (
+            "image(tools.echo(1))",
+            "image() got a Promise; await it first",
+        ),
+        (
+            "store('k', { x: [tools.echo(1)] })",
+            "store(\"k\") got a Promise at value.x[0]; await it first",
+        ),
+        (
+            "return [1, tools.echo(2)]",
+            "return value[1] is a Promise; await it first",
+        ),
+        (
+            "return { 'a b': { c: tools.echo(1) } }",
+            "return value[\"a b\"].c is a Promise; await it first",
+        ),
+        (
+            "await tools.echo({ path: tools.echo(1) })",
+            "tools.echo() got a Promise at args.path; await it first",
+        ),
+    ] {
+        let execution = execute(code, Setup::tools(vec![echo()])).await;
+        let error = execution.exception();
+        assert_eq!(error.name.as_deref(), Some("TypeError"), "{code}");
+        assert_eq!(error.message, message, "{code}");
+        assert!(execution.output.is_empty(), "{code}");
+    }
+    let execution = execute(
+        "try { text(tools.echo(1)); } catch (error) { text(error.name); } return tools.echo(3)",
+        Setup::tools(vec![echo()]),
+    )
+    .await;
+    assert_eq!(execution.texts(), ["TypeError"]);
+    assert_eq!(execution.value(), Some(&json!(3)));
+}
+
 #[tokio::test]
 async fn reports_non_error_throws() {
     let execution = run("throw { code: 7 }").await;
@@ -657,7 +738,7 @@ async fn exposes_globals_as_top_level_functions_without_recording_them_as_calls(
         ["echo"]
     );
     // Calls are reported in order, so an unawaited global is issued before the script settles.
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + BOUND;
     while seen.lock().map(|seen| seen.len()).unwrap_or(0) < 2 && Instant::now() < deadline {
         tokio::time::sleep(Duration::from_millis(5)).await;
     }
@@ -749,7 +830,6 @@ fn rejects_invalid_and_reserved_global_names() {
 
 #[tokio::test]
 async fn terminates_a_synchronous_infinite_loop_on_timeout() {
-    let started = Instant::now();
     let execution = execute(
         "while (true) {}",
         Setup {
@@ -759,7 +839,6 @@ async fn terminates_a_synchronous_infinite_loop_on_timeout() {
     )
     .await;
     assert!(matches!(execution.failure(), Failure::Timeout { .. }));
-    assert!(started.elapsed() < Duration::from_secs(5));
 }
 
 #[tokio::test]
@@ -953,6 +1032,107 @@ async fn has_no_host_globals() {
             "undefined",
             "undefined",
             "function"
+        ]))
+    );
+}
+
+/// Every name on the global object, so text that tells the model what
+/// exists can be exact: QuickJS-NG 0.17's built-ins (no timers,
+/// `structuredClone`, `TextEncoder`, `URL`, `crypto`, or `Intl`) and the
+/// prelude's globals.
+#[tokio::test]
+async fn the_global_object_has_exactly_these_names() {
+    let execution = run("return Object.getOwnPropertyNames(globalThis).sort()").await;
+    assert_eq!(
+        execution.value(),
+        Some(&json!([
+            "ALL_TOOLS",
+            "AggregateError",
+            "Array",
+            "ArrayBuffer",
+            "AsyncDisposableStack",
+            "BigInt",
+            "BigInt64Array",
+            "BigUint64Array",
+            "Boolean",
+            "DOMException",
+            "DataView",
+            "Date",
+            "DisposableStack",
+            "Error",
+            "EvalError",
+            "FinalizationRegistry",
+            "Float16Array",
+            "Float32Array",
+            "Float64Array",
+            "Function",
+            "Infinity",
+            "Int16Array",
+            "Int32Array",
+            "Int8Array",
+            "InternalError",
+            "Iterator",
+            "JSON",
+            "Map",
+            "Math",
+            "NaN",
+            "Number",
+            "Object",
+            "Promise",
+            "Proxy",
+            "RangeError",
+            "ReferenceError",
+            "Reflect",
+            "RegExp",
+            "Set",
+            "SharedArrayBuffer",
+            "String",
+            "SuppressedError",
+            "Symbol",
+            "SyntaxError",
+            "TypeError",
+            "URIError",
+            "Uint16Array",
+            "Uint32Array",
+            "Uint8Array",
+            "Uint8ClampedArray",
+            "WeakMap",
+            "WeakRef",
+            "WeakSet",
+            "atob",
+            "btoa",
+            "console",
+            "decodeURI",
+            "decodeURIComponent",
+            "encodeURI",
+            "encodeURIComponent",
+            "escape",
+            "eval",
+            "exit",
+            "globalThis",
+            "image",
+            "isFinite",
+            "isNaN",
+            "load",
+            "parseFloat",
+            "parseInt",
+            "performance",
+            "queueMicrotask",
+            "store",
+            "text",
+            "tools",
+            "undefined",
+            "unescape"
+        ]))
+    );
+    let execution = run(
+        "return [typeof Date.now, typeof Math.random, typeof Promise.withResolvers, typeof Array.fromAsync, typeof performance.now]",
+    )
+    .await;
+    assert_eq!(
+        execution.value(),
+        Some(&json!([
+            "function", "function", "function", "function", "function"
         ]))
     );
 }

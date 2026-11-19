@@ -900,6 +900,19 @@ impl AgentSession {
 
     /// Delivers idle completion notices under a fresh interval. Returns
     /// whether a notice turn ran; its owner survives a dropped waiter.
+    /// Keeps for the next prompt the notices that could not open a turn
+    /// now ([`job_notices::claim_unwaking`]); it never opens one. Held mail,
+    /// and a notice that could wake, stays in the registry for a turn.
+    pub fn keep_job_notices(&self) {
+        let kept = job_notices::claim_unwaking(&self.jobs);
+        if !kept.is_empty() {
+            self.pending_notices
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .extend(kept);
+        }
+    }
+
     pub async fn deliver_job_notices(&self) -> Result<bool, String> {
         let (outcome, delivered) = self
             .deliver_job_notices_controlled(RunControl::default())
@@ -1141,6 +1154,11 @@ impl AgentSession {
     /// Pi's `isStreaming`: a prompt and its post-run work are running.
     pub fn is_streaming(&self) -> bool {
         self.core.activity.borrow().run
+    }
+
+    /// Waits until no prompt, compaction, or tree navigation runs.
+    pub async fn wait_for_idle(&self) {
+        self.core.wait_for_idle().await;
     }
 
     /// Pi's `autoCompactionEnabled`.

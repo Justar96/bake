@@ -626,12 +626,31 @@ async fn prompts(
             .await?;
         require_finished(outcome)?;
     }
-    let left = settle_jobs(session, options.job_wait, options.control).await?;
+    let left = settle_jobs(session, options.job_wait, options.control.clone()).await?;
+    // The team is left before the last look at the notices, so nothing a
+    // member is told was accepted goes unread. What arrived meanwhile, or
+    // was held past the wake budget, gets one more turn.
+    if let Some(Ok(station)) = session.telecom() {
+        station.leave();
+        let jobs = session.jobs();
+        jobs.release_held();
+        if left == 0 && jobs.has_undelivered() {
+            let (outcome, _) = session
+                .deliver_job_notices_controlled(options.control)
+                .await?;
+            require_finished(outcome)?;
+        }
+    }
     if left > 0 {
+        // An open ask holds the live count only when telecom is on.
+        let what = match session.telecom() {
+            Some(Ok(_)) => "background job(s), subagent run(s), or unanswered ask(s) still open",
+            _ => "background job(s) or subagent run(s) still running",
+        };
         write_out(
             stderr,
             &format!(
-                "{left} background job(s) or subagent run(s) still running after {} s were stopped\n",
+                "{left} {what} after {} s were stopped\n",
                 options.job_wait.as_secs()
             ),
         );
@@ -811,5 +830,123 @@ mod tests {
             String::from_utf8_lossy(&bytes.lock().expect("stderr")),
             records.concat()
         );
+    }
+
+    // With telecom on, an ask sent without waiting keeps print mode until
+    // its answer arrives, which opens one more turn; then the session
+    // leaves the team.
+    #[cfg(unix)]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn print_mode_waits_for_an_open_asks_answer() {
+        use crate::agent_session::tests::{harness, options};
+        use crate::jobs::{JobLimits, JobRegistry};
+        use crate::owned_work::WorkGate;
+        use crate::telecom::{Station, StationOptions};
+        use bake_ai::StopReason;
+        use bake_ai::providers::faux::{
+            faux_assistant_blocks, faux_assistant_message, faux_tool_call,
+        };
+
+        let dir = crate::test_support::TempDir::new("print-telecom");
+        let ws = dir.join("ws");
+        std::fs::create_dir_all(&ws).expect("ws");
+        let station = |session: &str, jobs: &JobRegistry, work: &WorkGate| {
+            let options = StationOptions {
+                root: dir.join("telecom"),
+                cwd: ws.clone(),
+                session_id: session.into(),
+                callsign: None,
+                parent: None,
+                model: None,
+            };
+            Station::start(options, jobs.clone(), work).expect("station")
+        };
+        let work = WorkGate::default();
+        let jobs = JobRegistry::new(work.clone(), JobLimits::default());
+        let alpha = station("s-alpha", &jobs, &work);
+        let bravo_work = WorkGate::default();
+        let bravo_jobs = JobRegistry::new(bravo_work.clone(), JobLimits::default());
+        let bravo = station("s-bravo", &bravo_jobs, &bravo_work);
+
+        let h = harness();
+        h.faux.set_responses(vec![
+            faux_assistant_blocks(
+                vec![faux_tool_call(
+                    "telecom",
+                    serde_json::json!({ "action": "ask", "to": "bravo", "message": "ready?", "wait": false }),
+                    Some("t1"),
+                )],
+                StopReason::ToolUse,
+            )
+            .into(),
+            faux_assistant_message("asked").into(),
+            faux_assistant_message("bravo is ready").into(),
+        ]);
+        let store = crate::session::SessionManager::create(
+            &ws.to_string_lossy(),
+            Some(&dir.join("sessions")),
+            crate::session::NewSessionOptions::default(),
+        )
+        .expect("store");
+        let mut session_options = options(&h, store, &ws.to_string_lossy());
+        session_options.tools = vec![Arc::new(crate::telecom::tool::tool(alpha.clone()).tool)];
+        session_options.active_tool_names = vec!["telecom".into()];
+        session_options.work = Some(work);
+        session_options.jobs = Some(jobs);
+        let mut session = AgentSession::create(session_options)
+            .await
+            .expect("session");
+        session.set_telecom(Ok(alpha.clone()));
+
+        // Bravo broadcasts and answers once the prompt's run has made its
+        // last request, so only print mode's wait for the open ask can take
+        // the answer, and the broadcast rides on the turn it opens.
+        let answer = {
+            let bravo = bravo.clone();
+            let faux = Arc::clone(&h.faux);
+            tokio::spawn(async move {
+                while bravo.owed().is_empty() || faux.call_count() < 2 {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+                bravo.broadcast("main is frozen").await.expect("broadcast");
+                bravo.reply("yes", None, None).await
+            })
+        };
+        let stdout = Arc::new(Mutex::new(Vec::<u8>::new()));
+        let code = tokio::time::timeout(
+            Duration::from_secs(30),
+            run_print_mode(
+                &session,
+                PrintModeOptions {
+                    control: RunControl::default(),
+                    recovery: PrintRunRecovery::Disabled,
+                    mode: PrintOutput::Text,
+                    initial_message: Some("check with bravo".into()),
+                    initial_images: Vec::new(),
+                    messages: Vec::new(),
+                    job_wait: Duration::from_secs(30),
+                },
+                Arc::clone(&stdout) as SharedWriter,
+                Arc::new(Mutex::new(Vec::<u8>::new())),
+            ),
+        )
+        .await
+        .expect("print mode returns");
+        assert_eq!(code, 0);
+        assert!(answer.await.expect("answered").is_ok());
+        let printed = String::from_utf8(stdout.lock().unwrap().clone()).expect("utf-8");
+        assert_eq!(printed, "bravo is ready\n");
+        let transcript = format!("{:?}", session.messages());
+        assert!(
+            transcript.contains("bravo answered your ask"),
+            "{transcript}"
+        );
+        assert!(
+            transcript.contains("[telecom] New broadcasts:\\n- bravo: main is frozen"),
+            "{transcript}"
+        );
+        assert!(bravo.peers().is_empty(), "print mode left the team");
+        session.shutdown().await;
+        bravo_work.close().await;
     }
 }

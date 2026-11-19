@@ -9,6 +9,7 @@
 //!
 //! | State | Mark |
 //! |---|---|
+//! | queued | `~` |
 //! | starting | `.` `o` `O` `o`, cycling |
 //! | working | `|` `/` `-` `\`, spinning, and its callsign shimmers |
 //! | asking | `?` |
@@ -44,6 +45,8 @@ const STARTING: [&str; 4] = [".", "o", "O", "o"];
 /// Where an agent is.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CrewState {
+    /// Waiting for a slot to start.
+    Queued,
     Starting,
     Working,
     Asking,
@@ -64,13 +67,15 @@ impl CrewState {
             Self::Working => 1,
             Self::Starting => 2,
             Self::Failed(_) => 3,
-            Self::Idle => 4,
-            Self::Exited(_) => 5,
+            Self::Queued => 4,
+            Self::Idle => 5,
+            Self::Exited(_) => 6,
         }
     }
 
     fn word(&self) -> &'static str {
         match self {
+            Self::Queued => "queued",
             Self::Starting => "starting",
             Self::Working => "working",
             Self::Asking => "asking",
@@ -120,6 +125,7 @@ fn frame(frames: &[&'static str; 4], now: Duration, motion: bool) -> &'static st
 fn mark(state: &CrewState, now: Duration, tones: Tones) -> Span<'static> {
     let motion = tones.moves();
     let (text, colour) = match state {
+        CrewState::Queued => ("~", Color::Cyan),
         CrewState::Starting => (frame(&STARTING, now, motion), Color::Cyan),
         CrewState::Working => (frame(&SPINNER, now, motion), activity::RUNNING_ANSI),
         CrewState::Asking => ("?", Color::Magenta),
@@ -268,6 +274,7 @@ pub fn lines(
         CrewState::Asking,
         CrewState::Working,
         CrewState::Starting,
+        CrewState::Queued,
         CrewState::Idle,
         CrewState::Failed(String::new()),
         CrewState::Exited(None),
@@ -533,6 +540,32 @@ mod tests {
             assert!(line.is_ascii(), "{line:?}");
             assert!(line.width() <= 60, "{line:?}");
         }
+    }
+
+    #[test]
+    fn a_queued_agent_shows_its_task_and_does_not_move() {
+        let mut queued = member(2, "alpha-2", CrewState::Queued);
+        queued.line = None;
+        let crew = vec![member(1, "alpha-1", CrewState::Idle), queued];
+        let texts: Vec<String> = lines(&crew, 60, Duration::ZERO, Duration::ZERO, Tones::None)
+            .iter()
+            .map(text)
+            .collect();
+        assert!(
+            texts[0].starts_with("  crew  1 queued  1 idle  "),
+            "{:?}",
+            texts[0]
+        );
+        assert_eq!(
+            texts[1],
+            "  ~ alpha-2 queued   write tests                         5s"
+        );
+        assert!(texts[2].starts_with("  + alpha-1 idle"), "{:?}", texts[2]);
+        // It waits still, so nothing moves.
+        assert_eq!(
+            next_change(&crew[1..], Duration::from_millis(400), Tones::Ansi),
+            Some(Duration::from_millis(600))
+        );
     }
 
     #[test]

@@ -10,7 +10,7 @@
 //! dialog, so none closes one, such as a question the person is
 //! answering.
 
-use bake_coding_agent::spawned::Origin;
+use bake_coding_agent::spawned::{Origin, SpawnedState};
 
 use super::{Context, Done, Outcome};
 
@@ -95,6 +95,14 @@ pub(super) async fn spawn(context: &Context, argument: &str) -> Outcome {
         }
         _ => {
             let agent = host.spawn(argument, None, Origin::Person)?;
+            if agent.state == SpawnedState::Queued {
+                return Ok(Done::Note(format!(
+                    "Queued {} on \"{}\": {} agents are running; it starts when one exits or is stopped.",
+                    agent.name,
+                    agent.task,
+                    host.running()
+                )));
+            }
             Ok(Done::Note(format!(
                 "Spawned {} on \"{}\". It joins telecom as {}; you and your agent are told when it finishes a run.",
                 agent.name, agent.task, agent.name

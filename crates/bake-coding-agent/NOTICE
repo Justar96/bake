@@ -201,6 +201,14 @@ test/tools.test.ts, test/branch-summarization.test.ts,
 test/image-processing.test.ts, test/truncate-surrogates.test.ts, and
 test/suite/regressions/11613-bash-timeout-after-shell-exit.test.ts that
 those files name.
+
+From release v1.3.0, revision 71023aec1546d6d677a65669c5665c0927ce0dd0: the
+codemode tool of src/extensions/codemode/tool.ts, execute.ts, and index.ts
+and the codemode settings of src/core/settings-schema.ts, with their tests,
+adapted in src/tools/codemode/, whose module documentation lists where Bake
+differs: among others its description's options example, sleep(), the
+hints for missing globals, the bounded call records, and the worker slots of
+subagents.
 --------------------------------------------------------------------------------
 MIT License
 
@@ -418,7 +426,12 @@ Adapted design, no source: the team of sessions per repository with callsigns,
 the board, send, ask, reply, broadcast, and status, the brief before each
 prompt, and the wake limit, in src/telecom/. Bake's membership, delivery, and
 wire format are its own; it takes no code from pi-telecom or the
-@tinoy/pi-ipc and @tinoy/pi-ext-lib portions its license names.
+@tinoy/pi-ipc and @tinoy/pi-ext-lib portions its license names. Where the
+behavior differs: a waiting ask ends when any other mail reaches its
+session, where pi-telecom interrupts it only for an ask that closes a cycle;
+and messages and asks from peers' models share one wake limit, past which
+mail is held and read within a minute, where pi-telecom wakes for every ask
+and appends other mail past its limit without a turn.
 --------------------------------------------------------------------------------
 MIT License
 
