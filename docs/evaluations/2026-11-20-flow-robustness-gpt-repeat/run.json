@@ -1,0 +1,79 @@
+{
+  "name": "flow robustness against develop, GPT repeated",
+  "date": "2026-11-19",
+  "base": {
+    "path": "/home/jtar-wsl/bake/target/release/bake",
+    "version": "bake 0.4.9",
+    "bytes": 72504000
+  },
+  "candidate": {
+    "path": "/home/jtar-wsl/bake/.artifacts/eval/bake-flow-robustness",
+    "version": "bake 0.4.9",
+    "bytes": 73271144
+  },
+  "same_executable": false,
+  "base_settings": {},
+  "candidate_settings": {},
+  "models": [
+    "cliproxyapi/gpt-6.1-sol:high"
+  ],
+  "tasks": [
+    [
+      "add-flag",
+      "Add a `--words` option to linecount.py. With `--words`, each line of output is `<lines> <words> <path>`, where words are separated by whitespace, and the total line is `<lines> <words> total`. Without the option the output must stay exactly as it is now. `--words` may come before or after the file names. Add unit tests for the option to tests/test_linecount.py."
+    ],
+    [
+      "cascade-fix",
+      "Run `python3 verify.py` and fix the project until it prints OK. Do not edit verify.py."
+    ],
+    [
+      "fix-test",
+      "The unit tests in tests/ fail. Fix the bugs in the inventory package so that they all pass. Do not change the tests."
+    ],
+    [
+      "hanging-command",
+      "The tests of this project don't pass in CI. Run the test suite as the README says, find what is wrong in the code, and fix it. Do not change the tests or the job files."
+    ],
+    [
+      "hidden-cause-bug",
+      "Some orders come out at a different total than the old billing system charged for them. tests/test_replay.py replays yesterday's orders against what was billed, and it fails. Find the causes and fix them; do not change the tests, their data, or the docs."
+    ],
+    [
+      "large-output",
+      "`python3 build.py` fails. Make the build succeed without changing build.py or anything in modules/."
+    ],
+    [
+      "log-count",
+      "app.log is a service log; README.md describes its format. How many ERROR lines have code=E417, and what is the timestamp of the first of them? Answer with the count and the timestamp. Do not change any file."
+    ],
+    [
+      "multi-module-refactor",
+      "reportgen keeps its readers, aggregators, formatters, and filters in module-level dictionaries in reportgen/registry.py, so two reports in one process cannot use different sets. Replace them with a `Registry` class exported from `reportgen`, with `add_reader(suffix, fn)`, `add_aggregator(name, fn)`, `add_formatter(name, fn)`, and `add_filter(name, fn)` methods, and a `reportgen.default_registry()` that returns a new registry holding every built-in one; nothing may be registered at import time any more. Keep every public function, adding the registry as its first argument to each one that needs it, and give plugins a `register(registry)` function instead of decorators. The command line must print exactly what it prints now; update the tests and the README."
+    ],
+    [
+      "nested-instructions",
+      "Add `GET /products/{id}/stock`, answering `{\"id\": <id>, \"in_stock\": <units>}` with the number of units of the product we can sell right now, and a 404 for a product that does not exist. Also include the same `in_stock` number in what `GET /products/{id}` returns. Add tests for both."
+    ],
+    [
+      "rename-api",
+      "Rename the function `normalize_ws` to `collapse_whitespace` everywhere in this project: the code, the tests, the README, and the filter name the command line accepts. Keep the behaviour the same and leave no alias or mention of the old name behind. Run the tests when you are done."
+    ],
+    [
+      "skill-crowd",
+      "Product wants to show when each user last signed in, so we need a nullable `last_login_at` timestamp column on the `users` table. Can you write the migration for it?"
+    ],
+    [
+      "skill-procedure",
+      "We're shipping 2.3.0 of tidy today. Please prepare the release."
+    ],
+    [
+      "trace-question",
+      "In this codebase, which function applies the bulk (volume) discount to an order line, which file is it in, and how many units of one item must a line hold to get it? Answer in one or two sentences. Do not change any file."
+    ]
+  ],
+  "trials": 5,
+  "jobs": 6,
+  "max_model_calls": 60,
+  "run_timeout_ms": 900000,
+  "host": "linux/x86_64"
+}
