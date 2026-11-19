@@ -3,7 +3,7 @@
 //! without the `models` globals, with v1.4.0's queue for a free script
 //! slot.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
@@ -16,8 +16,8 @@ use bake_agent::{
 use bake_ai::{AbortController, AbortSignal, ImageContent, TextContent, UserContentBlock};
 use bake_codemode::{
     Bm25Ranker, CallError, CallResult, CodemodeEngine, Completion, DEFAULT_TOOL_SEARCH_LIMIT,
-    Event, ExecuteRequest, ExitHook, Failure, HostCall, OutputItem, RunHandle, Source,
-    ToolDeclaration, create_tool_search_document, discovery_globals, render_tool_sample,
+    Event, ExecuteRequest, ExitHook, Failure, GlobalDeclaration, HostCall, OutputItem, RunHandle,
+    Source, ToolDeclaration, create_tool_search_document, discovery_globals, render_tool_sample,
     to_codemode_identifier,
 };
 use serde_json::{Value, json};
@@ -25,7 +25,7 @@ use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 
 use super::{
-    CODEMODE_TOOL_NAME, CodemodeHost, CodemodeNamespace, CodemodeNestedCall,
+    CODEMODE_TOOL_NAME, CodemodeCallCounts, CodemodeHost, CodemodeNamespace, CodemodeNestedCall,
     CodemodeNestedCallStatus, CodemodeStoreEntryData, codemode_details, to_codemode_declaration,
 };
 use crate::owned_work::WorkGate;
@@ -45,10 +45,24 @@ const ERROR_PREVIEW_CHARS: usize = 500;
 pub const MAX_CONCURRENT_CODEMODE_SCRIPTS: usize = 2;
 /// Where Pi reads `PI_CODEMODE_MAX_WORKERS`, Bake reads this.
 pub const BAKE_CODEMODE_MAX_WORKERS_ENV: &str = "BAKE_CODEMODE_MAX_WORKERS";
-/// How long a script waits for a free slot before failing, Pi's
-/// `CODEMODE_WORKER_WAIT_MS`. It bounds the wait when every slot is held by
-/// a script that waits on another script, such as a subagent's.
-const CODEMODE_WORKER_WAIT: Duration = Duration::from_secs(60);
+/// How long a script without `timeout_ms` waits for a free slot before
+/// failing; one with it waits up to its deadline. Pi's
+/// `CODEMODE_WORKER_WAIT_MS` is 60 seconds; scripts of subagents have
+/// their own slots ([`Admission::children`]), so no script waits on a
+/// slot its own child needs, and a longer wait fails fewer scripts.
+const CODEMODE_WORKER_WAIT: Duration = Duration::from_secs(600);
+/// The longest one `sleep(ms)` call waits.
+pub const MAX_SLEEP_MS: u64 = 300_000;
+/// Call records partial results and the final details list, the latest
+/// ones; the rest are counted by status.
+pub const MAX_LISTED_CALLS: usize = 256;
+/// Partial results go out at most this often, plus the final one, so a
+/// script of thousands of calls does not republish its list per call.
+const PUBLISH_INTERVAL: Duration = Duration::from_millis(100);
+/// Characters of a failed call's error in the failure summary.
+const SUMMARY_ERROR_CHARS: usize = 200;
+/// Calls a note names before it counts the rest.
+const NAMED_CALLS: usize = 10;
 /// A script's tool calls that run at once; the rest wait in the order the
 /// script made them, so a `Promise.all` over a thousand items does not start
 /// a thousand processes. Pi has no limit.
@@ -56,6 +70,8 @@ pub const MAX_CONCURRENT_NESTED_CALLS: usize = 16;
 /// What an aborted script reports: the message of the reason Pi's aborted
 /// signal carries by default.
 pub const CODEMODE_ABORT_MESSAGE: &str = "This operation was aborted";
+/// The host-answered global that waits: `await sleep(ms)`.
+pub const SLEEP_GLOBAL: &str = "sleep";
 /// The prefix of the files output is saved to.
 const OUTPUT_PREFIX: &str = "bake-codemode";
 
@@ -81,7 +97,11 @@ pub fn max_codemode_workers(env: impl Fn(&str) -> Option<std::ffi::OsString>) ->
 
 /// Script slots: at most a limit of scripts alive, the rest waiting in
 /// arrival order (`tokio`'s semaphore is fair), Pi's
-/// `activeCodemodeWorkers` and `codemodeWorkerWaiters`.
+/// `activeCodemodeWorkers` and `codemodeWorkerWaiters`. Top-level sessions
+/// and in-process subagents draw from separate sets of the same size: a
+/// parent's script that waits for its child must not hold the slot the
+/// child's script needs, and a child cannot delegate, so no wait crosses
+/// back.
 #[derive(Clone)]
 pub(super) struct Admission {
     slots: Arc<Semaphore>,
@@ -95,9 +115,18 @@ enum Refusal {
 }
 
 impl Admission {
-    /// The process's slots.
+    /// The process's slots for scripts of top-level sessions.
     #[cfg(not(test))]
     pub(super) fn process() -> Self {
+        static SLOTS: std::sync::LazyLock<Admission> = std::sync::LazyLock::new(|| {
+            Admission::new(max_codemode_workers(|name| std::env::var_os(name)))
+        });
+        SLOTS.clone()
+    }
+
+    /// The process's slots for scripts of subagents.
+    #[cfg(not(test))]
+    pub(super) fn children() -> Self {
         static SLOTS: std::sync::LazyLock<Admission> = std::sync::LazyLock::new(|| {
             Admission::new(max_codemode_workers(|name| std::env::var_os(name)))
         });
@@ -108,6 +137,14 @@ impl Admission {
     /// thread has its own slots; the admission cases use their own.
     #[cfg(test)]
     pub(super) fn process() -> Self {
+        thread_local! {
+            static SLOTS: Admission = Admission::new(MAX_CONCURRENT_CODEMODE_SCRIPTS);
+        }
+        SLOTS.with(Admission::clone)
+    }
+
+    #[cfg(test)]
+    pub(super) fn children() -> Self {
         thread_local! {
             static SLOTS: Admission = Admission::new(MAX_CONCURRENT_CODEMODE_SCRIPTS);
         }
@@ -133,17 +170,22 @@ impl Admission {
     }
 
     /// Pi's `reserveCodemodeWorker`: a slot, waiting in arrival order for
-    /// at most `wait` while all are taken. The returned hook releases it
-    /// once the script's thread has exited; dropped unused, it releases
-    /// it at once.
+    /// at most `wait` while all are taken, after calling `on_wait` once.
+    /// The returned hook releases it once the script's thread has exited;
+    /// dropped unused, it releases it at once.
     async fn reserve(
         &self,
         signal: Option<&AbortSignal>,
         wait: Duration,
+        on_wait: impl FnOnce(),
     ) -> Result<ExitHook, Refusal> {
         if signal.is_some_and(AbortSignal::aborted) {
             return Err(Refusal::Aborted);
         }
+        if let Ok(permit) = Arc::clone(&self.slots).try_acquire_owned() {
+            return Ok(ExitHook::new(move || drop(permit)));
+        }
+        on_wait();
         let cancelled = async {
             match signal {
                 Some(signal) => signal.cancelled().await,
@@ -198,7 +240,12 @@ fn text_of(result: &AgentToolResult) -> String {
 /// its structured content, also for error results that carry one; any other
 /// tool resolves to its text. Other failures reject with the tool's error
 /// text.
-fn to_script_value(tool: &AgentTool, outcome: &AgentToolCallOutcome) -> CallResult {
+///
+/// Bake's addition: the rejection's `Error` also carries `tool`, the tool's
+/// name, and `args`, its arguments' preview, so a script that awaits several
+/// calls together can tell which one failed; the message stays the tool's
+/// text, which scripts compare.
+fn to_script_value(tool: &AgentTool, outcome: &AgentToolCallOutcome, args: &str) -> CallResult {
     if tool.output_schema.is_some()
         && let Some(structured) = &outcome.result.structured_content
     {
@@ -206,11 +253,17 @@ fn to_script_value(tool: &AgentTool, outcome: &AgentToolCallOutcome) -> CallResu
     }
     let text = text_of(&outcome.result);
     if outcome.is_error {
-        return Err(CallError::new(if text.is_empty() {
-            format!("Tool \"{}\" failed", tool.name)
-        } else {
-            text
-        }));
+        let mut properties = serde_json::Map::new();
+        properties.insert("tool".to_owned(), Value::String(tool.name.clone()));
+        properties.insert("args".to_owned(), Value::String(args.to_owned()));
+        return Err(CallError {
+            message: if text.is_empty() {
+                format!("Tool \"{}\" failed", tool.name)
+            } else {
+                text
+            },
+            properties: Some(properties),
+        });
     }
     Ok(Some(Value::String(text)))
 }
@@ -310,23 +363,104 @@ pub(super) fn join_adjacent_text(items: Vec<Item>) -> Vec<Item> {
     joined
 }
 
-fn format_call_summary(calls: &[CodemodeNestedCall]) -> String {
-    if calls.is_empty() {
-        return "No tool calls were made.".to_owned();
+/// One call in a summary: a failed call with its arguments and the start of
+/// its error, any other with its status.
+fn summarize_call(call: &CodemodeNestedCall) -> String {
+    match (&call.status, &call.error) {
+        (CodemodeNestedCallStatus::Error, Some(error)) => {
+            let mut start: String = error.chars().take(SUMMARY_ERROR_CHARS).collect();
+            if start.len() < error.len() {
+                start.push('…');
+            }
+            format!("{} {} (error: {start})", call.name, call.args)
+        }
+        _ => format!("{} ({})", call.name, call.status.as_str()),
     }
-    format!(
-        "Tool calls made before the failure (they are not undone): {}",
-        calls
-            .iter()
-            .map(|call| format!("{} ({})", call.name, call.status.as_str()))
-            .collect::<Vec<_>>()
-            .join(", ")
-    )
 }
 
-/// Pi's `formatError`.
-pub(super) fn format_error(failure: &Failure, calls: &[CodemodeNestedCall]) -> String {
-    let head = match failure {
+/// Pi's call summary. Past [`MAX_LISTED_CALLS`] it counts the calls by
+/// status and lists the failed ones still listed.
+fn format_call_summary(view: &CallView) -> String {
+    let counts = view.counts();
+    if counts.total() == 0 {
+        return "No tool calls were made.".to_owned();
+    }
+    let head = "Tool calls made before the failure (they are not undone):";
+    if view.omitted.total() == 0 {
+        let listed: Vec<String> = view.listed.iter().map(summarize_call).collect();
+        return format!("{head} {}", listed.join(", "));
+    }
+    let failed: Vec<String> = view
+        .listed
+        .iter()
+        .filter(|call| call.status == CodemodeNestedCallStatus::Error)
+        .map(summarize_call)
+        .collect();
+    let mut summary = format!("{head} {}", counts.describe());
+    if !failed.is_empty() {
+        summary.push_str(&format!(
+            ". Failed among the last {}: {}",
+            view.listed.len(),
+            failed.join(", ")
+        ));
+    }
+    summary
+}
+
+/// The names in `names`, at most [`NAMED_CALLS`] of them, then how many
+/// more there are.
+fn name_calls(names: &[String], total: usize) -> String {
+    let shown = names.len().min(NAMED_CALLS);
+    let mut text = names[..shown].join(", ");
+    if total > shown {
+        text.push_str(&format!(", and {} more", total - shown));
+    }
+    text
+}
+
+/// The next step for a script that used a global the sandbox does not
+/// have, one of those `bake-codemode`'s globals test proves absent.
+fn missing_global_hint(failure: &Failure, web_fetch: bool) -> Option<&'static str> {
+    let Failure::Exception(error) = failure else {
+        return None;
+    };
+    if error.name.as_deref() != Some("ReferenceError") {
+        return None;
+    }
+    let name = error.message.strip_suffix(" is not defined")?;
+    Some(match name {
+        "setTimeout" | "setInterval" => {
+            "There are no timers: await tool calls, or `await sleep(ms)`."
+        }
+        "fetch" if web_fetch => "There is no fetch: use `tools.web_fetch({ url })`.",
+        "fetch" => "There is no network access from scripts.",
+        "require" | "process" => {
+            "There are no Node APIs: use tools.read, tools.bash and the other tools."
+        }
+        "structuredClone" => "Use JSON.parse(JSON.stringify(value)).",
+        "TextEncoder" | "TextDecoder" | "URL" | "URLSearchParams" | "crypto" | "Intl" => {
+            "Not available in the sandbox."
+        }
+        _ => return None,
+    })
+}
+
+/// What a failure's text says besides the failure: the calls, the calls
+/// still running when it ended, and whether a web fetch tool exists.
+#[derive(Debug, Default)]
+pub(super) struct Ending<'a> {
+    /// The calls, with their final statuses.
+    pub(super) calls: CallView,
+    /// The names of the calls still running when the script ended.
+    pub(super) running: &'a [String],
+    /// Scripts can call `web_fetch`.
+    pub(super) web_fetch: bool,
+}
+
+/// Pi's `formatError`. Bake adds a hint for a missing global and, for a
+/// timeout, the calls still running.
+pub(super) fn format_error(failure: &Failure, ending: &Ending<'_>) -> String {
+    let mut head = match failure {
         Failure::Exception(error) | Failure::NeverSettles(error) => {
             error.stack.clone().unwrap_or_else(|| {
                 format!(
@@ -341,7 +475,41 @@ pub(super) fn format_error(failure: &Failure, calls: &[CodemodeNestedCall]) -> S
         Failure::Aborted { message } => format!("Script aborted: {message}"),
         other => format!("Script sandbox failed: {}", other.message()),
     };
-    format!("{head}\n\n{}", format_call_summary(calls))
+    if let Some(hint) = missing_global_hint(failure, ending.web_fetch) {
+        head.push('\n');
+        head.push_str(hint);
+    }
+    if matches!(failure, Failure::Timeout { .. }) && !ending.running.is_empty() {
+        head.push_str(&format!(
+            "\nStill running when it timed out: {}.",
+            name_calls(ending.running, ending.running.len())
+        ));
+    }
+    format!("{head}\n\n{}", format_call_summary(&ending.calls))
+}
+
+/// The note a successful script's result ends with when calls it made were
+/// still running, or never started, when it ended.
+fn cancelled_note(view: &CallView) -> Option<String> {
+    let count = view.counts().cancelled;
+    if count == 0 {
+        return None;
+    }
+    let names: Vec<String> = view
+        .listed
+        .iter()
+        .filter(|call| call.status == CodemodeNestedCallStatus::Cancelled)
+        .map(|call| call.name.clone())
+        .collect();
+    let (calls, were) = if count == 1 {
+        ("tool call was", "was")
+    } else {
+        ("tool calls were", "were")
+    };
+    Some(format!(
+        "[{count} {calls} still running when the script ended and {were} cancelled: {}. Await calls (Promise.all) before the script ends.]",
+        name_calls(&names, count)
+    ))
 }
 
 /// Writes `bytes` to a new private file, on `work`'s blocking pool when
@@ -623,32 +791,207 @@ impl Catalog {
     }
 }
 
-/// The records of a script's nested calls, published as partial results.
+/// Calls by status: the calls a [`CallView`] does not list, or all of them.
+pub(super) type StatusCounts = CodemodeCallCounts;
+
+/// What a result shows of a script's calls: the latest
+/// [`MAX_LISTED_CALLS`] records, in the order the script made them, and
+/// the others counted by status.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(super) struct CallView {
+    pub(super) listed: Vec<CodemodeNestedCall>,
+    pub(super) omitted: StatusCounts,
+}
+
+impl CallView {
+    /// Every call by status, listed or not.
+    pub(super) fn counts(&self) -> StatusCounts {
+        let mut counts = self.omitted;
+        for call in &self.listed {
+            counts.add(call.status);
+        }
+        counts
+    }
+
+    fn details(&self, full_output_path: Option<&str>) -> Value {
+        codemode_details(&self.listed, &self.omitted, full_output_path)
+    }
+}
+
+/// The records behind a [`CallView`], bounded: calls still waiting or
+/// running, each settled call until [`MAX_LISTED_CALLS`] later ones have
+/// settled, and counts of the settled calls let go.
+#[derive(Default)]
+struct Book {
+    made: usize,
+    live: BTreeMap<usize, CodemodeNestedCall>,
+    settled: VecDeque<(usize, CodemodeNestedCall)>,
+    let_go: StatusCounts,
+    /// On Tokio's clock, which tests can pause.
+    published: Option<tokio::time::Instant>,
+    dirty: bool,
+}
+
+impl Book {
+    fn view(&self) -> CallView {
+        let mut all: Vec<(usize, &CodemodeNestedCall)> = self
+            .live
+            .iter()
+            .map(|(index, call)| (*index, call))
+            .chain(self.settled.iter().map(|(index, call)| (*index, call)))
+            .collect();
+        all.sort_by_key(|(index, _)| *index);
+        let skip = all.len().saturating_sub(MAX_LISTED_CALLS);
+        let mut omitted = self.let_go;
+        for (_, call) in &all[..skip] {
+            omitted.add(call.status);
+        }
+        CallView {
+            listed: all[skip..]
+                .iter()
+                .map(|(_, call)| (*call).clone())
+                .collect(),
+            omitted,
+        }
+    }
+
+    fn keep_settled(&mut self, index: usize, call: CodemodeNestedCall) {
+        self.settled.push_back((index, call));
+        while self.settled.len() > MAX_LISTED_CALLS {
+            if let Some((_, call)) = self.settled.pop_front() {
+                self.let_go.add(call.status);
+            }
+        }
+    }
+}
+
+/// The records of a script's nested calls, published as partial results at
+/// most every [`PUBLISH_INTERVAL`].
 #[derive(Clone)]
-struct Records {
+pub(super) struct Records {
     /// The codemode call's id, the prefix of a record's id until the
     /// nested call has its own.
     caller_id: String,
-    calls: Arc<Mutex<Vec<CodemodeNestedCall>>>,
+    book: Arc<Mutex<Book>>,
     on_update: AgentToolUpdateCallback,
 }
 
 impl Records {
-    fn lock(&self) -> std::sync::MutexGuard<'_, Vec<CodemodeNestedCall>> {
-        self.calls.lock().unwrap_or_else(PoisonError::into_inner)
+    pub(super) fn new(caller_id: String, on_update: AgentToolUpdateCallback) -> Self {
+        Self {
+            caller_id,
+            book: Arc::default(),
+            on_update,
+        }
     }
 
-    fn snapshot(&self) -> Vec<CodemodeNestedCall> {
-        self.lock().clone()
+    fn lock(&self) -> std::sync::MutexGuard<'_, Book> {
+        self.book.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Pi's `publish`: the records so far as a partial result.
-    fn publish(&self) {
-        let details = codemode_details(&self.snapshot(), None);
+    /// Pi's `publish`: the records so far as a partial result, now.
+    pub(super) fn publish(&self) {
+        let view = {
+            let mut book = self.lock();
+            book.published = Some(tokio::time::Instant::now());
+            book.dirty = false;
+            book.view()
+        };
         self.on_update.update(AgentToolResult {
-            details: Some(details),
+            details: Some(view.details(None)),
             ..AgentToolResult::default()
         });
+    }
+
+    /// Publishes the change now when the last publication is old enough,
+    /// else leaves it for [`Records::flush_at`].
+    fn changed(&self) {
+        let due = {
+            let mut book = self.lock();
+            book.dirty = true;
+            book.published
+                .is_none_or(|published| published.elapsed() >= PUBLISH_INTERVAL)
+        };
+        if due {
+            self.publish();
+        }
+    }
+
+    /// When an unpublished change is due.
+    pub(super) fn flush_at(&self) -> Option<tokio::time::Instant> {
+        let book = self.lock();
+        if !book.dirty {
+            return None;
+        }
+        Some(
+            book.published
+                .map_or_else(tokio::time::Instant::now, |published| {
+                    published + PUBLISH_INTERVAL
+                }),
+        )
+    }
+
+    /// Publishes an unpublished change.
+    pub(super) fn flush(&self) {
+        if self.lock().dirty {
+            self.publish();
+        }
+    }
+
+    /// Records a call when the script makes it, as Pi does, so a call that
+    /// never leaves the queue is still listed; returns its place.
+    pub(super) fn record(&self, tool: &AgentTool, args: &str) -> usize {
+        let index = {
+            let mut book = self.lock();
+            let index = book.made;
+            book.made += 1;
+            book.live.insert(
+                index,
+                CodemodeNestedCall {
+                    id: format!("{}/?", self.caller_id),
+                    name: tool.name.clone(),
+                    args: args.to_owned(),
+                    status: CodemodeNestedCallStatus::Running,
+                    duration_ms: None,
+                    error: None,
+                },
+            );
+            index
+        };
+        self.changed();
+        index
+    }
+
+    /// Settles the call at `index` with `settle`.
+    pub(super) fn settle(&self, index: usize, settle: impl FnOnce(&mut CodemodeNestedCall)) {
+        {
+            let mut book = self.lock();
+            if let Some(mut call) = book.live.remove(&index) {
+                settle(&mut call);
+                book.keep_settled(index, call);
+            }
+        }
+        self.changed();
+    }
+
+    /// The names of the calls not settled, in the order made.
+    fn unsettled(&self) -> Vec<String> {
+        self.lock()
+            .live
+            .values()
+            .map(|call| call.name.clone())
+            .collect()
+    }
+
+    /// The final view: every call not settled is cancelled.
+    pub(super) fn finish(&self) -> CallView {
+        let mut book = self.lock();
+        let live = std::mem::take(&mut book.live);
+        for (index, mut call) in live {
+            call.status = CodemodeNestedCallStatus::Cancelled;
+            book.keep_settled(index, call);
+        }
+        book.view()
     }
 }
 
@@ -658,6 +1001,7 @@ struct QueuedCall {
     index: usize,
     tool: Arc<AgentTool>,
     args: Option<Value>,
+    preview: String,
 }
 
 /// A nested call that has started: what answering the script and
@@ -666,27 +1010,8 @@ struct StartedCall {
     id: u32,
     index: usize,
     tool: Arc<AgentTool>,
+    preview: String,
     started: Instant,
-}
-
-/// Records a call when the script makes it, as Pi does, so a call that
-/// never leaves the queue is still listed; publishes the records and
-/// returns its place.
-fn record_call(records: &Records, tool: &AgentTool, args: Option<&Value>) -> usize {
-    let index = {
-        let mut calls = records.lock();
-        calls.push(CodemodeNestedCall {
-            id: format!("{}/?", records.caller_id),
-            name: tool.name.clone(),
-            args: preview_args(args),
-            status: CodemodeNestedCallStatus::Running,
-            duration_ms: None,
-            error: None,
-        });
-        calls.len() - 1
-    };
-    records.publish();
-    index
 }
 
 /// Waits for one started nested call, recorded at `index`, and answers the
@@ -705,39 +1030,35 @@ async fn settle_nested_call(
         id,
         index,
         tool,
+        preview,
         started,
     } = call;
     let outcome = outcome.await;
-    {
-        let mut calls = records.lock();
-        if let Some(record) = calls.get_mut(index) {
-            record.id = outcome.tool_call.id.clone();
-            record.duration_ms = Some(started.elapsed().as_secs_f64() * 1000.0);
-            if outcome.is_error {
-                record.status = if signal.aborted()
-                    || script_signal.as_ref().is_some_and(AbortSignal::aborted)
-                {
+    records.settle(index, |record| {
+        record.id = outcome.tool_call.id.clone();
+        record.duration_ms = Some(started.elapsed().as_secs_f64() * 1000.0);
+        if outcome.is_error {
+            record.status =
+                if signal.aborted() || script_signal.as_ref().is_some_and(AbortSignal::aborted) {
                     CodemodeNestedCallStatus::Cancelled
                 } else {
                     CodemodeNestedCallStatus::Error
                 };
-                let text = text_of(&outcome.result);
-                record.error = Some(truncate_text(
-                    &if text.is_empty() {
-                        format!("Tool \"{}\" failed", tool.name)
-                    } else {
-                        text
-                    },
-                    ERROR_PREVIEW_CHARS,
-                ));
-            } else {
-                record.status = CodemodeNestedCallStatus::Ok;
-            }
+            let text = text_of(&outcome.result);
+            record.error = Some(truncate_text(
+                &if text.is_empty() {
+                    format!("Tool \"{}\" failed", tool.name)
+                } else {
+                    text
+                },
+                ERROR_PREVIEW_CHARS,
+            ));
+        } else {
+            record.status = CodemodeNestedCallStatus::Ok;
         }
-    }
-    records.publish();
+    });
     // The run may have ended meanwhile; its answers are then ignored.
-    let _ = handle.answer(id, to_script_value(&tool, &outcome));
+    let _ = handle.answer(id, to_script_value(&tool, &outcome, &preview));
 }
 
 /// The engine, compiled on the first script off the async workers.
@@ -764,6 +1085,8 @@ async fn engine(work: Option<&WorkGate>) -> Result<&'static CodemodeEngine, Stri
 struct Ran {
     result: Result<Completion, Failure>,
     output: Vec<OutputItem>,
+    /// The names of the calls not settled when the script ended.
+    running: Vec<String>,
 }
 
 /// Why a script never started: no slot came free, or it was aborted while
@@ -771,17 +1094,29 @@ struct Ran {
 struct NotStarted(String);
 
 /// Pi's wait for a slot: it counts toward the script's `timeout_ms`, so the
-/// script then has what remains, at least a millisecond.
+/// script then has what remains, at least a millisecond. Without
+/// `timeout_ms` it waits up to [`CODEMODE_WORKER_WAIT`]. While it waits, a
+/// partial result says so.
 async fn reserve_slot(
     admission: &Admission,
     signal: Option<&AbortSignal>,
     deadline_ms: Option<u64>,
+    on_update: &AgentToolUpdateCallback,
 ) -> Result<(ExitHook, Option<u64>), NotStarted> {
-    let wait = deadline_ms.map_or(CODEMODE_WORKER_WAIT, |deadline| {
-        CODEMODE_WORKER_WAIT.min(Duration::from_millis(deadline))
-    });
+    let wait = deadline_ms.map_or(CODEMODE_WORKER_WAIT, Duration::from_millis);
     let waiting = Instant::now();
-    let reserved = admission.reserve(signal, wait).await;
+    let reserved = admission
+        .reserve(signal, wait, || {
+            on_update.update(AgentToolResult {
+                content: vec![UserContentBlock::Text(TextContent::new(format!(
+                    "Waiting for a free codemode worker: all {} are running other scripts.",
+                    admission.limit()
+                )))],
+                details: Some(CallView::default().details(None)),
+                ..AgentToolResult::default()
+            });
+        })
+        .await;
     let waited_ms = waiting.elapsed().as_secs_f64() * 1000.0;
     match reserved {
         Ok(on_exit) => Ok((
@@ -792,15 +1127,26 @@ async fn reserve_slot(
             "Script aborted: {CODEMODE_ABORT_MESSAGE}"
         ))),
         Err(Refusal::TimedOut) => Err(NotStarted(match deadline_ms {
-            Some(deadline) if Duration::from_millis(deadline) <= CODEMODE_WORKER_WAIT => format!(
-                "Script timed out: Execution timed out after {deadline} ms while waiting for a free codemode worker"
+            Some(deadline) => format!(
+                "Script timed out: Execution timed out after {deadline} ms while waiting for a free codemode worker. Make these tool calls directly instead of through codemode, or retry later."
             ),
-            _ => format!(
-                "No codemode worker became free within {} seconds. All {} workers, shared by every session in this process, are held by other scripts. Retry after they finish.",
-                CODEMODE_WORKER_WAIT.as_secs(),
+            None => format!(
+                "No codemode worker became free within {} minutes: all {} are running other scripts in this process. Make these tool calls directly instead of through codemode.",
+                CODEMODE_WORKER_WAIT.as_secs() / 60,
                 admission.limit()
             ),
         })),
+    }
+}
+
+/// `sleep(ms)`'s wait: a non-negative number of milliseconds, at most
+/// [`MAX_SLEEP_MS`].
+fn sleep_duration(args: Option<&Value>) -> Result<Duration, CallError> {
+    match args.and_then(Value::as_f64) {
+        Some(ms) if ms >= 0.0 => Ok(Duration::from_millis(ms.min(MAX_SLEEP_MS as f64) as u64)),
+        _ => Err(CallError::new(
+            "sleep(ms) expects a non-negative number of milliseconds",
+        )),
     }
 }
 
@@ -818,10 +1164,17 @@ async fn run_script(
         Ok(Ran {
             result: Err(failure),
             output: Vec::new(),
+            running: Vec::new(),
         })
     };
     // Held from here; dropped on an early return, it frees the slot.
-    let (on_exit, timeout_ms) = reserve_slot(&admission, signal, source.options.timeout_ms).await?;
+    let (on_exit, timeout_ms) = reserve_slot(
+        &admission,
+        signal,
+        source.options.timeout_ms,
+        &records.on_update,
+    )
+    .await?;
     source.options.timeout_ms = timeout_ms;
     let work = catalog.host.as_ref().and_then(|host| host.work());
     let engine = match engine(work.as_ref()).await {
@@ -849,6 +1202,7 @@ async fn run_script(
         })
         .collect();
     request.globals = discovery_globals();
+    request.globals.push(GlobalDeclaration::new(SLEEP_GLOBAL));
     request.store = store;
     request.on_exit = Some(on_exit);
     let mut run = match engine.start(request) {
@@ -864,6 +1218,8 @@ async fn run_script(
     let mut output = Vec::new();
     let mut queue: VecDeque<QueuedCall> = VecDeque::new();
     let mut running: JoinSet<()> = JoinSet::new();
+    // `sleep()` calls; aborted with the script, they answer nothing late.
+    let mut sleeps: JoinSet<()> = JoinSet::new();
     let mut controllers: Vec<AbortController> = Vec::new();
     let mut stopping = false;
     let cancelled = async {
@@ -890,6 +1246,7 @@ async fn run_script(
                 index,
                 tool,
                 args,
+                preview,
             } = call;
             let started = Instant::now();
             // Started here, not in the task, so nested ids follow the order
@@ -908,6 +1265,7 @@ async fn run_script(
                     id,
                     index,
                     tool,
+                    preview,
                     started,
                 },
                 controller.signal(),
@@ -917,18 +1275,34 @@ async fn run_script(
             ));
             controllers.push(controller);
         }
+        let flush_at = records.flush_at();
         tokio::select! {
             event = run.next() => match event {
                 Event::Call(HostCall::Tool { id, name, args }) => {
                     match catalog.tools.iter().find(|tool| tool.name == name) {
                         Some(tool) => {
-                            let index = record_call(records, tool, args.as_ref());
-                            queue.push_back(QueuedCall { id, index, tool: Arc::clone(tool), args });
+                            let preview = preview_args(args.as_ref());
+                            let index = records.record(tool, &preview);
+                            queue.push_back(QueuedCall { id, index, tool: Arc::clone(tool), args, preview });
                         }
                         None => {
                             let available: Vec<&str> = catalog.tools.iter().map(|tool| tool.name.as_str()).collect();
                             let message = bake_agent::unknown_tool_message(&name, &available);
                             let _ = handle.answer(id, Err(CallError::new(message)));
+                        }
+                    }
+                }
+                Event::Call(HostCall::Global { id, name, args }) if name == SLEEP_GLOBAL => {
+                    match sleep_duration(args.as_ref()) {
+                        Ok(duration) => {
+                            let handle = handle.clone();
+                            sleeps.spawn(async move {
+                                tokio::time::sleep(duration).await;
+                                let _ = handle.answer(id, Ok(None));
+                            });
+                        }
+                        Err(error) => {
+                            let _ = handle.answer(id, Err(error));
                         }
                     }
                 }
@@ -949,19 +1323,30 @@ async fn run_script(
                 }
             }
             Some(_) = running.join_next(), if !running.is_empty() => {}
+            Some(_) = sleeps.join_next(), if !sleeps.is_empty() => {}
+            () = async {
+                match flush_at {
+                    Some(at) => tokio::time::sleep_until(at).await,
+                    None => std::future::pending().await,
+                }
+            } => records.flush(),
         }
     };
+    let unsettled = records.unsettled();
     // Calls still running when the script ends are cancelled and awaited;
     // waiting ones never start, and their records read cancelled.
     queue.clear();
+    sleeps.abort_all();
     for controller in &controllers {
         controller.abort();
     }
     while running.join_next().await.is_some() {}
+    while sleeps.join_next().await.is_some() {}
     drop(run);
     Ok(Ran {
         result: outcome.result.clone(),
         output,
+        running: unsettled,
     })
 }
 
@@ -976,6 +1361,11 @@ pub(super) async fn execute_codemode(
     ctx: ToolContext,
     host: Option<Arc<dyn CodemodeHost>>,
 ) -> Result<AgentToolResult, String> {
+    let admission = if host.as_ref().is_some_and(|host| host.is_subagent()) {
+        Admission::children()
+    } else {
+        Admission::process()
+    };
     execute_with(
         tool_call_id,
         params,
@@ -983,7 +1373,7 @@ pub(super) async fn execute_codemode(
         on_update,
         ctx,
         host,
-        Admission::process(),
+        admission,
     )
     .await
 }
@@ -1005,11 +1395,7 @@ pub(super) async fn execute_with(
         .options
         .max_output_tokens
         .unwrap_or(DEFAULT_MAX_OUTPUT_TOKENS);
-    let records = Records {
-        caller_id: tool_call_id,
-        calls: Arc::default(),
-        on_update,
-    };
+    let records = Records::new(tool_call_id, on_update);
     // Show the script as running before its first nested call.
     records.publish();
 
@@ -1078,18 +1464,15 @@ pub(super) async fn execute_with(
                         "Script error:\n{error}\n\nThe script did not start."
                     ))),
                 ],
-                details: Some(codemode_details(&records.snapshot(), None)),
+                details: Some(CallView::default().details(None)),
                 is_error: true,
                 ..AgentToolResult::default()
             });
         }
     };
-    let mut calls = records.snapshot();
-    for call in &mut calls {
-        if call.status == CodemodeNestedCallStatus::Running {
-            call.status = CodemodeNestedCallStatus::Cancelled;
-        }
-    }
+    // The last partial result shows every call as it settled.
+    records.flush();
+    let calls = records.finish();
 
     let mut script_output = ran.output;
     let mut store_failure = None;
@@ -1123,9 +1506,14 @@ pub(super) async fn execute_with(
         )));
     }
     if let Err(failure) = &ran.result {
+        let ending = Ending {
+            calls: calls.clone(),
+            running: &ran.running,
+            web_fetch: catalog.tools.iter().any(|tool| tool.name == "web_fetch"),
+        };
         items.push(Item::Text(format!(
             "Script error:\n{}",
-            format_error(failure, &calls)
+            format_error(failure, &ending)
         )));
     }
     let work = catalog.host.as_ref().and_then(|host| host.work());
@@ -1133,7 +1521,14 @@ pub(super) async fn execute_with(
         truncate_output(join_adjacent_text(items), max_output_tokens, work.as_ref()).await;
     // After truncation, which joins the text items and moves images after
     // them, so each path stays next to its image and is never cut.
-    let output = join_adjacent_text(save_images(truncated, work.as_ref()).await);
+    let mut output = save_images(truncated, work.as_ref()).await;
+    // After truncation, so it is never cut.
+    if ran.result.is_ok()
+        && let Some(note) = cancelled_note(&calls)
+    {
+        output.push(Item::Text(note));
+    }
+    let output = join_adjacent_text(output);
     let header = format!(
         "{}\nWall time {:.1} seconds\nOutput:\n",
         if ran.result.is_ok() {
@@ -1150,7 +1545,7 @@ pub(super) async fn execute_with(
     }));
     Ok(AgentToolResult {
         content,
-        details: Some(codemode_details(&calls, full_output_path.as_deref())),
+        details: Some(calls.details(full_output_path.as_deref())),
         is_error: ran.result.is_err(),
         ..AgentToolResult::default()
     })

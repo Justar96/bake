@@ -42,6 +42,9 @@ pub(super) struct SessionCodemodeHost {
     /// replaced, by tool name: scripts see these, as Pi's `ctx.tools` keeps
     /// the registry's descriptions.
     pub(super) own_descriptions: Mutex<HashMap<String, String>>,
+    /// The session is a subagent child: its file starts with a
+    /// [`crate::subagents::CHILD_ENTRY`].
+    pub(super) subagent: bool,
 }
 
 impl CodemodeHost for SessionCodemodeHost {
@@ -92,6 +95,20 @@ impl CodemodeHost for SessionCodemodeHost {
     fn work(&self) -> Option<WorkGate> {
         Some(self.core.work.clone())
     }
+
+    fn is_subagent(&self) -> bool {
+        self.subagent
+    }
+}
+
+/// Whether `session` is a subagent child's, whose file starts with its
+/// [`crate::subagents::CHILD_ENTRY`].
+pub(super) fn is_subagent_session(session: &crate::session::SessionManager) -> bool {
+    session.branch_entries(None).iter().any(|entry| {
+        entry.entry_type() == "custom"
+            && entry.get("customType").and_then(serde_json::Value::as_str)
+                == Some(crate::subagents::CHILD_ENTRY)
+    })
 }
 
 /// The tools of one request with the active `codemode` tool's loadout

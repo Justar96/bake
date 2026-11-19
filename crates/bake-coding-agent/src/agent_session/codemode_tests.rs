@@ -1350,3 +1350,223 @@ async fn a_zero_timeout_reads_the_same_from_a_call_and_a_script() {
     session.shutdown().await;
     assert_eq!(result_text(&result), REFUSED);
 }
+
+/// A tool that fails with `no such file`.
+fn failing() -> AgentTool {
+    AgentTool::new(
+        "fail",
+        "Fail",
+        "Always fail",
+        json!({ "type": "object", "properties": { "path": { "type": "string" } } }),
+        |_id, _args, _signal, _update, _ctx| Box::pin(async { Err("no such file".to_owned()) }),
+    )
+}
+
+/// A rejected call's Error keeps the tool's text as its message and names
+/// the tool and its arguments; an uncaught one's summary shows both with
+/// the error.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_rejected_call_names_its_tool_and_arguments() {
+    let fx = Fixture::new("codemode-rejected");
+    let session = fx.session(vec![failing()], &["fail", "codemode"]).await;
+    fx.script(
+        "try { await tools.fail({ path: \"x\" }); } catch (error) { return [error.message, error.tool, error.args, error instanceof Error]; }",
+        "c1",
+    );
+    prompt(&session).await;
+    let caught = codemode_result(&session);
+    assert!(!caught.is_error);
+    assert_eq!(
+        serde_json::from_str::<Value>(&result_text(&caught)).expect("json"),
+        json!(["no such file", "fail", "{\"path\":\"x\"}", true])
+    );
+    fx.script("await tools.fail({ path: \"x\" });", "c2");
+    prompt(&session).await;
+    let failed = codemode_result(&session);
+    session.shutdown().await;
+    assert!(failed.is_error);
+    let text = result_text(&failed);
+    assert!(
+        text.ends_with(
+            "Tool calls made before the failure (they are not undone): fail {\"path\":\"x\"} (error: no such file)"
+        ),
+        "{text}"
+    );
+}
+
+/// A script that ends while calls it made still run completes, and its
+/// output ends by naming the calls it cancelled; the call it awaited is
+/// not named.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_completed_script_names_the_calls_it_left_running() {
+    let fx = Fixture::new("codemode-left-running");
+    let started = Arc::new(AtomicUsize::new(0));
+    let session = fx
+        .session(
+            vec![echo(), waiting(&started)],
+            &["echo", "wait", "codemode"],
+        )
+        .await;
+    fx.script(
+        "await tools.echo({ text: \"a\" });\ntools.wait({});\ntools.wait({});\nreturn \"done\";",
+        "c1",
+    );
+    prompt(&session).await;
+    let result = codemode_result(&session);
+    session.shutdown().await;
+    assert!(!result.is_error);
+    assert_eq!(
+        result_text(&result),
+        "done\n[2 tool calls were still running when the script ended and were cancelled: wait, wait. Await calls (Promise.all) before the script ends.]"
+    );
+    assert_eq!(
+        calls(&result)
+            .iter()
+            .map(|(_, name, status)| (name.as_str(), status.as_str()))
+            .collect::<Vec<_>>(),
+        [("echo", "ok"), ("wait", "cancelled"), ("wait", "cancelled")]
+    );
+}
+
+/// A script's `timeout_ms` cancels its calls, and the failure names the
+/// ones still running.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_timed_out_script_names_the_calls_still_running() {
+    let fx = Fixture::new("codemode-timed-out");
+    let started = Arc::new(AtomicUsize::new(0));
+    let session = fx
+        .session(vec![waiting(&started)], &["wait", "codemode"])
+        .await;
+    fx.script(
+        "// @options: {\"timeout_ms\": 300}\nawait tools.wait({});",
+        "c1",
+    );
+    prompt(&session).await;
+    let result = codemode_result(&session);
+    session.shutdown().await;
+    assert!(result.is_error);
+    let text = result_text(&result);
+    assert!(
+        text.contains("Script error:\nScript timed out: Execution timed out after 300 ms\nStill running when it timed out: wait.\n\nTool calls made before the failure (they are not undone): wait (cancelled)"),
+        "{text}"
+    );
+}
+
+/// A tool that records when it starts and ends, giving way to other tasks
+/// in between, so calls that ran side by side would interleave.
+fn step(
+    name: &str,
+    effect: Option<bake_agent::ToolEffect>,
+    log: &Arc<Mutex<Vec<String>>>,
+) -> AgentTool {
+    let log = Arc::clone(log);
+    let mut tool = AgentTool::new(
+        name,
+        name,
+        "Record a step",
+        json!({ "type": "object", "properties": { "n": { "type": "number" } } }),
+        move |_id, args, _signal, _update, _ctx| {
+            let log = Arc::clone(&log);
+            Box::pin(async move {
+                let n = args["n"].as_u64().unwrap_or_default();
+                log.lock().unwrap().push(format!("start {n}"));
+                for _ in 0..20 {
+                    tokio::task::yield_now().await;
+                }
+                log.lock().unwrap().push(format!("end {n}"));
+                Ok(AgentToolResult::text(n.to_string()))
+            })
+        },
+    );
+    tool.effect = effect;
+    tool
+}
+
+/// A tool that only reads and waits at `barrier`, which opens only when
+/// another call reaches it too.
+fn meet(barrier: &Arc<tokio::sync::Barrier>) -> AgentTool {
+    let barrier = Arc::clone(barrier);
+    let mut tool = AgentTool::new(
+        "meet",
+        "Meet",
+        "Wait for another call",
+        json!({ "type": "object", "properties": {} }),
+        move |_id, _args, _signal, _update, _ctx| {
+            let barrier = Arc::clone(&barrier);
+            Box::pin(async move {
+                barrier.wait().await;
+                Ok(AgentToolResult::text("met"))
+            })
+        },
+    );
+    tool.effect = Some(bake_agent::ToolEffect::Read);
+    tool
+}
+
+/// As the user docs say: a script's calls of tools that may change
+/// something run one at a time, even inside `Promise.all()`, while calls
+/// of tools that only read run side by side.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn changing_calls_run_one_at_a_time_and_reads_side_by_side() {
+    let fx = Fixture::new("codemode-serial");
+    let log: Arc<Mutex<Vec<String>>> = Arc::default();
+    let barrier = Arc::new(tokio::sync::Barrier::new(2));
+    let session = fx
+        .session(
+            vec![
+                step("change", None, &log),
+                step("edit_file", Some(bake_agent::ToolEffect::Write), &log),
+                meet(&barrier),
+            ],
+            &["change", "edit_file", "meet", "codemode"],
+        )
+        .await;
+    fx.script(
+        "const done = await Promise.all([tools.change({ n: 1 }), tools.edit_file({ n: 2 }), tools.change({ n: 3 })]);\nconst met = await Promise.all([tools.meet({}), tools.meet({})]);\nreturn [done, met];",
+        "c1",
+    );
+    prompt(&session).await;
+    let result = codemode_result(&session);
+    session.shutdown().await;
+    assert!(!result.is_error, "{}", result_text(&result));
+    assert_eq!(
+        result_text(&result),
+        "[[\"1\",\"2\",\"3\"],[\"met\",\"met\"]]"
+    );
+    // Each call ends before the next starts. Which goes first is not
+    // fixed: each call is its own task, and they reach the queue in the
+    // order they are first polled.
+    let log = log.lock().unwrap();
+    let mut ran: Vec<&str> = log
+        .chunks(2)
+        .map(|pair| {
+            let started = pair[0].strip_prefix("start ").expect("a start");
+            assert_eq!(pair.get(1), Some(&format!("end {started}")), "{log:?}");
+            started
+        })
+        .collect();
+    ran.sort_unstable();
+    assert_eq!(ran, ["1", "2", "3"], "{log:?}");
+}
+
+/// A subagent's session, whose store starts with its child entry, draws
+/// script slots from the subagents' set; a top-level session does not.
+#[test]
+fn a_subagent_session_is_known_by_its_child_entry() {
+    let dir = TempDir::new("codemode-subagent-session");
+    let cwd = dir.join("ws").to_string_lossy().into_owned();
+    let child = crate::subagents::new_child_store(
+        &cwd,
+        &dir.join("sessions"),
+        false,
+        "parent",
+        None,
+        "child",
+        "worker",
+    )
+    .expect("child store");
+    assert!(super::codemode::is_subagent_session(&child));
+    let top = SessionManager::in_memory(Some(&cwd), NewSessionOptions::default(), Vec::new())
+        .expect("store");
+    assert!(!super::codemode::is_subagent_session(&top));
+}

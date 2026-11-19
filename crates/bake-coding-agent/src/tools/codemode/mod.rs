@@ -58,6 +58,26 @@
 //!   `<codemode call id>/?`.
 //! - An Esc abort reports `Script aborted: This operation was aborted`, the
 //!   message of the default reason of Pi's aborted signal.
+//! - The description's options example sets only `max_output_tokens`, and
+//!   says in a sentence what `timeout_ms` does, where Pi's example sets
+//!   `"timeout_ms": 60000`, which models copied into scripts that a long
+//!   `bash` call then outlived. A timed-out script's failure names the calls
+//!   still running.
+//! - `await sleep(ms)` is a host-answered global ([`SLEEP_GLOBAL`], at most
+//!   [`MAX_SLEEP_MS`] per call), listed in the globals text; Pi has no way to
+//!   wait. A `ReferenceError` for a missing global such as `setTimeout`,
+//!   `fetch`, or `require` gets one line saying what to use instead.
+//! - A rejected call's `Error` also carries `tool` and an `args` preview;
+//!   the failure summary shows a failed call's arguments and the start of its
+//!   error. A successful script whose calls were still running when it
+//!   ended says which were cancelled.
+//! - Partial results go out at most ten times a second, plus a final one,
+//!   and list at most [`MAX_LISTED_CALLS`] calls, the latest, with
+//!   `omittedCalls` counting the rest by status; past that many the failure
+//!   summary counts calls instead of listing each.
+//! - Scripts of subagents take slots of their own, and a script waits for a
+//!   slot up to its `timeout_ms` or ten minutes, where Pi's wait is 60
+//!   seconds, with a partial result saying it waits.
 
 mod execute;
 
@@ -77,7 +97,8 @@ use crate::session::SessionEntry;
 
 pub use execute::{
     BAKE_CODEMODE_MAX_WORKERS_ENV, CODEMODE_ABORT_MESSAGE, DEFAULT_MAX_OUTPUT_TOKENS,
-    MAX_CONCURRENT_CODEMODE_SCRIPTS, MAX_CONCURRENT_NESTED_CALLS, max_codemode_workers,
+    MAX_CONCURRENT_CODEMODE_SCRIPTS, MAX_CONCURRENT_NESTED_CALLS, MAX_LISTED_CALLS, MAX_SLEEP_MS,
+    SLEEP_GLOBAL, max_codemode_workers,
 };
 
 /// The tool's name.
@@ -157,6 +178,12 @@ pub trait CodemodeHost: Send + Sync {
     /// The session's gate, which owns the blocking work of a script: the
     /// engine's first compile and the files output is saved to.
     fn work(&self) -> Option<WorkGate>;
+    /// The session is an in-process subagent: its scripts take slots of
+    /// their own, so a parent's script waiting for it never holds the slot
+    /// it needs.
+    fn is_subagent(&self) -> bool {
+        false
+    }
 }
 
 /// The status of a nested call in a result's details ([`codemode_details`]).
@@ -222,12 +249,76 @@ impl CodemodeNestedCall {
     }
 }
 
+/// Calls by status: those a result's details do not list.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct CodemodeCallCounts {
+    /// Waiting or running.
+    pub running: usize,
+    /// Succeeded.
+    pub ok: usize,
+    /// Failed.
+    pub error: usize,
+    /// Cancelled.
+    pub cancelled: usize,
+}
+
+impl CodemodeCallCounts {
+    /// Counts one more call of `status`.
+    pub fn add(&mut self, status: CodemodeNestedCallStatus) {
+        match status {
+            CodemodeNestedCallStatus::Running => self.running += 1,
+            CodemodeNestedCallStatus::Ok => self.ok += 1,
+            CodemodeNestedCallStatus::Error => self.error += 1,
+            CodemodeNestedCallStatus::Cancelled => self.cancelled += 1,
+        }
+    }
+
+    /// Every call counted.
+    pub fn total(&self) -> usize {
+        self.running + self.ok + self.error + self.cancelled
+    }
+
+    /// `N calls (a ok, b error, c cancelled)`, naming only the statuses
+    /// that occur.
+    pub fn describe(&self) -> String {
+        let parts: Vec<String> = [
+            (self.ok, "ok"),
+            (self.error, "error"),
+            (self.cancelled, "cancelled"),
+            (self.running, "running"),
+        ]
+        .into_iter()
+        .filter(|(count, _)| *count > 0)
+        .map(|(count, status)| format!("{count} {status}"))
+        .collect();
+        format!("{} calls ({})", self.total(), parts.join(", "))
+    }
+
+    fn to_value(self) -> Value {
+        json!({
+            "running": self.running,
+            "ok": self.ok,
+            "error": self.error,
+            "cancelled": self.cancelled,
+        })
+    }
+}
+
 /// The `details` of a codemode result, Pi's `CodemodeToolDetails`:
-/// `{ calls, fullOutputPath? }`.
-pub fn codemode_details(calls: &[CodemodeNestedCall], full_output_path: Option<&str>) -> Value {
+/// `{ calls, fullOutputPath? }`, with Bake's `omittedCalls` when a script
+/// made more calls than `calls` lists ([`MAX_LISTED_CALLS`], the latest
+/// ones).
+pub fn codemode_details(
+    calls: &[CodemodeNestedCall],
+    omitted: &CodemodeCallCounts,
+    full_output_path: Option<&str>,
+) -> Value {
     let mut details = json!({
         "calls": calls.iter().map(CodemodeNestedCall::to_value).collect::<Vec<_>>(),
     });
+    if omitted.total() > 0 {
+        details["omittedCalls"] = omitted.to_value();
+    }
     if let Some(path) = full_output_path {
         details["fullOutputPath"] = json!(path);
     }
@@ -260,12 +351,13 @@ pub fn codemode_parameters() -> Value {
 
 const DESCRIPTION_INTRO: &str = "Run JavaScript that calls other tools. The input is raw JavaScript (not JSON, no code fence), run as an async function body in a QuickJS sandbox: top-level `await` and `return` work. No Node, file system, network, or timers.
 - `await tools.<name>({ ...args })` resolves to a string, or an object if the tool's declaration says so, and rejects with an Error on failure. A tool whose declaration returns an object resolves on failure too when it returned that object; check its fields. Calls still running when the script ends are cancelled.
-- Optional first line: `// @options: {\"max_output_tokens\": 10000, \"timeout_ms\": 60000}`";
+- Optional first line: `// @options: {\"max_output_tokens\": 10000}`. Adding `\"timeout_ms\": N` ends the script and cancels its calls after N ms.";
 
 /// Pi's `describeGlobals(false)`: Bake has no `models`.
 const GLOBALS: &str = "Globals:
 - `text(value)`, `image(dataUrlOrImageBlock)`, `console.log(...)`, and top-level `return` add output; `exit()` ends the script. With several text items, each starts with a `==> text N/M <==` line, and `console` lines follow the other output in one `<console_output>` block. `image()` also saves the image to a temp file and the result names its path.
 - `store(key, value)` and `load(key)` keep JSON values across codemode calls.
+- `await sleep(ms)` waits, at most 300000 ms per call.
 - `ALL_TOOLS`, `await searchTools(query, { limit?, namespace? })`, `await describeTool(name)`, `await describeNamespace(name)`: find unlisted tools, such as MCP tools.";
 
 /// The output schema of a tool without one: its text.

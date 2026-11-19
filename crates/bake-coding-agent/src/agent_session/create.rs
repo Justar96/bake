@@ -237,11 +237,14 @@ impl AgentSession {
         let jobs = jobs.unwrap_or_else(|| JobRegistry::new(work.clone(), JobLimits::default()));
         // Jobs an earlier process ran: their ids stay reserved, and those
         // never reported carry their recorded outcome with the next prompt.
-        let pending_notices = {
+        let (pending_notices, subagent) = {
             let session = lock(&session);
             let mut notices = job_notices::recover(&session, &jobs);
             notices.extend(crate::subagents::lost_runs(&session));
-            Arc::new(Mutex::new(notices))
+            (
+                Arc::new(Mutex::new(notices)),
+                codemode::is_subagent_session(&session),
+            )
         };
         let (context, has_thinking_entry, nested_paths) =
             with_session(&work, &session, |session| {
@@ -326,6 +329,7 @@ impl AgentSession {
             guidelines: tool_guidelines,
             mcp: Arc::clone(&mcp),
             own_descriptions: Mutex::default(),
+            subagent,
         });
         if own_codemode {
             tools.push(Arc::new(crate::tools::codemode::create_codemode_tool(

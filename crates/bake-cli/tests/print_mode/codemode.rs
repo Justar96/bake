@@ -173,9 +173,14 @@ fn a_selection_without_codemode_sends_the_request_of_a_session_without_it() {
     };
     let from_flag = body(&requests[0]);
     assert_eq!(from_flag, body(&requests[1]));
+    // Code mode is named nowhere but in paths, which a checkout or a
+    // temporary directory may name so.
+    let without_paths = from_flag
+        .replace(env!("CARGO_BIN_EXE_bake"), "<bake>")
+        .replace(&workspace.root.to_string_lossy().into_owned(), "<root>");
     assert!(
-        !from_flag.to_lowercase().contains("codemode"),
-        "{from_flag}"
+        !without_paths.to_lowercase().contains("codemode"),
+        "{without_paths}"
     );
 }
 
