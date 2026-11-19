@@ -194,7 +194,7 @@ fn ask_result(outcome: AskOutcome) -> AgentToolResult {
         ),
         AskOutcome::Interrupted { ask_id, to } => ok(
             format!(
-                "{to} has not answered yet (ask {ask_id}); something arrived for you meanwhile and comes next. The ask stays open: its answer will arrive as a message."
+                "{to} has not answered yet (ask {ask_id}); something else arrived for you meanwhile. The ask stays open, so do not ask again: its answer will arrive as a message."
             ),
             json!({ "action": "ask", "askId": ask_id, "status": "interrupted", "to": to }),
         ),
