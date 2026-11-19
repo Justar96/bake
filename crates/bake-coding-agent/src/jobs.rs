@@ -1567,6 +1567,38 @@ impl JobRegistry {
         (mail.into_iter().map(|mail| mail.message).collect(), depth)
     }
 
+    /// Claims, under one lock, only the notices that could not open a turn
+    /// now: terminal jobs not yet reported and unheld mail, each of depth
+    /// [`MAX_CONSECUTIVE_WAKES`] or more. Held mail, and a notice that could
+    /// wake (a shallower job, mail released since a caller's look), stays
+    /// queued for a turn. Empty once the registry is closed.
+    pub fn claim_unwaking(&self) -> (Vec<JobSnapshot>, Vec<CustomMessage>) {
+        let wakes = self.inner.wakes.load(Ordering::SeqCst);
+        let claim = self.inner.delivery_claim();
+        let mut state = self.inner.state();
+        if state.closed {
+            return (Vec::new(), Vec::new());
+        }
+        let jobs = state
+            .records
+            .iter_mut()
+            .filter(|record| {
+                record.status.is_terminal()
+                    && record.claim == Claim::Unclaimed
+                    && record.depth >= MAX_CONSECUTIVE_WAKES
+            })
+            .map(|record| {
+                record.claim = claim;
+                record.snapshot()
+            })
+            .collect();
+        let (kept, waiting): (Vec<Mail>, Vec<Mail>) = std::mem::take(&mut state.mail)
+            .into_iter()
+            .partition(|mail| !mail.held && mail.depth(wakes) >= MAX_CONSECUTIVE_WAKES);
+        state.mail = waiting;
+        (jobs, kept.into_iter().map(|mail| mail.message).collect())
+    }
+
     /// Whether a terminal job is unreported or a posted notice waits.
     pub fn has_undelivered(&self) -> bool {
         let state = self.inner.state();

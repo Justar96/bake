@@ -1448,3 +1448,36 @@ async fn a_turns_claim_leaves_held_mail_posted_after_the_look() {
     assert!(!registry.has_undelivered());
     registry.close().await;
 }
+
+// Keeping notices for the next prompt never takes one that could open a
+// turn: held mail, mail released since the caller looked, or shallow mail.
+#[tokio::test]
+async fn keeping_notices_for_a_prompt_takes_only_those_that_cannot_wake() {
+    let (_gate, registry) = registry(JobLimits::default());
+    let notice = |text: &str| crate::session::messages::CustomMessage {
+        custom_type: "test.notice".into(),
+        content: bake_ai::UserContent::Text(text.into()),
+        display: true,
+        details: None,
+        timestamp: 0,
+    };
+    registry
+        .post_at(notice("deep"), MAX_CONSECUTIVE_WAKES)
+        .expect("posted");
+    registry.post_held(notice("held")).expect("posted");
+    assert!(!registry.notice_would_wake());
+    assert_eq!(
+        registry.claim_unwaking(),
+        (Vec::new(), vec![notice("deep")])
+    );
+    assert!(registry.has_held());
+    // Released after the look, it is a turn's to take.
+    assert!(registry.release_held());
+    registry.post_at(notice("shallow"), 0).expect("posted");
+    assert_eq!(registry.claim_unwaking(), (Vec::new(), Vec::new()));
+    assert_eq!(
+        registry.claim_mail(),
+        vec![notice("held"), notice("shallow")]
+    );
+    registry.close().await;
+}

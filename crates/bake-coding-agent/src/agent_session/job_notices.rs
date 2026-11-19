@@ -79,6 +79,15 @@ pub fn claim_at(jobs: &JobRegistry) -> (Vec<CustomMessage>, usize) {
     (notices, depth)
 }
 
+/// The notices that could not open a turn now, for the next prompt
+/// ([`JobRegistry::claim_unwaking`]).
+pub fn claim_unwaking(jobs: &JobRegistry) -> Vec<CustomMessage> {
+    let (settled, mail) = jobs.claim_unwaking();
+    let mut notices: Vec<CustomMessage> = settled.iter().map(completion_notice).collect();
+    notices.extend(mail);
+    notices
+}
+
 /// The notice for a job an earlier process of the session started and did
 /// not report.
 pub fn lost_notice(id: &str, kind: &str, label: &str) -> CustomMessage {
