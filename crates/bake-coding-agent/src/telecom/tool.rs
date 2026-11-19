@@ -176,8 +176,14 @@ fn ask_result(outcome: AskOutcome) -> AgentToolResult {
             format!("{from} answered:\n{text}"),
             json!({ "action": "ask", "askId": ask_id, "status": "answered", "from": from }),
         ),
-        AskOutcome::Sent { ask_id, to } => ok(
-            format!("asked {to} (ask {ask_id}); the answer will arrive as a message"),
+        AskOutcome::Sent { ask_id, to, held } => ok(
+            if held {
+                format!(
+                    "asked {to} (ask {ask_id}; held: {to} reads it within a minute); the answer will arrive as a message"
+                )
+            } else {
+                format!("asked {to} (ask {ask_id}); the answer will arrive as a message")
+            },
             json!({ "action": "ask", "askId": ask_id, "status": "sent", "to": to }),
         ),
         AskOutcome::TimedOut { ask_id, to } => ok(

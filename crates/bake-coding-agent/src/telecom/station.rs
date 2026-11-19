@@ -19,13 +19,34 @@
 //! dropped. The directory reads of deliveries and waits, and the
 //! publisher's writes, run on the blocking pool under the session's
 //! [`WorkGate`]; no write is made under a lock another task takes.
+//!
+//! **One wake budget.** What a peer's model sends, a message or an ask,
+//! may start a turn at most [`MAX_WAKES_PER_MINUTE`] times in any minute,
+//! shared by every peer. Past that it is still accepted, and the sender is
+//! told it is held: a run reads it at its next step as any notice, and an
+//! idle session is woken for it by one timer, owned by the session's gate,
+//! when the minute's window reopens. A person's message and the answer to
+//! this session's own ask always wake it.
+//!
+//! **Nothing is accepted that cannot be read.** A frame is taken under the
+//! membership lock, and the session leaves the team before its notices
+//! close, so a frame is refused once its mail could no longer be read. An
+//! ask this session made and no longer waits on holds the session's live
+//! work ([`JobRegistry::hold_live`]) until it is answered, withdrawn, or
+//! its peer leaves, which a watcher task reports as a message; print mode
+//! therefore waits for the answer within its job wait.
+//!
+//! **The team update** (who joined or left, new tasks, broadcasts, owed
+//! asks) reaches the model before a prompt, in a turn opened for notices,
+//! and at a run's step boundary ([`JobRegistry::set_update_source`]); it
+//! never starts a turn of its own.
 
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::future::Future;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 use std::task::Poll;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use serde_json::json;
 use tokio::sync::{Notify, oneshot};
@@ -34,7 +55,7 @@ use super::directory::{self, Membership, NATO, Team};
 use super::endpoint;
 use super::wire::{self, Activity, Body, Frame, Outcome, Presence, Sender, WIRE_VERSION};
 use crate::agent_session::SessionEvent;
-use crate::jobs::JobRegistry;
+use crate::jobs::{JobRegistry, LiveHold};
 use crate::owned_work::WorkGate;
 use crate::session::messages::CustomMessage;
 use bake_ai::{TextContent, UserContent, UserContentBlock};
@@ -42,9 +63,15 @@ use bake_ai::{TextContent, UserContent, UserContentBlock};
 /// The `customType` of what telecom puts in a session.
 pub const MESSAGE_TYPE: &str = "bake.telecom";
 
-/// Turns peers' messages may start per minute; asks and a person's
-/// messages always may.
+/// Turns peers' models' messages and asks may start per minute, together;
+/// a person's messages and answers to this session's asks always may.
 pub const MAX_WAKES_PER_MINUTE: usize = 6;
+
+/// The window [`MAX_WAKES_PER_MINUTE`] counts in.
+const WAKE_WINDOW: Duration = Duration::from_secs(60);
+
+/// The most broadcasts held for the next update; older ones are dropped.
+pub const HELD_CAP: usize = 20;
 
 /// How long an `ask` waits by default, and at most.
 pub const ASK_TIMEOUT: Duration = Duration::from_secs(300);
@@ -86,6 +113,11 @@ const CLOSED_KEPT: usize = 32;
 
 /// An ask this station made and has no answer to.
 struct Waiting {
+    /// The peer's callsign, as the model reads it.
+    to: String,
+    /// The session's live work while nobody waits on the answer, so print
+    /// mode waits for it ([`JobRegistry::hold_live`]).
+    hold: Option<LiveHold>,
     /// The peer's session: only it may answer, and the ask fails when it
     /// leaves, whoever takes the callsign next.
     session: String,
@@ -117,11 +149,18 @@ struct State {
     owed: Vec<Owed>,
     /// The latest asks closed unanswered, at most [`CLOSED_KEPT`].
     closed: VecDeque<Closed>,
-    /// Broadcasts held for the next brief.
+    /// Broadcasts held for the next update, at most [`HELD_CAP`].
     held: Vec<String>,
+    /// How many older broadcasts were dropped for the cap.
+    dropped: usize,
     /// The roster the last brief described; `None` before the first.
     briefed: Option<BTreeMap<String, Seen>>,
-    wakes: VecDeque<Instant>,
+    /// When peers' models last woke the session, in the last minute.
+    wakes: VecDeque<tokio::time::Instant>,
+    /// Whether the timer that releases held mail is pending.
+    waking: bool,
+    /// Whether the task that watches the peers of unwaited asks runs.
+    watching: bool,
 }
 
 impl State {
@@ -248,8 +287,11 @@ impl Station {
                         owed: Vec::new(),
                         closed: VecDeque::new(),
                         held: Vec::new(),
+                        dropped: 0,
                         briefed: None,
                         wakes: VecDeque::new(),
+                        waking: false,
+                        watching: false,
                     }),
                     jobs,
                     work: work.clone(),
@@ -271,6 +313,10 @@ impl Station {
             let _publisher = work
                 .spawn(move |scope| publisher(weak, scope))
                 .map_err(|_| "telecom: the session is closing".to_owned())?;
+            let weak = Arc::downgrade(&station.inner);
+            station.inner.jobs.set_update_source(Arc::new(move || {
+                weak.upgrade().and_then(|inner| Self { inner }.update())
+            }));
             Ok(station)
         }
     }
@@ -353,13 +399,16 @@ impl Station {
         lock(&self.inner.state).owed.clone()
     }
 
-    /// Gives the callsign back; later deliveries fail. Idempotent.
+    /// Gives the callsign back; later deliveries fail. Idempotent. A
+    /// frame being taken finishes first ([`Self::receive`]), so whatever
+    /// was accepted is in the session's notices when this returns. Open
+    /// asks end, and their hold on the session's live work with them.
     pub fn leave(&self) {
         let membership = lock(&self.inner.membership).take();
         drop(membership);
         let mut state = lock(&self.inner.state);
         for (_, waiting) in state.waiting.drain() {
-            drop(waiting.answer);
+            drop(waiting);
         }
     }
 
@@ -428,22 +477,34 @@ impl Station {
         task
     }
 
-    /// The brief to put before a prompt: on the first prompt with peers,
-    /// every peer; later, only what changed, with held broadcasts and the
-    /// asks this member owes. `None` when there is nothing to say. A
-    /// prompt of three words or more becomes the task unless `status` set
-    /// one.
+    /// The brief to put before a typed prompt: [`Self::take_task`], then
+    /// [`Self::update`].
     pub fn brief(&self, prompt: &str) -> Option<CustomMessage> {
+        self.take_task(prompt);
+        self.update()
+    }
+
+    /// The prompt part of [`Self::brief`]: a typed prompt of three words or
+    /// more becomes the task unless `status` set one.
+    pub fn take_task(&self, prompt: &str) {
+        let mut state = lock(&self.inner.state);
+        let line = prompt.lines().find(|line| !line.trim().is_empty());
+        if let Some(line) = line.filter(|_| !state.task_pinned)
+            && prompt.split_whitespace().count() >= 3
         {
-            let mut state = lock(&self.inner.state);
-            let line = prompt.lines().find(|line| !line.trim().is_empty());
-            if let Some(line) = line.filter(|_| !state.task_pinned)
-                && prompt.split_whitespace().count() >= 3
-            {
-                state.presence.task = Some(wire::one_line(line, 140));
-                drop(state);
-                self.mark_dirty();
-            }
+            state.presence.task = Some(wire::one_line(line, 140));
+            drop(state);
+            self.mark_dirty();
+        }
+    }
+
+    /// The team update of [`Self::brief`], for any request a run makes:
+    /// the whole team the first time there is one, later only what
+    /// changed, with held broadcasts and the asks this member owes. `None`
+    /// when there is nothing to say.
+    pub fn update(&self) -> Option<CustomMessage> {
+        if lock(&self.inner.membership).is_none() {
+            return None;
         }
         let peers = self.peers();
         self.prune_owed(&peers);
@@ -503,8 +564,12 @@ impl Station {
             }
         }
         let held = std::mem::take(&mut state.held);
+        let dropped = std::mem::take(&mut state.dropped);
         if !held.is_empty() {
-            lines.push("[telecom] Broadcasts since your last prompt:".to_owned());
+            lines.push("[telecom] New broadcasts:".to_owned());
+            if dropped > 0 {
+                lines.push(format!("({dropped} earlier broadcasts were dropped.)"));
+            }
             lines.extend(held);
         }
         if !state.owed.is_empty() && !lines.is_empty() {
@@ -559,17 +624,65 @@ impl Station {
         pick(&self.peers(), &self.callsign(), to)
     }
 
-    async fn deliver(&self, peer: &Presence, body: Body) -> Result<(), String> {
+    /// Delivers `body` to `peer`: whether it holds it past its wake
+    /// budget, or why it did not take it.
+    async fn deliver(&self, peer: &Presence, body: Body) -> Result<bool, String> {
         match self.exchange(peer, body).await? {
-            Outcome::Accepted => Ok(()),
+            Outcome::Accepted { held } => Ok(held),
             Outcome::Refused { reason } => Err(reason),
         }
     }
 
-    /// Delivers `body` to `peer`: what it answered, or why it could not.
+    /// Delivers `body` to `peer`'s session: what it answered, or why it
+    /// could not. Whoever holds the callsign now refuses it unless it is
+    /// that session.
     async fn exchange(&self, peer: &Presence, body: Body) -> Result<Outcome, String> {
-        let frame = Frame::new(self.sender(), body);
+        let mut frame = Frame::new(self.sender(), body);
+        frame.to = Some(peer.session.clone());
         endpoint::deliver(&self.inner.team.socket(&peer.callsign), &frame).await
+    }
+
+    /// Stops waiting on the ask `ask_id` if it is still open: its answer
+    /// arrives as a message, and until then the ask holds the session's
+    /// live work and the watcher reports its peer leaving.
+    fn stop_waiting(&self, ask_id: &str) {
+        let mut state = lock(&self.inner.state);
+        let Some(waiting) = state.waiting.get_mut(ask_id) else {
+            return;
+        };
+        waiting.answer = None;
+        if waiting.hold.is_none() {
+            waiting.hold = self.inner.jobs.hold_live();
+        }
+        self.arm_watcher(&mut state);
+    }
+
+    /// Starts the watcher of unwaited asks' peers, unless it runs.
+    fn arm_watcher(&self, state: &mut State) {
+        if state.watching {
+            return;
+        }
+        let weak = Arc::downgrade(&self.inner);
+        state.watching = self
+            .inner
+            .work
+            .spawn(move |scope| watcher(weak, scope))
+            .is_ok();
+    }
+
+    /// Starts the timer that releases held mail, unless it is pending. It
+    /// holds the session's live work, so print mode waits for it.
+    fn arm_waker(&self, state: &mut State) {
+        if state.waking {
+            return;
+        }
+        let hold = self.inner.jobs.hold_live();
+        let weak = Arc::downgrade(&self.inner);
+        state.waking = self
+            .inner
+            .work
+            .spawn(move |scope| waker(weak, hold, scope))
+            .is_ok();
     }
 
     /// Withdraws `ask_id` from `peer` on a task the session's gate owns,
@@ -612,6 +725,7 @@ impl Station {
         let mut sessions = HashSet::new();
         peers.retain(|peer| sessions.insert(peer.session.clone()));
         let mut reached = Vec::new();
+        let mut held = Vec::new();
         let mut failed = Vec::new();
         for batch in peers.chunks(wire::GROUP_CAP) {
             let deliveries = batch.iter().map(|peer| {
@@ -629,7 +743,12 @@ impl Station {
             });
             for (peer, result) in join_all(deliveries.collect()).await {
                 match result {
-                    Ok(()) => reached.push(peer.callsign.clone()),
+                    Ok(was_held) => {
+                        reached.push(peer.callsign.clone());
+                        if was_held {
+                            held.push(peer.callsign.clone());
+                        }
+                    }
                     Err(reason) => failed.push(format!("{}: {reason}", peer.callsign)),
                 }
             }
@@ -638,6 +757,13 @@ impl Station {
             return Err(format!("not delivered ({})", failed.join("; ")));
         }
         let mut report = format!("delivered to {}", reached.join(", "));
+        if !held.is_empty() {
+            let verb = if held.len() == 1 { "reads" } else { "read" };
+            report.push_str(&format!(
+                " (held: {} {verb} it within a minute)",
+                held.join(", ")
+            ));
+        }
         if !failed.is_empty() {
             report.push_str(&format!(" (failed: {})", failed.join("; ")));
         }
@@ -660,7 +786,7 @@ impl Station {
         let mut failed = Vec::new();
         for (peer, result) in join_all(deliveries.collect()).await {
             match result {
-                Ok(()) => reached.push(peer.callsign.clone()),
+                Ok(_) => reached.push(peer.callsign.clone()),
                 Err(reason) => failed.push(format!("{}: {reason}", peer.callsign)),
             }
         }
@@ -696,6 +822,12 @@ impl Station {
         lock(&self.inner.state).waiting.insert(
             ask_id.clone(),
             Waiting {
+                to: peer.callsign.clone(),
+                hold: if wait {
+                    None
+                } else {
+                    self.inner.jobs.hold_live()
+                },
                 session: peer.session.clone(),
                 answer: wait.then_some(answer),
             },
@@ -704,14 +836,19 @@ impl Station {
             ask_id: ask_id.clone(),
             text,
         };
-        if let Err(reason) = self.deliver(&peer, body).await {
-            lock(&self.inner.state).waiting.remove(&ask_id);
-            return Err(format!("{} did not get the ask: {reason}", peer.callsign));
-        }
+        let held = match self.deliver(&peer, body).await {
+            Ok(held) => held,
+            Err(reason) => {
+                lock(&self.inner.state).waiting.remove(&ask_id);
+                return Err(format!("{} did not get the ask: {reason}", peer.callsign));
+            }
+        };
         if !wait {
+            self.stop_waiting(&ask_id);
             return Ok(AskOutcome::Sent {
                 ask_id,
                 to: peer.callsign,
+                held,
             });
         }
         let outcome = self
@@ -721,9 +858,7 @@ impl Station {
             AskOutcome::Answered { .. } | AskOutcome::Sent { .. } => {}
             AskOutcome::TimedOut { .. } | AskOutcome::Interrupted { .. } => {
                 // Nobody waits now: a late answer arrives as a message.
-                if let Some(waiting) = lock(&self.inner.state).waiting.get_mut(&ask_id) {
-                    waiting.answer = None;
-                }
+                self.stop_waiting(&ask_id);
             }
             AskOutcome::Gone { .. } => {
                 lock(&self.inner.state).waiting.remove(&ask_id);
@@ -878,7 +1013,7 @@ impl Station {
             text,
         };
         match self.exchange(peer, body).await {
-            Ok(Outcome::Accepted) => {
+            Ok(Outcome::Accepted { .. }) => {
                 lock(&self.inner.state)
                     .owed
                     .retain(|owed| owed.ask_id != ask.ask_id);
@@ -896,14 +1031,29 @@ impl Station {
         }
     }
 
-    /// Takes an arriving frame.
+    /// Takes an arriving frame. The membership lock is held throughout, so
+    /// [`Self::leave`] waits for a frame being taken and none is accepted
+    /// after it.
     fn receive(&self, frame: Frame) -> Outcome {
-        if lock(&self.inner.membership).is_none() {
+        let membership = lock(&self.inner.membership);
+        if membership.is_none() {
             return refused("telecom is off in that session");
         }
         let from = frame.from.callsign.clone();
         let mut state = lock(&self.inner.state);
-        let (text, wake, details) = match frame.body {
+        if frame
+            .to
+            .as_ref()
+            .is_some_and(|to| *to != state.presence.session)
+        {
+            return refused("that member left");
+        }
+        // An unwaited ask's hold on the session's live work, kept until its
+        // answer is posted.
+        let mut _answered_hold = None;
+        // Whether it spends the shared wake budget: what a peer's model
+        // sends. A person's message and an answer always wake.
+        let (text, budgeted, details) = match frame.body {
             Body::Message { text, group, human } => {
                 let header = match (human, group.is_empty()) {
                     (true, _) => format!("[telecom] Message from the person at {from}'s terminal:"),
@@ -913,16 +1063,15 @@ impl Station {
                         group.join(", ")
                     ),
                 };
-                let wake = human || allow_wake(&mut state.wakes);
                 (
                     format!("{header}\n{text}"),
-                    wake,
+                    !human,
                     json!({ "kind": "message", "from": from, "human": human }),
                 )
             }
             Body::Ask { ask_id, text } => {
                 if state.owed.iter().any(|ask| ask.ask_id == ask_id) {
-                    return Outcome::Accepted;
+                    return Outcome::Accepted { held: false };
                 }
                 state.owed.push(Owed {
                     ask_id: ask_id.clone(),
@@ -948,27 +1097,33 @@ impl Station {
                         state.waiting.insert(ask_id, waiting);
                         return refused("that ask was not put to you");
                     }
-                    Some(Waiting {
-                        answer: Some(answer),
-                        ..
-                    }) => match answer.send(text) {
-                        Ok(()) => return Outcome::Accepted,
-                        Err(text) => (text, ""),
-                    },
-                    Some(Waiting { answer: None, .. }) => (text, ""),
+                    Some(waiting) => {
+                        _answered_hold = waiting.hold;
+                        match waiting.answer {
+                            Some(answer) => match answer.send(text) {
+                                Ok(()) => return Outcome::Accepted { held: false },
+                                Err(text) => (text, ""),
+                            },
+                            None => (text, ""),
+                        }
+                    }
                     None => (text, "earlier "),
                 };
                 (
                     format!("[telecom] {from} answered your {earlier}ask {ask_id}:\n{text}"),
-                    true,
+                    false,
                     json!({ "kind": "reply", "from": from, "askId": ask_id }),
                 )
             }
             Body::Broadcast { text } => {
+                if state.held.len() == HELD_CAP {
+                    state.held.remove(0);
+                    state.dropped += 1;
+                }
                 state
                     .held
                     .push(format!("- {from}: {}", wire::one_line(&text, 2000)));
-                return Outcome::Accepted;
+                return Outcome::Accepted { held: false };
             }
             Body::Withdraw { ask_id } => {
                 let withdrawn = state
@@ -980,17 +1135,23 @@ impl Station {
                     let note = format!("{from} withdrew ask {ask_id}; nothing more to do");
                     state.close_owed(&ask, note);
                 }
-                return Outcome::Accepted;
+                return Outcome::Accepted { held: false };
             }
         };
-        drop(state);
-        if wake {
-            self.inner.jobs.reset_wakes();
+        let held = budgeted && (state.waking || !allow_wake(&mut state.wakes));
+        let message = message(text, true, details);
+        let posted = if held {
+            self.inner.jobs.post_held(message)
+        } else {
+            self.inner.jobs.post_at(message, 0)
+        };
+        if posted.is_err() {
+            return refused("the session is closing");
         }
-        match self.inner.jobs.post(message(text, true, details)) {
-            Ok(()) => Outcome::Accepted,
-            Err(_) => refused("the session is closing"),
+        if held {
+            self.arm_waker(&mut state);
         }
+        Outcome::Accepted { held }
     }
 
     #[cfg(test)]
@@ -1010,6 +1171,8 @@ pub enum AskOutcome {
     Sent {
         ask_id: String,
         to: String,
+        /// The peer holds it past its wake budget.
+        held: bool,
     },
     TimedOut {
         ask_id: String,
@@ -1038,7 +1201,11 @@ impl AskOutcome {
                 from,
                 text,
             },
-            Self::Sent { to, .. } => Self::Sent { ask_id: id, to },
+            Self::Sent { to, held, .. } => Self::Sent {
+                ask_id: id,
+                to,
+                held,
+            },
             Self::TimedOut { to, .. } => Self::TimedOut { ask_id: id, to },
             Self::Gone { to, .. } => Self::Gone { ask_id: id, to },
             Self::Interrupted { to, .. } => Self::Interrupted { ask_id: id, to },
@@ -1113,21 +1280,110 @@ fn checked_text(text: &str) -> Result<String, String> {
     Ok(text)
 }
 
-/// Whether a peer's message may start a turn: at most
-/// [`MAX_WAKES_PER_MINUTE`] in any minute.
-fn allow_wake(wakes: &mut VecDeque<Instant>) -> bool {
-    let now = Instant::now();
-    while wakes
-        .front()
-        .is_some_and(|at| now.duration_since(*at) > Duration::from_secs(60))
-    {
-        wakes.pop_front();
-    }
-    if wakes.len() >= MAX_WAKES_PER_MINUTE {
+/// Whether a peer's model may start a turn now: at most
+/// [`MAX_WAKES_PER_MINUTE`] in any [`WAKE_WINDOW`]. Spends one when it may.
+fn allow_wake(wakes: &mut VecDeque<tokio::time::Instant>) -> bool {
+    let now = tokio::time::Instant::now();
+    if reopens_at(wakes, now).is_some() {
         return false;
     }
     wakes.push_back(now);
     true
+}
+
+/// When the wake budget has room again: `None` when it has now. Forgets
+/// wakes older than the window.
+fn reopens_at(
+    wakes: &mut VecDeque<tokio::time::Instant>,
+    now: tokio::time::Instant,
+) -> Option<tokio::time::Instant> {
+    while wakes
+        .front()
+        .is_some_and(|at| now.duration_since(*at) >= WAKE_WINDOW)
+    {
+        wakes.pop_front();
+    }
+    (wakes.len() >= MAX_WAKES_PER_MINUTE).then(|| wakes[0] + WAKE_WINDOW)
+}
+
+/// Releases the held mail once the wake budget has room, spending one
+/// wake for all of it. Holds the session's live work until then.
+async fn waker(inner: Weak<Inner>, _hold: Option<LiveHold>, scope: crate::owned_work::TaskScope) {
+    loop {
+        let reopens = {
+            let Some(inner) = inner.upgrade() else { return };
+            let mut state = lock(&inner.state);
+            let now = tokio::time::Instant::now();
+            match reopens_at(&mut state.wakes, now) {
+                Some(at) => at,
+                None => {
+                    // Under the state lock: a frame taken after this is
+                    // weighed against the budget as it now is.
+                    if inner.jobs.release_held() {
+                        state.wakes.push_back(now);
+                    }
+                    state.waking = false;
+                    return;
+                }
+            }
+        };
+        tokio::select! {
+            biased;
+            () = scope.signal().cancelled() => return,
+            () = tokio::time::sleep_until(reopens) => {}
+        }
+    }
+}
+
+/// Every [`PEER_CHECK`], ends the open asks nobody waits on whose peer's
+/// session left, posting that it left; stops when there are none.
+async fn watcher(inner: Weak<Inner>, scope: crate::owned_work::TaskScope) {
+    loop {
+        tokio::select! {
+            biased;
+            () = scope.signal().cancelled() => return,
+            () = tokio::time::sleep(PEER_CHECK) => {}
+        }
+        let Some(inner) = inner.upgrade() else { return };
+        let station = Station { inner };
+        let unwaited = |waiting: &Waiting| waiting.answer.is_none();
+        {
+            let mut state = lock(&station.inner.state);
+            if !state.waiting.values().any(unwaited) {
+                state.watching = false;
+                return;
+            }
+        }
+        let peers = station.live_peers().await;
+        if lock(&station.inner.membership).is_none() {
+            return;
+        }
+        let gone: Vec<(String, Waiting)> = {
+            let mut state = lock(&station.inner.state);
+            let ids: Vec<String> = state
+                .waiting
+                .iter()
+                .filter(|(_, waiting)| {
+                    unwaited(waiting) && !peers.iter().any(|peer| peer.session == waiting.session)
+                })
+                .map(|(id, _)| id.clone())
+                .collect();
+            ids.into_iter()
+                .filter_map(|id| state.waiting.remove(&id).map(|waiting| (id, waiting)))
+                .collect()
+        };
+        for (ask_id, waiting) in gone {
+            let text = format!(
+                "[telecom] {} left before answering ask {ask_id}.",
+                waiting.to
+            );
+            let details = json!({ "kind": "gone", "to": waiting.to, "askId": ask_id });
+            let _ = station.inner.jobs.post_at(message(text, true, details), 0);
+            // Its hold ends after the notice is queued, so print mode
+            // sees one or the other.
+            drop(waiting);
+        }
+    }
 }
 
 fn message(text: String, display: bool, details: serde_json::Value) -> CustomMessage {

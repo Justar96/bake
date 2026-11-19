@@ -508,7 +508,14 @@ struct Inner {
     events: watch::Sender<Events>,
     recorder: OnceLock<JobRecorder>,
     facts: OnceLock<FactRecorder>,
+    /// What the model is told with the next request a run makes anyway
+    /// ([`JobRegistry::set_update_source`]).
+    update: Mutex<Option<UpdateSource>>,
 }
+
+/// A source of an update for the session's model, such as telecom's team
+/// update: `None` when there is nothing new to say.
+pub(crate) type UpdateSource = Arc<dyn Fn() -> Option<CustomMessage> + Send + Sync>;
 
 /// A session's durable lifecycle writer. The driver awaits it before
 /// invoking the producer and before publishing a terminal outcome.
@@ -549,9 +556,21 @@ struct State {
 
 /// A posted notice and the wake depth it carries
 /// ([`JobRegistry::post_at`]); `None` takes the session's depth when read.
+/// Held mail ([`JobRegistry::post_held`]) wakes nothing until released.
 struct Mail {
     message: CustomMessage,
     depth: Option<usize>,
+    held: bool,
+}
+
+impl Mail {
+    fn depth(&self, wakes: usize) -> usize {
+        if self.held {
+            MAX_CONSECUTIVE_WAKES
+        } else {
+            self.depth.unwrap_or(wakes)
+        }
+    }
 }
 
 /// The ids of one kind: those at or below `floor` were issued by an
@@ -872,6 +891,7 @@ impl JobRegistry {
                 events: watch::Sender::new(Events::default()),
                 recorder: OnceLock::new(),
                 facts: OnceLock::new(),
+                update: Mutex::new(None),
             }),
         }
     }
@@ -985,11 +1005,7 @@ impl JobRegistry {
             .filter(|record| record.status.is_terminal() && record.claim == Claim::Unclaimed)
             .map(|record| record.depth)
             .min();
-        let mail = state
-            .mail
-            .iter()
-            .map(|mail| mail.depth.unwrap_or(wakes))
-            .min();
+        let mail = state.mail.iter().map(|mail| mail.depth(wakes)).min();
         jobs.into_iter().chain(mail).min().unwrap_or(wakes) < MAX_CONSECUTIVE_WAKES
     }
 
@@ -1430,26 +1446,89 @@ impl JobRegistry {
     /// wake budget ([`Self::has_undelivered`], [`Self::subscribe`]).
     /// Refused once the registry is closed.
     pub fn post(&self, message: CustomMessage) -> Result<(), StartError> {
-        self.push_mail(message, None)
+        self.push_mail(message, None, false)
     }
 
     /// [`Self::post`], for work that a turn of wake depth `depth` started
     /// ([`Self::wake_depth`]): the notice wakes the session as that work's
     /// own job notice would, whatever the session's depth is by then.
     pub fn post_at(&self, message: CustomMessage, depth: usize) -> Result<(), StartError> {
-        self.push_mail(message, Some(depth))
+        self.push_mail(message, Some(depth), false)
     }
 
-    fn push_mail(&self, message: CustomMessage, depth: Option<usize>) -> Result<(), StartError> {
+    /// [`Self::post`], held: a run takes it at its next step as any
+    /// notice, but it opens no turn until [`Self::release_held`], which the
+    /// poster owes, as a sender past its wake budget.
+    pub fn post_held(&self, message: CustomMessage) -> Result<(), StartError> {
+        self.push_mail(message, None, true)
+    }
+
+    /// Lets every held notice still queued open a turn, at depth 0.
+    /// Returns whether any was.
+    pub fn release_held(&self) -> bool {
+        let released = {
+            let mut state = self.inner.state();
+            let mut released = false;
+            for mail in state.mail.iter_mut().filter(|mail| mail.held) {
+                mail.held = false;
+                mail.depth = Some(0);
+                released = true;
+            }
+            released
+        };
+        if released {
+            self.inner.announce();
+        }
+        released
+    }
+
+    /// Whether a held notice is queued ([`Self::post_held`]).
+    pub fn has_held(&self) -> bool {
+        self.inner.state().mail.iter().any(|mail| mail.held)
+    }
+
+    fn push_mail(
+        &self,
+        message: CustomMessage,
+        depth: Option<usize>,
+        held: bool,
+    ) -> Result<(), StartError> {
         {
             let mut state = self.inner.state();
             if state.closed {
                 return Err(StartError::Closed);
             }
-            state.mail.push(Mail { message, depth });
+            state.mail.push(Mail {
+                message,
+                depth,
+                held,
+            });
         }
         self.inner.announce();
         Ok(())
+    }
+
+    /// Sets the source of the update a run's model gets with a request it
+    /// makes anyway: at a step boundary or in a notice turn, never a turn
+    /// of its own ([`Self::take_update`]). Replaces an earlier source.
+    pub(crate) fn set_update_source(&self, source: UpdateSource) {
+        *self
+            .inner
+            .update
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(source);
+    }
+
+    /// The update to add to a request about to be made, if the source has
+    /// one ([`Self::set_update_source`]).
+    pub fn take_update(&self) -> Option<CustomMessage> {
+        let source = self
+            .inner
+            .update
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        source.and_then(|source| source())
     }
 
     /// Takes every queued notice ([`Self::post`]), in arrival order.
@@ -1462,7 +1541,7 @@ impl JobRegistry {
     pub fn claim_mail_at(&self) -> (Vec<CustomMessage>, Option<usize>) {
         let wakes = self.inner.wakes.load(Ordering::SeqCst);
         let mail = std::mem::take(&mut self.inner.state().mail);
-        let depth = mail.iter().map(|mail| mail.depth.unwrap_or(wakes)).min();
+        let depth = mail.iter().map(|mail| mail.depth(wakes)).min();
         (mail.into_iter().map(|mail| mail.message).collect(), depth)
     }
 

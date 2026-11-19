@@ -26,6 +26,9 @@ use bake_ai::AbortSignal;
 /// How long either side of a delivery waits for the other.
 pub const IO_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// How long the server pauses after a failed accept.
+const ACCEPT_BACKOFF: Duration = Duration::from_millis(100);
+
 /// The most deliveries a member reads at once; more wait to be accepted.
 const CONCURRENT: usize = 16;
 
@@ -108,7 +111,15 @@ impl Listener {
                 () = scope.signal().cancelled() => break,
                 Some(_) = connections.join_next(), if !connections.is_empty() => {}
                 accepted = self.0.accept() => {
-                    let Ok((stream, _)) = accepted else { continue };
+                    let Ok((stream, _)) = accepted else {
+                        // A failed accept (out of descriptors, say) is
+                        // tried again after a pause, not at once.
+                        tokio::select! {
+                            biased;
+                            () = scope.signal().cancelled() => break,
+                            () = tokio::time::sleep(ACCEPT_BACKOFF) => continue,
+                        }
+                    };
                     let slots = std::sync::Arc::clone(&slots);
                     let handler = std::sync::Arc::clone(&handler);
                     let signal = scope.signal().clone();
@@ -221,7 +232,7 @@ mod tests {
                     };
                 }
                 seen.lock().unwrap().push(text);
-                Outcome::Accepted
+                Outcome::Accepted { held: false }
             })
         };
         let gate = WorkGate::default();
@@ -230,7 +241,10 @@ mod tests {
             .spawn(move |scope| listener.serve(handler, scope))
             .unwrap();
 
-        assert_eq!(deliver(&socket, &frame("hi")).await, Ok(Outcome::Accepted));
+        assert_eq!(
+            deliver(&socket, &frame("hi")).await,
+            Ok(Outcome::Accepted { held: false })
+        );
         assert_eq!(
             deliver(&socket, &frame("no")).await,
             Ok(Outcome::Refused {
@@ -266,7 +280,7 @@ mod tests {
             let seen = Arc::clone(&seen);
             Arc::new(move |_frame: Frame| {
                 *seen.lock().unwrap() += 1;
-                Outcome::Accepted
+                Outcome::Accepted { held: false }
             })
         };
         let gate = WorkGate::default();
@@ -285,7 +299,7 @@ mod tests {
         assert_eq!(*seen.lock().unwrap(), 0);
         assert_eq!(
             deliver(&socket, &frame("fresh")).await,
-            Ok(Outcome::Accepted)
+            Ok(Outcome::Accepted { held: false })
         );
         assert_eq!(*seen.lock().unwrap(), 1);
 
@@ -298,13 +312,16 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("bt-{}", crate::session::id::uuid_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let socket = dir.join("bravo.sock");
-        let handler: Handler = Arc::new(|_frame: Frame| Outcome::Accepted);
+        let handler: Handler = Arc::new(|_frame: Frame| Outcome::Accepted { held: false });
         let gate = WorkGate::default();
         let listener = Listener::bind(&socket).unwrap();
         let _task = gate
             .spawn(move |scope| listener.serve(handler, scope))
             .unwrap();
-        assert_eq!(deliver(&socket, &frame("hi")).await, Ok(Outcome::Accepted));
+        assert_eq!(
+            deliver(&socket, &frame("hi")).await,
+            Ok(Outcome::Accepted { held: false })
+        );
         // More silent connections than the server reads at once: every
         // slot is taken and the rest wait for one.
         let mut idle = Vec::new();

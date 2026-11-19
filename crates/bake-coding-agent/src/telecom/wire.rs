@@ -186,6 +186,11 @@ pub struct Frame {
     pub from: Sender,
     /// Unix milliseconds.
     pub sent_at: i64,
+    /// The session the sender meant it for; a member in another session
+    /// refuses it, so nothing reaches whoever took a callsign since.
+    /// Absent from senders that predate it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to: Option<String>,
     pub body: Body,
 }
 
@@ -217,6 +222,7 @@ impl Frame {
             id: crate::session::id::uuid_v4(),
             from,
             sent_at: bake_ai::now_ms(),
+            to: None,
             body,
         }
     }
@@ -252,6 +258,9 @@ impl Frame {
         }
         if !is_callsign(&frame.from.callsign) {
             return Err(DecodeError::Invalid("sender callsign"));
+        }
+        if frame.to.as_deref().is_some_and(|to| !is_id(to)) {
+            return Err(DecodeError::Invalid("recipient session"));
         }
         match &mut frame.body {
             Body::Message { text, group, .. } => {
@@ -292,8 +301,13 @@ fn clean_body_text(text: &mut String) -> Result<(), DecodeError> {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "lowercase")]
 pub enum Outcome {
-    /// The frame was handed to the recipient's session.
-    Accepted,
+    /// The frame was handed to the recipient's session. `held`: past its
+    /// wake budget, the recipient reads it within a minute rather than at
+    /// once. Absent from recipients that predate it.
+    Accepted {
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        held: bool,
+    },
     /// It was not, for `reason`.
     Refused { reason: String },
 }
@@ -331,7 +345,7 @@ impl Response {
             Outcome::Refused { reason } => Outcome::Refused {
                 reason: one_line(&reason, 400),
             },
-            accepted => accepted,
+            accepted @ Outcome::Accepted { .. } => accepted,
         })
     }
 }
@@ -418,6 +432,45 @@ mod tests {
         assert_eq!(
             Response::decode(line, "f2"),
             Err(DecodeError::Invalid("response id"))
+        );
+    }
+
+    #[test]
+    fn the_held_flag_and_the_recipient_are_optional_on_the_wire() {
+        // A recipient that predates the flag answers a bare acceptance.
+        assert_eq!(
+            Response::decode(br#"{"v":1,"id":"f1","status":"accepted"}"#, "f1"),
+            Ok(Outcome::Accepted { held: false })
+        );
+        let plain = Response {
+            v: 1,
+            id: "f1".into(),
+            outcome: Outcome::Accepted { held: false },
+        }
+        .encode();
+        assert_eq!(plain, b"{\"v\":1,\"id\":\"f1\",\"status\":\"accepted\"}\n");
+        let held = Response {
+            v: 1,
+            id: "f1".into(),
+            outcome: Outcome::Accepted { held: true },
+        }
+        .encode();
+        assert_eq!(
+            Response::decode(&held[..held.len() - 1], "f1"),
+            Ok(Outcome::Accepted { held: true })
+        );
+
+        let mut frame = Frame::new(sender(), Body::Broadcast { text: "hi".into() });
+        let line = frame.encode();
+        assert!(!std::str::from_utf8(&line).unwrap().contains(r#""to""#));
+        frame.to = Some("s-2".into());
+        let line = frame.encode();
+        assert_eq!(Frame::decode(&line[..line.len() - 1]), Ok(frame.clone()));
+        frame.to = Some("../x".into());
+        let line = frame.encode();
+        assert_eq!(
+            Frame::decode(&line[..line.len() - 1]),
+            Err(DecodeError::Invalid("recipient session"))
         );
     }
 

@@ -1375,3 +1375,37 @@ async fn a_user_stop_leaves_the_report_for_the_notice() {
     );
     bounded("the close", registry.close()).await;
 }
+
+// Held mail is undelivered, read by a run as any notice, yet opens no turn
+// until released, then at depth 0 whatever the session's depth.
+#[tokio::test]
+async fn held_mail_opens_no_turn_until_released() {
+    let (_gate, registry) = registry(JobLimits::default());
+    let notice = |text: &str| crate::session::messages::CustomMessage {
+        custom_type: "test.notice".into(),
+        content: bake_ai::UserContent::Text(text.into()),
+        display: true,
+        details: None,
+        timestamp: 0,
+    };
+    assert!(!registry.release_held(), "nothing held");
+    registry.post_held(notice("held")).expect("posted");
+    assert!(registry.has_undelivered());
+    assert!(registry.has_held());
+    assert!(!registry.notice_would_wake());
+    let mut events = registry.subscribe();
+    assert!(registry.release_held());
+    assert!(bounded("a release wakes", events.changed()).await);
+    assert!(!registry.has_held());
+    while registry.wake_depth() < MAX_CONSECUTIVE_WAKES {
+        assert!(registry.spend_wake());
+    }
+    assert!(registry.notice_would_wake());
+    assert_eq!(registry.claim_mail_at(), (vec![notice("held")], Some(0)));
+
+    // A run takes held mail at its next step as it is.
+    registry.post_held(notice("read in a run")).expect("posted");
+    assert_eq!(registry.claim_mail(), vec![notice("read in a run")]);
+    assert!(!registry.release_held());
+    registry.close().await;
+}

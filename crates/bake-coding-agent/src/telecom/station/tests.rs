@@ -265,7 +265,7 @@ async fn the_brief_lists_the_team_once_then_only_changes() {
     let update = mail_text(&alpha.station.brief("go on with it").unwrap());
     assert_eq!(
         update,
-        "[telecom] Team update (you are alpha):\n- bravo left\n[telecom] Broadcasts since your last prompt:\n- bravo: main is frozen"
+        "[telecom] Team update (you are alpha):\n- bravo left\n[telecom] New broadcasts:\n- bravo: main is frozen"
     );
     alpha.work.close().await;
     std::fs::remove_dir_all(root).unwrap();
@@ -609,7 +609,7 @@ async fn a_cancelled_ask_is_withdrawn_and_a_late_answer_still_arrives() {
     let socket = alpha.station.team().socket("alpha");
     assert_eq!(
         endpoint::deliver(&socket, &crossed).await,
-        Ok(Outcome::Accepted)
+        Ok(Outcome::Accepted { held: false })
     );
     assert_eq!(
         mail_texts(&alpha.jobs),
@@ -776,6 +776,198 @@ async fn a_broadcast_names_the_members_it_did_not_reach() {
         "{error}"
     );
     drop(zulu);
+    alpha.work.close().await;
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+fn from_bravo(body: Body) -> Frame {
+    Frame::new(
+        Sender {
+            session: "s-bravo".into(),
+            callsign: "bravo".into(),
+        },
+        body,
+    )
+}
+
+fn note(text: &str) -> Body {
+    Body::Message {
+        text: text.into(),
+        group: Vec::new(),
+        human: false,
+    }
+}
+
+const ACCEPTED: Outcome = Outcome::Accepted { held: false };
+const HELD: Outcome = Outcome::Accepted { held: true };
+
+#[tokio::test(start_paused = true)]
+async fn peers_models_share_one_wake_budget_and_held_mail_wakes_when_it_reopens() {
+    let (root, cwd) = (temp(), temp());
+    let alpha = join(&root, &cwd, "s-alpha", None);
+    // Messages and asks from a peer's model spend the same budget.
+    for n in 0..MAX_WAKES_PER_MINUTE / 2 {
+        assert_eq!(
+            alpha.station.receive(from_bravo(note(&format!("m{n}")))),
+            ACCEPTED
+        );
+        let ask = Body::Ask {
+            ask_id: format!("a{n}"),
+            text: "q".into(),
+        };
+        assert_eq!(alpha.station.receive(from_bravo(ask)), ACCEPTED);
+    }
+    mail_texts(&alpha.jobs);
+    assert_eq!(alpha.station.receive(from_bravo(note("seventh"))), HELD);
+    let ask = Body::Ask {
+        ask_id: "a9".into(),
+        text: "q".into(),
+    };
+    assert_eq!(alpha.station.receive(from_bravo(ask)), HELD);
+    // Accepted, but it opens no turn yet.
+    assert!(alpha.jobs.has_undelivered());
+    assert!(!alpha.jobs.notice_would_wake());
+    for _ in 0..10 {
+        tokio::task::yield_now().await;
+    }
+    assert!(alpha.jobs.has_held(), "released before the window reopened");
+    // A person's message is never held.
+    let person = Body::Message {
+        text: "from me".into(),
+        group: Vec::new(),
+        human: true,
+    };
+    assert_eq!(alpha.station.receive(from_bravo(person)), ACCEPTED);
+
+    tokio::time::advance(WAKE_WINDOW).await;
+    until(|| !alpha.jobs.has_held()).await;
+    assert!(alpha.jobs.notice_would_wake());
+    // One timer released both, spending one wake.
+    assert_eq!(lock(&alpha.station.inner.state).wakes.len(), 1);
+    let mail = mail_texts(&alpha.jobs);
+    assert_eq!(mail.len(), 3, "{mail:?}");
+    alpha.work.close().await;
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn a_sender_is_told_when_its_recipient_holds_the_message() {
+    let (root, cwd) = (temp(), temp());
+    let alpha = join(&root, &cwd, "s-alpha", None);
+    let bravo = join(&root, &cwd, "s-bravo", None);
+    for n in 0..MAX_WAKES_PER_MINUTE {
+        alpha.station.receive(from_bravo(note(&format!("m{n}"))));
+    }
+    assert_eq!(
+        bravo
+            .station
+            .send("alpha", "one more", false)
+            .await
+            .unwrap(),
+        "delivered to alpha (held: alpha reads it within a minute)"
+    );
+    let outcome = bravo
+        .station
+        .ask("alpha", "and this?", Duration::from_secs(1), false, None)
+        .await
+        .unwrap();
+    assert!(
+        matches!(outcome, AskOutcome::Sent { held: true, .. }),
+        "{outcome:?}"
+    );
+    for member in [alpha, bravo] {
+        member.work.close().await;
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn held_broadcasts_are_capped_and_reach_the_next_request_a_run_makes() {
+    let (root, cwd) = (temp(), temp());
+    let alpha = join(&root, &cwd, "s-alpha", None);
+    for n in 0..HELD_CAP + 2 {
+        let body = Body::Broadcast {
+            text: format!("b{n}"),
+        };
+        assert_eq!(alpha.station.receive(from_bravo(body)), ACCEPTED);
+    }
+    assert!(!alpha.jobs.has_undelivered(), "a broadcast starts no turn");
+    // Through the registry, as a step boundary or a notice turn takes it.
+    let update = mail_text(&alpha.jobs.take_update().unwrap());
+    let mut expected = vec![
+        "[telecom] New broadcasts:".to_owned(),
+        "(2 earlier broadcasts were dropped.)".to_owned(),
+    ];
+    expected.extend((2..HELD_CAP + 2).map(|n| format!("- bravo: b{n}")));
+    assert_eq!(update, expected.join("\n"));
+    assert!(alpha.jobs.take_update().is_none(), "said once");
+    alpha.work.close().await;
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn an_unwaited_ask_holds_live_work_until_answered_or_its_peer_leaves() {
+    let (root, cwd) = (temp(), temp());
+    let alpha = join(&root, &cwd, "s-alpha", None);
+    let bravo = join(&root, &cwd, "s-bravo", None);
+    let unwaited = |member: &Member| {
+        let station = member.station.clone();
+        async move {
+            match station
+                .ask("bravo", "ping me", Duration::from_secs(1), false, None)
+                .await
+                .unwrap()
+            {
+                AskOutcome::Sent { ask_id, .. } => ask_id,
+                other => panic!("{other:?}"),
+            }
+        }
+    };
+    let answered = unwaited(&alpha).await;
+    assert_eq!(alpha.jobs.live(), 1);
+    bravo.station.reply("pong", None, None).await.unwrap();
+    assert_eq!(alpha.jobs.live(), 0);
+    assert_eq!(
+        mail_texts(&alpha.jobs),
+        [format!(
+            "[telecom] bravo answered your ask {answered}:\npong"
+        )]
+    );
+
+    let abandoned = unwaited(&alpha).await;
+    assert_eq!(alpha.jobs.live(), 1);
+    bravo.work.close().await;
+    until(|| alpha.jobs.live() == 0).await;
+    assert_eq!(
+        mail_texts(&alpha.jobs),
+        [format!(
+            "[telecom] bravo left before answering ask {abandoned}."
+        )]
+    );
+    alpha.work.close().await;
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn a_frame_meant_for_another_session_is_refused() {
+    let (root, cwd) = (temp(), temp());
+    let alpha = join(&root, &cwd, "s-alpha", None);
+    let mut stale = from_bravo(note("for the old alpha"));
+    stale.to = Some("s-gone".into());
+    assert_eq!(
+        alpha.station.receive(stale),
+        Outcome::Refused {
+            reason: "that member left".into()
+        }
+    );
+    let mut meant = from_bravo(note("for this alpha"));
+    meant.to = Some("s-alpha".into());
+    assert_eq!(alpha.station.receive(meant), ACCEPTED);
+    alpha.station.leave();
+    assert!(matches!(
+        alpha.station.receive(from_bravo(note("late"))),
+        Outcome::Refused { .. }
+    ));
     alpha.work.close().await;
     std::fs::remove_dir_all(root).unwrap();
 }
