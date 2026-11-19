@@ -40,6 +40,7 @@ pub(super) fn crew(host: &SpawnHost) -> Vec<CrewMember> {
             id: agent.id,
             name: agent.name,
             state: match agent.state {
+                SpawnedState::Queued => CrewState::Queued,
                 SpawnedState::Starting => CrewState::Starting,
                 SpawnedState::Working => CrewState::Working,
                 SpawnedState::Asking => CrewState::Asking,

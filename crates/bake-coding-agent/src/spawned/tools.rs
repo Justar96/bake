@@ -56,6 +56,16 @@ pub fn tools(host: &SpawnHost) -> Vec<ToolDefinition> {
                     let agent = host
                         .spawn(task, model, super::Origin::Model)
                         .map_err(|error| format!("spawn_agent: {error}"))?;
+                    if agent.state == SpawnedState::Queued {
+                        return Ok(ok(
+                            format!(
+                                "queued {name}: {running} agents are running; it starts when one exits or is stopped (stop_agent)",
+                                name = agent.name,
+                                running = host.running(),
+                            ),
+                            json!({ "agent": agent.name, "id": agent.id, "model": agent.model, "status": "queued" }),
+                        ));
+                    }
                     Ok(ok(
                         format!(
                             "started {name}; it works in the background and you are notified when it finishes a run. Reach it with telecom (to: \"{name}\").",
@@ -104,6 +114,14 @@ pub fn tools(host: &SpawnHost) -> Vec<ToolDefinition> {
                         ));
                     }
                     let interrupt = args.get("interrupt").and_then(Value::as_bool) == Some(true);
+                    if agent.state == SpawnedState::Queued && !interrupt {
+                        host.stop(agent.id)
+                            .map_err(|error| format!("stop_agent: {error}"))?;
+                        return Ok(ok(
+                            format!("{} was queued and will not start", agent.name),
+                            json!({ "agent": agent.name, "status": "cancelled" }),
+                        ));
+                    }
                     if interrupt {
                         host.interrupt(agent.id)
                             .map_err(|error| format!("stop_agent: {error}"))?;

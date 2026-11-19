@@ -31,11 +31,11 @@ In the interactive terminal:
 
 ## Spawned agents
 
-A session in the team can start other Bake agents, each a `bake --mode rpc` process of the same executable working in the same directory (`bake docs rpc`). The model starts one with `spawn_agent`, giving it a self-contained task and, optionally, a `provider/model`; the agent does not see the conversation. It runs with the parent's sandbox and approval mode, joins telecom as `<parent>-<n>`, and spawns no agents of its own. At most six run at once.
+A session in the team can start other Bake agents, each a `bake --mode rpc` process of the same executable working in the same directory (`bake docs rpc`). The model starts one with `spawn_agent`, giving it a self-contained task and, optionally, a `provider/model`; the agent does not see the conversation. It runs with the parent's sandbox and approval mode, joins telecom as `<parent>-<n>`, and spawns no agents of its own. At most six run at once; an agent being stopped no longer counts. Past that, `spawn_agent` and `/spawn` queue the agent, up to 32, and it starts, oldest first, when a running one exits or is stopped; stopping a queued agent cancels it.
 
-Each time an agent finishes a run, the parent session is told, with the agent's task, whether you or the model started it, and its last answer, and starts a turn if it is idle. The terminal shows it as `← alpha-1 finished: ...` or `← alpha-1 failed: ...`. The model messages and asks its agents with `telecom`, and ends one with `stop_agent`, or stops only its current run with `interrupt: true`. A question or approval an agent needs comes to you, marked with the agent's name.
+Each time an agent finishes a run, the parent session is told, with the agent's task, whether you or the model started it, and its last answer, and starts a turn if it is idle; while agents are queued, the notice says that stopping a finished agent lets one start. The parent is also told, once, when an agent cannot start, refuses its task, or exits without being stopped, and when an agent has waited 60 seconds for your answer to its question or approval. The terminal shows these as `← alpha-1 finished: ...`, `← alpha-1 was interrupted: ...`, `← alpha-1 failed: ...`, `← alpha-1 exited: ...`, or `← alpha-1 waits for you to ...`. The model messages and asks its agents with `telecom`, and ends one with `stop_agent`, or stops only its current run with `interrupt: true`. A question or approval an agent needs comes to you, marked with the agent's name; it is withdrawn when the agent's run ends or the agent stops or exits. A message you send an agent that it refuses, such as during a compaction, is sent once more as a follow-up; if that is refused too, the panel says it was not delivered.
 
-The crew panel above the composer shows each agent while there are any: a spinner and its current tool or line while it works, `?` while it waits for an answer, `+` when idle, `x` when its run failed or its process ended unsuccessfully, with the reason, and `-` once it was stopped or exited cleanly. With `NO_COLOR` set, the panel draws without colour or motion. In the interactive terminal:
+The crew panel above the composer shows each agent while there are any: `~` while it is queued, a spinner and its current tool or line while it works, `?` while it waits for an answer, `+` when idle, `x` when its run failed or its process ended unsuccessfully, with the reason, and `-` once it was stopped or exited cleanly. With `NO_COLOR` set, the panel draws without colour or motion. In the interactive terminal:
 
 - Ctrl+X opens an agent's transcript under the composer, read from its session file without disturbing it and updated as it works; ←→ move between agents, ↑↓ and PgUp/PgDn scroll, and Esc or Ctrl+X closes it.
 - `/spawn <task>` starts an agent on a task.
@@ -44,7 +44,7 @@ The crew panel above the composer shows each agent while there are any: a spinne
 - `/spawn stop <agent>` ends it.
 - `/spawn clear` removes the agents that exited from the panel.
 
-Agents are owned by the session that spawned them: ending or replacing that session stops them, waiting ten seconds for each to shut down before ending it.
+Agents are owned by the session that spawned them: ending or replacing that session stops them. An agent being stopped has ten seconds from the stop to shut down, whether or not it is still writing, and is then ended with its processes.
 
 ## Questions
 

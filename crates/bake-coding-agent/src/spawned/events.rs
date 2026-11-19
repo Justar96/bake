@@ -6,6 +6,8 @@
 //! defensively; a record that does not have the expected shape changes
 //! nothing.
 
+use std::time::Duration;
+
 use serde_json::{Value, json};
 
 use super::{SpawnedAgent, SpawnedState};
@@ -15,11 +17,17 @@ use crate::telecom::wire::one_line;
 /// What the host does after an event.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Effect {
-    /// A run settled: tell the parent, with its last answer or failure.
+    /// A run started.
+    Started,
+    /// A run settled: tell the parent, with its last answer or failure,
+    /// and whether it was interrupted.
     Settled {
         text: Option<String>,
         failed: Option<String>,
+        interrupted: bool,
     },
+    /// The agent refused a prompt the host sent under `id`.
+    Refused { id: Option<String>, error: String },
     /// The agent reported its session id.
     SessionId,
     /// The agent asks its person something.
@@ -35,8 +43,8 @@ pub struct Request {
 
 #[derive(Debug, Clone, PartialEq)]
 enum Kind {
-    /// An approval: answered `confirmed`.
-    Confirm { question: Question },
+    /// An approval of `tool`: answered `confirmed`.
+    Confirm { tool: String, question: Question },
     /// A question: answered with `value` and `values`.
     Choose { question: Question },
 }
@@ -44,14 +52,29 @@ enum Kind {
 const ALLOW: &str = "Allow once";
 const REJECT: &str = "Reject";
 
+/// How long a request waits for the person before the parent's model is
+/// told ([`Request::forward`]).
+pub const ASK_NOTICE_AFTER: Duration = Duration::from_secs(60);
+
 impl Request {
+    /// What the agent waits for, as "the person to ...".
+    pub fn waiting_for(&self) -> String {
+        match &self.kind {
+            Kind::Confirm { tool, .. } => format!("approve {tool}"),
+            Kind::Choose { .. } => "answer its question".to_owned(),
+        }
+    }
+
     /// The response record for the agent: the person's answer, or a
-    /// withdrawal when nobody can answer or the session ends.
+    /// withdrawal when nobody can answer or `signal` ends the request.
+    /// Once the request has waited [`ASK_NOTICE_AFTER`] unanswered,
+    /// `waited` runs, once.
     pub async fn forward(
         self,
         name: &str,
         questions: Option<&QuestionBroker>,
         signal: bake_ai::AbortSignal,
+        waited: impl FnOnce(String),
     ) -> Value {
         let cancelled =
             json!({ "type": "extension_ui_response", "id": self.id, "cancelled": true });
@@ -59,12 +82,25 @@ impl Request {
             return cancelled;
         };
         let question = match &self.kind {
-            Kind::Confirm { question } | Kind::Choose { question } => question.clone(),
+            Kind::Confirm { question, .. } | Kind::Choose { question } => question.clone(),
         };
         let call = format!("spawn:{name}:{}", self.id);
-        let answer = broker
-            .ask(&call, Some(name.to_owned()), vec![question], Some(signal))
-            .await;
+        let waiting_for = self.waiting_for();
+        let asking = broker.ask(&call, Some(name.to_owned()), vec![question], Some(signal));
+        tokio::pin!(asking);
+        let long = tokio::time::sleep(ASK_NOTICE_AFTER);
+        tokio::pin!(long);
+        let mut waited = Some(waited);
+        let answer = loop {
+            tokio::select! {
+                answer = &mut asking => break answer,
+                () = &mut long, if waited.is_some() => {
+                    if let Some(waited) = waited.take() {
+                        waited(waiting_for.clone());
+                    }
+                }
+            }
+        };
         let entry = match answer {
             Ok(QuestionAnswer::Answered(mut entries)) if !entries.is_empty() => entries.remove(0),
             _ => return cancelled,
@@ -132,6 +168,7 @@ impl Follower {
                 }
                 self.text.clear();
                 self.last = None;
+                effects.push(Effect::Started);
             }
             "tool_execution_start" if event.get("parentToolCallId").is_none_or(Value::is_null) => {
                 row.tool = str_of(event, "toolName").map(|name| one_line(name, 40));
@@ -173,6 +210,9 @@ impl Follower {
                     Some("budget_exhausted") => Some("its budget ran out".to_owned()),
                     _ => None,
                 };
+                let interrupted = failed.is_none()
+                    && (kind == Some("cancelled")
+                        || event.get("aborted") == Some(&Value::Bool(true)));
                 row.tool = None;
                 row.since = now;
                 row.runs += 1;
@@ -183,6 +223,7 @@ impl Follower {
                 effects.push(Effect::Settled {
                     text: self.last.take(),
                     failed,
+                    interrupted,
                 });
             }
             "response" => {
@@ -200,12 +241,16 @@ impl Follower {
                         row.model = Some(one_line(&format!("{provider}/{id}"), 120));
                     }
                 }
-                if str_of(event, "command") == Some("prompt")
+                // The host decides what a refusal changes: a task the agent
+                // never ran, or a person's message to send again.
+                if matches!(str_of(event, "command"), Some("prompt" | "follow_up"))
                     && event.get("success") == Some(&Value::Bool(false))
                 {
                     let error = str_of(event, "error").unwrap_or("the prompt was refused");
-                    row.state = SpawnedState::Failed(one_line(error, 300));
-                    row.since = now;
+                    effects.push(Effect::Refused {
+                        id: str_of(event, "id").map(str::to_owned),
+                        error: one_line(error, 300),
+                    });
                 }
             }
             "extension_ui_request" => {
@@ -241,6 +286,7 @@ fn request(event: &Value) -> Option<Request> {
                 .map(|arguments| one_line(&arguments.to_string(), 200))
                 .unwrap_or_default();
             Kind::Confirm {
+                tool: one_line(tool, 40),
                 question: Question {
                     question: one_line(&format!("Allow {tool}? {reason}"), 400),
                     header: "Approval".to_owned(),
@@ -314,8 +360,11 @@ mod tests {
         let mut follower = Follower::default();
         let mut row = row();
         row.state = SpawnedState::Starting;
+        assert_eq!(
+            follower.follow(&json!({ "type": "agent_start" }), &mut row),
+            [Effect::Started]
+        );
         let events = [
-            json!({ "type": "agent_start" }),
             json!({ "type": "tool_execution_start", "toolName": "bash", "toolCallId": "c" }),
             json!({ "type": "tool_execution_start", "toolName": "read", "toolCallId": "d", "parentToolCallId": "c" }),
             json!({ "type": "tool_execution_end", "toolName": "read", "toolCallId": "d", "parentToolCallId": "c" }),
@@ -339,7 +388,8 @@ mod tests {
             effects,
             [Effect::Settled {
                 text: Some("Done.\nAll green.".into()),
-                failed: None
+                failed: None,
+                interrupted: false,
             }]
         );
         assert_eq!(row.state, SpawnedState::Idle);
@@ -354,10 +404,44 @@ mod tests {
             effects,
             [Effect::Settled {
                 text: None,
-                failed: Some("no key".into())
+                failed: Some("no key".into()),
+                interrupted: false,
             }]
         );
         assert_eq!(row.state, SpawnedState::Failed("no key".into()));
+
+        let effects = follower.follow(
+            &json!({ "type": "agent_settled", "aborted": true, "outcome": { "kind": "cancelled" } }),
+            &mut row,
+        );
+        assert_eq!(
+            effects,
+            [Effect::Settled {
+                text: None,
+                failed: None,
+                interrupted: true,
+            }]
+        );
+        assert_eq!(row.state, SpawnedState::Idle);
+    }
+
+    #[test]
+    fn a_refused_prompt_is_reported_with_its_id_and_changes_no_state() {
+        let mut follower = Follower::default();
+        let mut row = row();
+        row.state = SpawnedState::Working;
+        let effects = follower.follow(
+            &json!({ "type": "response", "id": "m1", "command": "prompt", "success": false, "error": "compacting" }),
+            &mut row,
+        );
+        assert_eq!(
+            effects,
+            [Effect::Refused {
+                id: Some("m1".into()),
+                error: "compacting".into()
+            }]
+        );
+        assert_eq!(row.state, SpawnedState::Working);
     }
 
     #[test]
@@ -379,9 +463,10 @@ mod tests {
         let [Effect::Ask(asked)] = effects.as_slice() else {
             panic!("{effects:?}")
         };
-        let Kind::Confirm { question } = &asked.kind else {
+        let Kind::Confirm { question, .. } = &asked.kind else {
             panic!()
         };
+        assert_eq!(asked.waiting_for(), "approve bash");
         assert_eq!(question.question, "Allow bash? escalate");
         assert_eq!(question.options[0].description, r#"{"command":"ls"}"#);
 
@@ -400,10 +485,77 @@ mod tests {
     async fn nobody_to_ask_withdraws_the_request() {
         let asked = request(&json!({ "type": "extension_ui_request", "id": "q1", "method": "input", "title": "Name?" })).unwrap();
         let controller = bake_ai::AbortController::new();
-        let response = asked.forward("alpha-1", None, controller.signal()).await;
+        let response = asked
+            .forward("alpha-1", None, controller.signal(), |_| panic!("no wait"))
+            .await;
         assert_eq!(
             response,
             json!({ "type": "extension_ui_response", "id": "q1", "cancelled": true })
         );
+    }
+
+    /// Forwards `request` to a connected broker nobody answers yet;
+    /// returns the forward's task and the waits it reported.
+    fn forward_unanswered(
+        broker: &QuestionBroker,
+    ) -> (
+        tokio::task::JoinHandle<Value>,
+        std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+    ) {
+        let asked = request(&json!({ "type": "extension_ui_request", "id": "a1", "method": "confirm", "approval": { "toolName": "bash" } })).unwrap();
+        let waits = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let task = tokio::spawn({
+            let broker = broker.clone();
+            let waits = std::sync::Arc::clone(&waits);
+            async move {
+                let controller = bake_ai::AbortController::new();
+                asked
+                    .forward("alpha-1", Some(&broker), controller.signal(), move |what| {
+                        waits.lock().unwrap().push(what);
+                    })
+                    .await
+            }
+        });
+        (task, waits)
+    }
+
+    async fn shown(broker: &QuestionBroker) -> u64 {
+        loop {
+            if let Some(front) = broker.pending().first() {
+                return front.generation;
+            }
+            tokio::task::yield_now().await;
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_long_wait_for_the_person_is_reported_once() {
+        let broker = QuestionBroker::new();
+        assert!(broker.connect(Box::new(|_| true)));
+        let (task, waits) = forward_unanswered(&broker);
+        let generation = shown(&broker).await;
+        tokio::time::sleep(ASK_NOTICE_AFTER * 3).await;
+        assert_eq!(*waits.lock().unwrap(), ["approve bash"]);
+        assert!(broker.answer(
+            generation,
+            QuestionAnswer::Answered(vec![vec![ALLOW.to_owned()]])
+        ));
+        let response = task.await.unwrap();
+        assert_eq!(response["confirmed"], json!(true));
+        assert_eq!(waits.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_answer_before_the_wait_reports_nothing() {
+        let broker = QuestionBroker::new();
+        assert!(broker.connect(Box::new(|_| true)));
+        let (task, waits) = forward_unanswered(&broker);
+        let generation = shown(&broker).await;
+        tokio::time::sleep(ASK_NOTICE_AFTER / 2).await;
+        assert!(broker.answer(generation, QuestionAnswer::Declined));
+        let response = task.await.unwrap();
+        assert_eq!(response["cancelled"], json!(true));
+        tokio::time::sleep(ASK_NOTICE_AFTER * 2).await;
+        assert!(waits.lock().unwrap().is_empty());
     }
 }

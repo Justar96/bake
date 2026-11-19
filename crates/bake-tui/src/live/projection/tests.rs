@@ -785,6 +785,51 @@ fn telecom_messages_and_spawn_notices_show_who_said_what() {
     );
     assert_eq!(
         row(
+            spawned,
+            "[spawn] alpha-1, which you started on \"t\", could not start its task: busy",
+            json!({ "agent": "alpha-1", "status": "failed" })
+        )
+        .as_deref(),
+        Some("← alpha-1 failed: busy")
+    );
+    assert_eq!(
+        row(
+            spawned,
+            "[spawn] alpha-1, which you started on \"t\", was interrupted and is idle. Its last answer:\nhalf",
+            json!({ "agent": "alpha-1", "status": "interrupted" })
+        )
+        .as_deref(),
+        Some("← alpha-1 was interrupted: half")
+    );
+    assert_eq!(
+        row(
+            spawned,
+            "[spawn] alpha-1, which you started on \"t\", exited: bake exit status: 1",
+            json!({ "agent": "alpha-1", "status": "exited" })
+        )
+        .as_deref(),
+        Some("← alpha-1 exited: bake exit status: 1")
+    );
+    assert_eq!(
+        row(
+            spawned,
+            "[spawn] alpha-1, which you started on \"t\", exited.",
+            json!({ "agent": "alpha-1", "status": "exited" })
+        )
+        .as_deref(),
+        Some("← alpha-1 exited")
+    );
+    assert_eq!(
+        row(
+            spawned,
+            "[spawn] alpha-1 has waited 60 s for the person to approve bash; it continues when they answer, or stop it with stop_agent",
+            json!({ "agent": "alpha-1", "status": "waiting" })
+        )
+        .as_deref(),
+        Some("← alpha-1 waits for you to approve bash")
+    );
+    assert_eq!(
+        row(
             telecom,
             "[telecom] alpha asks you (ask a2) and waits for your answer:\nwhich port?\nAnswer with telecom action \"reply\", askId \"a2\".",
             json!({ "kind": "ask", "from": "alpha", "askId": "a2" })

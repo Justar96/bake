@@ -530,6 +530,7 @@ pub(super) async fn build_session(args: &Args, build: Build) -> Result<Built, St
                         .model
                         .map(|model| format!("{}/{}", model.provider, model.id))
                 }),
+                stop_grace: crate::spawned::STOP_GRACE,
             })
         }),
         _ => None,

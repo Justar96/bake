@@ -5,8 +5,8 @@
 //! ([`crate::permissions::ApprovalBroker`]) for a different answer: one
 //! frontend connects and receives the whole queue, oldest first, whenever
 //! it changes; the oldest is the one shown; an answer settles only the
-//! request its generation names; a request whose call is cancelled is
-//! withdrawn; and closing the broker settles every request as declined.
+//! request its generation names; a request whose call is cancelled, or whose
+//! asker stops waiting, is withdrawn; and closing the broker settles every request as declined.
 //! Before a frontend connects, or after it has gone, nobody can answer, so
 //! the tool says so at once instead of waiting: print mode has no person
 //! to ask.
@@ -187,6 +187,13 @@ impl QuestionBroker {
             });
             generation
         };
+        // Withdrawn however this ends: cancelled, or the asking future
+        // dropped, as a spawned agent's forward is when the agent exits.
+        // After an answer the request is already gone, so this is a no-op.
+        let _withdraw = Withdraw {
+            broker: self,
+            generation,
+        };
         announce(&self.inner);
         let cancelled = async {
             match &cancel {
@@ -196,10 +203,7 @@ impl QuestionBroker {
         };
         tokio::select! {
             biased;
-            () = cancelled => {
-                self.withdraw(generation);
-                Err("the question was withdrawn".to_owned())
-            }
+            () = cancelled => Err("the question was withdrawn".to_owned()),
             answer = answered => Ok(answer.unwrap_or(QuestionAnswer::Declined)),
         }
     }
@@ -259,6 +263,18 @@ impl QuestionBroker {
         for waiting in inner.queue.drain(..) {
             let _ = waiting.answer.send(QuestionAnswer::Declined);
         }
+    }
+}
+
+/// Withdraws a request when its asker stops waiting for it.
+struct Withdraw<'a> {
+    broker: &'a QuestionBroker,
+    generation: u64,
+}
+
+impl Drop for Withdraw<'_> {
+    fn drop(&mut self) {
+        self.broker.withdraw(self.generation);
     }
 }
 
@@ -404,5 +420,39 @@ mod tests {
         controller.abort();
         assert!(asking.await.unwrap().is_err());
         assert!(broker.pending().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_dropped_ask_withdraws_its_question_and_the_next_is_answerable() {
+        let broker = QuestionBroker::new();
+        assert!(broker.connect(Box::new(|_| true)));
+        let asking = tokio::spawn({
+            let broker = broker.clone();
+            async move {
+                broker
+                    .ask("c1", Some("alpha-1".into()), vec![question("q")], None)
+                    .await
+            }
+        });
+        while broker.pending().is_empty() {
+            tokio::task::yield_now().await;
+        }
+        asking.abort();
+        assert!(asking.await.unwrap_err().is_cancelled());
+        assert!(broker.pending().is_empty(), "{:?}", broker.pending());
+
+        let next = tokio::spawn({
+            let broker = broker.clone();
+            async move { broker.ask("c2", None, vec![question("next")], None).await }
+        });
+        while broker.pending().is_empty() {
+            tokio::task::yield_now().await;
+        }
+        let shown = broker.pending()[0].generation;
+        assert!(broker.answer(shown, QuestionAnswer::Answered(vec![vec!["No".into()]])));
+        assert_eq!(
+            next.await.unwrap(),
+            Ok(QuestionAnswer::Answered(vec![vec!["No".into()]]))
+        );
     }
 }
