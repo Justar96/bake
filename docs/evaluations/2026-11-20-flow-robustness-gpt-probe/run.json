@@ -1,0 +1,31 @@
+{
+  "name": "probe nested-instructions gpt",
+  "date": "2026-11-19",
+  "base": {
+    "path": "/home/jtar-wsl/bake/target/release/bake",
+    "version": "bake 0.4.9",
+    "bytes": 72504000
+  },
+  "candidate": {
+    "path": "/home/jtar-wsl/bake/.artifacts/eval/bake-flow-robustness",
+    "version": "bake 0.4.9",
+    "bytes": 73271144
+  },
+  "same_executable": false,
+  "base_settings": {},
+  "candidate_settings": {},
+  "models": [
+    "cliproxyapi/gpt-6.1-sol:high"
+  ],
+  "tasks": [
+    [
+      "nested-instructions",
+      "Add `GET /products/{id}/stock`, answering `{\"id\": <id>, \"in_stock\": <units>}` with the number of units of the product we can sell right now, and a 404 for a product that does not exist. Also include the same `in_stock` number in what `GET /products/{id}` returns. Add tests for both."
+    ]
+  ],
+  "trials": 10,
+  "jobs": 6,
+  "max_model_calls": 60,
+  "run_timeout_ms": 900000,
+  "host": "linux/x86_64"
+}
