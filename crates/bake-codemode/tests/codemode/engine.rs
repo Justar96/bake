@@ -461,6 +461,36 @@ async fn calls_in_a_loop_without_awaiting_end_at_the_byte_budget() {
     }
 }
 
+/// A script that ends while calls past the window are still held reports
+/// how many, on success and on failure: the host was given only the
+/// window's calls, and the outcome counts the rest.
+#[tokio::test]
+async fn the_outcome_counts_the_calls_still_held_when_the_script_ends() {
+    let never = || async_tool("wait", |_, _| std::future::pending());
+    for (code, completes) in [
+        (
+            "for (let i = 0; i < 2000; i++) tools.wait();\nreturn 'ok';",
+            true,
+        ),
+        (
+            "for (let i = 0; i < 2000; i++) tools.wait();\nthrow new Error('x');",
+            false,
+        ),
+    ] {
+        let execution = execute(code, Setup::tools(vec![never()])).await;
+        assert_eq!(execution.outcome.result.is_ok(), completes, "{code}");
+        assert_eq!(execution.calls.len(), MAX_PENDING_CALLS, "{code}");
+        assert_eq!(execution.outcome.held, 2000 - MAX_PENDING_CALLS, "{code}");
+    }
+    // Calls that all reached the host leave none held.
+    let execution = execute(
+        "await Promise.all([tools.echo(), tools.echo()]);",
+        Setup::tools(vec![echo()]),
+    )
+    .await;
+    assert_eq!(execution.outcome.held, 0);
+}
+
 /// Calls past the window are held, in order, and given to the host one by
 /// one as earlier calls' answers are applied. Deterministic mode makes the
 /// VM's waits observable: `Idle` reports the calls given to the host.

@@ -601,6 +601,7 @@ fn a_timeout_names_the_calls_still_running() {
         },
         running: &running,
         web_fetch: false,
+        idle: false,
     };
     assert_eq!(
         format_error(
@@ -1139,9 +1140,9 @@ async fn a_script_waits_for_a_slot_and_starts_when_one_comes_free() {
         .try_acquire_owned()
         .expect("slot");
 
-    let (on_update, mut receiver) = updates();
+    let (on_update, mut waiting_updates) = updates();
     let waiting = tokio::spawn(run_watched("return 3", None, &admission, on_update));
-    waiting_for_a_worker(&mut receiver, 1).await;
+    waiting_for_a_worker(&mut waiting_updates, 1).await;
     let controller = bake_ai::AbortController::new();
     let (on_update, mut receiver) = updates();
     let aborted = tokio::spawn(run_watched(
@@ -1182,6 +1183,13 @@ async fn a_script_waits_for_a_slot_and_starts_when_one_comes_free() {
     let admitted = waiting.await.expect("task").expect("result");
     assert!(!admitted.is_error);
     assert_eq!(result_text(&admitted), "3");
+    // Once it has its slot, a partial result without the waiting marker
+    // replaces the one that had it, though the script made no call.
+    let mut after = Vec::new();
+    while let Ok(partial) = waiting_updates.try_recv() {
+        after.push(partial.details);
+    }
+    assert_eq!(after, [Some(json!({ "calls": [] }))]);
     wait_for_free_slots(&admission, 1).await;
     drop(held_two);
 }
@@ -1437,6 +1445,61 @@ async fn publishes_call_records_at_most_ten_times_a_second_and_lists_the_last_25
     let view = records.finish();
     assert_eq!(view.counts().total(), 1000);
     assert_eq!(view.counts().error, 100);
+}
+
+/// A script without `timeout_ms` that only sleeps fails once it has gone
+/// `CODEMODE_IDLE_BOUND` without a tool call, on Tokio's clock.
+#[tokio::test(start_paused = true)]
+async fn a_script_that_only_sleeps_ends_at_the_idle_bound() {
+    let started = tokio::time::Instant::now();
+    let result = run_detached("for (;;) await sleep(1000);")
+        .await
+        .expect("result");
+    assert_eq!(started.elapsed(), CODEMODE_IDLE_BOUND);
+    assert!(result.is_error);
+    assert_eq!(
+        result_text(&result),
+        "Script error:\nScript made no tool call for 10 minutes (a loop that only sleeps?). End the script when there is nothing to call, or set timeout_ms to allow a longer wait.\n\nNo tool calls were made."
+    );
+    // A script's own timeout_ms replaces the bound.
+    let started = tokio::time::Instant::now();
+    let result = run_detached("// @options: {\"timeout_ms\": 1200000}\nfor (let i = 0; i < 4; i++) await sleep(300000);\nreturn 'slept'")
+        .await
+        .expect("result");
+    assert_eq!(result_text(&result), "slept");
+    assert_eq!(started.elapsed(), std::time::Duration::from_secs(1200));
+}
+
+/// Waits the host answers at once, a discovery global or `sleep(0)`, end
+/// at the idle bound too: each answer checks it.
+#[tokio::test(start_paused = true)]
+async fn a_loop_of_instant_answers_ends_at_the_idle_bound() {
+    for code in [
+        "for (;;) await describeTool(\"read\");",
+        "for (;;) await sleep(0);",
+    ] {
+        let mut run = tokio::spawn(run_detached(code));
+        // Virtual time moves only here; the script starts on its own thread
+        // in real time, so steps go on until it has ended, within a
+        // generous bound against a hang.
+        let hang = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        let result = loop {
+            tokio::select! {
+                result = &mut run => break result.expect("task").expect("result"),
+                () = tokio::time::advance(std::time::Duration::from_secs(60)) => {
+                    assert!(std::time::Instant::now() < hang, "{code} never ended");
+                    tokio::task::yield_now().await;
+                }
+            }
+        };
+        assert!(result.is_error, "{code}");
+        assert!(
+            result_text(&result)
+                .starts_with("Script error:\nScript made no tool call for 10 minutes"),
+            "{code}: {}",
+            result_text(&result)
+        );
+    }
 }
 
 /// Pi's "reads the limit from PI_CODEMODE_MAX_WORKERS" and "ignores an

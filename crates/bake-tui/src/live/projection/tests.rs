@@ -1584,6 +1584,13 @@ fn a_codemode_card_counts_the_calls_its_result_does_not_list() {
         ),
     ));
     assert_eq!(codemode(&rows[0]).summary.as_deref(), Some(copy::WAITING));
+    // The partial the tool publishes once the script has its worker, before
+    // any call, has no marker, and the card stops saying it waits.
+    let rows = live_rows(run(
+        &mut projector,
+        partial(Vec::new(), json!({ "calls": [] })),
+    ));
+    assert_eq!(codemode(&rows[0]).summary, None);
     let rows = live_rows(run(
         &mut projector,
         partial(
@@ -1691,6 +1698,35 @@ fn a_codemode_card_counts_the_calls_its_result_does_not_list() {
         ]);
         assert_eq!(codemode(&rows[0]).omitted, NestedCounts::default());
     }
+    // The largest counts a session file can hold are read and drawn
+    // without overflowing.
+    let rows = replay(&[
+        Message::Assistant(assistant).into(),
+        logged(json!({
+            "calls": [{ "id": "c/1", "name": "read", "args": "{}", "status": "error", "error": "x" }],
+            "omittedCalls": { "running": u64::MAX, "ok": u64::MAX, "error": u64::MAX, "cancelled": u64::MAX },
+        }))
+        .into(),
+    ]);
+    let most = usize::try_from(u64::MAX).unwrap_or(usize::MAX);
+    assert_eq!(codemode(&rows[0]).omitted.ok, most);
+    let drawn = bake_tui_view::transcript::present(
+        &rows,
+        0,
+        80,
+        bake_tui_view::transcript::Look {
+            tones: bake_tui_view::activity::Tones::None,
+            classic: false,
+            lit: true,
+            mermaid: bake_tui_view::mermaid::Mermaid::Streaming,
+        },
+    );
+    assert!(
+        drawn
+            .iter()
+            .any(|line| line.to_string().contains(&format!("{} calls", usize::MAX))),
+        "{drawn:?}"
+    );
 }
 
 #[test]

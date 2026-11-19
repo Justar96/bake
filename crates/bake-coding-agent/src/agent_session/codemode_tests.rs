@@ -1438,7 +1438,7 @@ async fn a_timed_out_script_names_the_calls_still_running() {
         .session(vec![waiting(&started)], &["wait", "codemode"])
         .await;
     fx.script(
-        "// @options: {\"timeout_ms\": 300}\nawait tools.wait({});",
+        "// @options: {\"timeout_ms\": 2000}\nawait tools.wait({});",
         "c1",
     );
     prompt(&session).await;
@@ -1447,7 +1447,7 @@ async fn a_timed_out_script_names_the_calls_still_running() {
     assert!(result.is_error);
     let text = result_text(&result);
     assert!(
-        text.contains("Script error:\nScript timed out: Execution timed out after 300 ms\nStill running when it timed out: wait.\n\nTool calls made before the failure (they are not undone): wait (cancelled)"),
+        text.contains("Script error:\nScript timed out: Execution timed out after 2000 ms\nStill running when it timed out: wait.\n\nTool calls made before the failure (they are not undone): wait (cancelled)"),
         "{text}"
     );
 }
@@ -1568,4 +1568,103 @@ fn a_subagent_session_is_known_by_its_child_entry() {
     let top = SessionManager::in_memory(Some(&cwd), NewSessionOptions::default(), Vec::new())
         .expect("store");
     assert!(!super::codemode::is_subagent_session(&top));
+}
+
+/// Calls the engine held back past its window when the script ended never
+/// ran: the note, the details, and their counts include them, so they
+/// count every call the script made.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn calls_held_back_when_the_script_ends_are_counted_cancelled() {
+    let fx = Fixture::new("codemode-held");
+    let started = Arc::new(AtomicUsize::new(0));
+    let session = fx
+        .session(
+            vec![echo(), waiting(&started)],
+            &["echo", "wait", "codemode"],
+        )
+        .await;
+    fx.script(
+        "await tools.echo({ text: \"a\" });\nfor (let i = 0; i < 2000; i++) tools.wait({});\nreturn \"done\";",
+        "c1",
+    );
+    prompt(&session).await;
+    let result = codemode_result(&session);
+    session.shutdown().await;
+    assert!(!result.is_error);
+    assert_eq!(
+        result_text(&result),
+        format!(
+            "done\n[2000 tool calls were still running when the script ended and were cancelled: {}, and 1990 more. Await calls (Promise.all) before the script ends.]",
+            ["wait"; 10].join(", ")
+        )
+    );
+    let details = result.details.expect("details");
+    assert_eq!(details["calls"].as_array().map(Vec::len), Some(256));
+    assert_eq!(
+        details["omittedCalls"],
+        json!({ "running": 0, "ok": 1, "error": 0, "cancelled": 1744 })
+    );
+}
+
+/// A session over `tools` on a paused clock, prompted without a timeout
+/// of its own: the clock jumps to each timer while the runtime idles.
+async fn prompt_unbounded(
+    fx: &Fixture,
+    tools: Vec<AgentTool>,
+    active: &[&str],
+) -> bake_ai::ToolResultMessage {
+    let session = fx.session(tools, active).await;
+    session.prompt("go", Vec::new()).await.expect("prompt");
+    let result = codemode_result(&session);
+    session.shutdown().await;
+    result
+}
+
+/// A tool that answers after half an hour on Tokio's clock.
+fn dozing() -> AgentTool {
+    let mut tool = AgentTool::new(
+        "doze",
+        "Doze",
+        "Answer after half an hour",
+        json!({ "type": "object", "properties": {} }),
+        |_id, _args, _signal, _update, _ctx| {
+            Box::pin(async {
+                tokio::time::sleep(Duration::from_secs(1800)).await;
+                Ok(AgentToolResult::text("awake"))
+            })
+        },
+    );
+    tool.effect = Some(bake_agent::ToolEffect::Read);
+    tool
+}
+
+/// The idle bound never runs while a tool call is in flight: a script
+/// awaiting a call past it completes.
+#[tokio::test(start_paused = true)]
+async fn a_script_awaiting_a_slow_tool_outlives_the_idle_bound() {
+    let fx = Fixture::new("codemode-slow-tool");
+    fx.script("return await tools.doze({});", "c1");
+    let started = tokio::time::Instant::now();
+    let result = prompt_unbounded(&fx, vec![dozing()], &["doze", "codemode"]).await;
+    assert!(!result.is_error, "{}", result_text(&result));
+    assert_eq!(result_text(&result), "awake");
+    assert!(started.elapsed() >= Duration::from_secs(1800));
+}
+
+/// Each tool call restarts the idle bound: a script that sleeps nine
+/// minutes between calls runs past ten minutes in all.
+#[tokio::test(start_paused = true)]
+async fn a_script_calling_a_tool_every_nine_minutes_is_not_idle() {
+    let fx = Fixture::new("codemode-nine-minutes");
+    fx.script(
+        "for (let i = 0; i < 3; i++) {\n  await sleep(270000);\n  await sleep(270000);\n  await tools.echo({ text: String(i) });\n}\nreturn \"done\";",
+        "c1",
+    );
+    let started = tokio::time::Instant::now();
+    let result = prompt_unbounded(&fx, vec![echo()], &["echo", "codemode"]).await;
+    assert!(!result.is_error, "{}", result_text(&result));
+    assert_eq!(result_text(&result), "done");
+    // Nine minutes three times, and the throttled publications after each
+    // call.
+    assert!(started.elapsed() >= Duration::from_secs(3 * 540));
 }

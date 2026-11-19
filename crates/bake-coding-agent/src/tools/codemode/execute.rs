@@ -52,6 +52,13 @@ pub const BAKE_CODEMODE_MAX_WORKERS_ENV: &str = "BAKE_CODEMODE_MAX_WORKERS";
 /// their own slots ([`Admission::children`]), so no script waits on a
 /// slot its own child needs, and a longer wait fails fewer scripts.
 const CODEMODE_WORKER_WAIT: Duration = Duration::from_secs(600);
+/// How long a script without `timeout_ms` may go without a tool call in
+/// flight before it fails: waits that come back from the host without one,
+/// such as `sleep()` and the discovery globals, each restart the engine's
+/// busy budget, so a loop of them would otherwise never end. The clock
+/// restarts whenever a tool call is made or settles and does not run while
+/// one is in flight. A script's `timeout_ms` replaces it.
+pub const CODEMODE_IDLE_BOUND: Duration = Duration::from_secs(600);
 /// The longest one `sleep(ms)` call waits.
 pub const MAX_SLEEP_MS: u64 = 300_000;
 /// Call records partial results and the final details list, the latest
@@ -456,6 +463,17 @@ pub(super) struct Ending<'a> {
     pub(super) running: &'a [String],
     /// Scripts can call `web_fetch`.
     pub(super) web_fetch: bool,
+    /// The script was stopped by [`CODEMODE_IDLE_BOUND`]: its abort's
+    /// message says so and is shown as is.
+    pub(super) idle: bool,
+}
+
+/// The failure of a script stopped by [`CODEMODE_IDLE_BOUND`].
+fn idle_message() -> String {
+    format!(
+        "Script made no tool call for {} minutes (a loop that only sleeps?). End the script when there is nothing to call, or set timeout_ms to allow a longer wait.",
+        CODEMODE_IDLE_BOUND.as_secs() / 60
+    )
 }
 
 /// Pi's `formatError`. Bake adds a hint for a missing global and, for a
@@ -473,6 +491,7 @@ pub(super) fn format_error(failure: &Failure, ending: &Ending<'_>) -> String {
         }
         Failure::Timeout { message } => format!("Script timed out: {message}"),
         Failure::Busy { message } => message.clone(),
+        Failure::Aborted { message } if ending.idle => message.clone(),
         Failure::Aborted { message } => format!("Script aborted: {message}"),
         other => format!("Script sandbox failed: {}", other.message()),
     };
@@ -1088,6 +1107,11 @@ struct Ran {
     output: Vec<OutputItem>,
     /// The names of the calls not settled when the script ended.
     running: Vec<String>,
+    /// Calls the script made that the engine still held back when it
+    /// ended: never started, so cancelled.
+    held: usize,
+    /// The script was stopped by [`CODEMODE_IDLE_BOUND`].
+    idle: bool,
 }
 
 /// Why a script never started: no slot came free, or it was aborted while
@@ -1097,17 +1121,19 @@ struct NotStarted(String);
 /// Pi's wait for a slot: it counts toward the script's `timeout_ms`, so the
 /// script then has what remains, at least a millisecond. Without
 /// `timeout_ms` it waits up to [`CODEMODE_WORKER_WAIT`]. While it waits, a
-/// partial result says so.
+/// partial result says so; the last item returned is whether it waited.
 async fn reserve_slot(
     admission: &Admission,
     signal: Option<&AbortSignal>,
     deadline_ms: Option<u64>,
     on_update: &AgentToolUpdateCallback,
-) -> Result<(ExitHook, Option<u64>), NotStarted> {
+) -> Result<(ExitHook, Option<u64>, bool), NotStarted> {
     let wait = deadline_ms.map_or(CODEMODE_WORKER_WAIT, Duration::from_millis);
     let waiting = Instant::now();
+    let waited = std::sync::atomic::AtomicBool::new(false);
     let reserved = admission
         .reserve(signal, wait, || {
+            waited.store(true, std::sync::atomic::Ordering::Relaxed);
             on_update.update(AgentToolResult {
                 content: vec![UserContentBlock::Text(TextContent::new(format!(
                     "Waiting for a free codemode worker: all {} are running other scripts.",
@@ -1127,6 +1153,7 @@ async fn reserve_slot(
         Ok(on_exit) => Ok((
             on_exit,
             deadline_ms.map(|deadline| ((deadline as f64 - waited_ms).round() as u64).max(1)),
+            waited.load(std::sync::atomic::Ordering::Relaxed),
         )),
         Err(Refusal::Aborted) => Err(NotStarted(format!(
             "Script aborted: {CODEMODE_ABORT_MESSAGE}"
@@ -1170,17 +1197,24 @@ async fn run_script(
             result: Err(failure),
             output: Vec::new(),
             running: Vec::new(),
+            held: 0,
+            idle: false,
         })
     };
     // Held from here; dropped on an early return, it frees the slot.
-    let (on_exit, timeout_ms) = reserve_slot(
+    let (on_exit, timeout_ms, waited) = reserve_slot(
         &admission,
         signal,
         source.options.timeout_ms,
         &records.on_update,
     )
     .await?;
+    // The partial result that said the script waits is replaced.
+    if waited {
+        records.publish();
+    }
     source.options.timeout_ms = timeout_ms;
+    let idle_bound = timeout_ms.is_none().then_some(CODEMODE_IDLE_BOUND);
     let work = catalog.host.as_ref().and_then(|host| host.work());
     let engine = match engine(work.as_ref()).await {
         Ok(engine) => engine,
@@ -1227,6 +1261,9 @@ async fn run_script(
     let mut sleeps: JoinSet<()> = JoinSet::new();
     let mut controllers: Vec<AbortController> = Vec::new();
     let mut stopping = false;
+    // When the script last made a tool call or had one settle.
+    let mut active_at = tokio::time::Instant::now();
+    let mut idle = false;
     let cancelled = async {
         match signal {
             Some(signal) => signal.cancelled().await,
@@ -1281,6 +1318,9 @@ async fn run_script(
             controllers.push(controller);
         }
         let flush_at = records.flush_at();
+        let idle_until = idle_bound
+            .filter(|_| !stopping && queue.is_empty() && running.is_empty())
+            .map(|bound| active_at + bound);
         tokio::select! {
             event = run.next() => match event {
                 Event::Call(HostCall::Tool { id, name, args }) => {
@@ -1289,6 +1329,7 @@ async fn run_script(
                             let preview = preview_args(args.as_ref());
                             let index = records.record(tool, &preview);
                             queue.push_back(QueuedCall { id, index, tool: Arc::clone(tool), args, preview });
+                            active_at = tokio::time::Instant::now();
                         }
                         None => {
                             let available: Vec<&str> = catalog.tools.iter().map(|tool| tool.name.as_str()).collect();
@@ -1296,6 +1337,11 @@ async fn run_script(
                             let _ = handle.answer(id, Err(CallError::new(message)));
                         }
                     }
+                }
+                Event::Call(HostCall::Global { .. }) if idle_until.is_some_and(|until| tokio::time::Instant::now() >= until) => {
+                    stopping = true;
+                    idle = true;
+                    run.abort_with(idle_message());
                 }
                 Event::Call(HostCall::Global { id, name, args }) if name == SLEEP_GLOBAL => {
                     match sleep_duration(args.as_ref()) {
@@ -1327,7 +1373,23 @@ async fn run_script(
                     controller.abort();
                 }
             }
-            Some(_) = running.join_next(), if !running.is_empty() => {}
+            Some(_) = running.join_next(), if !running.is_empty() => {
+                active_at = tokio::time::Instant::now();
+            }
+            // Only a pending `sleep()` holds the script without a tool call
+            // in flight: a discovery global is answered at once and checked
+            // above, JavaScript that runs is bounded by the busy budget, and
+            // a script waiting on nothing fails as never settling.
+            () = async {
+                match idle_until {
+                    Some(at) => tokio::time::sleep_until(at).await,
+                    None => std::future::pending().await,
+                }
+            }, if !sleeps.is_empty() => {
+                stopping = true;
+                idle = true;
+                run.abort_with(idle_message());
+            }
             Some(_) = sleeps.join_next(), if !sleeps.is_empty() => {}
             () = async {
                 match flush_at {
@@ -1352,6 +1414,8 @@ async fn run_script(
         result: outcome.result.clone(),
         output,
         running: unsettled,
+        held: outcome.held,
+        idle,
     })
 }
 
@@ -1477,7 +1541,11 @@ pub(super) async fn execute_with(
     };
     // The last partial result shows every call as it settled.
     records.flush();
-    let calls = records.finish();
+    let mut calls = records.finish();
+    // Calls the engine held back past its window never started; they count
+    // as cancelled, so the note, summary, and details count every call the
+    // script made.
+    calls.omitted.cancelled = calls.omitted.cancelled.saturating_add(ran.held);
 
     let mut script_output = ran.output;
     let mut store_failure = None;
@@ -1515,6 +1583,7 @@ pub(super) async fn execute_with(
             calls: calls.clone(),
             running: &ran.running,
             web_fetch: catalog.tools.iter().any(|tool| tool.name == "web_fetch"),
+            idle: ran.idle,
         };
         items.push(Item::Text(format!(
             "Script error:\n{}",

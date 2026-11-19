@@ -161,9 +161,7 @@ impl RunControl {
                 self.stop(StopReason::TimedOut);
                 return;
             }
-            let busy_until = watch
-                .busy_since
-                .map(|since| since.checked_add(self.busy).unwrap_or(since));
+            let busy_until = busy_deadline(watch.busy_since, self.busy);
             if busy_until.is_some_and(|until| now >= until) {
                 // Under the lock: see `leave_vm`.
                 self.stop(StopReason::Busy);
@@ -237,6 +235,13 @@ impl RunControl {
             _ => None,
         }
     }
+}
+
+/// When a VM that started running JavaScript at `since` is over the busy
+/// `budget`; `None` while it waits, or when the budget reaches past what an
+/// `Instant` can hold, which is no busy bound at all.
+fn busy_deadline(since: Option<Instant>, budget: Duration) -> Option<Instant> {
+    since.and_then(|since| since.checked_add(budget))
 }
 
 /// [`Failure::Busy`]'s message: what happened and what the script can do.
@@ -541,6 +546,11 @@ impl HostState {
             self.report(call)?;
         }
         Ok(())
+    }
+
+    /// Calls held back past the window, never given to the host.
+    pub(crate) fn held_calls(&self) -> usize {
+        self.held.len()
     }
 
     fn window_open(&self) -> bool {
@@ -1075,7 +1085,11 @@ fn host_call(
                 issued: state.issued,
             });
             if state.done.is_none() && state.failure.is_none() {
-                state.done = Some(Outcome { result, during });
+                state.done = Some(Outcome {
+                    result,
+                    during,
+                    held: 0,
+                });
             }
             return Err(GuestError::Finished);
         }
@@ -1502,6 +1516,17 @@ mod tests {
         assert!(again.fill(&mut same).is_ok());
         assert_eq!(bytes, same);
         assert_ne!(bytes, [0; 6]);
+    }
+
+    #[test]
+    fn a_busy_budget_past_what_an_instant_holds_is_no_bound() {
+        let now = Instant::now();
+        assert_eq!(busy_deadline(Some(now), Duration::MAX), None);
+        assert_eq!(busy_deadline(None, Duration::from_secs(1)), None);
+        assert_eq!(
+            busy_deadline(Some(now), Duration::from_secs(1)),
+            now.checked_add(Duration::from_secs(1))
+        );
     }
 
     #[test]

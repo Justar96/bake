@@ -78,7 +78,8 @@ pub struct NestedCall {
     pub error: Option<String>,
 }
 
-/// The calls a result counts by status but does not list: Bake keeps the
+/// The calls a result counts by status but does not list, read from a
+/// session file and so summed saturating: Bake keeps the
 /// last [256] in `details.calls` and counts the earlier ones in
 /// `details.omittedCalls`. A result saved before that field counts none.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -92,7 +93,10 @@ pub struct NestedCounts {
 impl NestedCounts {
     /// Every call counted.
     pub fn total(&self) -> usize {
-        self.running + self.ok + self.error + self.cancelled
+        self.running
+            .saturating_add(self.ok)
+            .saturating_add(self.error)
+            .saturating_add(self.cancelled)
     }
 
     /// The calls counted with `status`.
@@ -279,9 +283,13 @@ fn status(script: &Codemode, look: Look) -> Vec<Span<'static>> {
     };
     let calls = &script.calls;
     let count = |status| {
-        calls.iter().filter(|call| call.status == status).count() + script.omitted.of(status)
+        calls
+            .iter()
+            .filter(|call| call.status == status)
+            .count()
+            .saturating_add(script.omitted.of(status))
     };
-    let total = calls.len() + script.omitted.total();
+    let total = calls.len().saturating_add(script.omitted.total());
     if total > 0 {
         let noun = if total == 1 { copy::CALL } else { copy::CALLS };
         push(format!("{total} {noun}"), transcript::dim());
@@ -559,7 +567,7 @@ fn calls(
         built += rows.len();
         blocks.push(rows);
     }
-    let hidden = calls.len() - blocks.len() + omitted;
+    let hidden = (calls.len() - blocks.len()).saturating_add(omitted);
     let mut rows = Vec::new();
     if hidden > 0 {
         let mut spans = gutter();
@@ -1096,6 +1104,33 @@ mod tests {
             render(ran, 80, PLAIN)[0],
             "  ● codemode  750 calls · 4 running"
         );
+    }
+
+    /// Counts read back from a session file may be anything: the largest
+    /// draw without overflowing.
+    #[test]
+    fn the_largest_counts_draw_without_overflow() {
+        let mut ran = script(CallState::Failed);
+        ran.calls = vec![call("bash", "{}", NestedStatus::Error, None)];
+        ran.omitted = NestedCounts {
+            running: usize::MAX,
+            ok: usize::MAX,
+            error: usize::MAX,
+            cancelled: usize::MAX,
+        };
+        assert_eq!(ran.omitted.total(), usize::MAX);
+        for detail in [Detail::Preview, Detail::Full] {
+            let lines: Vec<String> = present(&ran, 80, PLAIN, detail)
+                .iter()
+                .map(|line| line.to_string())
+                .collect();
+            assert!(
+                lines.join(" ").contains(&format!("{} calls", usize::MAX)),
+                "{lines:?}"
+            );
+        }
+        ran.state = CallState::Running;
+        assert!(render(ran, 80, PLAIN).join(" ").contains("running"));
     }
 
     /// A script waiting for a worker says so in its head, as a quiet

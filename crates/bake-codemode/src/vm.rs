@@ -180,14 +180,30 @@ pub(crate) fn run_script(input: ScriptInput) -> Outcome {
     };
     let result = driver.run(&script, limits, deterministic.is_some(), &commands);
     match result {
-        Ok(outcome) => outcome,
+        Ok(mut outcome) => {
+            outcome.held = driver.store.data().held_calls();
+            outcome
+        }
         Err(error) => conclude_store(&mut driver.store, &control, error),
+    }
+}
+
+/// The outcome once the VM stopped with `error`, with the calls still held.
+fn conclude_store(
+    store: &mut Store<HostState>,
+    control: &RunControl,
+    error: GuestError,
+) -> Outcome {
+    let held = store.data().held_calls();
+    Outcome {
+        held,
+        ..stopped_outcome(store, control, error)
     }
 }
 
 /// The outcome once the VM stopped with `error`: the end the script reported,
 /// a failure an import recorded, the memory limit, a stop, then `error`.
-fn conclude_store(
+fn stopped_outcome(
     store: &mut Store<HostState>,
     control: &RunControl,
     error: GuestError,

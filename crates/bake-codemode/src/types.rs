@@ -115,10 +115,12 @@ pub struct Limits {
     /// The store's limit on the guest's linear memory (`StoreLimits`).
     pub linear_memory_bytes: usize,
     /// How long the VM may run JavaScript without waiting for an answer
-    /// before the run ends as [`Failure::Busy`]: an endless loop, with or
-    /// without `await`, ends even when the script has no deadline. Time
-    /// spent waiting for answers never counts, and the budget restarts each
-    /// time the VM waits. A `timeout_ms` longer than the budget raises it to
+    /// before the run ends as [`Failure::Busy`]: a loop that never waits on
+    /// the host, with or without `await`, ends even when the script has no
+    /// deadline. Time spent waiting for answers never counts, and the budget
+    /// restarts each time the VM waits, so a loop whose every turn waits for
+    /// an answer, such as one that only sleeps through a host global, is not
+    /// bounded here: its host bounds it, or `timeout_ms` does. A `timeout_ms` longer than the budget raises it to
     /// the deadline, which then is the script's bound.
     pub busy: Duration,
 }
@@ -175,8 +177,9 @@ impl fmt::Debug for ExitHook {
 #[derive(Debug, Default)]
 pub struct ExecuteRequest {
     /// The script, an async function body, with its options; `timeout_ms` is
-    /// the run's deadline, including time spent in calls. Without it only
-    /// [`Limits::busy`] bounds the run.
+    /// the run's deadline, including time spent in calls. Without it the
+    /// engine bounds the run only by [`Limits::busy`], which a loop that
+    /// waits on the host every turn never reaches: the host bounds that.
     pub source: Source,
     /// The tools on `tools`. Names must be unique.
     pub tools: Vec<ToolDeclaration>,
@@ -409,6 +412,11 @@ pub struct Outcome {
     pub result: Result<Completion, Failure>,
     /// Deterministic mode, for a script that ended itself: where it ended.
     pub during: Option<During>,
+    /// Calls the script made that were still held back past the window
+    /// ([`MAX_PENDING_CALLS`]) when the run ended. They were never given to
+    /// the host as [`Event::Call`]s, so a host that counts the calls the
+    /// script made adds them, as calls that never ran.
+    pub held: usize,
 }
 
 impl Outcome {
@@ -416,6 +424,7 @@ impl Outcome {
         Self {
             result: Err(failure),
             during: None,
+            held: 0,
         }
     }
 }

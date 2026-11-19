@@ -78,6 +78,10 @@
 //! - Scripts of subagents take slots of their own, and a script waits for a
 //!   slot up to its `timeout_ms` or ten minutes, where Pi's wait is 60
 //!   seconds, with a partial result saying it waits.
+//! - A script without `timeout_ms` fails after [`CODEMODE_IDLE_BOUND`]
+//!   without a tool call in flight, which Pi does not bound; calls the
+//!   engine still held past its window when the script ended count as
+//!   cancelled.
 
 mod execute;
 
@@ -96,9 +100,9 @@ use crate::owned_work::WorkGate;
 use crate::session::SessionEntry;
 
 pub use execute::{
-    BAKE_CODEMODE_MAX_WORKERS_ENV, CODEMODE_ABORT_MESSAGE, DEFAULT_MAX_OUTPUT_TOKENS,
-    MAX_CONCURRENT_CODEMODE_SCRIPTS, MAX_CONCURRENT_NESTED_CALLS, MAX_LISTED_CALLS, MAX_SLEEP_MS,
-    SLEEP_GLOBAL, max_codemode_workers,
+    BAKE_CODEMODE_MAX_WORKERS_ENV, CODEMODE_ABORT_MESSAGE, CODEMODE_IDLE_BOUND,
+    DEFAULT_MAX_OUTPUT_TOKENS, MAX_CONCURRENT_CODEMODE_SCRIPTS, MAX_CONCURRENT_NESTED_CALLS,
+    MAX_LISTED_CALLS, MAX_SLEEP_MS, SLEEP_GLOBAL, max_codemode_workers,
 };
 
 /// The tool's name.
