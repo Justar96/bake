@@ -4,6 +4,8 @@ Notable changes to Bake. `bake` compiles this file in, and `/changelog` shows it
 
 ## [Unreleased]
 
+## [0.4.10] - 2026-11-19
+
 Bake 0.4.10 makes asks between team members unable to deadlock, holds or queues messages and reports instead of losing or refusing them, queues spawned agents and subagents past their limits, and keeps every code mode script within a bound.
 
 - **Telecom asks no longer wait on each other.** A waiting `ask` now ends as soon as anything else arrives for the asking session, such as another member's ask or a finished job, so two members asking each other, or a ring of asks, no longer sit out their timeouts; the ask stays open and its reply arrives as a message. A reply that comes just as the wait ends is no longer lost, Esc no longer waits on a member that does not answer, and a `timeoutSec` of 0 or less returns at once. A reply to an ask whose asker left or withdrew it is a note, not an error, and such asks drop off the board.
