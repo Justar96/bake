@@ -823,3 +823,258 @@ async fn a_panicking_pipeline_reports_the_panic() {
         "Nested tool call failed: the sink broke"
     );
 }
+
+// Order of exclusive calls.
+
+type Log = Arc<Mutex<Vec<String>>>;
+
+/// An exclusive tool that logs `start n` and `end n` around a yield, `n` from
+/// its arguments; with `hold`, call `n` of it also waits for the gate.
+fn logged(log: &Log, hold: Option<(u64, Arc<tokio::sync::Notify>)>) -> AgentTool {
+    let log = Arc::clone(log);
+    let mut tool = AgentTool::new(
+        "step",
+        "step",
+        "step",
+        json!({ "type": "object" }),
+        move |_id, args, _signal, _update, _ctx| {
+            let (log, hold) = (Arc::clone(&log), hold.clone());
+            Box::pin(async move {
+                let n = args.get("n").and_then(Value::as_u64).unwrap_or(0);
+                log.lock().unwrap().push(format!("start {n}"));
+                if let Some((held, gate)) = hold
+                    && held == n
+                {
+                    gate.notified().await;
+                }
+                tokio::task::yield_now().await;
+                log.lock().unwrap().push(format!("end {n}"));
+                Ok(AgentToolResult::default())
+            })
+        },
+    );
+    tool.execution_mode = Some(ToolExecutionMode::Sequential);
+    tool
+}
+
+/// The log of calls `numbers` run one after another.
+fn in_turn(numbers: &[u64]) -> Vec<String> {
+    numbers
+        .iter()
+        .flat_map(|n| [format!("start {n}"), format!("end {n}")])
+        .collect()
+}
+
+/// A runner over `tools` whose batch tools are copied only when the test
+/// answers the request the first call sends.
+fn runner_answered_later(
+    tools: Vec<AgentTool>,
+) -> (
+    Arc<NestedToolCallRunner>,
+    mpsc::UnboundedReceiver<oneshot::Sender<CallSiteSnapshot>>,
+    CallSiteSnapshot,
+) {
+    let (requests, asked) = mpsc::unbounded_channel();
+    let sink: AgentEventSink = Arc::new(|_| Box::pin(async {}));
+    let pipeline = NestedPipeline::new(
+        requests,
+        None,
+        None,
+        sink,
+        ToolExecutionMode::Parallel,
+        None,
+    );
+    let context = AgentContext {
+        messages: Vec::new(),
+        tools: tools.into_iter().map(Arc::new).collect(),
+    };
+    let site = CallSiteSnapshot::new(&context, &faux_assistant_message(""));
+    (NestedToolCallRunner::new(pipeline), asked, site)
+}
+
+/// Exclusive calls run in the order `start` was called, whichever of their
+/// tasks runs first and in whatever order their futures are awaited: with
+/// the batch's tools copied already, and before, when every call's task
+/// waits for them and they arrive for all at once.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn exclusive_calls_run_in_the_order_they_started() {
+    let numbers: Vec<u64> = (1..=8).collect();
+    for copied in [true, false] {
+        let log: Log = Arc::default();
+        let (runner, mut asked, site) = runner_answered_later(vec![logged(&log, None)]);
+        if copied {
+            let _ = runner.pipeline.site.set(site.clone());
+        }
+        let call = runner.executor("call", None);
+        let started: Vec<_> = numbers
+            .iter()
+            .map(|n| call.start("step", json!({ "n": n }), NestedToolCallOptions::default()))
+            .collect();
+        if !copied {
+            let reply = tokio::time::timeout(WAIT, asked.recv())
+                .await
+                .expect("a call asks for the tools")
+                .expect("a request");
+            let _ = reply.send(site);
+        }
+        for outcome in started.into_iter().rev() {
+            let outcome = tokio::time::timeout(WAIT, outcome)
+                .await
+                .expect("the call ends");
+            assert!(!outcome.is_error, "{}", text(&outcome));
+        }
+        assert_eq!(*log.lock().unwrap(), in_turn(&numbers), "copied: {copied}");
+    }
+}
+
+/// A call aborted while it waits for its turn gives its place up: the
+/// calls behind it run, in order, once the call ahead ends.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_aborted_waiting_call_lets_the_calls_behind_it_run_in_order() {
+    let log: Log = Arc::default();
+    let gate = Arc::new(tokio::sync::Notify::new());
+    let (runner, _) = create_runner(vec![logged(&log, Some((1, Arc::clone(&gate))))], false);
+    let call = runner.executor("call", None);
+    let abort = AbortController::new();
+    let run = |n: u64, signal: Option<AbortSignal>| {
+        call.start(
+            "step",
+            json!({ "n": n }),
+            NestedToolCallOptions {
+                signal,
+                on_update: None,
+            },
+        )
+    };
+    let first = run(1, None);
+    let second = run(2, Some(abort.signal()));
+    let third = run(3, None);
+    let fourth = run(4, None);
+    abort.abort();
+    let second = tokio::time::timeout(WAIT, second)
+        .await
+        .expect("the aborted call ends while the first runs");
+    assert_eq!(text(&second), "Operation aborted");
+    gate.notify_one();
+    for outcome in [fourth, third, first] {
+        let outcome = tokio::time::timeout(WAIT, outcome)
+            .await
+            .expect("the call ends");
+        assert!(!outcome.is_error, "{}", text(&outcome));
+    }
+    assert_eq!(*log.lock().unwrap(), in_turn(&[1, 3, 4]));
+}
+
+/// A call made by a tool that holds the queue runs at once, ahead of a
+/// call that started earlier and waits for the holder.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_call_from_a_queue_holder_runs_at_once() {
+    let log: Log = Arc::default();
+    let mut outer = {
+        let log = Arc::clone(&log);
+        tool("outer", move |_id, _update, ctx| {
+            let log = Arc::clone(&log);
+            Box::pin(async move {
+                log.lock().unwrap().push("start outer".to_owned());
+                let inner = ctx
+                    .nested()
+                    .execute("step", json!({ "n": 9 }), NestedToolCallOptions::default())
+                    .await;
+                assert!(!inner.is_error, "{}", text(&inner));
+                log.lock().unwrap().push("end outer".to_owned());
+                Ok(AgentToolResult::default())
+            })
+        })
+    };
+    outer.execution_mode = Some(ToolExecutionMode::Sequential);
+    let (runner, _) = create_runner(vec![outer, logged(&log, None)], false);
+    let call = runner.executor("call", None);
+    let first = call.start("outer", json!({}), NestedToolCallOptions::default());
+    let later = call.start("step", json!({ "n": 2 }), NestedToolCallOptions::default());
+    for outcome in [later, first] {
+        let outcome = tokio::time::timeout(WAIT, outcome)
+            .await
+            .expect("no call waits on its holder");
+        assert!(!outcome.is_error, "{}", text(&outcome));
+    }
+    let mut expected = vec!["start outer".to_owned()];
+    expected.extend(in_turn(&[9]));
+    expected.push("end outer".to_owned());
+    expected.extend(in_turn(&[2]));
+    assert_eq!(*log.lock().unwrap(), expected);
+}
+
+mod queue_order {
+    use std::pin::Pin;
+    use std::task::{Context, Waker};
+
+    use proptest::prelude::*;
+
+    use super::super::{CallQueue, Place};
+    use std::sync::{Arc, Mutex};
+
+    const PLACES: usize = 6;
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(512))]
+
+        /// Places are served in the order they were taken, whatever order
+        /// their waits are first polled in, and a place dropped before its
+        /// turn, whether never polled (the head included) or after it began
+        /// to wait, is skipped without stalling the places behind it.
+        #[test]
+        fn places_are_served_in_order_whatever_the_poll_order(
+            order in Just((0..PLACES).collect::<Vec<_>>()).prop_shuffle(),
+            dropped in proptest::collection::vec(any::<bool>(), PLACES),
+            unpolled in proptest::collection::vec(any::<bool>(), PLACES),
+        ) {
+            let queue = Arc::new(CallQueue::default());
+            let log: Arc<Mutex<Vec<usize>>> = Arc::default();
+            let mut waits: Vec<Option<Pin<Box<dyn std::future::Future<Output = ()>>>>> = (0..PLACES)
+                .map(|index| {
+                    let place: Place = queue.place();
+                    let log = Arc::clone(&log);
+                    let wait: Pin<Box<dyn std::future::Future<Output = ()>>> = Box::pin(async move {
+                        place.turn().await;
+                        log.lock().unwrap().push(index);
+                        drop(place);
+                    });
+                    Some(wait)
+                })
+                .collect();
+            for index in 0..PLACES {
+                if dropped[index] && unpolled[index] {
+                    waits[index] = None;
+                }
+            }
+            let mut cx = Context::from_waker(Waker::noop());
+            for round in 0..=PLACES {
+                for &index in &order {
+                    if let Some(wait) = &mut waits[index]
+                        && wait.as_mut().poll(&mut cx).is_ready()
+                    {
+                        waits[index] = None;
+                    }
+                }
+                if round == 0 {
+                    for index in 0..PLACES {
+                        if dropped[index] {
+                            waits[index] = None;
+                        }
+                    }
+                }
+            }
+            prop_assert!(waits.iter().all(Option::is_none), "a place stalled");
+            let log = log.lock().unwrap().clone();
+            prop_assert!(log.windows(2).all(|pair| pair[0] < pair[1]), "{:?}", log);
+            for index in 0..PLACES {
+                if !dropped[index] {
+                    prop_assert!(log.contains(&index), "{} never ran: {:?}", index, log);
+                }
+                if dropped[index] && unpolled[index] {
+                    prop_assert!(!log.contains(&index));
+                }
+            }
+        }
+    }
+}

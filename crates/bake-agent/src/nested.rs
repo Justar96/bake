@@ -30,6 +30,17 @@
 //!   `max_concurrent_read_tools`, when its tool is not
 //!   [`ToolEffect::Read`] (an unknown tool included). That limit's cap on
 //!   concurrent reads applies to the model's batches only.
+//! - Calls that run exclusively run in the order [`NestedToolExecutor::start`]
+//!   was called, as Pi's promise chain orders them, not in the order their
+//!   tasks first run: `start` takes the call's place in the batch's queue
+//!   before it returns, and the queue serves places in
+//!   sequence. A call whose tool is not known yet (the batch's tools are
+//!   copied on the first call) takes a place provisionally and gives it up
+//!   as soon as it proves not exclusive; a call known not to be exclusive,
+//!   or made by a tool that already holds the queue, takes none. A place
+//!   given up before its turn (the call cancelled, aborted, failed early,
+//!   or its task dropped unrun) is skipped, so the calls behind it go on.
+//!   Nothing is held across an await but the place itself.
 //! - A calling tool's nested calls cannot outlive it. Each runs as a task
 //!   its caller's scope owns, so a future the tool holds without polling
 //!   neither stalls the call nor keeps the exclusive queue. When the
@@ -58,6 +69,7 @@
 //!   record keeps only their size.
 //! - Error text in the record is cut at 500 characters, not UTF-16 units.
 
+use std::collections::BTreeSet;
 use std::future::Future;
 use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -324,6 +336,16 @@ impl NestedPipeline {
             .map(|snapshot| Arc::clone(&snapshot.0))
     }
 
+    /// Whether a call of `name` runs exclusively, when that is known
+    /// without waiting: `None` before the batch's tools are copied.
+    fn is_exclusive_now(&self, name: &str) -> Option<bool> {
+        if self.tool_execution == ToolExecutionMode::Sequential {
+            return Some(true);
+        }
+        let site = self.site.get()?;
+        Some(self.is_exclusive(find_tool(&site.0.callable, name).map(AsRef::as_ref)))
+    }
+
     /// The loop's rule for running a call alone.
     fn is_exclusive(&self, tool: Option<&AgentTool>) -> bool {
         self.tool_execution == ToolExecutionMode::Sequential
@@ -336,12 +358,77 @@ impl NestedPipeline {
     }
 }
 
+/// Serializes a batch's exclusive nested calls in the order they started:
+/// places are numbered as calls start, and the place whose number is the
+/// lowest not yet given up holds the queue.
+#[derive(Debug, Default)]
+pub(crate) struct CallQueue {
+    order: watch::Sender<QueueOrder>,
+}
+
+#[derive(Debug, Default)]
+struct QueueOrder {
+    /// The number the next place gets.
+    next: u64,
+    /// The lowest number not yet given up: the place whose turn it is.
+    head: u64,
+    /// Numbers above `head` already given up.
+    released: BTreeSet<u64>,
+}
+
+impl CallQueue {
+    /// Takes the next place.
+    pub(crate) fn place(self: &Arc<Self>) -> Place {
+        let mut number = 0;
+        self.order.send_modify(|order| {
+            number = order.next;
+            order.next += 1;
+        });
+        Place {
+            queue: Arc::clone(self),
+            number,
+        }
+    }
+}
+
+/// A place in a [`CallQueue`]. It holds the queue from its turn until it
+/// is dropped; dropped earlier, it is skipped.
+#[derive(Debug)]
+pub(crate) struct Place {
+    queue: Arc<CallQueue>,
+    number: u64,
+}
+
+impl Place {
+    /// Completes when every earlier place was given up: the queue is this
+    /// place's until it is dropped.
+    pub(crate) async fn turn(&self) {
+        let mut order = self.queue.order.subscribe();
+        // The sender lives in the queue this place keeps alive.
+        let _ = order.wait_for(|order| order.head == self.number).await;
+    }
+}
+
+impl Drop for Place {
+    fn drop(&mut self) {
+        let number = self.number;
+        self.queue.order.send_if_modified(|order| {
+            order.released.insert(number);
+            let head = order.head;
+            while order.released.remove(&order.head) {
+                order.head += 1;
+            }
+            order.head != head
+        });
+    }
+}
+
 /// Runs the nested calls of one batch, Pi's `NestedToolCallRunner`.
 pub(crate) struct NestedToolCallRunner {
     pipeline: NestedPipeline,
-    /// Serializes nested calls that must not run concurrently; FIFO, as
-    /// Pi's promise chain.
-    queue: Arc<tokio::sync::Mutex<()>>,
+    /// Serializes nested calls that must not run concurrently, in the
+    /// order they started, as Pi's promise chain.
+    queue: Arc<CallQueue>,
     /// Runs each nested call as its own task; `None` outside a Tokio
     /// runtime, where nested calls are refused.
     runtime: Option<Handle>,
@@ -594,6 +681,11 @@ impl NestedToolExecutor {
             args
         };
         let record = bound.scope.recorder().start(&id, name, &args);
+        // The call's place in the exclusive queue is taken now, so calls
+        // run in the order they started, whenever their tasks first run.
+        let place = (!bound.scope.holds_queue
+            && bound.runner.pipeline.is_exclusive_now(name) != Some(false))
+        .then(|| bound.runner.queue.place());
         let (sender, outcome) = oneshot::channel();
         let call = NestedCall {
             caller_id: self.caller_id.clone(),
@@ -603,6 +695,7 @@ impl NestedToolExecutor {
             args,
             options,
             record,
+            place,
         };
         let panic_call = ToolCall {
             id: id.clone(),
@@ -689,6 +782,9 @@ struct NestedCall {
     options: NestedToolCallOptions,
     /// The call's place in the recorder; `None` when it was dropped.
     record: Option<usize>,
+    /// Its place in the exclusive queue, unless it was known not to need
+    /// one; dropped with the call.
+    place: Option<Place>,
 }
 
 impl NestedCall {
@@ -702,6 +798,7 @@ impl NestedCall {
             args,
             options,
             record,
+            place,
         } = self;
         let pipeline = &bound.runner.pipeline;
         pipeline
@@ -713,7 +810,7 @@ impl NestedCall {
             })
             .await;
 
-        let outcome = outcome(&bound, &caller_id, id, &name, args, options).await;
+        let outcome = outcome(&bound, &caller_id, id, &name, args, options, place).await;
 
         let error_text = text_of(&outcome.result);
         bound
@@ -748,6 +845,7 @@ async fn outcome(
     name: &str,
     args: Value,
     options: NestedToolCallOptions,
+    place: Option<Place>,
 ) -> AgentToolCallOutcome {
     let runner = &bound.runner;
     let pipeline = &runner.pipeline;
@@ -805,13 +903,18 @@ async fn outcome(
     let exclusive = !bound.scope.holds_queue && pipeline.is_exclusive(tool.map(AsRef::as_ref));
     // An aborted call ends before the pipeline, whose `before_tool_call`
     // would ask, record, or run hooks for a call that never runs.
-    let _permit = if exclusive {
-        tokio::select! {
-            permit = Arc::clone(&runner.queue).lock_owned() => Some(permit),
-            () = &mut cancelled => return immediate(tool_call, NESTED_CALL_ABORTED),
+    // A call that proved not exclusive gives its provisional place up here.
+    let _place = match (exclusive, place) {
+        (false, _) => None,
+        (true, place) => {
+            // Taken late only if the tool resolved differently from `start`.
+            let place = place.unwrap_or_else(|| runner.queue.place());
+            tokio::select! {
+                () = place.turn() => {}
+                () = &mut cancelled => return immediate(tool_call, NESTED_CALL_ABORTED),
+            }
+            Some(place)
         }
-    } else {
-        None
     };
     if stopped() {
         return immediate(tool_call, NESTED_CALL_ABORTED);

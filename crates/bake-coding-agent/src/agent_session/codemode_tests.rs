@@ -1504,8 +1504,9 @@ fn meet(barrier: &Arc<tokio::sync::Barrier>) -> AgentTool {
 }
 
 /// As the user docs say: a script's calls of tools that may change
-/// something run one at a time, even inside `Promise.all()`, while calls
-/// of tools that only read run side by side.
+/// something run one at a time, in the order the script made them, even
+/// inside `Promise.all()`, while calls of tools that only read run side
+/// by side.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn changing_calls_run_one_at_a_time_and_reads_side_by_side() {
     let fx = Fixture::new("codemode-serial");
@@ -1533,11 +1534,10 @@ async fn changing_calls_run_one_at_a_time_and_reads_side_by_side() {
         result_text(&result),
         "[[\"1\",\"2\",\"3\"],[\"met\",\"met\"]]"
     );
-    // Each call ends before the next starts. Which goes first is not
-    // fixed: each call is its own task, and they reach the queue in the
-    // order they are first polled.
+    // Each call ends before the next starts, in the order the script made
+    // the calls.
     let log = log.lock().unwrap();
-    let mut ran: Vec<&str> = log
+    let ran: Vec<&str> = log
         .chunks(2)
         .map(|pair| {
             let started = pair[0].strip_prefix("start ").expect("a start");
@@ -1545,7 +1545,6 @@ async fn changing_calls_run_one_at_a_time_and_reads_side_by_side() {
             started
         })
         .collect();
-    ran.sort_unstable();
     assert_eq!(ran, ["1", "2", "3"], "{log:?}");
 }
 
