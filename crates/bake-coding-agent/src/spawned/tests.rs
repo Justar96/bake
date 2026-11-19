@@ -337,23 +337,27 @@ async fn an_agent_that_ignores_the_end_of_its_input_is_killed_after_the_grace() 
 
 #[tokio::test(flavor = "multi_thread")]
 async fn commands_during_one_long_slowly_written_event_lose_nothing() {
-    // About 100 KB of one event line, written in pieces.
+    // The settlement is one line of about 100 KB, written in pieces. After
+    // each piece the script marks it and waits for a command on its input
+    // before writing the next, so every command reaches the driver while
+    // the line is half read. A short line after it shows the stream read
+    // past it.
     const SLOW: &str = r#"#!/bin/sh
 while IFS= read -r line; do
   case "$line" in
     *bake-spawn-task*)
       echo '{"type":"agent_start"}'
-      : > "$0.writing"
-      printf '{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"'
+      echo '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"long done"}]}}'
+      printf '{"type":"agent_settled","aborted":false,"outcome":{"kind":"finished_turn"},"pad":"'
       i=0
-      while [ $i -lt 40 ]; do
-        printf '%02560d' 0
-        sleep 0.02
+      while [ $i -lt 20 ]; do
+        printf '%05120d' 0
+        : > "$0.piece-$i"
+        IFS= read -r command
         i=$((i+1))
       done
-      printf '"}}\n'
-      echo '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"long done"}]}}'
-      echo '{"type":"agent_settled","aborted":false,"outcome":{"kind":"finished_turn"}}' ;;
+      printf '"}\n'
+      echo '{"type":"response","command":"get_state","success":true,"data":{"sessionId":"after-the-long-line"}}' ;;
   esac
 done
 "#;
@@ -362,17 +366,20 @@ done
     let jobs = JobRegistry::new(work.clone(), JobLimits::default());
     let host = host_running(&dir, &work, &jobs, SLOW);
     let agent = host.spawn("write slowly", None, Origin::Model).unwrap();
-    let writing = dir.join("bake.writing");
-    eventually("the long line starts", || writing.exists()).await;
-    // Each command wins the driver's select while the line is half read.
-    for n in 0..10 {
+    for n in 0..20 {
+        let piece = dir.join(format!("bake.piece-{n}"));
+        eventually("the next piece is written", || piece.exists()).await;
         host.message(agent.id, &format!("steer {n}")).unwrap();
-        host.interrupt(agent.id).unwrap();
-        tokio::task::yield_now().await;
     }
-    let told = told(&jobs, 1).await;
-    let idle = until(&host, |agent| agent.runs == 1).await;
-    assert_eq!(idle.last_line.as_deref(), Some("long done"));
+    let after = until(&host, |agent| {
+        agent.session_id.as_deref() == Some("after-the-long-line")
+    })
+    .await;
+    // Read in order, so the long line was taken whole before the one after.
+    assert_eq!(after.runs, 1, "the settlement was lost: {after:?}");
+    assert_eq!(after.state, SpawnedState::Idle);
+    let told = notices(&jobs);
+    assert_eq!(told.len(), 1, "{told:?}");
     assert!(told[0].ends_with("Its last answer:\nlong done"), "{told:?}");
     work.close().await;
     std::fs::remove_dir_all(dir).unwrap();
