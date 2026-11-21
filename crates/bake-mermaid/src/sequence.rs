@@ -2,7 +2,10 @@
 // (ce21072c90d32c40af7a55b60b2fb35c84a43a6a), under the Apache License,
 // Version 2.0; see this crate's NOTICE.
 // Changed by Bake contributors: parsing is split from drawing, so `outline`
-// can count a sequence's participants and messages without drawing it.
+// can count a sequence's participants and messages without drawing it; `par`
+// with `and`, `critical` with `option`, an `alt` with several `else`, notes
+// left and right of a participant, `-)` messages, and activation marks are
+// read, where upstream refuses them.
 //! Bounded sequence timelines with ordered messages and explicitly nested control fragments.
 
 use super::RenderError;
@@ -92,28 +95,49 @@ pub(super) fn parse(body: &[&str]) -> Result<Timeline, RenderError> {
         let event = if line == "end" {
             blocks.pop().ok_or(RenderError::Unsupported)?;
             Event::Close
-        } else if let Some(text) = line.strip_prefix("else ") {
-            let Some(("alt", branched)) = blocks.last_mut() else {
-                return Err(RenderError::Unsupported);
-            };
-            if *branched {
-                return Err(RenderError::Unsupported);
-            }
-            *branched = true;
-            check_label(text)?;
-            Event::Branch(format!("else {text}"))
-        } else if let Some((kind @ ("loop" | "alt" | "opt" | "critical" | "break"), text)) =
+        } else if let Some((word, text)) =
             line.split_once(' ')
+                .or(Some((line, "")))
+                .filter(|(word, _)| {
+                    matches!(
+                        (blocks.last(), *word),
+                        (Some(&"alt"), "else")
+                            | (Some(&"par"), "and")
+                            | (Some(&"critical"), "option")
+                    )
+                })
         {
-            check_label(text)?;
+            let text = text.trim();
+            if text.is_empty() {
+                Event::Branch(word.to_owned())
+            } else {
+                check_label(text)?;
+                Event::Branch(format!("{word} {text}"))
+            }
+        } else if let Some((kind @ ("loop" | "alt" | "opt" | "critical" | "break" | "par"), text)) =
+            line.split_once(' ').or(Some((line, "")))
+        {
+            let text = text.trim();
             if blocks.len() == 4 {
                 return Err(RenderError::Limit);
             }
-            blocks.push((kind, false));
-            Event::Open(format!("{kind} {text}"))
-        } else if let Some(after) = line
-            .strip_prefix("Note over ")
-            .or_else(|| line.strip_prefix("note over "))
+            blocks.push(kind);
+            if text.is_empty() {
+                Event::Open(kind.to_owned())
+            } else {
+                check_label(text)?;
+                Event::Open(format!("{kind} {text}"))
+            }
+        } else if let Some(after) = [
+            "Note over ",
+            "note over ",
+            "Note left of ",
+            "note left of ",
+            "Note right of ",
+            "note right of ",
+        ]
+        .into_iter()
+        .find_map(|prefix| line.strip_prefix(prefix))
         {
             rest = after;
             let left = participant(&mut people, identifier(&mut rest)?)?;
@@ -139,7 +163,11 @@ pub(super) fn parse(body: &[&str]) -> Result<Timeline, RenderError> {
             rest = rest.trim_start();
             let mut operator = None;
             for (token, dashed, arrow) in [
+                ("<<-->>", true, '▶'),
+                ("<<->>", false, '▶'),
                 ("-->>", true, '▶'),
+                ("--)", true, '▶'),
+                ("-)", false, '▶'),
                 ("->>", false, '▶'),
                 ("-->", true, '┄'),
                 ("->", false, '─'),
@@ -153,6 +181,8 @@ pub(super) fn parse(body: &[&str]) -> Result<Timeline, RenderError> {
                 }
             }
             let (dashed, arrow) = operator.ok_or(RenderError::Unsupported)?;
+            // An activation mark on the receiver.
+            rest = rest.strip_prefix(['+', '-']).unwrap_or(rest);
             let to = participant(&mut people, identifier(&mut rest)?)?;
             let text = rest
                 .trim_start()
@@ -288,8 +318,11 @@ pub(super) fn draw(timeline: Timeline, max_width: usize) -> Result<Vec<Vec<Span>
                 rows[top + 1][end] = Cell::node('│');
                 put_text(&mut rows[top + 1], start + 2, &label)?;
             }
-            Event::Open(label) | Event::Branch(label) => {
-                let opening = !label.starts_with("else ");
+            event @ (Event::Open(_) | Event::Branch(_)) => {
+                let opening = matches!(event, Event::Open(_));
+                let (Event::Open(label) | Event::Branch(label)) = event else {
+                    continue;
+                };
                 if opening {
                     depth += 1;
                 }

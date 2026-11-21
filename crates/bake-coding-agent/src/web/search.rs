@@ -37,6 +37,8 @@ pub const SEARCH_MODEL_SETTING: &str = "webSearch.model";
 pub const ANTHROPIC_MESSAGES: &str = "anthropic-messages";
 /// The largest search response read.
 pub const MAX_SEARCH_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
+/// How long one web search request (headers and body) may take.
+pub const SEARCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(90);
 
 /// One citeable source (`WebSearchSource`).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -431,60 +433,82 @@ impl CliProxySearch {
                 "Web search model \"{name}\" has no API key. The user can sign in with /login."
             )));
         };
+        let base_root = model.base_url.trim_end_matches('/');
+        let base_root = base_root.strip_suffix("/v1").unwrap_or(base_root);
         let request = SearchRequest {
-            endpoint: bake_ai::http::join_url(&model.base_url, "/v1/messages"),
+            endpoint: bake_ai::http::join_url(base_root, "/v1/messages"),
             api_version: SEARCH_API_VERSION.to_owned(),
             body: search_request_body(&model.id, query),
         };
         let failed = |message: String| WebError::new(WEB_PROVIDER_ERROR, message);
         let client = client()
             .map_err(|error| failed(format!("CLIProxyAPI web search request failed: {error}")))?;
-        let secret = |value: String| {
-            let mut header = reqwest::header::HeaderValue::from_str(&value)
-                .map_err(|_| failed("the API key cannot be sent in an HTTP header".into()))?;
-            header.set_sensitive(true);
-            Ok::<_, WebError>(header)
-        };
-        let mut builder = client
-            .post(&request.endpoint)
-            .header("x-api-key", secret(api_key.clone())?)
-            .header(
-                reqwest::header::AUTHORIZATION,
-                secret(format!("Bearer {api_key}"))?,
-            )
-            .header("anthropic-version", SEARCH_API_VERSION)
-            .header(reqwest::header::CONTENT_TYPE, "application/json")
-            .header(reqwest::header::ACCEPT, "application/json")
-            .header(
-                reqwest::header::USER_AGENT,
-                super::fetch::DEFAULT_USER_AGENT,
-            );
-        for (header, value) in auth.headers.unwrap_or_default() {
-            builder = builder.header(header, value);
+        let defaults: bake_ai::ProviderHeaders = vec![
+            ("x-api-key".into(), Some(api_key.clone())),
+            ("authorization".into(), Some(format!("Bearer {api_key}"))),
+            ("anthropic-version".into(), Some(SEARCH_API_VERSION.into())),
+            ("content-type".into(), Some("application/json".into())),
+            ("accept".into(), Some("application/json".into())),
+            (
+                "user-agent".into(),
+                Some(super::fetch::DEFAULT_USER_AGENT.into()),
+            ),
+        ];
+        let extra: bake_ai::ProviderHeaders = auth
+            .headers
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(name, value)| (name, Some(value)))
+            .collect();
+        let merged = bake_ai::http::merge_headers(&[&defaults, &extra]);
+        let mut builder = client.post(&request.endpoint);
+        for (name, value) in merged {
+            let sensitive = name.eq_ignore_ascii_case("x-api-key")
+                || name.eq_ignore_ascii_case("authorization");
+            let header_name = reqwest::header::HeaderName::from_bytes(name.as_bytes())
+                .map_err(|_| failed(format!("invalid request header name: {name:?}")))?;
+            let mut header_value =
+                reqwest::header::HeaderValue::from_str(&value).map_err(|_| {
+                    if sensitive {
+                        failed("the API key cannot be sent in an HTTP header".into())
+                    } else {
+                        failed(format!("invalid value for request header {name}"))
+                    }
+                })?;
+            if sensitive {
+                header_value.set_sensitive(true);
+            }
+            builder = builder.header(header_name, header_value);
         }
         let body = serde_json::to_vec(&request.body)
             .map_err(|error| failed(format!("CLIProxyAPI web search request failed: {error}")))?;
-        let mut response = builder.body(body).send().await.map_err(|error| {
-            failed(format!(
-                "CLIProxyAPI web search request failed: {}",
-                super::source_chain(&error)
-            ))
-        })?;
-        let status = response.status().as_u16();
-        let mut bytes: Vec<u8> = Vec::new();
-        while let Some(chunk) = response.chunk().await.map_err(|error| {
-            failed(format!(
-                "CLIProxyAPI web search request failed: {}",
-                super::source_chain(&error)
-            ))
-        })? {
-            if bytes.len() + chunk.len() > MAX_SEARCH_RESPONSE_BYTES {
-                return Err(failed(
-                    "CLIProxyAPI returned an unprocessable response body: it is too large".into(),
-                ));
+        let (status, bytes) = tokio::time::timeout(SEARCH_TIMEOUT, async {
+            let mut response = builder.body(body).send().await.map_err(|error| {
+                failed(format!(
+                    "CLIProxyAPI web search request failed: {}",
+                    super::source_chain(&error)
+                ))
+            })?;
+            let status = response.status().as_u16();
+            let mut bytes: Vec<u8> = Vec::new();
+            while let Some(chunk) = response.chunk().await.map_err(|error| {
+                failed(format!(
+                    "CLIProxyAPI web search request failed: {}",
+                    super::source_chain(&error)
+                ))
+            })? {
+                if bytes.len() + chunk.len() > MAX_SEARCH_RESPONSE_BYTES {
+                    return Err(failed(
+                        "CLIProxyAPI returned an unprocessable response body: it is too large"
+                            .into(),
+                    ));
+                }
+                bytes.extend_from_slice(&chunk);
             }
-            bytes.extend_from_slice(&chunk);
-        }
+            Ok::<_, WebError>((status, bytes))
+        })
+        .await
+        .map_err(|_| failed("CLIProxyAPI web search request timed out".into()))??;
         let unsupported = |detail: String| {
             failed(format!(
                 "Web search model \"{name}\" could not search: {detail}. The user can set {SEARCH_MODEL_SETTING} in settings.json to an Anthropic Messages model on the CLIProxyAPI route that supports web search."

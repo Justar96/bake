@@ -99,14 +99,10 @@ fn definitions_match_pi() {
         if tool.name == "grep" {
             pi["parameters"]["properties"]["glob"]["description"] = json!(GREP_GLOB_V1_5_2);
         }
-        // Bake's `edit` contributes one guideline of its own; Pi's four
-        // repeat the tool's description and parameters.
-        let bake_edit_guidelines = [
-            "Use edit for precise changes, with every change to one file in a single call as separate edits[] entries.",
-        ];
-        if tool.name == "edit" {
-            assert_eq!(pi["promptGuidelines"].as_array().map(Vec::len), Some(4));
-            pi["promptGuidelines"] = json!(bake_edit_guidelines);
+        // Bake's builtin file tools contribute no prompt guidelines; their
+        // tool descriptions and parameter schemas already document their use.
+        if matches!(tool.name.as_str(), "read" | "edit" | "write") {
+            pi["promptGuidelines"] = Value::Null;
         }
         let pi = &pi;
         let mine = json!({
@@ -135,11 +131,7 @@ fn definitions_match_pi() {
             contribution["snippet"].as_str()
         );
         let guidelines = definition.prompt_guidelines.clone().unwrap_or_default();
-        if tool.name == "edit" {
-            assert_eq!(guidelines, bake_edit_guidelines);
-        } else {
-            assert_eq!(guidelines, strings(&contribution["guidelines"]));
-        }
+        assert!(guidelines.is_empty(), "{}", tool.name);
     }
 }
 
@@ -220,33 +212,19 @@ fn tool_sets_follow_pi_and_take_bash_from_its_slot() {
     assert!(create_tool_definition("nope", cwd, &with_bash).is_none());
 }
 
-/// Pi: `system-prompt.test.ts`'s rules for the sets the session builds:
-/// after Bake's own rules, the tool guidelines Pi lists, in Pi's order,
-/// from the tool definitions. Pi's last two rules and its `bash` guideline,
-/// which names the `PI_*` variables, are Pi's own and left out, as
-/// are the three `edit` guidelines Bake drops; Bake rewords Pi's first
-/// `edit` guideline and its `bash` rule, which keep Pi's places.
+/// Builtin tools contribute no prompt guidelines; `<rules>` holds only
+/// Bake's core rules unless a tool supplies guidelines, which propagate
+/// only when that tool is selected.
 #[test]
 fn tool_guidelines_match_pi() {
-    const PI_ONLY: [&str; 6] = [
-        "- Be concise in your responses",
-        "- Show file paths clearly when working with files",
-        "- You can inspect PI_* environment variables for current model and session details.",
-        "- When changing multiple separate locations in one file, use one edit call with multiple entries in edits[] instead of multiple edit calls",
-        "- Each edits[].oldText is matched against the original file, not after earlier edits are applied. Do not emit overlapping or nested edits. Merge nearby changes into one edit.",
-        "- Keep edits[].oldText as small as possible while still being unique in the file. Do not pad with large unchanged regions.",
-    ];
-    const REWORDED: [(&str, &str); 2] = [
-        (
-            "- Use bash for file operations like ls, rg, find",
-            "- Use bash for file operations like ls, find, and rg (grep where rg is not installed)",
-        ),
-        (
-            "- Use edit for precise changes (edits[].oldText must match exactly)",
-            "- Use edit for precise changes, with every change to one file in a single call as separate edits[] entries.",
-        ),
-    ];
     let built = definitions(&ToolsOptions::default());
+    assert!(
+        built.iter().all(|definition| definition
+            .prompt_guidelines
+            .as_ref()
+            .is_none_or(Vec::is_empty)),
+        "builtin tools should not contribute prompt guidelines"
+    );
     let lines = |section: &str| -> Vec<String> {
         section
             .lines()
@@ -257,40 +235,36 @@ fn tool_guidelines_match_pi() {
     for case in golden()["prompts"].as_array().expect("prompts") {
         let mut options = SystemPromptOptions::new("/work");
         options.selected_tools = strings(&case["selected"]);
-        for definition in &built {
-            if let Some(guidelines) = definition
-                .prompt_guidelines
-                .as_ref()
-                .filter(|g| !g.is_empty())
-            {
-                options
-                    .tool_guidelines
-                    .push((definition.name().to_owned(), guidelines.clone()));
-            }
-        }
         let sections = build_system_prompt_sections(&options).expect("sections");
         let rules = sections
             .iter()
             .find(|(name, _)| name == "rules")
             .map(|(_, text)| lines(text))
             .unwrap_or_default();
-        let pi: Vec<String> = lines(case["rules"].as_str().expect("rules"))
-            .into_iter()
-            .filter(|line| !PI_ONLY.contains(&line.as_str()))
-            .map(|line| {
-                REWORDED
-                    .iter()
-                    .find(|(pi, _)| *pi == line)
-                    .map_or(line.clone(), |(_, bake)| (*bake).to_owned())
-            })
-            .collect();
-        assert!(rules.ends_with(&pi), "{:?}: {rules:?}", case["selected"]);
-        let own = if options.selected_tools.is_empty() {
-            4
+        let has = |name: &str| options.selected_tools.iter().any(|tool| tool == name);
+        let own = if has("edit") && has("bash") { 4 } else { 3 };
+        assert_eq!(rules.len(), own, "{:?}: {rules:?}", case["selected"]);
+
+        // Supplied tool guidelines propagate only for selected tools.
+        let supplied = "Follow supplied read guideline.";
+        options
+            .tool_guidelines
+            .push(("read".to_owned(), vec![supplied.to_owned()]));
+        let with_supplied = build_system_prompt_sections(&options).expect("sections");
+        let rules_with_supplied = with_supplied
+            .iter()
+            .find(|(name, _)| name == "rules")
+            .map(|(_, text)| lines(text))
+            .unwrap_or_default();
+        if has("read") {
+            assert_eq!(rules_with_supplied.len(), own + 1, "{:?}", case["selected"]);
+            assert_eq!(
+                rules_with_supplied.last().map(String::as_str),
+                Some("- Follow supplied read guideline.")
+            );
         } else {
-            5
-        };
-        assert_eq!(rules.len() - pi.len(), own, "{:?}", case["selected"]);
+            assert_eq!(rules_with_supplied, rules, "{:?}", case["selected"]);
+        }
     }
 }
 

@@ -1,12 +1,13 @@
 //! Puts selected text on the clipboard.
 //!
-//! Over SSH the terminal's own clipboard is the user's, so OSC 52 goes first.
-//! Otherwise macOS uses `pbcopy`, Windows `clip`, Wayland `wl-copy`, and X11
-//! `xclip` then `xsel`. WSL uses OSC 52 under Windows Terminal, which honours
-//! it, and `clip.exe` elsewhere. When no tool succeeds, OSC 52 is the last
-//! resort; a terminal that ignores it gives no sign, so it counts as copied.
+//! Over SSH the terminal's own clipboard is the user's, so OSC 52 goes first
+//! and no remote helper is run. Otherwise macOS uses `pbcopy`, Windows `clip`,
+//! WSL (including Windows Terminal) `clip.exe`, Wayland `wl-copy`, and X11
+//! `xclip` then `xsel`. When no tool succeeds, bounded OSC 52 is the fallback.
 
-use std::io::{Read, Write};
+mod transport;
+
+use std::io::Read;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
@@ -14,6 +15,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use bake_tui_view::paste::{self, Image};
+
+use self::transport::TerminalTransport;
 
 /// Longest a clipboard tool may take; one that hangs is killed and reads as
 /// failed.
@@ -65,8 +68,8 @@ pub struct Clipboard {
     platform: Platform,
     ssh: bool,
     wsl: bool,
-    windows_terminal: bool,
     wayland: bool,
+    transport: TerminalTransport,
 }
 
 impl Clipboard {
@@ -74,16 +77,23 @@ impl Clipboard {
         let set = |name: &str| env(name).is_some_and(|value| !value.is_empty());
         Self {
             platform,
-            ssh: set("SSH_TTY") || set("SSH_CONNECTION"),
-            wsl: set("WSL_DISTRO_NAME"),
-            windows_terminal: set("WT_SESSION"),
+            ssh: set("SSH_TTY") || set("SSH_CONNECTION") || set("SSH_CLIENT"),
+            wsl: set("WSL_DISTRO_NAME") || set("WSL_INTEROP"),
             wayland: set("WAYLAND_DISPLAY"),
+            transport: TerminalTransport::detect(&env),
         }
     }
 
     /// Whether the terminal itself is asked first, over SSH.
     pub fn terminal_first(self) -> bool {
         self.ssh
+    }
+
+    /// Encodes `text` as an OSC 52 sequence framed for this terminal, or
+    /// returns `None` when the terminal does not support OSC 52 or `text`
+    /// exceeds the safe OSC 52 payload cap.
+    pub fn terminal_copy(self, text: &str) -> Option<String> {
+        self.transport.encode(text)
     }
 
     /// The tools to try, in order, before the terminal's own clipboard.
@@ -94,12 +104,17 @@ impl Clipboard {
         match self.platform {
             Platform::MacOs => vec![tool("pbcopy", &[], false)],
             Platform::Windows => vec![tool("clip", &[], true)],
-            Platform::Other if self.wsl && self.windows_terminal => Vec::new(),
             Platform::Other if self.wsl => vec![tool("clip.exe", &[], true)],
             Platform::Other => {
                 let mut tools = Vec::new();
                 if self.wayland {
-                    tools.push(tool("wl-copy", &[], false));
+                    // Without a type wl-copy sniffs the contents: a copied JSON or
+                    // HTML snippet might not be offered as text to another editor.
+                    tools.push(tool(
+                        "wl-copy",
+                        &["--type", "text/plain;charset=utf-8"],
+                        false,
+                    ));
                 }
                 tools.push(tool("xclip", &["-selection", "clipboard"], false));
                 tools.push(tool("xsel", &["--clipboard", "--input"], false));
@@ -279,72 +294,12 @@ pub fn read_image_file(path: &str, home: Option<&str>) -> Option<Image> {
     })
 }
 
-/// Runs `tool` with `text` on its standard input. Returns whether it exited
-/// successfully within [`FEED`]; a missing tool, a failure, or a hang is
-/// `false`, and a hung tool is killed.
+/// Runs `tool` with `text` on its standard input. Returns whether every byte
+/// was written and the tool exited cleanly within [`FEED`]; a missing tool,
+/// a truncated write, a failure, or a hang is `false`, and a hung tool is
+/// killed.
 pub fn feed(tool: Tool, text: &str) -> bool {
-    let Ok(mut child) = Command::new(tool.program)
-        .args(tool.args)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-    else {
-        return false;
-    };
-    let input = if tool.utf16 {
-        let mut bytes = vec![0xff, 0xfe];
-        bytes.extend(text.encode_utf16().flat_map(u16::to_le_bytes));
-        bytes
-    } else {
-        text.as_bytes().to_vec()
-    };
-    // Dropped after writing, so the tool sees the end of its input.
-    let written = child
-        .stdin
-        .take()
-        .is_some_and(|mut stdin| stdin.write_all(&input).is_ok());
-    let deadline = Instant::now() + FEED;
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => return written && status.success(),
-            Ok(None) if Instant::now() < deadline => thread::sleep(POLL),
-            _ => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return false;
-            }
-        }
-    }
-}
-
-/// The OSC 52 sequence that asks the terminal itself to set its clipboard,
-/// which reaches the local clipboard over SSH and inside multiplexers that
-/// forward it.
-pub fn osc52(text: &str) -> String {
-    format!("\x1b]52;c;{}\x07", base64(text.as_bytes()))
-}
-
-/// Standard Base64 with padding.
-fn base64(bytes: &[u8]) -> String {
-    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
-    for chunk in bytes.chunks(3) {
-        let b = [
-            chunk[0],
-            chunk.get(1).copied().unwrap_or(0),
-            chunk.get(2).copied().unwrap_or(0),
-        ];
-        let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
-        for i in 0..4 {
-            if i <= chunk.len() {
-                out.push(char::from(ALPHABET[(n >> (18 - 6 * i)) as usize & 63]));
-            } else {
-                out.push('=');
-            }
-        }
-    }
-    out
+    crate::clipboard_feed::feed(tool, text, FEED)
 }
 
 #[cfg(test)]
@@ -381,30 +336,96 @@ mod tests {
             programs(clipboard(Platform::Other, &[("WSL_DISTRO_NAME", "Ubuntu")])),
             ["clip.exe"]
         );
-        // Windows Terminal honours OSC 52, so WSL there uses it alone.
+        assert_eq!(
+            programs(clipboard(
+                Platform::Other,
+                &[("WSL_INTEROP", "/run/WSL/1_interop")]
+            )),
+            ["clip.exe"]
+        );
+        // WSL under Windows Terminal still prefers clip.exe locally for
+        // confirmation, Unicode, and selections larger than the OSC 52 cap.
         let wt = clipboard(
             Platform::Other,
             &[("WSL_DISTRO_NAME", "Ubuntu"), ("WT_SESSION", "1")],
         );
-        assert!(wt.tools().is_empty() && !wt.terminal_first());
+        assert_eq!(programs(wt), ["clip.exe"]);
+        assert!(wt.tools()[0].utf16);
+        assert!(!wt.terminal_first());
+        assert_eq!(
+            wt.terminal_copy("hi").as_deref(),
+            Some("\x1b]52;c;aGk=\x07")
+        );
     }
 
     #[test]
     fn over_ssh_the_terminal_is_asked_first_and_alone() {
-        let ssh = clipboard(Platform::MacOs, &[("SSH_TTY", "/dev/pts/1")]);
-        assert!(ssh.terminal_first() && ssh.tools().is_empty());
-        // An empty variable is unset.
-        assert!(!clipboard(Platform::MacOs, &[("SSH_TTY", "")]).terminal_first());
+        for var in ["SSH_TTY", "SSH_CONNECTION", "SSH_CLIENT"] {
+            for platform in [Platform::MacOs, Platform::Windows, Platform::Other] {
+                let ssh = clipboard(
+                    platform,
+                    &[
+                        (var, "1"),
+                        ("WSL_DISTRO_NAME", "Ubuntu"),
+                        ("WAYLAND_DISPLAY", "wayland-0"),
+                        ("WT_SESSION", "1"),
+                    ],
+                );
+                assert!(ssh.terminal_first(), "{var} on {platform:?}");
+                assert!(ssh.tools().is_empty(), "{var} on {platform:?}");
+            }
+            // An empty variable is unset.
+            assert!(!clipboard(Platform::MacOs, &[(var, "")]).terminal_first());
+        }
     }
 
     #[test]
-    fn osc52_carries_the_text_in_base64() {
-        assert_eq!(osc52("hi"), "\x1b]52;c;aGk=\x07");
-        assert_eq!(base64(b""), "");
-        assert_eq!(base64(b"f"), "Zg==");
-        assert_eq!(base64(b"fo"), "Zm8=");
-        assert_eq!(base64(b"foo"), "Zm9v");
-        assert_eq!(base64("é漢".as_bytes()), "w6nmvKI=");
+    fn terminal_copy_routes_by_multiplexer_and_enforces_limits() {
+        let plain = clipboard(Platform::Other, &[("SSH_CLIENT", "1.2.3.4 5 22")]);
+        assert_eq!(
+            plain.terminal_copy("hi").as_deref(),
+            Some("\x1b]52;c;aGk=\x07")
+        );
+
+        let tmux = clipboard(
+            Platform::Other,
+            &[
+                ("SSH_TTY", "/dev/pts/1"),
+                ("TMUX", "/tmp/tmux-1000/default,1,0"),
+            ],
+        );
+        assert_eq!(
+            tmux.terminal_copy("hi").as_deref(),
+            Some("\x1b]52;c;aGk=\x07")
+        );
+
+        let screen = clipboard(
+            Platform::Other,
+            &[("SSH_TTY", "/dev/pts/1"), ("STY", "123.pts-0.host")],
+        );
+        assert_eq!(
+            screen.terminal_copy("hi").as_deref(),
+            Some("\x1bP\x1b]52;c;aGk=\x07\x1b\\")
+        );
+
+        let nested = clipboard(
+            Platform::Other,
+            &[("TMUX", "/tmp/t"), ("STY", "123.pts-0.host")],
+        );
+        assert_eq!(
+            nested.terminal_copy("hi").as_deref(),
+            Some("\x1b]52;c;aGk=\x07")
+        );
+
+        let dumb = clipboard(
+            Platform::Other,
+            &[("SSH_TTY", "/dev/pts/1"), ("TERM", "dumb")],
+        );
+        assert_eq!(dumb.terminal_copy("hi"), None);
+
+        let oversized = "a".repeat(transport::MAX_OSC52_RAW_BYTES + 1);
+        assert_eq!(plain.terminal_copy(&oversized), None);
+        assert_eq!(screen.terminal_copy(&oversized), None);
     }
 
     #[test]

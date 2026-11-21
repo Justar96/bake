@@ -1,4 +1,4 @@
-//! SVG images shown sharp, over the half-block cells the view draws them
+//! SVG images shown sharp, over the quadrant-block cells the view draws them
 //! in, on terminals that show images.
 //!
 //! The view lists the finished SVG images wholly on screen each frame
@@ -20,9 +20,12 @@
 //! or changed repaints the whole screen first. A frame whose images are as
 //! before writes nothing.
 //!
-//! Detection reads only the environment; `BAKE_IMAGES` chooses `kitty`,
-//! `iterm`, `sixel`, or `off`. Inside tmux or screen, which do not pass
-//! images through by default, images are off unless chosen.
+//! Detection reads the environment first; `BAKE_IMAGES` chooses `kitty`,
+//! `iterm`, `sixel`, or `off`. A terminal the environment does not name,
+//! as under WSL or over SSH, is asked on Unix ([`probe`]): it answers a
+//! Kitty graphics query when it draws them, and names Sixel in its device
+//! attributes. Inside tmux or screen, which do not pass images through by
+//! default, images are off unless chosen, and nothing is asked.
 
 use std::collections::HashMap;
 use std::io::{self, Write};
@@ -32,7 +35,7 @@ use base64::Engine as _;
 
 /// Default cell size in pixels where the terminal scales the image to the
 /// cells it is given, so the exact size only sets the drawing's resolution.
-const SCALED_CELL: (u16, u16) = (10, 20);
+const SCALED_CELL: (u16, u16) = (16, 32);
 /// Encoded images kept, the latest drawn last.
 const CACHED: usize = 8;
 /// Base64 bytes a Kitty graphics command carries.
@@ -77,7 +80,7 @@ impl Protocol {
             Some("off") => return None,
             _ => {}
         }
-        if env("TMUX").is_some() || env("STY").is_some() {
+        if multiplexed(&env) {
             return None;
         }
         let term = env("TERM").unwrap_or_default();
@@ -100,11 +103,22 @@ impl Protocol {
         }
     }
 
+    /// Whether the terminal may be asked what it shows ([`probe`]): not
+    /// when `BAKE_IMAGES` is `off`, nor inside tmux or screen, which answer
+    /// for themselves and not for the terminal behind them.
+    pub fn asks(env: impl Fn(&str) -> Option<String>) -> bool {
+        env("BAKE_IMAGES").as_deref().map(str::trim) != Some("off") && !multiplexed(&env)
+    }
+
     /// Whether the image is drawn into the cells, so the cells' redraw can
     /// leave it behind.
     fn in_cells(self) -> bool {
         self != Self::Kitty
     }
+}
+
+fn multiplexed(env: &impl Fn(&str) -> Option<String>) -> bool {
+    env("TMUX").is_some() || env("STY").is_some()
 }
 
 /// The images placed, and what is needed to place them.
@@ -419,16 +433,38 @@ pub fn reported_cell() -> Option<(u16, u16)> {
     Some((size.width / size.columns, size.height / size.rows))
 }
 
-/// Asks the terminal for its cell size (`CSI 16 t`) and waits up to
-/// `wait` for the answer, `CSI 6 ; height ; width t`. Run once, in raw mode,
-/// before the input reader starts; bytes read that are not the answer are
+/// What the terminal answered [`probe`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Probe {
+    /// The protocol it draws: Kitty graphics when it answered that query,
+    /// else Sixel when its device attributes name it.
+    pub protocol: Option<Protocol>,
+    /// A cell's width and height in pixels.
+    pub cell: Option<(u16, u16)>,
+}
+
+/// The Kitty graphics query's id, which its answer repeats.
+const PROBE_ID: u32 = 31;
+
+/// Asks the terminal whether it draws Kitty graphics (a one-pixel query,
+/// which draws nothing), for its cell size (`CSI 16 t`), and for its
+/// device attributes (`CSI c`), and waits up to `wait` for the answers.
+/// Every terminal answers the last, so the wait ends with it; one that
+/// knows nothing of the first two ignores them. Run once, in raw mode,
+/// before the input reader starts; bytes read that are not an answer are
 /// dropped.
 #[cfg(unix)]
-pub fn query_cell(wait: std::time::Duration) -> Option<(u16, u16)> {
+pub fn probe(wait: std::time::Duration) -> Probe {
     use std::os::fd::AsRawFd;
     let mut out = io::stdout();
-    out.write_all(b"\x1b[16t").ok()?;
-    out.flush().ok()?;
+    let asked = write!(
+        out,
+        "\x1b_Gi={PROBE_ID},s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\\x1b[16t\x1b[c"
+    )
+    .and_then(|()| out.flush());
+    if asked.is_err() {
+        return Probe::default();
+    }
     let fd = io::stdin().as_raw_fd();
     let deadline = std::time::Instant::now() + wait;
     let mut reply = Vec::new();
@@ -444,7 +480,7 @@ pub fn query_cell(wait: std::time::Duration) -> Option<(u16, u16)> {
         if ready <= 0 {
             break;
         }
-        let mut buffer = [0u8; 64];
+        let mut buffer = [0u8; 128];
         // SAFETY: `buffer` is valid for writes of its length.
         let read = unsafe { libc::read(fd, buffer.as_mut_ptr().cast(), buffer.len()) };
         let Ok(read) = usize::try_from(read) else {
@@ -454,14 +490,44 @@ pub fn query_cell(wait: std::time::Duration) -> Option<(u16, u16)> {
             break;
         }
         reply.extend_from_slice(&buffer[..read]);
-        if let Some(cell) = parse_cell_reply(&reply) {
-            return Some(cell);
-        }
-        if reply.len() > 256 {
+        if attributes(&reply).is_some() || reply.len() > 1024 {
             break;
         }
     }
+    parse_probe(&reply)
+}
+
+/// The parameters of the device attributes answer, `CSI ? ... c`, in
+/// `bytes`.
+fn attributes(bytes: &[u8]) -> Option<String> {
+    let text = String::from_utf8_lossy(bytes);
+    let mut rest = text.as_ref();
+    while let Some(start) = rest.find("\x1b[?") {
+        rest = &rest[start + 3..];
+        let end = rest
+            .find(|ch: char| !(ch.is_ascii_digit() || ch == ';'))
+            .unwrap_or(rest.len());
+        if rest[end..].starts_with('c') {
+            return Some(rest[..end].to_owned());
+        }
+    }
     None
+}
+
+/// What the answers in `bytes` say.
+pub fn parse_probe(bytes: &[u8]) -> Probe {
+    let text = String::from_utf8_lossy(bytes);
+    let protocol = if text.contains(&format!("\x1b_Gi={PROBE_ID};OK")) {
+        Some(Protocol::Kitty)
+    } else if attributes(bytes).is_some_and(|list| list.split(';').skip(1).any(|n| n == "4")) {
+        Some(Protocol::Sixel)
+    } else {
+        None
+    };
+    Probe {
+        protocol,
+        cell: parse_cell_reply(bytes),
+    }
 }
 
 /// The cell size in `CSI 6 ; height ; width t`, anywhere in `bytes`.
@@ -565,6 +631,44 @@ mod tests {
             Graphics::new(Protocol::Kitty, None).unwrap().cell,
             SCALED_CELL
         );
+    }
+
+    #[test]
+    fn the_probe_reads_what_the_terminal_answers() {
+        // kitty and Ghostty: the graphics answer, the cell, the attributes.
+        assert_eq!(
+            parse_probe(b"\x1b_Gi=31;OK\x1b\\\x1b[6;36;17t\x1b[?62;c"),
+            Probe {
+                protocol: Some(Protocol::Kitty),
+                cell: Some((17, 36)),
+            }
+        );
+        // Windows Terminal: Sixel among its attributes, and no graphics
+        // answer.
+        assert_eq!(
+            parse_probe(b"\x1b[6;20;10t\x1b[?61;4;6;7;14;21;22;23;24;28;32;42c"),
+            Probe {
+                protocol: Some(Protocol::Sixel),
+                cell: Some((10, 20)),
+            }
+        );
+        // A refused query, or a terminal with neither, shows none; the
+        // class 64 is not the attribute 4.
+        assert_eq!(
+            parse_probe(b"\x1b_Gi=31;ENOTSUPPORTED\x1b\\\x1b[?64;1;2c"),
+            Probe::default()
+        );
+        assert_eq!(parse_probe(b"\x1b[?4;1c").protocol, None);
+        assert_eq!(parse_probe(b"\x1b[?1;2").protocol, None);
+        assert_eq!(parse_probe(b"\xff\x1b[?"), Probe::default());
+    }
+
+    #[test]
+    fn nothing_is_asked_inside_a_multiplexer_or_when_off() {
+        assert!(Protocol::asks(env(&[("TERM", "xterm-256color")])));
+        assert!(!Protocol::asks(env(&[("TMUX", "/tmp/t")])));
+        assert!(!Protocol::asks(env(&[("STY", "1.pts")])));
+        assert!(!Protocol::asks(env(&[("BAKE_IMAGES", "off")])));
     }
 
     #[test]

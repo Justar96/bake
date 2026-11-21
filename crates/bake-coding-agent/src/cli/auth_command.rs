@@ -344,9 +344,18 @@ fn check_json(result: &AuthCheckResult, credential: Option<&str>) -> String {
 }
 
 /// What `auth.json` holds for `provider`, as Pi's `listCredentials` reports
-/// a credential's type. A provider whose key comes from `models.json` or
-/// the environment has no record, as in Pi.
-fn stored_credential_type(credentials: &AuthStorage, provider: &str) -> Option<&'static str> {
+/// a credential's type. A bound CLIProxyAPI account's key also comes from
+/// `auth.json` (verified against `settings.json` by `apply_account`). A
+/// provider whose key comes from `models.json` or the environment has no
+/// record, as in Pi.
+fn stored_credential_type(
+    registry: &ModelRegistry,
+    credentials: &AuthStorage,
+    provider: &str,
+) -> Option<&'static str> {
+    if registry.has_bound_key(provider) {
+        return Some("api_key");
+    }
     match credentials.read(provider) {
         Some(Credential::ApiKey { .. }) => Some("api_key"),
         Some(Credential::OAuth) => Some("oauth"),
@@ -393,7 +402,7 @@ pub fn resolve_credential_for_print(
             let models = registry.models();
             for model in &models {
                 if providers.contains(&model.provider)
-                    || stored_credential_type(credentials, &model.provider).is_none()
+                    || stored_credential_type(registry, credentials, &model.provider).is_none()
                 {
                     continue;
                 }
@@ -415,7 +424,7 @@ pub fn resolve_credential_for_print(
     }
     let mut found: Vec<(String, String)> = Vec::new();
     for provider in &providers {
-        let stored = stored_credential_type(credentials, provider);
+        let stored = stored_credential_type(registry, credentials, provider);
         // Pi skips a provider whose stored credential is the other kind.
         if stored == Some("oauth") {
             continue;
@@ -428,7 +437,7 @@ pub fn resolve_credential_for_print(
         Ok([(_, value)]) => Ok(value),
         Err(found) if found.is_empty() => {
             let first = providers.first().map(String::as_str).unwrap_or_default();
-            let stored = stored_credential_type(credentials, first);
+            let stored = stored_credential_type(registry, credentials, first);
             if cli_provider.is_some() && stored == Some("oauth") {
                 return Err(format!(
                     "Provider \"{first}\" is configured with OAuth, not an API key; OAuth providers are not available in bake yet and are planned for a later release"
@@ -829,6 +838,29 @@ mod tests {
                 "Model \"keyless-1\" not found. Use --list-models to see available models."
                     .to_owned()
             )
+        );
+        // A signed-in CLIProxyAPI account's bound key is found by `--model` alone.
+        let (mut bound_registry, credentials) = self::registry();
+        bound_registry
+            .add_provider_config(
+                "cliproxyapi",
+                serde_json::json!({
+                    "baseUrl": "http://127.0.0.1:8317/v1",
+                    "api": "openai-responses",
+                    "models": [{ "id": "cpa-only", "contextWindow": 1000 }]
+                }),
+                None,
+            )
+            .expect("cpa");
+        bound_registry.bind_provider_key("cliproxyapi", Some("sk-cpa-bound".into()));
+        assert_eq!(
+            resolve_credential_for_print(
+                &parse_args(&strings(&["--model", "cpa-only"])),
+                &bound_registry,
+                &credentials,
+                AuthCommandKind::ApiKey,
+            ),
+            Ok("sk-cpa-bound".to_owned())
         );
     }
 }

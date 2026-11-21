@@ -39,6 +39,8 @@ const PUNCTUATION: &str = "(){}[]<>.,;:'\"!?+-=*/\\|&%^$#@~`";
 pub const PASTE_COLLAPSE_BYTES: usize = 800;
 /// Pasted text with at least this many lines collapses into a placeholder.
 pub const PASTE_COLLAPSE_LINES: usize = 3;
+/// Leading prefix shared by every collapsed-paste placeholder token.
+const PASTE_TOKEN_PREFIX: &str = "[Pasted text #";
 
 /// What a registered placeholder stands for: pasted text, which a submission
 /// expands back, or a staged image, by its attachment number.
@@ -189,18 +191,26 @@ impl Draft {
         }
     }
 
-    /// Inserts a terminal paste: as text, or, when it [`collapses`], as one
-    /// placeholder that stands for it. Returns `false` when the draft limit
-    /// cut the pasted text.
+    /// Inserts a terminal paste: as text, or, when it [`collapses`] (or
+    /// contains a reserved placeholder prefix), as one placeholder that stands
+    /// for it. Returns `false` when the draft limit cut the pasted text.
     pub fn paste_block(&mut self, input: &str) -> bool {
         let clean = sanitize(input);
-        if !collapses(&clean) {
+        if !collapses(&clean) && !clean.contains(PASTE_TOKEN_PREFIX) {
             return self.paste(&clean);
         }
         let complete = clean.len() <= MAX_DRAFT_BYTES;
         let kept = cut_at_boundary(&clean, MAX_DRAFT_BYTES).to_owned();
-        self.pastes += 1;
-        let token = pasted_text_token(self.pastes, &kept);
+        let mut next_id = self.pastes + 1;
+        let mut token = pasted_text_token(next_id, &kept);
+        while self.text.contains(token.as_str()) {
+            next_id += 1;
+            token = pasted_text_token(next_id, &kept);
+        }
+        if self.text.len().saturating_add(token.len()) > MAX_DRAFT_BYTES {
+            return false;
+        }
+        self.pastes = next_id;
         self.atoms.push((token.clone(), Atom::Text(kept)));
         self.paste(&token) && complete
     }
@@ -297,13 +307,46 @@ impl Draft {
     /// the text it stands for. Image placeholders stay, beside their
     /// attachments.
     pub fn expanded(&self) -> String {
-        let mut text = self.text.clone();
-        for (token, atom) in &self.atoms {
-            if let Atom::Text(pasted) = atom {
-                text = text.replace(token.as_str(), pasted);
+        let max_token_len = self
+            .atoms
+            .iter()
+            .filter_map(|(token, atom)| matches!(atom, Atom::Text(_)).then_some(token.len()))
+            .max()
+            .unwrap_or(0);
+        if max_token_len == 0 {
+            return self.text.clone();
+        }
+        let mut out = String::with_capacity(self.text.len());
+        let mut rest = self.text.as_str();
+        while let Some(at) = rest.find(PASTE_TOKEN_PREFIX) {
+            let after_prefix = &rest[at..];
+            let bound = after_prefix.len().min(max_token_len);
+            let matched = after_prefix.as_bytes()[..bound]
+                .iter()
+                .position(|&b| b == b']')
+                .and_then(|close| {
+                    let candidate = &after_prefix[..=close];
+                    self.atoms.iter().find_map(|(token, atom)| match atom {
+                        Atom::Text(pasted) if token == candidate => {
+                            Some((candidate.len(), pasted.as_str()))
+                        }
+                        _ => None,
+                    })
+                });
+            match matched {
+                Some((token_len, pasted)) => {
+                    out.push_str(&rest[..at]);
+                    out.push_str(pasted);
+                    rest = &rest[at + token_len..];
+                }
+                None => {
+                    out.push_str(&rest[..at + PASTE_TOKEN_PREFIX.len()]);
+                    rest = &rest[at + PASTE_TOKEN_PREFIX.len()..];
+                }
             }
         }
-        text
+        out.push_str(rest);
+        out
     }
 
     /// The placeholder the caret would cross going back (`backward`) or
@@ -881,7 +924,7 @@ fn is_blank(grapheme: &str) -> bool {
 /// Cells a grapheme advances a row's column from `col`, where the row's text
 /// ends at `limit`. A tab reaches the next stop. A blank at or past `limit`
 /// hangs: it stays on the row and occupies nothing.
-fn advance(grapheme: &str, col: usize, limit: usize) -> usize {
+pub(crate) fn advance(grapheme: &str, col: usize, limit: usize) -> usize {
     match grapheme {
         " " => usize::from(col < limit),
         "\t" => (TAB_WIDTH - col % TAB_WIDTH).min(limit.saturating_sub(col)),
@@ -1415,6 +1458,69 @@ mod tests {
         // Undo brings it back, still standing for its text.
         draft.undo();
         assert_eq!(draft.expanded(), format!("see {pasted} ok"));
+    }
+
+    #[test]
+    fn expanded_never_reexpands_placeholder_text_inside_earlier_paste() {
+        let mut draft = Draft::default();
+        let first = "literal [Pasted text #2 +2 lines]\nline 2\nline 3";
+        let second = "alpha\nbeta\ngamma";
+        assert!(draft.paste_block(first));
+        assert!(draft.paste_block(" "));
+        assert!(draft.paste_block(second));
+        assert_eq!(
+            draft.text(),
+            "[Pasted text #1 +2 lines] [Pasted text #2 +2 lines]"
+        );
+        assert_eq!(draft.expanded(), format!("{first} {second}"));
+    }
+
+    #[test]
+    fn literal_placeholder_label_pasted_before_and_after_long_paste_roundtrips() {
+        let label = "[Pasted text #1 +2 lines]";
+        let payload = "alpha\nbeta\ngamma";
+
+        // Pasted BEFORE the long paste that would otherwise claim #1.
+        let mut before = Draft::default();
+        assert!(before.paste_block(label));
+        assert!(before.paste_block(" "));
+        assert!(before.paste_block(payload));
+        assert_eq!(before.expanded(), format!("{label} {payload}"));
+
+        // Pasted AFTER the long paste that already owns #1.
+        let mut after = Draft::default();
+        assert!(after.paste_block(payload));
+        assert!(after.paste_block(" "));
+        assert!(after.paste_block(label));
+        assert_eq!(after.expanded(), format!("{payload} {label}"));
+
+        // Typed BEFORE the long paste: allocation skips the colliding id.
+        let mut typed_before = typed(&format!("{label} "));
+        assert!(typed_before.paste_block(payload));
+        assert_eq!(typed_before.expanded(), format!("{label} {payload}"));
+    }
+
+    #[test]
+    fn collapsed_paste_refuses_partial_token_when_draft_lacks_room() {
+        let mut draft = Draft::default();
+        let filler = "a".repeat(MAX_DRAFT_BYTES - 5);
+        assert!(draft.paste(&filler));
+        let before = draft.text().to_owned();
+        let collapsed = "line 1\nline 2\nline 3";
+        assert!(!draft.paste_block(collapsed));
+        assert_eq!(draft.text(), before);
+        assert_eq!(draft.expanded(), before);
+        assert!(draft.atoms.is_empty());
+    }
+
+    #[test]
+    fn paste_block_preserves_unicode_bom_tabs_crlf_and_trailing_blanks() {
+        let mut draft = Draft::default();
+        let raw = "\u{feff}fn greet() {\r\n\tlet msg = \"café 漢 🚀 e\u{301}\";   \r\n\t\r\n}\r\n";
+        let expected = "\u{feff}fn greet() {\n\tlet msg = \"café 漢 🚀 e\u{301}\";   \n\t\n}\n";
+        assert!(draft.paste_block(raw));
+        assert_eq!(draft.text(), "[Pasted text #1 +4 lines]");
+        assert_eq!(draft.expanded(), expected);
     }
 
     #[test]

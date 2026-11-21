@@ -510,7 +510,7 @@ async fn completions_saturate_huge_token_counts() {
 
 // ---- openai-responses ----
 
-const OPENAI_TOOL_CALL_PROVIDERS: [&str; 3] = ["openai", "openai-codex", "opencode"];
+const OPENAI_TOOL_CALL_PROVIDERS: [&str; 4] = ["openai", "openai-codex", "opencode", "cliproxyapi"];
 
 fn codex_model() -> Model {
     model_from(json!({
@@ -572,6 +572,25 @@ fn responses_hash_foreign_tool_item_ids() {
             .is_some_and(|rest| !rest.is_empty() && rest.chars().all(|c| c.is_ascii_alphanumeric())),
         "{id}"
     );
+
+    // router-for-me/pi-cliproxyapi-provider `codex-stream.ts`: `cliproxyapi`
+    // also preserves `call_id|fc_<hash>` across foreign or cross-model turns.
+    let mut cpa_model = codex_model();
+    cpa_model.provider = "cliproxyapi".into();
+    cpa_model.api = "openai-responses".into();
+    let cpa_params = openai_responses::build_params(
+        &cpa_model,
+        &context,
+        &openai_responses::OpenAIResponsesOptions::default(),
+        &openai_responses::get_compat(&cpa_model),
+    )
+    .expect("params");
+    let cpa_call = cpa_params["input"]
+        .as_array()
+        .and_then(|items| items.iter().find(|item| item["type"] == "function_call"))
+        .expect("a function_call item");
+    assert_eq!(cpa_call["call_id"], json!("call_4VnzVawQXPB9MgYib7CiQFEY"));
+    assert_eq!(cpa_call["id"], json!(format!("fc_{}", short_hash(item))));
 }
 
 // openai-responses-message-id.test.ts: "generates unique fallback message

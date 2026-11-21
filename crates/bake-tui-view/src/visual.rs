@@ -31,7 +31,7 @@
 //!   it never turns back into source. `markdown.mermaid` governs answers
 //!   only: the model asked to show this diagram, so it always draws.
 //!
-//! - **SVG images** are drawn in half blocks, two pixels a cell
+//! - **SVG images** are drawn in quadrant blocks, four pixels a cell
 //!   ([`crate::svg`]), growing tag by tag while the source arrives.
 //!
 //! Series take their colours from [`palette::SERIES`]. Under `NO_COLOR`

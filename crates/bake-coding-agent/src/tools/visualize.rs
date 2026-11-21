@@ -875,24 +875,28 @@ fn quoted_line(line: &str) -> String {
 /// the renderer stops reading it, and why, or the limit it passes.
 fn diagnose(source: &str, error: RenderError) -> String {
     let lines: Vec<&str> = source.lines().collect();
-    // The renderer skips blank lines and `%%` comments, but not `%%{`
-    // directives.
-    let Some(head) = lines.iter().position(|line| {
+    // The renderer skips blank lines, `%%` comments and directives, and
+    // front matter.
+    let first = lines.iter().position(|line| !line.trim().is_empty());
+    let matter = first
+        .filter(|&first| lines[first].trim() == "---")
+        .and_then(|first| {
+            let close = lines[first + 1..]
+                .iter()
+                .position(|line| line.trim() == "---")?;
+            Some(first + close + 2)
+        })
+        .unwrap_or(0);
+    let Some(head) = lines.iter().enumerate().position(|(k, line)| {
         let line = line.trim();
-        !line.is_empty() && (!line.starts_with("%%") || line.starts_with("%%{"))
+        k >= matter && !line.is_empty() && !line.starts_with("%%") && !line.ends_with("}%%")
     }) else {
         return format!("source is empty; start it with {DIAGRAM_TYPES}");
     };
     let header = lines[head].split(';').next().unwrap_or_default().trim();
     let at = |k: usize| format!("Mermaid line {} {}", k + 1, quoted_line(lines[k]));
     let Some(family) = family_of(header) else {
-        let why = if header.starts_with("---") {
-            "front matter is not supported"
-        } else if header.starts_with("%%{") {
-            "directives are not supported"
-        } else {
-            "is not a diagram type drawn here"
-        };
+        let why = "is not a diagram type drawn here";
         return format!("{} {why}; start the source with {DIAGRAM_TYPES}", at(head));
     };
     let reads = |text: &str| bake_mermaid::outline(text);
@@ -984,9 +988,6 @@ fn opened(family: Family, lines: &[&str]) -> Option<usize> {
 fn unsupported(family: Family, line: &str) -> Option<&'static str> {
     let line = line.trim();
     let word = line.split_whitespace().next().unwrap_or_default();
-    if line.starts_with("%%{") {
-        return Some("directives are not supported");
-    }
     if line.chars().any(char::is_control) {
         return Some("it holds a control character");
     }
@@ -1000,72 +1001,29 @@ fn unsupported(family: Family, line: &str) -> Option<&'static str> {
     }) {
         return Some("character entities such as &amp; are not decoded; write the character");
     }
-    if line.contains(":::") || matches!(word, "style" | "classDef" | "linkStyle" | "click") {
-        return Some("styles, classes, and links are not drawn; remove the line");
+    if line.contains("\"`") {
+        return Some("Markdown strings are not drawn; write the label as plain text");
     }
     match family {
         Family::Flowchart => {
-            if matches!(word, "subgraph" | "end") {
-                Some("subgraphs are not drawn; draw the nodes without them")
-            } else if word == "class" {
-                Some("styles, classes, and links are not drawn; remove the line")
-            } else if ["((", "[[", "[(", "{{", "[/", "[\\"]
-                .iter()
-                .any(|shape| line.contains(shape))
-            {
-                Some("only [box], {decision}, and ([stadium]) node shapes are drawn")
-            } else if ["==>", "~~~", "--o", "--x", "o--", "x--"]
-                .iter()
-                .any(|edge| line.contains(edge))
-            {
-                Some("only -->, ---, -.->, -.-, and <--> edges are drawn")
+            if line.contains("~~~") {
+                Some("invisible links are not drawn; remove the line")
+            } else if line.contains("@{") {
+                Some("shapes are written A[box], A{decision}, or A([stadium]), not A@{ ... }")
+            } else if line.contains('<') && line.contains('>') && !line.contains("<br") {
+                Some("HTML other than <br> in a node's label is not drawn; write plain text")
             } else {
                 None
             }
         }
         Family::Sequence => match word {
-            "activate" | "deactivate" => Some("activations are not drawn"),
-            "par" | "and" | "rect" | "box" => {
-                Some("only loop, alt with one else, opt, critical, and break blocks are drawn")
-            }
-            "else" => Some("an alt block takes one else, and only alt takes else"),
-            "autonumber" | "create" | "destroy" | "link" | "links" | "title" => {
-                Some("only participants, messages, notes over, and blocks are drawn")
-            }
-            "Note" | "note" if !line.contains(" over ") => Some("only Note over is drawn"),
-            _ if ["->>+", "->>-", "->+", "->-", "-x+", "-x-", "-)", "--)"]
-                .iter()
-                .any(|arrow| line.contains(arrow)) =>
-            {
-                Some("only ->, ->>, -->, -->>, -x, and --x messages without activation are drawn")
-            }
+            "else" => Some("only an alt block takes else"),
+            "and" => Some("only a par block takes and"),
+            "option" => Some("only a critical block takes option"),
+            "Note" | "note" => Some("a note is written Note over A,B: text"),
             _ => None,
         },
-        Family::State => {
-            if line.contains('{') || word == "}" {
-                Some("composite states are not drawn; keep the states flat")
-            } else if matches!(word, "note" | "end") {
-                Some("notes are not drawn")
-            } else if line.contains("<<") {
-                Some("fork, join, and choice states are not drawn")
-            } else if line == "--" {
-                Some("concurrent regions are not drawn")
-            } else {
-                None
-            }
-        }
-        Family::Class => {
-            if line.contains("<<") {
-                Some("annotations such as <<interface>> are not drawn")
-            } else if line.contains('~') {
-                Some("generic types such as List~T~ are not drawn")
-            } else if matches!(word, "namespace" | "note" | "callback" | "link") {
-                Some("namespaces, notes, and links are not drawn")
-            } else {
-                None
-            }
-        }
-        Family::Entity => None,
+        Family::State | Family::Class | Family::Entity => None,
     }
 }
 
@@ -1073,13 +1031,13 @@ fn unsupported(family: Family, line: &str) -> Option<&'static str> {
 fn subset(family: Family) -> &'static str {
     match family {
         Family::Flowchart => {
-            "flowcharts draw [box], {decision}, and ([stadium]) nodes joined by -->, ---, -.->, -.-, or <-->, with |labels| and & groups"
+            "flowcharts draw [box], {decision}, and ([stadium]) nodes, other shapes as one of these, joined by -->, ---, -.->, -.-, ==>, or <-->, with |labels| and & groups; subgraphs draw without their frame, and styles are left out"
         }
         Family::Sequence => {
-            "sequence diagrams draw participant and actor lines, messages such as A->>B: text, Note over A,B: text, and loop, alt/else, opt, critical, and break blocks closed by end"
+            "sequence diagrams draw participant and actor lines, messages such as A->>B: text, Note over A,B: text, and loop, alt/else, opt, par/and, critical/option, and break blocks closed by end"
         }
         Family::State => {
-            "state diagrams draw flat states: A --> B: label, [*] for the start and end, state \"label\" as ID, and ID : description"
+            "state diagrams draw states flat, composite ones without their frame: A --> B: label, [*] for the start and end, state \"label\" as ID, and ID : description"
         }
         Family::Class => {
             "class diagrams draw class ID { members }, ID : member, and relationships such as A <|-- B, A *-- B, A o-- B, A --> B, or A ..|> B, with \"1\" cardinalities and : labels"
@@ -1954,24 +1912,20 @@ mod tests {
                 "Mermaid line 1 \"pie title Pets\" is not a diagram type drawn here; start the source with flowchart (or graph) with TD, TB, BT, LR, or RL, sequenceDiagram, stateDiagram-v2, classDiagram, or erDiagram".to_owned(),
             ),
             (
-                diagram("flowchart TD\n    A --> B\n    subgraph api\n    B --> C\n    end"),
-                "Mermaid line 3 \"subgraph api\" cannot be drawn: subgraphs are not drawn; draw the nodes without them; flowcharts draw [box], {decision}, and ([stadium]) nodes joined by -->, ---, -.->, -.-, or <-->, with |labels| and & groups".to_owned(),
+                diagram("flowchart TD\n    A --> B\n    A ~~~ C"),
+                format!("Mermaid line 3 \"A ~~~ C\" cannot be drawn: invisible links are not drawn; remove the line; {}", subset(Family::Flowchart)),
             ),
             (
-                diagram("flowchart TD\n    A --> B\n    style A fill:#f9f"),
-                "Mermaid line 3 \"style A fill:#f9f\" cannot be drawn: styles, classes, and links are not drawn; remove the line; flowcharts draw [box], {decision}, and ([stadium]) nodes joined by -->, ---, -.->, -.-, or <-->, with |labels| and & groups".to_owned(),
+                diagram("---\ntitle: T\n---\n%%{init: {}}%%\nflowchart TD\n    A[\"`**bold**`\"] --> B"),
+                format!("Mermaid line 6 \"A[\"`**bold**`\"] --> B\" cannot be drawn: Markdown strings are not drawn; write the label as plain text; {}", subset(Family::Flowchart)),
             ),
             (
-                diagram("sequenceDiagram\n    A->>B: one\n    loop retry\n        B-->>A: two\n        activate A\n    end"),
-                "Mermaid line 5 \"activate A\" cannot be drawn: activations are not drawn; sequence diagrams draw participant and actor lines, messages such as A->>B: text, Note over A,B: text, and loop, alt/else, opt, critical, and break blocks closed by end".to_owned(),
+                diagram("sequenceDiagram\n    A->>B: one\n    loop retry\n        B-->>A: two\n        else no\n    end"),
+                format!("Mermaid line 5 \"else no\" cannot be drawn: only an alt block takes else; {}", subset(Family::Sequence)),
             ),
             (
                 diagram("sequenceDiagram\n    A->>B: one\n    alt ok\n        B-->>A: two"),
                 "Mermaid line 3 \"alt ok\" opens a block that is never closed; close it with end".to_owned(),
-            ),
-            (
-                diagram("stateDiagram-v2\n    [*] --> Busy\n    state Busy {\n        A --> B\n    }"),
-                "Mermaid line 3 \"state Busy {\" cannot be drawn: composite states are not drawn; keep the states flat; state diagrams draw flat states: A --> B: label, [*] for the start and end, state \"label\" as ID, and ID : description".to_owned(),
             ),
             (
                 diagram(&format!("flowchart TD\n{}", (0..17).map(|i| format!("    N{i} --> N{}\n", i + 1)).collect::<String>())),

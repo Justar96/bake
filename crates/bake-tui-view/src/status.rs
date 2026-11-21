@@ -1,13 +1,17 @@
 //! The status line's fields and the order they give way in as the row
 //! narrows.
 //!
-//! The row is minimal: `● deepseek-v4-flash high  ctx ~11%
-//! (15.2k/128k)  ~/bake ⎇ main`, the session's state dot, the model and
-//! its thinking level, the context window's occupancy as a gauge and a
-//! count, and the working directory with its git branch. A reading the
-//! session does not have is left out. The session's token totals
-//! (`↑12k ↓3.4k`) and its prompt cache (`cache 99% (R180k W2k)`), Pi's
-//! footer readings, show after the context when the user turns them on.
+//! The line is minimal and takes two rows: `● nova  deepseek-v4-flash high
+//! ~/bake ⎇ main`, the session's state dot, its telecom callsign while it is
+//! in a team, in the callsign's own hue, the model and its thinking level,
+//! and the working directory with its git branch; and under the
+//! model, the readings: `ctx ~11% (15.2k/128k)`, the context window's
+//! occupancy, and `auto-compact 87%`, the share of the window past which
+//! automatic compaction starts, or `auto-compact off`; then the session's token totals (`↑12k ↓3.4k`) and its prompt
+//! cache (`cache 99% (R180k W2k)`), Pi's footer readings, when the user
+//! turns them on ([`lines`]). A reading the session does not have is left
+//! out, and without any the line keeps one row. Given one row only, the
+//! readings join it between the model and the location ([`line`]).
 //!
 //! The row is quiet: the model is in the terminal's foreground, everything
 //! else is dim, and colour comes from [`crate::palette`] only where it
@@ -39,9 +43,11 @@ pub mod rank {
     pub const CWD: u16 = 30;
     pub const UPDATE: u16 = 40;
     pub const GIT_COUNTS: u16 = 50;
+    pub const AUTO_COMPACT: u16 = 55;
     pub const CACHE_HIT: u16 = 60;
     pub const CONTEXT_MARK_DROP: u16 = 65;
     pub const BRANCH: u16 = 70;
+    pub const CALLSIGN: u16 = 75;
     pub const THINKING: u16 = 80;
     pub const CONTEXT_ABSOLUTE_WARM: u16 = 85;
     pub const MODEL: u16 = 90;
@@ -69,6 +75,35 @@ pub enum Tone {
     Dim,
     /// A palette colour that means something.
     Ink(Token),
+    /// A hue in degrees, 0 to 359, of its own: a callsign's ([`hue_rgb`]).
+    Hue(u16),
+}
+
+/// The colour of `hue`, in degrees, at the saturation and lightness the
+/// status line draws callsigns in: bright enough on a dark screen, deep
+/// enough on a light one.
+pub fn hue_rgb(hue: u16) -> (u8, u8, u8) {
+    let (h, s, l) = (f64::from(hue % 360) / 60.0, 0.65, 0.6);
+    let chroma = (1.0 - (2.0 * l - 1.0_f64).abs()) * s;
+    let x = chroma * (1.0 - (h % 2.0 - 1.0).abs());
+    let (r, g, b) = match h as u8 {
+        0 => (chroma, x, 0.0),
+        1 => (x, chroma, 0.0),
+        2 => (0.0, chroma, x),
+        3 => (0.0, x, chroma),
+        4 => (x, 0.0, chroma),
+        _ => (chroma, 0.0, x),
+    };
+    let m = l - chroma / 2.0;
+    let channel = |value: f64| ((value + m) * 255.0).round().clamp(0.0, 255.0) as u8;
+    (channel(r), channel(g), channel(b))
+}
+
+/// A telecom callsign and its hue ([`Tone::Hue`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Callsign {
+    pub name: String,
+    pub hue: u16,
 }
 
 /// Context occupancy from here up wants a look: `notice`.
@@ -358,6 +393,19 @@ pub struct ContextUsage {
     pub window: u64,
 }
 
+/// Where automatic compaction stands.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AutoCompact {
+    /// Turned off: the context fills until the model refuses it.
+    Off,
+    /// Starts once the context exceeds this many tokens.
+    At(u64),
+}
+
+/// Context occupancy this many points under the automatic-compaction point
+/// and above warns that a compaction is near: `notice`.
+pub const AUTO_COMPACT_NEAR: u64 = 10;
+
 /// The checked-out branch, or the abbreviated commit when HEAD is detached.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Branch {
@@ -397,6 +445,10 @@ pub struct StatusInput {
     pub tokens: Option<TokenTotals>,
     /// Shown when the user turns it on (`statusLine.cache`).
     pub cache: Option<CacheReading>,
+    /// Where automatic compaction starts, shown after the context.
+    pub auto_compact: Option<AutoCompact>,
+    /// The session's telecom callsign while it is in a team.
+    pub callsign: Option<Callsign>,
     pub branch: Option<Branch>,
     /// The working directory, already shortened against home.
     pub cwd: String,
@@ -511,12 +563,43 @@ pub fn dot(state: SessionState, ascii: bool) -> Part {
 /// A field the rest cannot hold whole at its narrowest goes whole, from the
 /// end, rather than be cut.
 pub fn line(input: &StatusInput, state: SessionState, room: usize) -> Vec<Part> {
-    if room == 0 {
+    laid(dot(state, input.ascii), &fields(input), room)
+}
+
+/// The status line on two rows, each `room` cells: the state dot, the
+/// model, and the location; then, under the model, the readings. The
+/// second is empty when the session has no reading ([`has_readings`]).
+pub fn lines(input: &StatusInput, state: SessionState, room: usize) -> [Vec<Part>; 2] {
+    let mut head: Vec<Field> = input
+        .callsign
+        .as_ref()
+        .map(callsign_field)
+        .into_iter()
+        .collect();
+    head.push(model_field(input));
+    head.extend(location_field(input));
+    [
+        laid(dot(state, input.ascii), &head, room),
+        laid(Part::new(" ", Tone::Plain), &reading_fields(input), room),
+    ]
+}
+
+/// Whether the session has a reading for the second row: the context, or
+/// the token totals or the cache once turned on.
+pub fn has_readings(input: &StatusInput) -> bool {
+    !reading_fields(input).is_empty()
+}
+
+/// `lead`, one cell, then `fields` fitted to the rest of `room`, two cells
+/// apart, the first a cell after `lead`. Nothing when there are no fields
+/// to draw and `lead` is only room.
+fn laid(lead: Part, fields: &[Field], room: usize) -> Vec<Part> {
+    if room == 0 || (fields.is_empty() && lead.text.trim().is_empty()) {
         return Vec::new();
     }
-    let mut parts = vec![dot(state, input.ascii)];
+    let mut parts = vec![lead];
     let rest = room.saturating_sub(DOT_WIDTH);
-    let mut fitted = fit(&fields(input), rest);
+    let mut fitted = fit(fields, rest);
     while !fitted.is_empty() && fitted_width(&fitted) > rest {
         fitted.pop();
     }
@@ -533,20 +616,48 @@ pub fn line(input: &StatusInput, state: SessionState, room: usize) -> Vec<Part> 
 /// are on, and the location, which is the working directory with the
 /// branch after it.
 pub fn fields(input: &StatusInput) -> Vec<Field> {
-    let mut fields = vec![model_field(input)];
+    let mut fields: Vec<Field> = input
+        .callsign
+        .as_ref()
+        .map(callsign_field)
+        .into_iter()
+        .collect();
+    fields.push(model_field(input));
+    fields.extend(reading_fields(input));
+    fields.extend(location_field(input));
+    fields
+}
+
+/// The readings, in display order: the context, the token totals, and the
+/// cache, each when the session has it and the user turned it on.
+fn reading_fields(input: &StatusInput) -> Vec<Field> {
+    let mut fields = Vec::new();
     if let Some(usage) = input.context {
         fields.push(context_field(usage));
+        fields.extend(
+            input
+                .auto_compact
+                .map(|auto| auto_compact_field(auto, usage)),
+        );
     }
     if let Some(totals) = input.tokens {
         fields.push(tokens_field(totals, input.ascii));
     }
-    if let Some(field) = input.cache.and_then(cache_field) {
-        fields.push(field);
-    }
-    if let Some(field) = location_field(input) {
-        fields.push(field);
-    }
+    fields.extend(input.cache.and_then(cache_field));
     fields
+}
+
+/// `nova`: who the session is in its team, in its own hue, before the
+/// model. It gives way after the branch and before the thinking level.
+fn callsign_field(callsign: &Callsign) -> Field {
+    Field {
+        forms: vec![vec![Part::new(
+            callsign.name.as_str(),
+            Tone::Hue(callsign.hue),
+        )]],
+        yields: vec![rank::CALLSIGN],
+        shrink: None,
+    }
 }
 
 /// `deepseek-v4-flash high`: the level reads as the model's, so it needs no
@@ -622,6 +733,41 @@ fn context_field(usage: ContextUsage) -> Field {
             vec![label, Part::new(format!("~{percent}%"), tone)],
         ],
         yields: vec![absolute_rank],
+        shrink: None,
+    }
+}
+
+/// `auto-compact 87%`: the share of the window past which automatic
+/// compaction starts, a `notice` once the context is within
+/// [`AUTO_COMPACT_NEAR`] points of it; or `auto-compact off`. Narrow, it
+/// reads `compact 87%`, and then gives way.
+fn auto_compact_field(auto: AutoCompact, usage: ContextUsage) -> Field {
+    let (value, tone) = match auto {
+        AutoCompact::Off => (copy::AUTO_COMPACT_OFF.to_owned(), Tone::Plain),
+        AutoCompact::At(tokens) => {
+            let at = context_percent(ContextUsage {
+                used: Some(tokens),
+                window: usage.window,
+            })
+            .min(100);
+            let near = usage.used.is_some() && context_percent(usage) + AUTO_COMPACT_NEAR >= at;
+            let tone = if near {
+                Tone::Ink(Token::Notice)
+            } else {
+                Tone::Plain
+            };
+            (format!("{at}%"), tone)
+        }
+    };
+    let form = |label: &str| {
+        vec![
+            Part::new(format!("{label} "), Tone::Dim),
+            Part::new(value.clone(), tone),
+        ]
+    };
+    Field {
+        forms: vec![form(copy::AUTO_COMPACT), form(copy::AUTO_COMPACT_SHORT)],
+        yields: vec![rank::TOTALS, rank::AUTO_COMPACT],
         shrink: None,
     }
 }
@@ -979,6 +1125,112 @@ mod tests {
     // after the context when turned on. The totals and the cache's counts
     // give way first, then the directory, and the hit outlasts the branch's
     // directory.
+    // Bake: in a team, the callsign leads the first row in its own hue, and
+    // gives way after the branch, before the thinking level.
+    #[test]
+    fn the_callsign_leads_the_first_row_in_its_hue() {
+        let shown = |parts: &[Part]| parts.iter().map(|p| p.text.as_str()).collect::<String>();
+        let mut input = full();
+        input.callsign = Some(Callsign {
+            name: "nova".into(),
+            hue: 200,
+        });
+        let head = |input: &StatusInput, room| lines(input, SessionState::Idle, room)[0].clone();
+        assert_eq!(
+            shown(&head(&input, 60)),
+            "○ nova  deepseek-v4-flash high  ~/bake ⎇ main"
+        );
+        assert_eq!(head(&input, 60)[2].tone, Tone::Hue(200));
+        assert_eq!(shown(&head(&input, 30)), "○ nova  deepseek-v4-flash high");
+        assert_eq!(shown(&head(&input, 24)), "○ deepseek-v4-flash high");
+        assert_eq!(
+            shown(&line(&input, SessionState::Idle, 120)),
+            "○ nova  deepseek-v4-flash high  ctx ~11% (15.2k/128k)  ~/bake ⎇ main"
+        );
+        // Hues come out as distinct colours, in range at every degree.
+        assert_ne!(hue_rgb(0), hue_rgb(137));
+        for hue in 0..=720 {
+            let _ = hue_rgb(hue);
+        }
+    }
+
+    // Bake: the automatic-compaction point follows the context, as a share
+    // of the window, and wants a look once the context nears it; off, it
+    // says so. Narrow, it shortens, then gives way before the context.
+    #[test]
+    fn the_auto_compact_point_follows_the_context() {
+        let shown = |parts: &[Part]| parts.iter().map(|p| p.text.as_str()).collect::<String>();
+        let mut input = full();
+        input.auto_compact = Some(AutoCompact::At(111_616));
+        let readings =
+            |input: &StatusInput, room| shown(&lines(input, SessionState::Idle, room)[1]);
+        assert_eq!(
+            readings(&input, 60),
+            "  ctx ~11% (15.2k/128k)  auto-compact 87%"
+        );
+        // The context's count goes first, as it does on one row.
+        assert_eq!(readings(&input, 36), "  ctx ~11%  auto-compact 87%");
+        assert_eq!(readings(&input, 24), "  ctx ~11%  compact 87%");
+        assert_eq!(readings(&input, 14), "  ctx ~11%");
+        let tone = |input: &StatusInput| {
+            let field = auto_compact_field(input.auto_compact.unwrap(), input.context.unwrap());
+            field.forms[0][1].tone
+        };
+        assert_eq!(tone(&input), Tone::Plain);
+        input.context = Some(ContextUsage {
+            used: Some(100_000),
+            window: 128_000,
+        });
+        assert_eq!(tone(&input), Tone::Ink(Token::Notice));
+        // Unknown tokens never warn; a point past the window reads 100%.
+        input.context = Some(ContextUsage {
+            used: None,
+            window: 128_000,
+        });
+        assert_eq!(tone(&input), Tone::Plain);
+        input.auto_compact = Some(AutoCompact::At(u64::MAX));
+        assert!(readings(&input, 60).ends_with("auto-compact 100%"));
+        input.auto_compact = Some(AutoCompact::Off);
+        assert!(readings(&input, 60).ends_with("auto-compact off"));
+        // Without the context there is nothing to read it against.
+        input.context = None;
+        assert!(!has_readings(&input));
+    }
+
+    // Bake: on two rows, the readings go under the model, so the first row
+    // keeps the location whole; with one row they join it, and without any
+    // reading the second row is empty.
+    #[test]
+    fn the_readings_take_the_second_row() {
+        let shown = |parts: &[Part]| parts.iter().map(|p| p.text.as_str()).collect::<String>();
+        let mut input = full();
+        input.cache = Some(CacheReading {
+            read: 180_000,
+            write: 2_000,
+            hit: Some(99),
+        });
+        let [head, readings] = lines(&input, SessionState::Idle, 60);
+        assert_eq!(shown(&head), "○ deepseek-v4-flash high  ~/bake ⎇ main");
+        assert_eq!(
+            shown(&readings),
+            "  ctx ~11% (15.2k/128k)  cache 99% (R180k W2k)"
+        );
+        // Narrow, each row gives way on its own.
+        let [head, readings] = lines(&input, SessionState::Idle, 30);
+        assert_eq!(shown(&head), "○ deepseek-v4-flash high");
+        assert_eq!(shown(&readings), "  ctx ~11%  cache 99%");
+        assert!(has_readings(&input));
+        assert_eq!(
+            shown(&line(&input, SessionState::Idle, 120)),
+            "○ deepseek-v4-flash high  ctx ~11% (15.2k/128k)  cache 99% (R180k W2k)  ~/bake ⎇ main"
+        );
+        input.context = None;
+        input.cache = None;
+        assert!(!has_readings(&input));
+        assert!(lines(&input, SessionState::Idle, 60)[1].is_empty());
+        assert!(lines(&input, SessionState::Idle, 0)[0].is_empty());
+    }
+
     #[test]
     fn token_totals_and_the_cache_show_when_on_and_give_way_early() {
         let mut input = full();

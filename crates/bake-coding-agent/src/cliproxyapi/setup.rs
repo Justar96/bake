@@ -617,7 +617,10 @@ where
         if signal.is_some_and(AbortSignal::aborted) {
             return Err(ConfigureCliProxyError::Aborted);
         }
-        typed_key = js_trim(&answer).to_owned();
+        let entered_key = js_trim(&answer);
+        if !entered_key.is_empty() {
+            typed_key = entered_key.to_owned();
+        }
         let checked = match normalize_api_key(&typed_key) {
             Ok(key) => key,
             Err(KeyRejection::Empty) => {
@@ -1254,7 +1257,7 @@ mod tests {
             "sk-kept-secret".to_owned(),
             "bad url with spaces".to_owned(),
             url.clone(),
-            "sk-kept-secret".to_owned(),
+            String::new(),
         ]));
         let questions = Mutex::new(Vec::new());
         let mut checked = Vec::new();

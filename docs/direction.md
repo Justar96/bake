@@ -10,6 +10,7 @@ Bake is one Rust executable, `bake`, released for Linux x86_64 (glibc 2.34 or ne
 
 - **Pi is the upstream.** Port from Pi's latest official release, record the revision and adapted files, keep its MIT notice, and port its tests. Bake reads and writes Pi's session format.
 - **Bake's own contracts.** The CLIProxyAPI provider route, the sandbox with its approvals and permission presets, and the Bake home (`BAKE_HOME`, else `~/.bake`) with its settings and credentials are Bake's, not Pi's. So is the system prompt.
+- **Lean, model-neutral prompt.** Bake supplies tool semantics, permissions, and user/workspace contracts, not a model persona, preferred style, or universal workflow.
 - **Opt-in by measurement.** Subagents, reminders, and telecom stay behind settings until a paired evaluation shows they help by default. Evaluations run with `bake-eval` and their records are kept ([evaluations](evaluations/README.md)).
 - **A command or script cannot hold a turn forever.** A foreground `bash` command without a `timeout` continues as a job after `bash.foregroundSeconds`, and the call returns with its output so far; a `codemode` script ends after its busy budget of JavaScript run without waiting on a call, and one without `timeout_ms` after ten minutes with no tool call made or running.
 - **Nothing waits without a bound.** A waiting ask ends when other mail reaches its session, mail a session accepted is read at its next step or within a minute, and work past a cap waits in a bounded queue instead of being refused.

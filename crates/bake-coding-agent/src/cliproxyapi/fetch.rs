@@ -316,6 +316,7 @@ async fn read_catalog(
         .get(url)
         .header(reqwest::header::AUTHORIZATION, authorization)
         .header(reqwest::header::ACCEPT, "application/json")
+        .header(reqwest::header::USER_AGENT, bake_ai::http::user_agent())
         .send()
         .await
         .map_err(|error| unreachable(transport_detail(&error)))?;

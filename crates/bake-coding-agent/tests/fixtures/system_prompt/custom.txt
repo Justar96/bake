@@ -1,7 +1,7 @@
 Custom preamble.
 
 <run>
-This is a non-interactive run: no one can answer questions. Make reasonable assumptions, state them in your final answer, and finish the task.
+This is a non-interactive run: no one can answer questions.
 </run>
 
 <addendum>

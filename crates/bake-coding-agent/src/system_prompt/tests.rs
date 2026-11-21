@@ -34,20 +34,10 @@ fn names(options: &SystemPromptOptions) -> Vec<String> {
         .collect()
 }
 
-/// `bake -p` with Pi's four default tools and their guidelines
-/// (`tools/{read,edit,write}.ts`; `bash` contributes none), the
-/// `workspace-write` preset with no one to answer approvals, and the facts
-/// of a Linux repository.
+/// `bake -p` with the four default tools, the `workspace-write` preset with
+/// no one to answer approvals, and the facts of a Linux repository.
 fn default_options() -> SystemPromptOptions {
     let mut options = options("/home/user/project", &["read", "bash", "edit", "write"]);
-    options.tool_guidelines = vec![
-        ("read".into(), vec!["Use read to examine files instead of cat or sed.".into()]),
-        (
-            "edit".into(),
-            vec!["Use edit for precise changes, with every change to one file in a single call as separate edits[] entries.".into()],
-        ),
-        ("write".into(), vec!["Use write only for new files or complete rewrites.".into()]),
-    ];
     options.permissions = "File sandbox: workspace-write. Sandboxed tools can modify files under \"/home/user/project\", and possibly in some temporary directories.\n\nApproval prompts: disabled. Actions that need approval are rejected automatically, so do not request sandbox escalation with `sandbox_permissions`.".into();
     options.docs_command = "/usr/local/bin/bake docs".into();
     options.environment = Environment {
@@ -105,12 +95,9 @@ fn no_tools() {
     bare.selected_tools = Vec::new();
     let text = prompt(&bare);
     assert!(text.contains(
-        "<rules>\n- Follow the conventions of the surrounding code and the project's instructions."
+        "<rules>\n- Follow the conventions of the surrounding code and the project's instructions. The user's requests take precedence over project instructions.\n- Commit or push only when the task requests it, and do not discard changes you did not make.\n- Report results and verification accurately, including failures and skipped checks.\n</rules>"
     ));
-    assert!(text.contains(
-        "The user's requests take precedence over project instructions.\n- Commit or push only when the task requests it, and do not discard changes you did not make.\n- Report results and verification accurately, including failures and skipped checks.\n- Keep the final answer concise, factual, and neutral.\n</rules>"
-    ));
-    assert!(!text.contains("round trips"));
+    assert!(!text.contains(EDIT_BASH_SCHEDULING_RULE));
     assert!(!text.contains("Shell:"));
     assert!(text.ends_with(
         "<environment>\nWorking directory: /home/user/project\nPlatform: linux\nGit repository: yes\nSession started: 2026-10-13 (UTC)\n</environment>"
@@ -138,7 +125,10 @@ fn environment_states_its_facts() {
 #[test]
 fn run_modes() {
     let mut run = options("/tmp", &[]);
-    assert!(prompt(&run).contains("<run>\nThis is a non-interactive run: no one can answer questions. Make reasonable assumptions, state them in your final answer, and finish the task.\n</run>"));
+    assert!(
+        prompt(&run)
+            .contains("<run>\nThis is a non-interactive run: no one can answer questions.\n</run>")
+    );
     run.run_mode = RunMode::Interactive;
     assert!(prompt(&run).contains("<run>\nThis is an interactive session. Ask the user only when you are blocked or before an action that is hard to reverse or visible to others.\n</run>"));
 }
@@ -173,15 +163,11 @@ fn optional_sections() {
     ));
 }
 
-// Pi: "uses shell-specific guidance".
+// No built-in fallback shell command coaching is injected for bash-only sessions.
 #[test]
-fn shell_guidance() {
+fn no_shell_fallback_coaching() {
     let only_bash = prompt(&options("/tmp", &["bash"]));
-    assert!(only_bash.contains(
-        "- Use bash for file operations like ls, find, and rg (grep where rg is not installed)\n"
-    ));
-    assert!(!prompt(&options("/tmp", &["bash", "grep"])).contains("Use bash for file operations"));
-    // Pi's `powershell` tool is not ported, so no rule names it.
+    assert!(!only_bash.contains("Use bash for file operations"));
     assert!(!prompt(&options("/tmp", &["powershell"])).contains("for file operations"));
 }
 
@@ -199,20 +185,20 @@ fn guidelines() {
         "Use dynamic_tool for summaries.".into(),
         "  Use dynamic_tool for summaries.  ".into(),
         "   ".into(),
-        "Keep the final answer concise, factual, and neutral.".into(),
+        "Report results and verification accurately, including failures and skipped checks.".into(),
     ];
     let text = prompt(&with);
     assert!(text.contains(
-        "- Keep the final answer concise, factual, and neutral.\n- Write second.\n- Read first.\n- Use dynamic_tool for summaries.\n</rules>"
+        "- Report results and verification accurately, including failures and skipped checks.\n- Write second.\n- Read first.\n- Use dynamic_tool for summaries.\n</rules>"
     ));
     assert!(!text.contains("Never shown."));
-    assert_eq!(text.matches("Keep the final answer").count(), 1);
+    assert_eq!(text.matches("Report results and verification").count(), 1);
 }
 
 // Pi: "leaves hidden tools out of the tool list and rules".
 #[test]
 fn hidden_tools() {
-    let mut hidden = options("/tmp", &["read", "bash", "run"]);
+    let mut hidden = options("/tmp", &["read", "bash", "edit", "run"]);
     hidden.hidden_tools = vec!["read".into(), "bash".into()];
     hidden.environment.shell = "bash".into();
     hidden.tool_guidelines = vec![
@@ -222,10 +208,33 @@ fn hidden_tools() {
     let text = prompt(&hidden);
     assert!(!text.contains("Use read for files."));
     assert!(!text.contains("Use bash for file operations"));
+    assert!(!text.contains(EDIT_BASH_SCHEDULING_RULE));
     assert!(!text.contains("Shell:"));
     assert!(text.contains("- Prefer run."));
-    hidden.hidden_tools = vec!["read".into(), "bash".into(), "run".into()];
-    assert!(!prompt(&hidden).contains("round trips"));
+}
+
+#[test]
+fn scheduling_affordance_requires_declared_edit_and_bash() {
+    let has_affordance = |selected: &[&str], hidden: &[&str]| {
+        let mut opts = options("/tmp", selected);
+        opts.hidden_tools = hidden.iter().map(|tool| (*tool).to_owned()).collect();
+        prompt(&opts).contains(EDIT_BASH_SCHEDULING_RULE)
+    };
+
+    assert!(has_affordance(&["read", "bash", "edit", "write"], &[]));
+    assert!(has_affordance(&["edit", "bash"], &[]));
+
+    assert!(!has_affordance(&[], &[]));
+    assert!(!has_affordance(&["read", "grep", "find", "ls"], &[]));
+    assert!(!has_affordance(&["read", "edit"], &[]));
+    assert!(!has_affordance(&["bash"], &[]));
+    assert!(!has_affordance(&["edit"], &[]));
+    assert!(!has_affordance(&["edit", "bash"], &["bash"]));
+    assert!(!has_affordance(&["edit", "bash"], &["edit"]));
+    assert!(!has_affordance(
+        &["read", "bash", "edit", "write", "codemode"],
+        &["read", "bash", "edit", "write"],
+    ));
 }
 
 #[test]

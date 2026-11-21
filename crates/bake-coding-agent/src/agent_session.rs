@@ -95,6 +95,7 @@ mod approval_history;
 mod background_compaction;
 mod cached_compaction;
 mod codemode;
+mod context_inspect;
 mod context_masking;
 mod control;
 mod create;
@@ -120,6 +121,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 
 pub use background_compaction::BackgroundCompactionStatus;
+pub use context_inspect::SessionContextReport;
 use control::Control;
 use create::{model_profile, profile_tool_names};
 use events::Listeners;
@@ -171,8 +173,7 @@ use crate::session::{GroupEntry, SessionError, SessionManager};
 use crate::settings::{Settings, SettingsStore};
 use crate::skills::expand_skill_command;
 use crate::system_prompt::{
-    SystemPromptOptions, build_system_prompt_sections, diff_system_prompt_sections,
-    normalize_prompt_guidelines,
+    SystemPromptOptions, diff_system_prompt_sections, normalize_prompt_guidelines,
 };
 use crate::tools::image::{
     ImageResizeOptions, ProcessedImage, normalize_tool_result_images, process_image,
@@ -1176,6 +1177,8 @@ impl AgentSession {
 mod approval_tests;
 #[cfg(test)]
 mod codemode_tests;
+#[cfg(test)]
+mod context_inspect_tests;
 #[cfg(test)]
 mod control_tests;
 #[cfg(test)]

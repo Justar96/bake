@@ -66,6 +66,8 @@ const RETRYABLE_PROVIDER_ERRORS: &[&str] = &[
     "reset before headers",
     "socket hang up",
     "socket connection was closed",
+    "closed network connection",
+    "invalid sse (?:data )?json",
     "timed? out",
     "timeout",
     "terminated",
@@ -354,6 +356,11 @@ mod tests {
             "stream disconnected before completion: stream closed before response.completed",
             // v1.5.2, #11879: "matches gateway wording for a stream cut short mid-reply"
             "Claude Code's stream from Anthropic was cut short after the reply had begun",
+            // router-for-me/pi-cliproxyapi-provider `retry.ts`: Go `net` pooled
+            // upstream disconnect and truncated SSE JSON frames on CLIProxyAPI.
+            "Post \"https://chatgpt.com/backend-api/codex/responses\": read tcp 10.0.0.1:443->10.0.0.2:51234: use of closed network connection",
+            "cliproxyapi API error: Invalid SSE JSON: EOF while parsing a string at line 1 column 42",
+            "invalid SSE data JSON: Unexpected end of JSON input",
             "503",
             "HTTP 503: unavailable",
         ] {

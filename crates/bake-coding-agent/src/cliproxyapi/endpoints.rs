@@ -71,17 +71,16 @@ pub(crate) fn js_trim(value: &str) -> &str {
     })
 }
 
-/// `cliProxyEndpoints`: accept a root URL, a `/v1` URL, or the proxy's
-/// native `/backend-api` URL, with or without a scheme (`http://` is
-/// assumed).
+/// `cliProxyEndpoints`: accept a root URL, a `/v1` or `/v1/models` URL, or
+/// the proxy's native `/backend-api` (or `/backend-api/codex` /
+/// `/backend-api/codex/responses`) URL, with or without a scheme (`http://` is
+/// assumed when no `scheme://` prefix is present).
 pub fn cli_proxy_endpoints(input: &str) -> Result<CliProxyEndpoints, CliProxyUrlError> {
     let raw = js_trim(input);
     if raw.is_empty() {
         return Err(CliProxyUrlError::Empty);
     }
-    let has_scheme = starts_with_ignore_ascii_case(raw, "http://")
-        || starts_with_ignore_ascii_case(raw, "https://");
-    let text = if has_scheme {
+    let text = if has_url_scheme(raw) {
         raw.to_owned()
     } else {
         format!("http://{raw}")
@@ -98,10 +97,16 @@ pub fn cli_proxy_endpoints(input: &str) -> Result<CliProxyEndpoints, CliProxyUrl
         return Err(CliProxyUrlError::Disallowed);
     }
     let trimmed = url.path().trim_end_matches('/');
-    let path = trimmed
-        .strip_suffix("/v1")
-        .or_else(|| trimmed.strip_suffix("/backend-api"))
-        .unwrap_or(trimmed);
+    let path = [
+        "/v1/models",
+        "/v1",
+        "/backend-api/codex/responses",
+        "/backend-api/codex",
+        "/backend-api",
+    ]
+    .into_iter()
+    .find_map(|suffix| trimmed.strip_suffix(suffix))
+    .unwrap_or(trimmed);
     let root = format!("{}{path}", url.origin().ascii_serialization());
     Ok(CliProxyEndpoints {
         models: format!("{root}/v1/models?client_version=pi"),
@@ -110,10 +115,16 @@ pub fn cli_proxy_endpoints(input: &str) -> Result<CliProxyEndpoints, CliProxyUrl
     })
 }
 
-fn starts_with_ignore_ascii_case(value: &str, prefix: &str) -> bool {
-    value
-        .get(..prefix.len())
-        .is_some_and(|head| head.eq_ignore_ascii_case(prefix))
+/// RFC 3986 `scheme "://"`: `ALPHA *( ALPHA / DIGIT / "+" / "-" / "." ) "://"`.
+fn has_url_scheme(value: &str) -> bool {
+    let Some((scheme, _)) = value.split_once("://") else {
+        return false;
+    };
+    let mut bytes = scheme.bytes();
+    bytes
+        .next()
+        .is_some_and(|first| first.is_ascii_alphabetic())
+        && bytes.all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'-' | b'.'))
 }
 
 #[cfg(test)]
@@ -195,6 +206,43 @@ mod tests {
         assert_eq!(root("http://h#frag"), Err(CliProxyUrlError::Disallowed));
         assert_eq!(root("http://user@h"), Err(CliProxyUrlError::Disallowed));
         assert_eq!(root("http://:@h"), Ok("http://h".into()));
-        assert_eq!(root("ftp://x"), Ok("http://ftp//x".into()));
+        assert_eq!(root("ftp://x"), Err(CliProxyUrlError::Disallowed));
+        assert_eq!(
+            root("ws://127.0.0.1:8317"),
+            Err(CliProxyUrlError::Disallowed)
+        );
+        assert_eq!(
+            root("wss://proxy.example/v1"),
+            Err(CliProxyUrlError::Disallowed)
+        );
+        assert_eq!(root("http://h/v1/models"), Ok("http://h".into()));
+        assert_eq!(root("http://h/backend-api/codex"), Ok("http://h".into()));
+        assert_eq!(
+            root("http://h/backend-api/codex/responses/"),
+            Ok("http://h".into())
+        );
+    }
+
+    mod properties {
+        use proptest::prelude::*;
+
+        use super::*;
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(128))]
+
+            #[test]
+            fn endpoints_never_panic_and_root_and_inference_are_idempotent(input in "\\PC{0,120}") {
+                if let Ok(parsed) = cli_proxy_endpoints(&input) {
+                    let from_root = cli_proxy_endpoints(&parsed.root);
+                    let from_inference = cli_proxy_endpoints(&parsed.inference);
+                    prop_assert_eq!(from_root.as_ref(), Ok(&parsed));
+                    prop_assert_eq!(from_inference.as_ref(), Ok(&parsed));
+                    prop_assert!(
+                        parsed.root.starts_with("http://") || parsed.root.starts_with("https://")
+                    );
+                }
+            }
+        }
     }
 }

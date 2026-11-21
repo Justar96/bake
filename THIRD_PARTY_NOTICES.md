@@ -6,12 +6,13 @@ Bake's dependencies are locked in [`Cargo.lock`](Cargo.lock). Native archives ca
 
 ## Ported source (`crates/bake-ai`)
 
-The Rust `bake-ai` crate ports code from these MIT-licensed projects. Its [`NOTICE`](crates/bake-ai/NOTICE) file reproduces both license texts, and its module documentation names each source file.
+The Rust `bake-ai` crate ports code from these MIT-licensed projects. Its [`NOTICE`](crates/bake-ai/NOTICE) file reproduces their license texts, and its module documentation names each source file.
 
 | Project | Ported revision | License |
 | --- | --- | --- |
 | [Pi](https://github.com/earendil-works/pi) `packages/ai`, Copyright (c) 2025 Mario Zechner | v1.1.0 (`abe508e1b89912adde45528136c3221eb69acdd7`) | MIT |
 | [partial-json](https://github.com/promplate/partial-json-parser-js), Copyright (c) 2023 Promplate Dev Team | 0.1.7 | MIT |
+| [pi-cliproxyapi-provider](https://github.com/router-for-me/pi-cliproxyapi-provider), Copyright (c) 2026 Router-For.ME | 1.5.0 (`5a1641be00ffd4e5f154c8fdea844ef90543035f`) | MIT |
 
 The crate's Cargo dependencies are locked in [`Cargo.lock`](Cargo.lock) and keep their own licenses.
 
@@ -21,7 +22,7 @@ The Rust `bake-agent` crate ports Pi's agent loop and stateful agent, and the to
 
 | Project | Ported revision | License |
 | --- | --- | --- |
-| [Pi](https://github.com/earendil-works/pi) `packages/agent` and `packages/ai/src/utils/validation.ts`, Copyright (c) 2025 Mario Zechner | v1.1.0 (`abe508e1b89912adde45528136c3221eb69acdd7`) | MIT |
+| [Pi](https://github.com/earendil-works/pi) `packages/agent` and `packages/ai/src/utils/validation.ts`, Copyright (c) 2025 Mario Zechner | v1.1.0 (`abe508e1b89912adde45528136c3221eb69acdd7`), with v1.3.0 (`71023aec1546d6d677a65669c5665c0927ce0dd0`) nested tool calls and v1.6.0 (`faac585884ae2c013a6b1400f3e9e77f10b34bac`) `#9986` aborted tool-batch handling | MIT |
 
 ## Ported source (`crates/bake-coding-agent`)
 
@@ -33,6 +34,7 @@ The Rust `bake-coding-agent` crate ports Pi's coding-agent package, the line dif
 | [jsdiff](https://github.com/kpdecker/jsdiff), Copyright (c) 2009-2015 Kevin Decker | 8.0.4 | BSD-3-Clause |
 | [pi-cached-compaction](https://github.com/nicobailon/pi-cached-compaction), Copyright (c) 2026 Nico Bailon | 0.2.0 (`e1e20de0a7e433070414602f1105cdcac258ef4f`) | MIT (declared in its `package.json`) |
 | [pi-telecom](https://github.com/Justar96/pi-telecom), Copyright (c) 2026 Justar96, portions copyright (c) 2026 Tinoy Thomas | 0.8.0 (`b6fe4d8317b387facd8d764b76f9f127f7547a85`), design only | MIT |
+| [pi-cliproxyapi-provider](https://github.com/router-for-me/pi-cliproxyapi-provider), Copyright (c) 2026 Router-For.ME | 1.5.0 (`5a1641be00ffd4e5f154c8fdea844ef90543035f`) | MIT |
 
 ## Ported source (`crates/bake-session`)
 

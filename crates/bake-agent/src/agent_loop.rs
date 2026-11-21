@@ -1108,6 +1108,9 @@ impl BatchRecord {
     /// change, so the command sent to check an edit does not run against a
     /// file the edit never reached.
     fn skipped(&self, batch: &Batch<'_>, tool_call: &ToolCall) -> Option<AgentToolCallOutcome> {
+        if is_aborted(batch.signal) {
+            return None;
+        }
         let failed = self.failed_write.as_deref()?;
         if matches!(
             batch.effect(tool_call),
@@ -1160,9 +1163,6 @@ async fn execute_segments(
                     execute_together(batch, calls, max_concurrent, &mut record).await;
                 }
             }
-        }
-        if is_aborted(batch.signal) {
-            break;
         }
     }
     ExecutedToolCallBatch {
@@ -1246,9 +1246,6 @@ async fn execute_together(
                     finalized
                 }));
             }
-        }
-        if is_aborted(signal) {
-            break;
         }
     }
 
@@ -1393,6 +1390,11 @@ async fn prepare_tool_call(
     tools: &[Arc<AgentTool>],
     parent_tool_call_id: Option<&str>,
 ) -> Preparation {
+    // Once aborted, skip preparation and the hooks; callers still record
+    // this result, so no call is left without one (Pi #9986).
+    if is_aborted(signal) {
+        return immediate_error("Operation aborted");
+    }
     let Some(tool) = find_tool(tools, &tool_call.name) else {
         let available: Vec<&str> = tools.iter().map(|tool| tool.name.as_str()).collect();
         return immediate_error(crate::unknown_tool::unknown_tool_message(
@@ -1414,6 +1416,9 @@ async fn prepare_tool_call(
         Ok(args) => args,
         Err(error) => return immediate_error(error),
     };
+    if is_aborted(signal) {
+        return immediate_error("Operation aborted");
+    }
 
     if let Some(before) = hooks.before {
         let outcome = calling(|| {
@@ -1449,9 +1454,6 @@ async fn prepare_tool_call(
                 is_error: true,
             };
         }
-    }
-    if is_aborted(signal) {
-        return immediate_error("Operation aborted");
     }
     Preparation::Prepared {
         tool: Arc::clone(tool),
@@ -1764,7 +1766,8 @@ pub struct RunToolCallOptions<'a> {
 
 /// Pi's `runToolCall`: runs one call through argument preparation, schema
 /// validation, `beforeToolCall`, execution, and `afterToolCall`, with no
-/// events and no messages. Failures come back as `is_error` outcomes.
+/// events and no messages. Failures come back as `is_error` outcomes. An
+/// aborted `signal` is checked first, before tool lookup and hooks run.
 ///
 /// No agent serves the call's nested calls: its tool's
 /// [`ToolContext::nested`] refuses them. Tools that call other tools use

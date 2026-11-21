@@ -158,23 +158,24 @@ impl<'a> Task<'a> {
         }
     }
 
-    /// What it is: a shell's command; an agent's model, after where the
-    /// agent rests once a run has ended, `idle · faux/faux-2`.
+    /// What it is: a shell's command; an agent's latest activity or closing
+    /// words, falling back to its model id when none is reported.
     fn what(self) -> String {
         match self {
             Self::Shell(job) => job.command.clone(),
-            Self::Agent(agent) => {
-                let rest = match agent.state {
-                    AgentState::Idle(Some(_)) => Some(copy::AGENT_IDLE),
-                    AgentState::Saved(Some(_)) => Some(copy::AGENT_SAVED),
-                    _ => None,
-                };
-                [rest, agent.route.as_deref()]
-                    .into_iter()
-                    .flatten()
-                    .collect::<Vec<_>>()
-                    .join(copy::STATUS_SEP)
-            }
+            Self::Agent(agent) => agent
+                .detail
+                .as_deref()
+                .map(one_line)
+                .filter(|text| !text.is_empty())
+                .or_else(|| {
+                    agent
+                        .route
+                        .as_deref()
+                        .map(one_line)
+                        .filter(|text| !text.is_empty())
+                })
+                .unwrap_or_default(),
         }
     }
 
@@ -294,11 +295,15 @@ pub fn label(live: bool) -> &'static str {
     }
 }
 
-/// One count of the standing row: `2 running`, `1 failed`.
+/// One count of the standing row: `2 running`, `1 failed`, or compactly
+/// `● 2`, `✗ 1`.
+#[derive(Clone, Debug)]
 struct Count {
-    text: String,
+    phase: Phase,
+    n: usize,
+    word: &'static str,
     style: Style,
-    /// Whether it counts failures, which stay longer than the dim counts.
+    /// Whether it counts failures, which stay even when other counts give way.
     failed: bool,
 }
 
@@ -307,14 +312,14 @@ struct Count {
 /// for a look; then, dim, what is done, stopped, idle, saved, or
 /// unreadable. Counts of none are left out.
 fn counts(tasks: &[Task], look: Look) -> Vec<Count> {
-    let words = [
-        (copy::TASK_RUNNING, Style::new()),
-        (copy::AGENT_FAILED, transcript::red(look)),
-        (copy::AGENT_DONE, dim()),
-        (copy::AGENT_STOPPED, dim()),
-        (copy::AGENT_IDLE, dim()),
-        (copy::AGENT_SAVED, dim()),
-        (copy::AGENT_UNREADABLE, dim()),
+    let slots = [
+        (Phase::Running, copy::TASK_RUNNING, Style::new()),
+        (Phase::Failed, copy::AGENT_FAILED, transcript::red(look)),
+        (Phase::Done, copy::AGENT_DONE, dim()),
+        (Phase::Stopped, copy::AGENT_STOPPED, dim()),
+        (Phase::Resting, copy::AGENT_IDLE, dim()),
+        (Phase::Resting, copy::AGENT_SAVED, dim()),
+        (Phase::Unreadable, copy::AGENT_UNREADABLE, dim()),
     ];
     let mut tally = [0usize; 7];
     for task in tasks {
@@ -331,16 +336,32 @@ fn counts(tasks: &[Task], look: Look) -> Vec<Count> {
         };
         tally[slot] += 1;
     }
-    words
+    slots
         .into_iter()
         .zip(tally)
         .filter(|(_, n)| *n > 0)
-        .map(|((word, style), n)| Count {
-            text: format!("{n} {word}"),
+        .map(|((phase, word, style), n)| Count {
+            phase,
+            n,
+            word,
             style,
-            failed: word == copy::AGENT_FAILED,
+            failed: phase == Phase::Failed,
         })
         .collect()
+}
+
+/// Counts merged by [`Phase`] so compact mark counts (`● 2  ✗ 1  ✓ 2`)
+/// never repeat the same mark (such as idle and saved both using `○`).
+fn mark_counts(counts: &[Count]) -> Vec<Count> {
+    let mut merged: Vec<Count> = Vec::with_capacity(counts.len());
+    for count in counts {
+        if let Some(prev) = merged.iter_mut().find(|c| c.phase == count.phase) {
+            prev.n += count.n;
+        } else {
+            merged.push(count.clone());
+        }
+    }
+    merged
 }
 
 /// Fewest cells of the newest task's command, or of an agent's name, the
@@ -351,26 +372,32 @@ const FLEX_MIN: usize = 8;
 #[derive(Clone, Copy, Debug)]
 struct Kept {
     label: bool,
-    /// Counts after the first, other than the failed one, kept from the
-    /// front.
+    /// When true, counts render as compact marks (`● 2  ✗ 1  ✓ 2`) instead
+    /// of words (`2 running · 1 failed · 2 done`).
+    marks: bool,
+    /// Non-failed dim counts after the first kept in marks mode.
     extras: usize,
     newest: bool,
     /// The newest shell's command, or the newest agent's name.
     what: bool,
     time: bool,
-    failed: bool,
+    /// Whether the first count is kept alongside a failed count. Only set
+    /// false as a last resort when both cannot fit in the terminal width.
+    first: bool,
 }
 
 /// The row under the composer: the label, how many tasks run and how many
-/// failed or finished, then the newest running task, its mark, name or id,
-/// command, and time; with `tail`, such as the key that opens the tray,
-/// dim at the right. Nothing but the tail while there are no tasks.
+/// failed or finished, then (separated by a dim bar) the newest running
+/// task, its mark, name or id, command, and time; with `tail`, such as the
+/// key that opens the tray, dim at the right. Nothing but the tail while
+/// there are no tasks.
 ///
-/// Narrower, it gives up its least important parts first, each whole: the
-/// command shrinks to [`FLEX_MIN`] cells, then the dim counts go from the
-/// last, then the command, the time, the label, the newest task, and the
-/// failed count. The first count stays, and is never cut: on a row too
-/// narrow for it beside the tail, the tail gives way.
+/// Narrower, it gives up its parts whole in a defined order: the featured
+/// command shrinks to [`FLEX_MIN`] cells and drops, then the featured time
+/// and featured task drop, then counts switch from words to marks
+/// (`● 2  ✗ 1  ✓ 2`), then the label drops, then dim non-failed counts drop
+/// from the end. The failed count is never lost while it fits: on a row too
+/// narrow for it beside the tail, the tail gives way first.
 #[allow(clippy::too_many_arguments)]
 pub fn standing(
     tasks: &[Task],
@@ -386,35 +413,41 @@ pub fn standing(
     if tasks.is_empty() {
         return (Line::default(), tail);
     }
-    let counts = counts(tasks, look);
-    // The first count always shows; the failed one, when it is not first,
-    // stays longer than the dim ones.
-    let failed_at = counts
+    let word_counts = counts(tasks, look);
+    let compact = mark_counts(&word_counts);
+    let failed_at = compact
         .iter()
         .position(|count| count.failed)
         .filter(|at| *at > 0);
-    let extras = counts.len() - 1 - usize::from(failed_at.is_some());
+    let extras = compact.len() - 1 - usize::from(failed_at.is_some());
     let mut kept = Kept {
         label: true,
+        marks: false,
         extras,
         newest: newest.is_some(),
         what: true,
         time: true,
-        failed: true,
+        first: true,
     };
     let mut levels = vec![kept];
-    while kept.extras > 0 {
-        kept.extras -= 1;
+    // 1. Drop featured command, then time, then featured task.
+    if kept.newest {
+        kept.what = false;
+        levels.push(kept);
+        kept.time = false;
+        levels.push(kept);
+        kept.newest = false;
         levels.push(kept);
     }
-    for step in 0..5 {
-        match step {
-            0 => kept.what = false,
-            1 => kept.time = false,
-            2 => kept.label = false,
-            3 => kept.newest = false,
-            _ => kept.failed = false,
-        }
+    // 2. Switch words to marks while keeping every count.
+    kept.marks = true;
+    levels.push(kept);
+    // 3. Drop the label.
+    kept.label = false;
+    levels.push(kept);
+    // 4. Drop non-failed dim mark counts from the end, never dropping failed.
+    while kept.extras > 0 {
+        kept.extras -= 1;
         levels.push(kept);
     }
     let beside = match tail.width() {
@@ -423,11 +456,30 @@ pub fn standing(
     };
     for (room, tail) in [(beside, tail), (width, Line::default())] {
         for kept in &levels {
-            if let Some(line) =
-                standing_row(&counts, failed_at, newest, *kept, at, now, room, look, live)
-            {
+            let active = if kept.marks { &compact } else { &word_counts };
+            if let Some(line) = standing_row(
+                active,
+                if kept.marks { failed_at } else { None },
+                newest,
+                *kept,
+                at,
+                now,
+                room,
+                look,
+                live,
+            ) {
                 return (line, tail);
             }
+        }
+    }
+    // Last resort when even first + failed cannot fit in `width`: keep the
+    // failed count alone if present, else the first count alone.
+    if failed_at.is_some() {
+        kept.first = false;
+        if let Some(line) = standing_row(
+            &compact, failed_at, newest, kept, at, now, width, look, live,
+        ) {
+            return (line, Line::default());
         }
     }
     (Line::default(), Line::default())
@@ -464,10 +516,12 @@ fn standing_row(
     let mut extras = kept.extras;
     let mut shown = 0;
     for (i, count) in counts.iter().enumerate() {
-        let keep = if i == 0 {
+        let keep = if !kept.marks {
             true
+        } else if i == 0 {
+            kept.first
         } else if Some(i) == failed_at {
-            kept.failed
+            true
         } else if extras > 0 {
             extras -= 1;
             true
@@ -478,25 +532,44 @@ fn standing_row(
             continue;
         }
         if shown > 0 {
-            head.push(Span::styled(copy::STATUS_SEP, dim()));
+            if kept.marks {
+                head.push(Span::raw("  "));
+            } else {
+                head.push(Span::styled(copy::STATUS_SEP, dim()));
+            }
         } else if !head.is_empty() {
             head.push(Span::raw("  "));
         }
-        head.push(Span::styled(count.text.clone(), count.style));
+        if kept.marks {
+            head.push(mark(count.phase, look));
+            head.push(Span::raw(" "));
+            head.push(Span::styled(count.n.to_string(), count.style));
+        } else {
+            head.push(Span::styled(
+                format!("{} {}", count.n, count.word),
+                count.style,
+            ));
+        }
         shown += 1;
     }
-    // The newest running task: an agent shows its name, which gives way
-    // as its command does a shell's; a shell its id, command, and time.
+    // The newest running task, separated visually from the counts: an agent
+    // shows its name, which gives way as its command does a shell's; a shell
+    // shows its id, command, and time.
     let mut flex: Option<(String, Style)> = None;
     let mut tail = Vec::new();
+    let sep = if look.classic { " | " } else { " │ " };
     match newest.filter(|_| kept.newest) {
         Some(task @ Task::Agent(agent)) if kept.what => {
-            head.extend([Span::raw("  "), mark(task.phase(), look), Span::raw(" ")]);
+            head.extend([
+                Span::styled(sep, dim()),
+                mark(task.phase(), look),
+                Span::raw(" "),
+            ]);
             flex = Some((one_line(&agent.name), accent(look.tones)));
         }
         Some(task @ Task::Shell(job)) => {
             head.extend([
-                Span::raw("  "),
+                Span::styled(sep, dim()),
                 mark(task.phase(), look),
                 Span::raw(" "),
                 Span::styled(one_line(&job.id), accent(look.tones)),
@@ -635,10 +708,11 @@ pub struct Listed {
 }
 
 /// The tasks as one list `width` cells wide: each group under a dim
-/// label, one row per task, `selected` marked with the pointer and
-/// followed by its detail row. Every row has the same columns: the
-/// pointer, the mark, the name or id, the command or model, and, right
-/// aligned, the state word and the time where one is known.
+/// counted label, one row per task, `selected` marked with the pointer and
+/// followed by its detail row when it adds information not already shown on
+/// the row. Every row shares the same columns: the pointer, the mark, the
+/// name or id, the dim detail (command or agent activity/summary), and,
+/// flush right, the state word and the time where one is known.
 pub fn list(
     tasks: &[Task],
     selected: Option<&TaskId>,
@@ -652,8 +726,11 @@ pub fn list(
     let end = width.saturating_sub(MARGIN);
     let cols = columns(tasks, at, now, end);
     let pointer = if look.classic { ">" } else { "▸" };
+    let agent_count = tasks.iter().filter(|t| t.group() == Group::Agents).count();
+    let shell_count = tasks.iter().filter(|t| t.group() == Group::Shells).count();
     let mut listed = Listed::default();
     let mut group = None;
+    let mut first_group = true;
     let mut detail_somewhere = false;
     let mut detail_shown = false;
     for task in tasks.iter().copied() {
@@ -662,13 +739,20 @@ pub fn list(
         let start = listed.lines.len();
         if group != Some(task.group()) {
             group = Some(task.group());
-            listed.lines.push(group_label(task.group(), end, live));
+            let count = match task.group() {
+                Group::Agents => agent_count,
+                Group::Shells => shell_count,
+            };
+            listed
+                .lines
+                .push(group_label(task.group(), count, first_group, end, live));
+            first_group = false;
         }
         listed.rows.push(listed.lines.len());
         listed
             .lines
-            .push(row(task, picked, pointer, cols, at, now, look));
-        let detail = task.detail();
+            .push(row(task, picked, pointer, cols, end, at, now, look));
+        let detail = extra_detail(task, cols, end, at, now);
         detail_somewhere |= detail.is_some();
         if picked {
             if let Some(detail) = detail {
@@ -685,16 +769,84 @@ pub fn list(
     listed
 }
 
-/// A group's dim label, with what to know about its tasks when it fits:
-/// that shells stop when Bake exits, or that the preview's are samples.
-fn group_label(group: Group, end: usize, live: bool) -> Line<'static> {
-    let (name, note) = match (group, live) {
+/// The tasks list's key hints, dim, drawn as the tray's last row.
+pub fn list_footer(width: usize) -> Option<Line<'static>> {
+    let room = width.saturating_sub(MARGIN + GAP);
+    if room == 0 {
+        return None;
+    }
+    let text = if copy::TASKS_LIST_KEYS.width() <= room {
+        copy::TASKS_LIST_KEYS.to_owned()
+    } else if copy::TASKS_LIST_KEYS_SHORT.width() <= room {
+        copy::TASKS_LIST_KEYS_SHORT.to_owned()
+    } else {
+        fit(copy::TASKS_LIST_KEYS_SHORT, room)
+    };
+    (!text.is_empty()).then(|| Line::styled(format!("  {text}"), dim()))
+}
+
+/// Extra detail shown under a selected task: a shell's newest output line,
+/// or an agent's closing words when they did not fit whole in the row's
+/// detail column.
+fn extra_detail(
+    task: Task,
+    cols: Columns,
+    end: usize,
+    at: Duration,
+    now: Duration,
+) -> Option<String> {
+    let detail = task.detail()?;
+    if let Task::Agent(_) = task
+        && let Some(what_w) = row_what_width(task, cols, end, at, now)
+        && detail.width() <= what_w
+    {
+        return None;
+    }
+    Some(detail)
+}
+
+/// Width of the `what` column for `task`, when the list draws one.
+fn row_what_width(
+    task: Task,
+    cols: Columns,
+    end: usize,
+    at: Duration,
+    now: Duration,
+) -> Option<usize> {
+    cols.what?;
+    let word_w = cols.word?;
+    let time_w = cols
+        .time
+        .filter(|_| task.time(at, now).is_some())
+        .map_or(0, |tw| GAP + tw);
+    let right_w = word_w + time_w;
+    Some(end.saturating_sub(LEAD + cols.name + GAP + GAP + right_w))
+}
+
+/// A group's dim label with its count, and a single note where needed: that
+/// shells stop when Bake exits, or (on the first group only) that the
+/// preview's tasks are samples.
+fn group_label(
+    group: Group,
+    count: usize,
+    first_group: bool,
+    end: usize,
+    live: bool,
+) -> Line<'static> {
+    let (base, note) = match (group, live) {
         (Group::Agents, true) => (copy::TASKS_AGENTS, None),
         (Group::Shells, true) => (copy::TASKS_SHELLS, Some(copy::TASKS_SHELLS_NOTE)),
-        (Group::Agents, false) => (copy::TASKS_AGENTS, Some(copy::TASKS_SAMPLES_NOTE)),
-        (Group::Shells, false) => (copy::TASKS_SHELLS, Some(copy::TASKS_SAMPLES_NOTE)),
+        (Group::Agents, false) => (
+            copy::TASKS_AGENTS,
+            first_group.then_some(copy::TASKS_SAMPLES_NOTE),
+        ),
+        (Group::Shells, false) => (
+            copy::TASKS_SHELLS,
+            first_group.then_some(copy::TASKS_SAMPLES_NOTE),
+        ),
     };
-    let mut text = name.to_owned();
+    let name = format!("{base} {count}");
+    let mut text = name.clone();
     if let Some(note) = note
         && GAP + name.width() + copy::STATUS_SEP.width() + note.width() <= end
     {
@@ -703,16 +855,29 @@ fn group_label(group: Group, end: usize, live: bool) -> Line<'static> {
     Line::styled(format!("  {}", fit(&text, end.saturating_sub(GAP))), dim())
 }
 
-/// One task's row in `cols`.
+/// One task's row in `cols`, right-aligned flush to `end`.
+#[allow(clippy::too_many_arguments)]
 fn row(
     task: Task,
     picked: bool,
     pointer: &str,
     cols: Columns,
+    end: usize,
     at: Duration,
     now: Duration,
     look: Look,
 ) -> Line<'static> {
+    let time = cols
+        .time
+        .and_then(|tw| task.time(at, now).map(|text| (text, tw)));
+    let right_w = cols
+        .word
+        .map_or(0, |ww| ww + time.as_ref().map_or(0, |(_, tw)| GAP + *tw));
+    let name_w = if cols.what.is_some() || cols.word.is_none() {
+        cols.name
+    } else {
+        end.saturating_sub(LEAD + GAP + right_w)
+    };
     let mut spans = vec![
         if picked {
             Span::styled(format!("{pointer} "), accent(look.tones))
@@ -722,7 +887,7 @@ fn row(
         mark(task.phase(), look),
         Span::raw(" "),
         Span::styled(
-            padded(&one_line(task.name()), cols.name),
+            padded(&one_line(task.name()), name_w),
             if picked {
                 accent(look.tones)
             } else {
@@ -730,7 +895,7 @@ fn row(
             },
         ),
     ];
-    if let Some(cells) = cols.what {
+    if let Some(cells) = row_what_width(task, cols, end, at, now) {
         spans.push(Span::raw(" ".repeat(GAP)));
         spans.push(Span::styled(
             padded(&one_line(&task.what()), cells),
@@ -741,10 +906,9 @@ fn row(
         spans.push(Span::raw(" ".repeat(GAP)));
         spans.push(Span::styled(pad_start(&task.word(), cells), dim()));
     }
-    if let Some(cells) = cols.time {
+    if let Some((text, cells)) = time {
         spans.push(Span::raw(" ".repeat(GAP)));
-        let time = task.time(at, now).unwrap_or_default();
-        spans.push(Span::styled(pad_start(&time, cells), dim()));
+        spans.push(Span::styled(pad_start(&text, cells), dim()));
     }
     Line::from(spans)
 }
@@ -940,7 +1104,10 @@ mod tests {
             );
         }
         let done = agent("a", "A", AgentState::Idle(Some(Ended::Completed)));
-        assert_eq!(Task::Agent(&done).what(), "idle · faux/faux-2");
+        assert_eq!(Task::Agent(&done).what(), "faux/faux-2");
+        let mut with_detail = done.clone();
+        with_detail.detail = Some("Checked auth flow.".into());
+        assert_eq!(Task::Agent(&with_detail).what(), "Checked auth flow.");
         let working = agent("a", "A", AgentState::Working);
         assert_eq!(Task::Agent(&working).what(), "faux/faux-2");
     }
@@ -998,11 +1165,11 @@ mod tests {
         assert_eq!(
             lines(&listed),
             [
-                "  Agents",
-                "▸ ● Explore auth     faux/faux-2                               working        ",
-                "  ✗ Run the tests    saved · faux/faux-2                        failed        ",
-                "  ✓ Review the diff  idle · faux/faux-2                           done        ",
-                "  Shells · they stop when Bake exits",
+                "  Agents 3",
+                "▸ ● Explore auth     faux/faux-2                                       working",
+                "  ✗ Run the tests    The request failed.                                failed",
+                "  ✓ Review the diff  The change reads well.                               done",
+                "  Shells 2 · they stop when Bake exits",
                 "  ● bash-2           bun run dev                               running  1m 12s",
                 "  ✓ bash-1           cargo build                                exit 0     41s",
             ]
@@ -1031,10 +1198,10 @@ mod tests {
             true,
         );
         assert_eq!(listed.selected, Some(4..7));
-        // The preview's groups say they are samples.
+        // The preview notes samples once on the first group only.
         let preview = lines(&list(&tasks, None, at, at, 80, plain(), false));
-        assert_eq!(preview[0], "  Agents · samples, nothing runs");
-        assert_eq!(preview[4], "  Shells · samples, nothing runs");
+        assert_eq!(preview[0], "  Agents 3 · samples, nothing runs");
+        assert_eq!(preview[4], "  Shells 2");
     }
 
     // From 40 to 160 columns every row fits, keeps its columns, and gives
@@ -1069,28 +1236,26 @@ mod tests {
         }
         let at_width = |width| lines(&list(&tasks, None, at, at, width, plain(), true));
         assert_eq!(
-            at_width(60)[1..3],
+            at_width(60)[1..4],
             [
-                "▸ ● Explore auth     faux/faux-2           working        ",
-                "  ✗ Run the tests    saved · faux/faux-2    failed        ",
+                "▸ ● Explore auth     faux/faux-2                   working",
+                "  ✗ Run the tests    The request failed.            failed",
+                "  ✓ Review the diff  The change reads well.           done",
             ]
         );
         assert_eq!(
             at_width(60)[5],
             "  ● bash-2           bun run dev           running  1m 12s"
         );
-        assert_eq!(at_width(40)[1], "▸ ● Explore auth       working        ");
+        assert_eq!(at_width(40)[1], "▸ ● Explore auth               working");
         assert_eq!(at_width(40)[5], "  ● bash-2             running  1m 12s");
-        assert_eq!(at_width(30)[1], "▸ ● Explor…  working        ");
+        assert_eq!(at_width(30)[1], "▸ ● Explore auth     working");
         assert_eq!(at_width(30)[5], "  ● bash-2   running  1m 12s");
         assert_eq!(at_width(20)[1], "▸ ● Explore auth  ");
         assert_eq!(at_width(20)[5], "  ● bash-2        ");
         assert_eq!(
             at_width(160)[1],
-            format!(
-                "▸ ● Explore auth     faux/faux-2{}working        ",
-                " ".repeat(111)
-            )
+            format!("▸ ● Explore auth     faux/faux-2{}working", " ".repeat(119))
         );
         // A shell's id is short, so its command keeps the room an agent's
         // long name would take.
@@ -1100,6 +1265,18 @@ mod tests {
             lines(&list(&only, None, at, at, 40, plain(), true))[1],
             "▸ ● bash-2  bun run…   running  1m 12s"
         );
+        // The tray footer fits wide, short, and narrow widths without panicking.
+        assert_eq!(
+            text(&list_footer(60).unwrap()),
+            "  ↑↓ select · Enter open · x stop · Esc close"
+        );
+        assert_eq!(text(&list_footer(30).unwrap()), "  ↑↓ · Enter · x · Esc");
+        assert!(list_footer(0).is_none());
+        for width in 0..=160 {
+            if let Some(footer) = list_footer(width) {
+                assert!(footer.width() <= width, "{width}: {:?}", text(&footer));
+            }
+        }
     }
 
     #[test]
@@ -1162,7 +1339,11 @@ mod tests {
             plain(),
             true,
         );
-        assert_eq!(lines(&listed)[2], "    bad thing");
+        assert!(
+            lines(&listed)[1].contains("bad thing"),
+            "{:?}",
+            lines(&listed)
+        );
     }
 
     fn row_at(tasks: &[Task], newest: Option<Task>, width: usize, with_key: bool) -> String {
@@ -1176,8 +1357,9 @@ mod tests {
     }
 
     // Bake: the standing row reads what is in flight at a glance, and
-    // narrower gives up its least important parts first, each whole; the
-    // first count and the key are never cut.
+    // narrower gives up its parts whole in order: featured command, time,
+    // featured task, words->marks, label, then dim counts — never losing
+    // the failed count while it fits.
     #[test]
     fn the_standing_row_gives_way_part_by_part() {
         let mut agents = mixed();
@@ -1186,58 +1368,59 @@ mod tests {
         let tasks = order(&agents, &jobs);
         let newest = Some(Task::Shell(&jobs[1]));
         let mut seen = Vec::new();
-        for width in [80, 70, 60, 50, 45, 40, 35, 30, 24, 20, 18, 9, 8, 0] {
+        for width in [80, 70, 60, 50, 45, 30, 24, 18, 12, 9, 8, 5, 3, 2, 0] {
             seen.push((width, row_at(&tasks, newest, width, false)));
         }
         let expected = [
             (
                 80,
-                "Tasks  2 running · 1 failed · 2 done · 1 stopped  ● bash-2  bun run dev  1m 12s",
+                "Tasks  2 running · 1 failed · 2 done · 1 stopped │ ● bash-2  bun run dev  1m 12s",
             ),
             (
                 70,
-                "Tasks  2 running · 1 failed · 2 done  ● bash-2  bun run dev  1m 12s",
+                "Tasks  2 running · 1 failed · 2 done · 1 stopped │ ● bash-2  1m 12s",
             ),
             (
                 60,
-                "Tasks  2 running · 1 failed  ● bash-2  bun run dev  1m 12s",
+                "Tasks  2 running · 1 failed · 2 done · 1 stopped │ ● bash-2",
             ),
-            (50, "Tasks  2 running · 1 failed  ● bash-2  1m 12s"),
-            (45, "Tasks  2 running · 1 failed  ● bash-2  1m 12s"),
-            (40, "Tasks  2 running · 1 failed  ● bash-2"),
-            (35, "2 running · 1 failed  ● bash-2"),
-            (30, "2 running · 1 failed  ● bash-2"),
-            (24, "2 running · 1 failed"),
-            (20, "2 running · 1 failed"),
-            (18, "2 running"),
-            (9, "2 running"),
-            (8, ""),
+            (50, "Tasks  2 running · 1 failed · 2 done · 1 stopped"),
+            (45, "Tasks  ● 2  ✗ 1  ✓ 2  ⊘ 1"),
+            (30, "Tasks  ● 2  ✗ 1  ✓ 2  ⊘ 1"),
+            (24, "● 2  ✗ 1  ✓ 2  ⊘ 1"),
+            (18, "● 2  ✗ 1  ✓ 2  ⊘ 1"),
+            (12, "● 2  ✗ 1"),
+            (9, "● 2  ✗ 1"),
+            (8, "● 2  ✗ 1"),
+            (5, "✗ 1"),
+            (3, "✗ 1"),
+            (2, ""),
             (0, ""),
         ]
         .map(|(width, row)| (width, row.to_owned()));
         assert_eq!(seen, expected);
-        // The key keeps its cells while the composer has the keyboard.
+        // The key keeps its cells while the composer has the keyboard, and
+        // yields before the failed count is ever lost.
         assert_eq!(
             row_at(&tasks, newest, 60, true),
-            "Tasks  2 running · 1 failed  ● bash-2  1m 12s|Ctrl+G"
+            "Tasks  2 running · 1 failed · 2 done · 1 stopped|Ctrl+G"
         );
-        // A working agent as the newest shows its name, cut to fit.
+        assert_eq!(row_at(&tasks, newest, 20, true), "● 2  ✗ 1|Ctrl+G");
+        assert_eq!(row_at(&tasks, newest, 12, true), "● 2  ✗ 1");
+        // A working agent as the newest shows its name, cut to fit, then
+        // drops whole before counts switch from words to marks.
         let newest = Some(Task::Agent(&agents[2]));
         assert_eq!(
             row_at(&tasks, newest, 80, false),
-            "Tasks  2 running · 1 failed · 2 done · 1 stopped  ● Explore auth"
+            "Tasks  2 running · 1 failed · 2 done · 1 stopped │ ● Explore auth"
         );
         assert_eq!(
-            row_at(&tasks, newest, 44, false),
-            "Tasks  2 running · 1 failed  ● Explore auth"
+            row_at(&tasks, newest, 62, false),
+            "Tasks  2 running · 1 failed · 2 done · 1 stopped │ ● Explore…"
         );
         assert_eq!(
-            row_at(&tasks, newest, 40, false),
-            "Tasks  2 running · 1 failed  ● Explore…"
-        );
-        assert_eq!(
-            row_at(&tasks, newest, 36, false),
-            "Tasks  2 running · 1 failed"
+            row_at(&tasks, newest, 58, false),
+            "Tasks  2 running · 1 failed · 2 done · 1 stopped"
         );
         // Nothing running: the failure leads; nothing failed either, the
         // row is a quiet count.
@@ -1256,7 +1439,7 @@ mod tests {
         assert_eq!(row_at(&tasks, None, 80, true), "Tasks  1 done|Ctrl+G");
         assert_eq!(row_at(&[], None, 80, true), "|Ctrl+G");
         // The open tray's hidden rows take the tail at any width they fit
-        // beside the first count, and give way where they do not.
+        // beside the counts, and give way where they do not.
         let tail = |width| {
             let (left, right) = standing(
                 &tasks,
@@ -1271,8 +1454,10 @@ mod tests {
             format!("{}|{}", text(&left), text(&right))
         };
         assert_eq!(tail(40), "Tasks  1 done|+2 below");
-        assert_eq!(tail(16), "1 done|+2 below");
-        assert_eq!(tail(12), "1 done|");
+        assert_eq!(tail(20), "Tasks  ✓ 1|+2 below");
+        assert_eq!(tail(14), "✓ 1|+2 below");
+        assert_eq!(tail(12), "Tasks  ✓ 1|");
+        assert_eq!(tail(8), "✓ 1|");
     }
 
     // The failed count is red in colour; without colour it is drawn plain

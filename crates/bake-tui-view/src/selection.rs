@@ -142,12 +142,215 @@ pub fn line_columns(range: Range, at: Anchor, text: &str) -> Option<(usize, usiz
 }
 
 /// The graphemes of `text` that start inside cells `from..to`.
+///
+/// When `to` reaches the end of `text`, trailing zero-width graphemes (such as
+/// an intentional trailing U+FEFF) at column `to` are included as well.
 pub fn slice_cells(text: &str, from: usize, to: usize) -> String {
-    cells(text)
+    let grapheme_cells = cells(text);
+    let width = grapheme_cells.last().map_or(0, |&(_, _, end)| end);
+    grapheme_cells
         .into_iter()
-        .filter(|&(_, start, _)| start >= from && start < to)
+        .filter(|&(_, start, end)| {
+            start >= from && (start < to || (to == width && start == to && end == to))
+        })
         .map(|(grapheme, ..)| grapheme)
         .collect()
+}
+
+/// One source unit (a grapheme cluster or `\t`) inside a [`SourceLine`], with
+/// its byte range in [`SourceLine::text`] and its half-open visual cell columns
+/// `[from, to)` on the rendered line.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct CellSpan {
+    pub(crate) byte_start: usize,
+    pub(crate) byte_end: usize,
+    pub(crate) from: usize,
+    pub(crate) to: usize,
+}
+
+/// Source-backed mapping for a single rendered transcript line.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct SourceLine {
+    /// Leading layout gutter cells to skip when copying (e.g. `> `, the
+    /// two-space rail, fenced-code `  │ `, or soft-wrap continuation indent).
+    pub(crate) gutter_cells: usize,
+    /// Visual cell column where `text` starts on this line. Any cells in
+    /// `gutter_cells..content_col` (such as a formatted list bullet `• ` on
+    /// the first line of a list item) are sliced from [`CopyLine::visual`].
+    pub(crate) content_col: usize,
+    /// Exact source text for this visual row (with original `\t` and trailing
+    /// whitespace intact before display tab expansion or visual trimming).
+    pub(crate) text: String,
+    /// Visual cell spans for each source unit in `text`, in ascending order.
+    pub(crate) spans: Vec<CellSpan>,
+    /// Whether this visual row is a soft-wrap continuation of the preceding
+    /// visual row (no `\n` inserted before it when both are selected).
+    pub(crate) wrapped_from_prev: bool,
+    /// Whether this visual row soft-wraps into the following visual row.
+    pub(crate) wrapped_to_next: bool,
+}
+
+/// One rendered transcript line paired with optional [`SourceLine`] metadata
+/// for faithful copy extraction.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct CopyLine {
+    /// The rendered visual line text, matching the terminal cell grid.
+    pub(crate) visual: String,
+    /// Structured source mapping when the line is backed by wrapped source
+    /// text; `None` for visual-only regions (tables, diagrams, banners, rules,
+    /// tool cards).
+    pub(crate) source: Option<SourceLine>,
+}
+
+impl CopyLine {
+    /// A line without source metadata, copied from its rendered visual cells.
+    pub(crate) fn visual(visual: String) -> Self {
+        Self {
+            visual,
+            source: None,
+        }
+    }
+}
+
+/// Appends printable text plus `\t` and `\n` from `chunk`, dropping any raw
+/// control characters (such as concealed ESC / C0 / C1 / `\r`) so untrusted
+/// output cannot smuggle terminal control sequences into the clipboard.
+fn push_safe_text(out: &mut String, chunk: &str) {
+    for ch in chunk.chars() {
+        if ch == '\t' || ch == '\n' || !ch.is_control() {
+            out.push(ch);
+        }
+    }
+}
+
+fn is_wrap_blank(unit: &str) -> bool {
+    unit == " " || unit == "\t"
+}
+
+fn slice_source_line(
+    src: &SourceLine,
+    visual: &str,
+    range: Range,
+    is_start: bool,
+    is_end: bool,
+    out: &mut String,
+) {
+    let raw_from = if is_start { range.start.column } else { 0 };
+    let from = raw_from.max(src.gutter_cells);
+    let to = if !is_end {
+        usize::MAX
+    } else if range.end.boundary {
+        range.end.column
+    } else {
+        range.end.column.saturating_add(1)
+    };
+    if to <= from {
+        return;
+    }
+
+    // Formatted visual prefix between `gutter_cells` and `content_col`
+    // (for example a list bullet `• ` or blockquote bar `│ ` on the first
+    // line of an item, or unclamped leading indentation).
+    if from < src.content_col {
+        let vis_from = from;
+        let vis_to = to.min(src.content_col);
+        if vis_to > vis_from {
+            for (grapheme, g_from, g_to) in cells(visual) {
+                if g_from >= src.content_col {
+                    break;
+                }
+                if g_to > vis_from && g_from < vis_to && g_from >= src.gutter_cells {
+                    push_safe_text(out, grapheme);
+                }
+            }
+        }
+    }
+
+    let content_from = from.max(src.content_col);
+    let content_end = src.spans.last().map_or(src.content_col, |span| span.to);
+    // When a line soft-wraps into the next line and the selection ends on
+    // this line (without continuing onto the next), cap at the trimmed visual
+    // end so a trailing wrap-break space is not copied unintentionally.
+    let effective_to = if is_end && src.wrapped_to_next {
+        to.min(text_width(visual))
+    } else {
+        to
+    };
+    let reaches_end = !is_end || effective_to >= content_end;
+
+    for &span in &src.spans {
+        let unit = &src.text[span.byte_start..span.byte_end];
+        let included = if span.from == span.to {
+            // Zero-width grapheme (e.g. intentional U+FEFF BOM, U+200B) or
+            // hanging space/tab past the wrap limit.
+            if !is_end {
+                span.from >= content_from
+            } else if src.wrapped_to_next {
+                span.from >= content_from
+                    && (span.from < effective_to
+                        || (reaches_end && span.from == effective_to && !is_wrap_blank(unit)))
+            } else {
+                span.from >= content_from
+                    && (span.from < effective_to || (reaches_end && span.from == effective_to))
+            }
+        } else {
+            span.to > content_from && span.from < effective_to
+        };
+        if included {
+            push_safe_text(out, unit);
+        }
+    }
+}
+
+/// Extracts the text covered by `range` from the presented `lines`.
+///
+/// Lines with [`SourceLine`] metadata are sliced from their source spans with
+/// layout gutters removed, soft-wrapped continuations rejoined without
+/// spurious newlines, and original tabs, trailing whitespace, and intentional
+/// Unicode (including U+FEFF) preserved. Lines without source metadata fall
+/// back to slicing rendered visual cells. Control characters other than `\t`
+/// and `\n` are stripped.
+///
+/// Returns `None` when nothing is covered. Whitespace-only selections that
+/// cover actual characters return `Some(...)`.
+pub(crate) fn extract(range: Range, lines: &[(Anchor, CopyLine)]) -> Option<String> {
+    let mut out = String::new();
+    let mut has_prev = false;
+    let mut prev_wrapped_to_next = false;
+
+    for &(at, ref line) in lines {
+        if compare_lines(at, range.start.at).is_lt() || compare_lines(at, range.end.at).is_gt() {
+            continue;
+        }
+        let is_start = compare_lines(at, range.start.at).is_eq();
+        let is_end = compare_lines(at, range.end.at).is_eq();
+
+        let wrapped_from_prev = line
+            .source
+            .as_ref()
+            .is_some_and(|src| src.wrapped_from_prev);
+
+        if has_prev && !(wrapped_from_prev && prev_wrapped_to_next) {
+            out.push('\n');
+        }
+        has_prev = true;
+
+        match &line.source {
+            Some(src) => {
+                slice_source_line(src, &line.visual, range, is_start, is_end, &mut out);
+                prev_wrapped_to_next = src.wrapped_to_next;
+            }
+            None => {
+                if let Some((from, to)) = line_columns(range, at, &line.visual) {
+                    let sliced = slice_cells(&line.visual, from, to);
+                    push_safe_text(&mut out, sliced.trim_end_matches(' '));
+                }
+                prev_wrapped_to_next = false;
+            }
+        }
+    }
+
+    (!out.is_empty()).then_some(out)
 }
 
 /// The half-open cells of the word under `column`, joined across `/` and

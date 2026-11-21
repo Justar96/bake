@@ -18,7 +18,7 @@ use crate::tools::definition::ToolDefinition;
 /// The tool's name.
 pub const TOOL_NAME: &str = "telecom";
 
-const DESCRIPTION: &str = "Coordinate with the other Bake agents working in this repository, each known by a callsign (alpha, bravo, ...; a spawned agent is <parent>-1, ...).
+const DESCRIPTION: &str = "Coordinate with the other Bake agents working in this repository, each known by a callsign (such as nova or rook; a spawned agent is <parent>-1, ...).
 board: who works here, on what, and the asks waiting on you.
 send: message agents (to = callsign, or several comma-separated); an idle one starts a turn. ask: message one agent and wait for its answer; the wait ends early when something else arrives for you (wait false: return at once). An answer not waited for arrives later as a message. reply: answer an ask put to you (askId; optional when only one waits).
 broadcast: tell every agent here; it starts no turn and reaches them at their next prompt. status: set the one-line task the others see.";
@@ -227,9 +227,10 @@ mod tests {
             root: root.to_path_buf(),
             cwd: cwd.to_path_buf(),
             session_id: session.into(),
-            callsign: None,
+            callsign: session.strip_prefix("s-").map(str::to_owned),
             parent: None,
             model: None,
+            names: Vec::new(),
         };
         (Station::start(options, jobs, &work).unwrap(), work)
     }

@@ -1584,6 +1584,71 @@ fn an_esc_before_the_tree_commit_moves_nothing() {
     assert_eq!(texts(&file, "user"), ["alpha", "beta", "gamma"]);
 }
 
+// Bake: `/session context` opens a read-only InfoDialog with estimated system
+// prompt sections, total, separate direct tool schema estimate, and distinct
+// tool lists without sending any model request; `/session` stays unchanged and
+// unknown `/session` arguments are refused with the draft kept.
+#[test]
+fn session_context_opens_read_only_inspector_and_validates_arguments() {
+    let world = World::new("session-context");
+    let manager = persisted(&world);
+    let id = manager.session_id().to_owned();
+    let (h, requests) = session_harness(&world, manager, Vec::new(), None);
+
+    // Unknown arguments are refused before opening any dialog.
+    let bad = h.command(1, "/session unknown");
+    assert_eq!(
+        refused(&bad).as_deref(),
+        Some("Usage: /session [context]; your draft is kept.")
+    );
+    let extra = h.command(2, "/session context extra");
+    assert_eq!(
+        refused(&extra).as_deref(),
+        Some("Usage: /session [context]; your draft is kept.")
+    );
+
+    // `/session` stays unchanged.
+    h.submit_id(3, Submission::FollowUp("/session".into()));
+    let info_dialog = h.next_dialog();
+    let DialogKind::Info(info) = &info_dialog.kind else {
+        panic!("{info_dialog:?}");
+    };
+    assert_eq!(info.title, "Session info");
+    assert!(info.lines.contains(&InfoLine::Field {
+        label: "ID".into(),
+        value: id,
+    }));
+    h.choose_answer(info_dialog.id, DialogAnswer::Cancel);
+    let updates = h.ended(3);
+    assert!(committed(&updates).is_empty(), "{updates:#?}");
+
+    // `/session context` opens the read-only context inspector sheet.
+    h.submit_id(4, Submission::FollowUp("/session context".into()));
+    let ctx_dialog = h.next_dialog();
+    let DialogKind::Info(ctx) = &ctx_dialog.kind else {
+        panic!("{ctx_dialog:?}");
+    };
+    assert_eq!(ctx.title, "Session context");
+    assert!(ctx.lines.iter().any(|line| matches!(
+        line,
+        InfoLine::Field { label, value } if label == "Total" && value.starts_with('~')
+    )));
+    assert!(ctx.lines.iter().any(|line| matches!(
+        line,
+        InfoLine::Field { label, value } if label == "Schemas" && value.starts_with('~')
+    )));
+    h.choose_answer(ctx_dialog.id, DialogAnswer::Cancel);
+    let updates = h.ended(4);
+    assert!(
+        matches!(updates.last(), Some(RuntimeUpdate::Admitted(4))),
+        "{updates:#?}"
+    );
+    assert!(committed(&updates).is_empty(), "{updates:#?}");
+
+    h.stop();
+    assert_eq!(h_requests(&requests), 0);
+}
+
 #[path = "compact_live.rs"]
 mod compact_live;
 

@@ -14,7 +14,7 @@ same names; src/tests.rs and src/families_tests.rs from the files of the same
 names, with the insta snapshots under src/snapshots/ kept as plain text
 files; and the crate documentation in src/lib.rs from README.md.
 Not ported: examples/render.rs and the Bazel build file.
-Bake's own: src/property_tests.rs.
+Bake's own: src/property_tests.rs and src/lenient.rs.
 
 The upstream NOTICE file reads:
 --------------------------------------------------------------------------------

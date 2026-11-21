@@ -132,6 +132,10 @@ pub struct Settings {
     /// Defaults to false, while its effect on models is unmeasured;
     /// `BAKE_TELECOM` overrides it for a run ([`crate::telecom::enabled`]).
     pub telecom: bool,
+    /// `callsigns`: the names a top-level session draws its telecom
+    /// callsign from, in place of the built-in pool
+    /// ([`crate::telecom::names`]). Empty by default.
+    pub callsigns: Vec<String>,
     /// `visualize`: makes the `visualize` tool one of an interactive
     /// session's defaults ([`crate::tools::visualize`]). Defaults to true,
     /// by the owner's decision of 2026-11-14; `false` leaves it opt-in.
@@ -313,6 +317,7 @@ impl Default for Settings {
             task_documents: false,
             subagents: false,
             telecom: false,
+            callsigns: Vec::new(),
             visualize: true,
             schedules: false,
             hooks: HookSettings::default(),
@@ -702,6 +707,17 @@ impl Settings {
             task_documents: object.get("taskDocuments").and_then(Value::as_bool) == Some(true),
             subagents: object.get("subagents").and_then(Value::as_bool) == Some(true),
             telecom: object.get("telecom").and_then(Value::as_bool) == Some(true),
+            callsigns: object
+                .get("callsigns")
+                .and_then(Value::as_array)
+                .map(|names| {
+                    names
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_owned)
+                        .collect()
+                })
+                .unwrap_or_default(),
             visualize: object.get("visualize").and_then(Value::as_bool) != Some(false),
             schedules: object.get("schedules").and_then(Value::as_bool) == Some(true),
             hooks: HookSettings::from_value(object.get("hooks")),

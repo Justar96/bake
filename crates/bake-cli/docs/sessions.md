@@ -39,6 +39,7 @@ Text mode writes the run id and session path to standard error and prints the se
 ## In an interactive session
 
 - `/session` shows the session's name, file, id, and message and token counts. It changes nothing.
+- `/session context` shows local token estimates for the active system prompt by section (without printing prompt contents) and separately for the directly declared tool schemas, along with distinct lists of active direct tools, tools callable from `codemode` (which may overlap direct tools), and tools registered on this session that are inactive. These are local estimates rather than exact provider billing, and the inactive list covers only tools registered on this session rather than every optional tool Bake can enable. It sends nothing to a model and changes nothing.
 - `/name <name>` records a display name, with line breaks turned into spaces; `/name` alone asks for a name, starting from the current one. A name that would be blank is refused.
 - `/new` starts a new session in a new file, keeping the current model and thinking level.
 - `/resume` lists the working directory's saved sessions, newest first, by name or first message, with the running one marked `Current`. Typing searches them (see [Searching sessions](#searching-sessions)). Enter opens the chosen session with its own transcript, model, thinking level, and permission; Esc keeps the running session.

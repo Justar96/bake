@@ -64,6 +64,9 @@ impl Driver {
                     }
                     return self.command(id, text, name, argument);
                 }
+                let skills = self.skill_names();
+                let text =
+                    driver::rewrite_skill_shorthand(&text, &templates, &skills).unwrap_or(text);
                 if let Some(reason) = refused_command(&text, &templates) {
                     return self.refuse(id, text, reason);
                 }

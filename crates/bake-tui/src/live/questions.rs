@@ -2,12 +2,12 @@
 //! session's [`QuestionBroker`] is put to the person as a run of dialogs,
 //! one per question, and its answers settle the request together.
 //!
-//! A question with options is a list: one row per option, with its
-//! description at the right, and a last row to type an answer instead. A
-//! multiple-choice question shows a box before each option; choosing a row
-//! ticks or clears it, and `Done` answers with what is ticked. A question
-//! without options is a one-line field. Esc on any of them declines the
-//! whole request. Questions a spawned agent forwards name it in the title.
+//! A question with options is a [`QuestionDialog`]: numbered rows with
+//! labels and wrapped descriptions, an `Other` row to type an answer instead,
+//! and in multiple-choice mode aligned `[x]`/`[ ]` checkboxes and a `Done`
+//! row. A question without options is a one-line field. Esc on any of them
+//! declines the whole request. Questions a spawned agent forwards name it in
+//! the title.
 //!
 //! The dialogs are the view's own ([`bake_tui_view::dialog`]), so their
 //! keyboard handover protects a question as it protects a command's
@@ -19,7 +19,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use bake_coding_agent::questions::{Question, QuestionAnswer, QuestionBroker, QuestionPrompt};
 use bake_tui_view::dialog::{
-    DialogAnswer, DialogKind, DialogRequest, FieldDialog, ListDialog, ListItem,
+    DialogAnswer, DialogKind, DialogRequest, FieldDialog, QuestionChoice, QuestionDialog,
 };
 use bake_tui_view::runtime::RuntimeUpdate;
 use tokio::sync::mpsc;
@@ -27,11 +27,6 @@ use tokio::task::JoinHandle;
 
 use super::Send;
 use super::commands::next_dialog_id;
-
-/// The value of the row that types an answer instead.
-const OTHER: &str = "\u{0}other";
-/// The value of a multiple-choice question's `Done` row.
-const DONE: &str = "\u{0}done";
 
 /// One request being asked.
 struct Asking {
@@ -164,13 +159,43 @@ async fn ask(
     let count = prompt.questions.len();
     let mut entries = Vec::with_capacity(count);
     for (index, question) in prompt.questions.iter().enumerate() {
-        let title = title(question, prompt.from.as_deref(), index, count);
         let entry = match question.options.is_empty() {
-            true => typed(&title, &question.question, &send, &ids, &mut inbox).await,
-            false if question.multi_select => {
-                several(&title, question, &send, &ids, &mut inbox).await
+            true => {
+                let field_title = title(question, prompt.from.as_deref(), index, count);
+                typed(
+                    &field_title,
+                    &question.question,
+                    false,
+                    &send,
+                    &ids,
+                    &mut inbox,
+                )
+                .await
             }
-            false => one(&title, question, &send, &ids, &mut inbox).await,
+            false if question.multi_select => {
+                several(
+                    question,
+                    prompt.from.as_deref(),
+                    index,
+                    count,
+                    &send,
+                    &ids,
+                    &mut inbox,
+                )
+                .await
+            }
+            false => {
+                one(
+                    question,
+                    prompt.from.as_deref(),
+                    index,
+                    count,
+                    &send,
+                    &ids,
+                    &mut inbox,
+                )
+                .await
+            }
         };
         match entry {
             Some(entry) => entries.push(entry),
@@ -201,118 +226,102 @@ pub(super) fn title(question: &Question, from: Option<&str>, index: usize, count
     title
 }
 
-fn list(title: &str, note: &str, items: Vec<ListItem>, selected: Option<usize>) -> DialogKind {
-    DialogKind::List(ListDialog {
-        title: title.to_owned(),
-        items,
-        current: None,
+fn question_dialog(
+    question: &Question,
+    from: Option<&str>,
+    index: usize,
+    count: usize,
+    ticked: Vec<bool>,
+    selected: Option<usize>,
+) -> DialogKind {
+    DialogKind::Question(Box::new(QuestionDialog {
+        header: question.header.clone(),
+        from: from.map(str::to_owned),
+        progress: (count > 1).then_some((index + 1, count)),
+        question: question.question.clone(),
+        options: question
+            .options
+            .iter()
+            .map(|option| QuestionChoice {
+                value: option.label.clone(),
+                label: option.label.clone(),
+                description: (!option.description.is_empty()).then(|| option.description.clone()),
+            })
+            .collect(),
+        multi_select: question.multi_select,
+        ticked,
         selected,
-        filterable: false,
-        saves_default: false,
-        note: Some(note.to_owned()),
-        search: None,
-    })
-}
-
-fn item(value: &str, label: String, detail: &str) -> ListItem {
-    ListItem {
-        value: value.to_owned(),
-        label,
-        detail: (!detail.is_empty()).then(|| detail.to_owned()),
-        ..ListItem::default()
-    }
-}
-
-fn other_item() -> ListItem {
-    item(OTHER, "Type my own answer".to_owned(), "")
+    }))
 }
 
 async fn one(
-    title: &str,
     question: &Question,
+    from: Option<&str>,
+    index: usize,
+    count: usize,
     send: &Send,
     ids: &AtomicU64,
     inbox: &mut mpsc::UnboundedReceiver<(u64, DialogAnswer)>,
 ) -> Option<Vec<String>> {
-    let mut items: Vec<ListItem> = question
-        .options
-        .iter()
-        .map(|option| item(&option.label, option.label.clone(), &option.description))
-        .collect();
-    items.push(other_item());
+    let field_title = title(question, from, index, count);
+    let mut selected = None;
     loop {
-        let kind = list(title, &question.question, items.clone(), None);
+        let kind = question_dialog(question, from, index, count, Vec::new(), selected);
         match open(kind, send, ids, inbox).await {
-            DialogAnswer::Chose { value, .. } if value == OTHER => {
-                if let Some(typed) = typed(title, &question.question, send, ids, inbox).await {
+            DialogAnswer::Question { other: true, .. } => {
+                if let Some(typed) =
+                    typed(&field_title, &question.question, true, send, ids, inbox).await
+                {
                     return Some(typed);
                 }
                 // Esc on the field goes back to the options.
+                selected = Some(question.options.len());
             }
-            DialogAnswer::Chose { value, .. } => return Some(vec![value]),
+            DialogAnswer::Question {
+                values,
+                other: false,
+            } => return Some(values),
             _ => return None,
         }
     }
 }
 
 async fn several(
-    title: &str,
     question: &Question,
+    from: Option<&str>,
+    index: usize,
+    count: usize,
     send: &Send,
     ids: &AtomicU64,
     inbox: &mut mpsc::UnboundedReceiver<(u64, DialogAnswer)>,
 ) -> Option<Vec<String>> {
+    let field_title = title(question, from, index, count);
     let mut ticked = vec![false; question.options.len()];
     let mut selected = None;
     loop {
-        let chosen = ticked.iter().filter(|tick| **tick).count();
-        let mut items: Vec<ListItem> = question
-            .options
-            .iter()
-            .zip(&ticked)
-            .map(|(option, tick)| {
-                let mark = if *tick { "[x]" } else { "[ ]" };
-                item(
-                    &option.label,
-                    format!("{mark} {}", option.label),
-                    &option.description,
-                )
-            })
-            .collect();
-        items.push(other_item());
-        items.push(item(DONE, format!("Done ({chosen} chosen)"), ""));
-        let kind = list(title, &question.question, items, selected);
+        let kind = question_dialog(question, from, index, count, ticked.clone(), selected);
         match open(kind, send, ids, inbox).await {
-            DialogAnswer::Chose { value, .. } if value == DONE => {
-                return Some(
-                    question
-                        .options
-                        .iter()
-                        .zip(&ticked)
-                        .filter(|(_, tick)| **tick)
-                        .map(|(option, _)| option.label.clone())
-                        .collect(),
-                );
-            }
-            DialogAnswer::Chose { value, .. } if value == OTHER => {
-                if let Some(mut typed) = typed(title, &question.question, send, ids, inbox).await {
-                    let mut entry: Vec<String> = question
-                        .options
-                        .iter()
-                        .zip(&ticked)
-                        .filter(|(_, tick)| **tick)
-                        .map(|(option, _)| option.label.clone())
-                        .collect();
+            DialogAnswer::Question {
+                values,
+                other: false,
+            } => return Some(values),
+            DialogAnswer::Question {
+                values,
+                other: true,
+            } => {
+                ticked = question
+                    .options
+                    .iter()
+                    .map(|option| values.contains(&option.label))
+                    .collect();
+                if let Some(mut typed) =
+                    typed(&field_title, &question.question, true, send, ids, inbox).await
+                {
+                    let mut entry = values;
                     entry.append(&mut typed);
                     return Some(entry);
                 }
                 selected = Some(question.options.len());
-            }
-            DialogAnswer::Chose { value, .. } => {
-                if let Some(index) = question.options.iter().position(|o| o.label == value) {
-                    ticked[index] = !ticked[index];
-                    selected = Some(index);
-                }
             }
             _ => return None,
         }
@@ -322,6 +331,7 @@ async fn several(
 async fn typed(
     title: &str,
     prompt: &str,
+    back_to_options: bool,
     send: &Send,
     ids: &AtomicU64,
     inbox: &mut mpsc::UnboundedReceiver<(u64, DialogAnswer)>,
@@ -329,6 +339,8 @@ async fn typed(
     let kind = DialogKind::Field(Box::new(FieldDialog {
         title: title.to_owned(),
         prompt: prompt.to_owned(),
+        placeholder: Some("Type your answer…".to_owned()),
+        hint: back_to_options.then(|| "Esc goes back to the options".to_owned()),
         action: Some("answer".to_owned()),
         ..FieldDialog::default()
     }));
@@ -414,10 +426,10 @@ mod tests {
         (asking.await.unwrap().unwrap(), shown)
     }
 
-    fn choose(value: &'static str) -> Step {
-        Box::new(move |_| DialogAnswer::Chose {
-            value: value.to_owned(),
-            save_default: false,
+    fn answer_values(values: &'static [&'static str], other: bool) -> Step {
+        Box::new(move |_| DialogAnswer::Question {
+            values: values.iter().map(|v| (*v).to_owned()).collect(),
+            other,
         })
     }
 
@@ -429,11 +441,10 @@ mod tests {
                 question(&["x", "y"], false),
             ],
             vec![
-                choose("a"),
-                choose("a"),
-                choose("c"),
-                choose(DONE),
-                choose("y"),
+                answer_values(&["c"], true),
+                Box::new(|_| DialogAnswer::Cancel),
+                answer_values(&["c"], false),
+                answer_values(&["y"], false),
             ],
         )
         .await;
@@ -441,12 +452,17 @@ mod tests {
             answer,
             QuestionAnswer::Answered(vec![vec!["c".into()], vec!["y".into()]])
         );
-        let DialogKind::List(last_multi) = &shown[3] else {
+        let DialogKind::Question(reopened) = &shown[2] else {
             panic!()
         };
-        assert_eq!(last_multi.items[2].label, "[x] c");
-        assert_eq!(last_multi.items[4].label, "Done (1 chosen)");
-        assert_eq!(last_multi.selected, Some(2));
+        assert_eq!(reopened.ticked, vec![false, false, true]);
+        assert_eq!(reopened.selected, Some(3));
+        assert_eq!(reopened.progress, Some((1, 2)));
+        let DialogKind::Question(second) = &shown[3] else {
+            panic!()
+        };
+        assert_eq!(second.progress, Some((2, 2)));
+        assert!(!second.multi_select);
     }
 
     #[tokio::test]

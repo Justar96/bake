@@ -188,29 +188,24 @@ fn render_project_context(files: &[ContextFile]) -> String {
 }
 
 /// The preamble of Bake's default prompt.
-pub const PREAMBLE: &str = "You are Bake, a coding agent that works in the user's workspace by reading code, running commands, and editing files.";
+pub const PREAMBLE: &str = "You are Bake, a coding agent.";
 
-/// Bake's first rules; the precedence sentence
-/// follows Codex CLI's base instructions.
-const LEADING_RULES: [&str; 2] = [
+/// Bake's core rules; the precedence sentence follows Codex CLI's base
+/// instructions.
+const CORE_RULES: [&str; 3] = [
     "Follow the conventions of the surrounding code and the project's instructions. The user's requests take precedence over project instructions.",
     "Commit or push only when the task requests it, and do not discard changes you did not make.",
-];
-
-/// Bake's round-trip paragraph, for a session with tools, without the
-/// sentence `edit`'s own guideline states. Calls in one response do run
-/// in order for every tool that is not a trusted read: `edit` and `write`
-/// declare the `Write` effect, `bash` and every tool the session registers
-/// without an effect `Exec`, and the agent loop runs each such call alone,
-/// in order (`bake_agent::ToolEffect`). After a failed `Write` call, the
-/// loop skips the later `Exec` and undeclared calls of the response.
-const ROUND_TRIP_RULE: &str = "Work in as few model round trips as you can. Put independent tool calls in one response: read the files you need together, and send an edit with the command that checks it, since calls in one response run in order and the command is skipped if the edit fails. Do not re-read a file to confirm an edit that succeeded.";
-
-/// Bake's last rules, before the tool-contributed guidelines.
-const TRAILING_RULES: [&str; 2] = [
     "Report results and verification accurately, including failures and skipped checks.",
-    "Keep the final answer concise, factual, and neutral.",
 ];
+
+/// Factual scheduling affordance when both `edit` and `bash` are declared.
+/// Calls in one response run in order for every tool that is not a trusted
+/// read: `edit` and `write` declare the `Write` effect, `bash` and every tool
+/// the session registers without an effect `Exec`, and the agent loop runs
+/// each such call alone, in order (`bake_agent::ToolEffect`). After a failed
+/// `Write` call, the loop skips the later `Exec` and undeclared calls of the
+/// response.
+const EDIT_BASH_SCHEDULING_RULE: &str = "When edit and bash are called in the same response, they run in order and a subsequent bash call is skipped if the preceding edit fails.";
 
 fn build_rules(
     selected: &[String],
@@ -224,15 +219,10 @@ fn build_rules(
             rules.push(normalized.to_owned());
         }
     };
-    LEADING_RULES.iter().for_each(|rule| add(rule));
-    if !selected.is_empty() {
-        add(ROUND_TRIP_RULE);
-    }
-    TRAILING_RULES.iter().for_each(|rule| add(rule));
+    CORE_RULES.iter().for_each(|rule| add(rule));
     let has = |name: &str| selected.iter().any(|tool| tool == name);
-    // Bake does not install ripgrep, so the rule names its fallback.
-    if has("bash") && !has("grep") && !has("find") && !has("ls") {
-        add("Use bash for file operations like ls, find, and rg (grep where rg is not installed)");
+    if has("edit") && has("bash") {
+        add(EDIT_BASH_SCHEDULING_RULE);
     }
     for name in selected {
         for (tool, guidelines) in tool_guidelines {
@@ -251,9 +241,7 @@ fn build_rules(
 
 fn run_text(mode: RunMode) -> &'static str {
     match mode {
-        RunMode::Print => {
-            "This is a non-interactive run: no one can answer questions. Make reasonable assumptions, state them in your final answer, and finish the task."
-        }
+        RunMode::Print => "This is a non-interactive run: no one can answer questions.",
         RunMode::Interactive => {
             "This is an interactive session. Ask the user only when you are blocked or before an action that is hard to reverse or visible to others."
         }

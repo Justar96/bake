@@ -225,12 +225,7 @@ fn the_description_without_tools_is_pis_text() {
         prompt.snippet.as_deref(),
         Some("Run JavaScript that calls other tools")
     );
-    assert_eq!(
-        prompt.guidelines,
-        [
-            "Use codemode to batch independent tool calls (Promise.allSettled), chain them, or filter large output, instead of many separate calls."
-        ]
-    );
+    assert!(prompt.guidelines.is_empty());
 }
 
 fn echo() -> Arc<AgentTool> {
@@ -274,7 +269,7 @@ fn loadout(
     let no_namespace = |_: &str| None;
     let guidelines = |name: &str| {
         if name == "read" {
-            vec!["Use read to examine files instead of cat or sed.".to_owned()]
+            vec!["Follow supplied read guideline.".to_owned()]
         } else {
             Vec::new()
         }
@@ -327,7 +322,7 @@ fn presents_callable_tools_per_codemode_mode() {
     assert!(codemode.contains("### `echo`"));
     assert!(codemode.contains("### `read`"));
     // Hidden tools' guidelines move to their codemode sections.
-    assert!(codemode.contains("- Use read to examine files instead of cat or sed."));
+    assert!(codemode.contains("- Follow supplied read guideline."));
     assert_eq!(only.hidden_declarations, ["read", "echo"]);
 }
 

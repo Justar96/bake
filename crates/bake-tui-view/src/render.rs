@@ -23,7 +23,9 @@ use crate::cards;
 use crate::completion;
 use crate::composer::{self, Edge};
 use crate::copy;
-use crate::dialog::{Dialog, DialogKind, FieldDialog, InfoLine, ListLine, SearchOrder};
+use crate::dialog::{
+    Dialog, DialogKind, FieldDialog, InfoLine, ListLine, QuestionDialog, SearchOrder,
+};
 use crate::editor::{self, display};
 use crate::frame::FrameStyle;
 use crate::jobs;
@@ -72,9 +74,11 @@ fn needs(app: &State, width: u16, height: u16) -> Needs {
     let draft = editor::layout(app.draft.text(), app.draft.caret(), geometry.wrap_width);
     Needs {
         draft_rows: u16::try_from(draft.rows.len()).unwrap_or(u16::MAX),
-        // Only the tray's scopes have something to say on the bar.
-        bar: app.focus.in_tray(),
+        // Only the opened task/crew views have a breadcrumb bar above the
+        // composer; the tasks list keeps its key hints inside the tray.
+        bar: app.focus.in_tray() && app.focus != Focus::Tasks,
         status: true,
+        readings: status::has_readings(&app.status),
         // The row shows the tasks while the runtime reports any, and stays
         // over the tray while it is open.
         standing: app.tasks_row() || app.focus.in_tray(),
@@ -108,29 +112,30 @@ fn tray_cap(focus: Focus, height: u16) -> u16 {
 /// Rows the status line takes under the tray.
 const STATUS_ROWS: u16 = 1;
 
-/// Rows the tray wants: its contents and the blank rows it keeps under
-/// them, up to [`tray_cap`].
+/// Rows the tray wants: its contents, the blank rows it keeps under
+/// them, and its pinned footer when present, up to [`tray_cap`].
 fn tray_rows(app: &State, width: u16, height: u16) -> u16 {
     let cap = tray_cap(app.focus, height);
     if cap == 0 {
         return 0;
     }
     let tray = tray(app, usize::from(width), usize::from(cap));
-    u16::try_from(tray.lines.len() + tray.reserve)
+    u16::try_from(tray.lines.len() + tray.reserve + usize::from(tray.footer.is_some()))
         .unwrap_or(u16::MAX)
         .min(cap)
 }
 
 /// What the tray draws: its lines, the lines to keep in view, the blank
 /// rows to keep under them, for one shell the most its output can scroll,
-/// and for the list the line of each task's row, so its counts of what is
-/// out of view count tasks rather than lines.
+/// for the list the line of each task's row (so its counts of what is out
+/// of view count tasks rather than lines), and an optional pinned footer.
 struct Tray {
     lines: Vec<Line<'static>>,
     selected: Option<std::ops::Range<usize>>,
     reserve: usize,
     most: Option<usize>,
     counted: Option<Vec<usize>>,
+    footer: Option<Line<'static>>,
 }
 
 /// How the tasks draw. Bake: a running task's mark is a running call's,
@@ -149,6 +154,7 @@ fn task_look(app: &State) -> Look {
 fn tray(app: &State, width: usize, rows: usize) -> Tray {
     let look = task_look(app);
     let mut counted = None;
+    let mut footer = None;
     let (lines, selected, reserve, most) = match app.focus {
         Focus::Composer => (Vec::new(), None, 0, None),
         Focus::Tasks => {
@@ -162,6 +168,7 @@ fn tray(app: &State, width: usize, rows: usize) -> Tray {
                 app.live,
             );
             counted = Some(listed.rows);
+            footer = tasks::list_footer(width);
             (listed.lines, listed.selected, listed.reserve, None)
         }
         Focus::Inspect => (
@@ -211,6 +218,7 @@ fn tray(app: &State, width: usize, rows: usize) -> Tray {
         reserve,
         most,
         counted,
+        footer,
     }
 }
 
@@ -285,19 +293,30 @@ fn sheet_chrome(dialog: &Dialog, width: u16) -> usize {
                     .map_or(0, |hint| sheet_text(hint, width).len())
         }
         DialogKind::Info(_) => 2,
+        DialogKind::Question(q) => {
+            let inner = usize::from(width.min(SHEET_WIDTH)).saturating_sub(4).max(1);
+            3 + question_text_lines(&q.question, inner).len()
+        }
     }
 }
 
 /// The body lines a dialog has: a list's unfiltered lines, so typing a
 /// filter never changes the sheet's height, or an information sheet's
 /// rows wrapped to a framed sheet's width at `width` columns.
-fn sheet_body(dialog: &Dialog, width: u16) -> usize {
+fn sheet_body(dialog: &Dialog, width: u16, frame: FrameStyle, tones: Tones) -> usize {
     match &dialog.request.kind {
         DialogKind::List(_) => dialog.all_lines().len().max(1),
         DialogKind::Field(_) => 0,
         DialogKind::Info(info) => {
             let inner = usize::from(width.min(SHEET_WIDTH)).saturating_sub(4);
             info_rows(info, inner).len().max(1)
+        }
+        DialogKind::Question(q) => {
+            let inner = usize::from(width.min(SHEET_WIDTH)).saturating_sub(4).max(1);
+            question_body_lines(q, &dialog.ticked, dialog.selected, inner, frame, tones)
+                .0
+                .len()
+                .max(1)
         }
     }
 }
@@ -309,8 +328,14 @@ fn dialog_rows(app: &State, width: u16, height: u16) -> u16 {
     let Some(dialog) = app.dialog.as_ref().filter(|_| app.approval().is_none()) else {
         return 0;
     };
-    let rows =
-        sheet_chrome(dialog, width) + sheet_body(dialog, width).min(sheet_body_cap(height)) + 2;
+    let rows = sheet_chrome(dialog, width)
+        + sheet_body(dialog, width, app.frame, app.tones).min(sheet_body_cap(height))
+        + 2;
+    let rows = if matches!(dialog.request.kind, DialogKind::Question(_)) && height >= 8 {
+        rows.min(usize::from(height).saturating_sub(5).max(8))
+    } else {
+        rows
+    };
     u16::try_from(rows).unwrap_or(u16::MAX)
 }
 
@@ -424,14 +449,13 @@ fn sheet_window(
     (top, count, edges)
 }
 
-/// A dialog's key row: `keys`, or `short` where they do not fit, or only
-/// Enter and Esc ([`copy::DIALOG_KEYS_TINY`]), with the selection's
+/// A dialog's key row: the first of `candidates` that fits `width`, or
+/// only Enter and Esc ([`copy::DIALOG_KEYS_TINY`]), with the selection's
 /// position at the right edge; where even that does not fit, the position
 /// goes before Esc does, so a narrow sheet still says how to cancel.
-fn sheet_footer(keys: &str, short: &str, position: Option<String>, width: usize) -> Line<'static> {
-    let candidates = [keys, short, copy::DIALOG_KEYS_TINY];
+fn sheet_footer_from(candidates: &[&str], position: Option<String>, width: usize) -> Line<'static> {
     if let Some(position) = position {
-        for keys in candidates {
+        for &keys in candidates {
             if keys.width() + SHEET_GAP + position.width() <= width {
                 let fill = width - keys.width() - position.width();
                 return Line::styled(format!("{keys}{}{position}", " ".repeat(fill)), dim());
@@ -439,10 +463,370 @@ fn sheet_footer(keys: &str, short: &str, position: Option<String>, width: usize)
         }
     }
     let keys = candidates
-        .into_iter()
+        .iter()
+        .copied()
         .find(|keys| keys.width() <= width)
         .unwrap_or(copy::DIALOG_KEYS_TINY);
     Line::styled(fit(keys, width), dim())
+}
+
+/// A dialog's key row with full and short forms.
+fn sheet_footer(keys: &str, short: &str, position: Option<String>, width: usize) -> Line<'static> {
+    sheet_footer_from(&[keys, short, copy::DIALOG_KEYS_TINY], position, width)
+}
+
+/// Single-line untrusted text with escape sequences, control characters,
+/// and line breaks removed.
+fn clean_question_inline(text: &str) -> String {
+    crate::shell_output::parse_sgr(&text.replace(['\n', '\r'], " "), Tones::None).0
+}
+
+/// Full wrapped question text at `w` cells, never truncated; escape
+/// sequences and control characters are stripped.
+fn question_text_lines(text: &str, w: usize) -> Vec<String> {
+    let w = w.max(1);
+    let mut rows: Vec<String> = text
+        .split('\n')
+        .flat_map(|raw| {
+            let cleaned = crate::shell_output::parse_sgr(&raw.replace('\r', ""), Tones::None).0;
+            transcript::wrap(&cleaned, w)
+        })
+        .collect();
+    if rows.is_empty() {
+        rows.push(String::new());
+    }
+    rows
+}
+
+/// Clips a styled [`Line`] so its total display width never exceeds `w`.
+fn clip_line(line: Line<'static>, w: usize) -> Line<'static> {
+    let mut rem = w;
+    let mut spans = Vec::with_capacity(line.spans.len());
+    for span in line.spans {
+        if rem == 0 {
+            break;
+        }
+        let sw = span.content.width();
+        if sw <= rem {
+            rem -= sw;
+            spans.push(span);
+        } else {
+            spans.push(Span::styled(fit(&span.content, rem), span.style));
+            break;
+        }
+    }
+    Line::from(spans)
+}
+
+/// A question dialog's title row: header chip (bold notice) and optional
+/// asking agent (dim) on the left, and `Question N of M` (dim) right-aligned
+/// when several questions are asked.
+fn question_title(q: &QuestionDialog, title_style: Style, w: usize) -> Line<'static> {
+    let chip_empty = q.header.trim().is_empty();
+    let chip = if chip_empty {
+        copy::DIALOG_QUESTION_TITLE.to_owned()
+    } else {
+        clean_question_inline(&q.header)
+    };
+    let from = q
+        .from
+        .as_deref()
+        .map(clean_question_inline)
+        .filter(|s| !s.is_empty())
+        .map(|f| {
+            format!(
+                "{}{}",
+                copy::STATUS_SEP,
+                copy::DIALOG_QUESTION_FROM.replace("{from}", &f)
+            )
+        });
+    let left_spans = |max_w: usize| -> Vec<Span<'static>> {
+        match &from {
+            Some(from_text) if chip.width() + from_text.width() <= max_w => vec![
+                Span::styled(chip.clone(), title_style),
+                Span::styled(from_text.clone(), dim()),
+            ],
+            Some(from_text) if chip.width() + 4 <= max_w => vec![
+                Span::styled(chip.clone(), title_style),
+                Span::styled(fit(from_text, max_w - chip.width()), dim()),
+            ],
+            _ => vec![Span::styled(fit(&chip, max_w), title_style)],
+        }
+    };
+    let progress = q.progress.filter(|&(_, count)| count > 1).map(|(i, n)| {
+        let full = if chip_empty {
+            copy::DIALOG_QUESTION_PROGRESS_SHORT
+        } else {
+            copy::DIALOG_QUESTION_PROGRESS
+        }
+        .replace("{index}", &i.to_string())
+        .replace("{count}", &n.to_string());
+        let short = format!("{i}/{n}");
+        (full, short)
+    });
+    if let Some((full, short)) = progress {
+        let left_full_w = chip.width() + from.as_ref().map_or(0, |f| f.width());
+        for tag in [&full, &short] {
+            if left_full_w + SHEET_GAP + tag.width() <= w {
+                let mut spans = left_spans(left_full_w);
+                let used: usize = spans.iter().map(|s| s.content.width()).sum();
+                let fill = w.saturating_sub(used + tag.width());
+                spans.push(Span::raw(" ".repeat(fill)));
+                spans.push(Span::styled(tag.clone(), dim()));
+                return clip_line(Line::from(spans), w);
+            }
+        }
+        if w >= short.width() + SHEET_GAP + 6 {
+            let max_left = w - short.width() - SHEET_GAP;
+            let mut spans = left_spans(max_left);
+            let used: usize = spans.iter().map(|s| s.content.width()).sum();
+            let fill = w.saturating_sub(used + short.width());
+            spans.push(Span::raw(" ".repeat(fill)));
+            spans.push(Span::styled(short, dim()));
+            return clip_line(Line::from(spans), w);
+        }
+    }
+    clip_line(Line::from(left_spans(w)), w)
+}
+
+/// Builds a [`QuestionDialog`]'s option rows, separator, `Other` row, and
+/// (in multi-select) `Done` row, returning both the drawn lines and each
+/// selectable row's `(start, end)` line span.
+fn question_body_lines(
+    q: &QuestionDialog,
+    ticked: &[bool],
+    selected: usize,
+    w: usize,
+    frame: FrameStyle,
+    tones: Tones,
+) -> (Vec<Line<'static>>, Vec<(usize, usize)>) {
+    let w = w.max(1);
+    let glyphs = frame.glyphs();
+    let desc_sep = if frame == FrameStyle::Classic {
+        " - "
+    } else {
+        " — "
+    };
+    let prefix_w = 2 + 3 + if q.multi_select { 4 } else { 0 };
+    let label_room = w.saturating_sub(prefix_w).max(1);
+    let inline_desc = w > prefix_w + 4
+        && q.options.iter().all(|opt| {
+            let label = clean_question_inline(&opt.label);
+            match opt.description.as_deref().filter(|d| !d.trim().is_empty()) {
+                Some(desc) => {
+                    !desc.contains('\n')
+                        && label.width() + desc_sep.width() + clean_question_inline(desc).width()
+                            <= label_room
+                }
+                None => label.width() <= label_room,
+            }
+        });
+
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    let mut row_spans: Vec<(usize, usize)> = Vec::with_capacity(q.row_count());
+
+    for (i, opt) in q.options.iter().enumerate() {
+        let start = lines.len();
+        let active = selected == i;
+        let ptr = Span::styled(
+            if active { "▸ " } else { "  " },
+            accent().add_modifier(Modifier::BOLD),
+        );
+        let num_text = if i < 9 {
+            format!("{}. ", i + 1)
+        } else {
+            "   ".to_owned()
+        };
+        let num = Span::styled(
+            num_text,
+            if active {
+                accent().add_modifier(Modifier::BOLD)
+            } else {
+                dim()
+            },
+        );
+        let box_span = q.multi_select.then(|| {
+            let on = ticked.get(i).copied().unwrap_or(false);
+            let style = if on {
+                current_style(tones).add_modifier(Modifier::BOLD)
+            } else {
+                dim()
+            };
+            Span::styled(if on { "[x] " } else { "[ ] " }, style)
+        });
+        let label_style = if active {
+            accent().add_modifier(Modifier::BOLD)
+        } else {
+            Style::new().add_modifier(Modifier::BOLD)
+        };
+        let label = clean_question_inline(&opt.label);
+        let desc_opt = opt.description.as_deref().filter(|d| !d.trim().is_empty());
+
+        if inline_desc && let Some(desc) = desc_opt {
+            let mut spans = vec![ptr, num];
+            if let Some(b) = box_span {
+                spans.push(b);
+            }
+            spans.push(Span::styled(label, label_style));
+            spans.push(Span::styled(desc_sep, dim()));
+            spans.push(Span::styled(clean_question_inline(desc), dim()));
+            lines.push(clip_line(Line::from(spans), w));
+        } else {
+            let wrapped_label = transcript::wrap(&label, label_room);
+            let cont_indent = prefix_w.min(w.saturating_sub(1));
+            for (part_idx, part) in wrapped_label.into_iter().enumerate() {
+                if part_idx == 0 {
+                    let mut spans = vec![ptr.clone(), num.clone()];
+                    if let Some(b) = box_span.clone() {
+                        spans.push(b);
+                    }
+                    spans.push(Span::styled(part, label_style));
+                    lines.push(clip_line(Line::from(spans), w));
+                } else {
+                    lines.push(clip_line(
+                        Line::from(vec![
+                            Span::raw(" ".repeat(cont_indent)),
+                            Span::styled(part, label_style),
+                        ]),
+                        w,
+                    ));
+                }
+            }
+            if let Some(desc) = desc_opt {
+                let desc_indent = prefix_w.min(w.saturating_sub(4));
+                let desc_room = w.saturating_sub(desc_indent).max(1);
+                for raw in desc.split('\n') {
+                    let cleaned =
+                        crate::shell_output::parse_sgr(&raw.replace('\r', ""), Tones::None).0;
+                    for part in transcript::wrap(&cleaned, desc_room) {
+                        lines.push(clip_line(
+                            Line::from(vec![
+                                Span::raw(" ".repeat(desc_indent)),
+                                Span::styled(part, dim()),
+                            ]),
+                            w,
+                        ));
+                    }
+                }
+            }
+        }
+        row_spans.push((start, lines.len()));
+    }
+
+    if !q.options.is_empty() {
+        lines.push(Line::styled(glyphs.horizontal.repeat(w), dim()));
+    }
+
+    // Other row.
+    {
+        let start = lines.len();
+        let active = selected == q.other_row();
+        let ptr = Span::styled(
+            if active { "▸ " } else { "  " },
+            accent().add_modifier(Modifier::BOLD),
+        );
+        let room = w.saturating_sub(2);
+        let full = format!(
+            "{} {}",
+            copy::DIALOG_QUESTION_OTHER,
+            copy::DIALOG_QUESTION_OTHER_HINT
+        );
+        let row_line = if active {
+            Line::from(vec![
+                ptr,
+                Span::styled(fit(&full, room), accent().add_modifier(Modifier::BOLD)),
+            ])
+        } else if copy::DIALOG_QUESTION_OTHER.width() + 1 + copy::DIALOG_QUESTION_OTHER_HINT.width()
+            <= room
+        {
+            Line::from(vec![
+                ptr,
+                Span::raw(copy::DIALOG_QUESTION_OTHER),
+                Span::styled(format!(" {}", copy::DIALOG_QUESTION_OTHER_HINT), dim()),
+            ])
+        } else {
+            Line::from(vec![ptr, Span::raw(fit(&full, room))])
+        };
+        lines.push(clip_line(row_line, w));
+        row_spans.push((start, lines.len()));
+    }
+
+    // Done row in multi-select.
+    if q.multi_select {
+        let start = lines.len();
+        let active = Some(selected) == q.done_row();
+        let chosen = ticked.iter().take(q.options.len()).filter(|t| **t).count();
+        let count_str = format!(
+            " ({})",
+            copy::DIALOG_QUESTION_CHOSEN.replace("{count}", &chosen.to_string())
+        );
+        let ptr = Span::styled(
+            if active { "▸ " } else { "  " },
+            accent().add_modifier(Modifier::BOLD),
+        );
+        let room = w.saturating_sub(2);
+        let full = format!("{}{count_str}", copy::DIALOG_QUESTION_DONE);
+        let row_line = if active {
+            Line::from(vec![
+                ptr,
+                Span::styled(fit(&full, room), accent().add_modifier(Modifier::BOLD)),
+            ])
+        } else if copy::DIALOG_QUESTION_DONE.width() + count_str.width() <= room {
+            let count_style = if chosen > 0 {
+                current_style(tones)
+            } else {
+                dim()
+            };
+            Line::from(vec![
+                ptr,
+                Span::styled(
+                    copy::DIALOG_QUESTION_DONE,
+                    Style::new().add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(count_str, count_style),
+            ])
+        } else {
+            Line::from(vec![
+                ptr,
+                Span::styled(fit(&full, room), Style::new().add_modifier(Modifier::BOLD)),
+            ])
+        };
+        lines.push(clip_line(row_line, w));
+        row_spans.push((start, lines.len()));
+    }
+
+    (lines, row_spans)
+}
+
+/// Like [`sheet_window`], keeping an entire multi-line span
+/// `follow_start..follow_end` in view when it fits.
+fn sheet_window_span(
+    total: usize,
+    rows: usize,
+    follow: Option<(usize, usize)>,
+    top: usize,
+) -> (usize, usize, bool) {
+    if total <= rows {
+        return (0, total, false);
+    }
+    let edges = rows >= 3;
+    let count = if edges { rows - 2 } else { rows };
+    if count == 0 {
+        return (0, 0, false);
+    }
+    let mut top = top.min(total - count);
+    if let Some((start, end)) = follow {
+        if start < top {
+            top = start;
+        } else if end > top + count {
+            if end.saturating_sub(start) <= count {
+                top = end - count;
+            } else {
+                top = start;
+            }
+        }
+    }
+    (top, count, edges)
 }
 
 /// The status column's style: the palette's `done` tone.
@@ -566,14 +950,25 @@ fn render_dialog(app: &mut State, area: Rect, buf: &mut Buffer) {
         return;
     }
     let tones = app.tones;
-    let glyphs = app.frame.glyphs();
+    let frame_style = app.frame;
+    let glyphs = frame_style.glyphs();
     let ready = app.dialog_ready();
     let Some(dialog) = app.dialog.as_mut() else {
         return;
     };
     let clean = |text: &str| editor::sanitize(text).replace(['\n', '\t'], " ");
     let width = area.width.min(SHEET_WIDTH);
-    let chrome = sheet_chrome(dialog, width);
+    let mut chrome = sheet_chrome(dialog, width);
+    // If a question's wrapped text is too tall to pin above the options,
+    // move the question lines into the scrollable body so it never clips
+    // or prevents keyboard arming.
+    let mut question_in_head = true;
+    if matches!(dialog.request.kind, DialogKind::Question(_))
+        && usize::from(area.height) < chrome + 3
+    {
+        question_in_head = false;
+        chrome = 2;
+    }
     let least = chrome + usize::from(!matches!(dialog.request.kind, DialogKind::Field(_)));
     let framed = width >= SHEET_FRAME_COLUMNS && usize::from(area.height) >= least + 2;
     let inner = if framed {
@@ -620,6 +1015,7 @@ fn render_dialog(app: &mut State, area: Rect, buf: &mut Buffer) {
     let mut tail: Vec<Line> = Vec::new();
     // A field's footer says what its answer waits on.
     let mut field_working: Option<String> = None;
+    let mut footer_candidates: Option<&'static [&'static str]> = None;
     let (keys, short, position): (Cow<'static, str>, Cow<'static, str>, _) = match dialog
         .request
         .kind
@@ -970,12 +1366,98 @@ fn render_dialog(app: &mut State, area: Rect, buf: &mut Buffer) {
                 )
             }
         }
+        DialogKind::Question(q) => {
+            head.push(question_title(&q, title_style, w));
+            let q_lines: Vec<Line<'static>> = question_text_lines(&q.question, w)
+                .into_iter()
+                .map(|row| Line::raw(fit(&row, w)))
+                .collect();
+            let row_count = q.row_count();
+            if dialog.selected >= row_count {
+                dialog.selected = row_count.saturating_sub(1);
+            }
+            let (mut all_lines, mut row_spans) =
+                question_body_lines(&q, &dialog.ticked, dialog.selected, w, frame_style, tones);
+            if question_in_head {
+                head.extend(q_lines);
+                head.push(Line::raw(""));
+            } else {
+                let offset = q_lines.len() + 1;
+                let mut combined = q_lines;
+                combined.push(Line::raw(""));
+                combined.append(&mut all_lines);
+                all_lines = combined;
+                for (start, end) in &mut row_spans {
+                    *start += offset;
+                    *end += offset;
+                }
+            }
+            let follow = row_spans.get(dialog.selected).copied();
+            let (top, count, edges) =
+                sheet_window_span(all_lines.len(), body_rows, follow, dialog.top);
+            dialog.top = top;
+            dialog.page = count.max(1);
+            dialog.total = all_lines.len();
+            if edges {
+                body.push(Line::styled(
+                    fit(
+                        &if top > 0 {
+                            format!("  ↑ {top} {}", copy::DIALOG_MORE)
+                        } else {
+                            String::new()
+                        },
+                        w,
+                    ),
+                    dim(),
+                ));
+            }
+            body.extend(all_lines.into_iter().skip(top).take(count));
+            if edges {
+                let below = dialog.total.saturating_sub(top + count);
+                body.push(Line::styled(
+                    fit(
+                        &if below > 0 {
+                            format!("  ↓ {below} {}", copy::DIALOG_MORE)
+                        } else {
+                            String::new()
+                        },
+                        w,
+                    ),
+                    dim(),
+                ));
+            }
+            footer_candidates = Some(if q.multi_select {
+                &[
+                    copy::DIALOG_QUESTION_MULTI_KEYS,
+                    copy::DIALOG_QUESTION_MULTI_KEYS_MED,
+                    copy::DIALOG_QUESTION_MULTI_KEYS_SHORT,
+                    copy::DIALOG_QUESTION_MULTI_KEYS_NARROW,
+                    copy::DIALOG_KEYS_TINY,
+                ]
+            } else if q.options.is_empty() {
+                &[copy::DIALOG_QUESTION_KEYS_SHORT, copy::DIALOG_KEYS_TINY]
+            } else {
+                &[
+                    copy::DIALOG_QUESTION_KEYS,
+                    copy::DIALOG_QUESTION_KEYS_MED,
+                    copy::DIALOG_QUESTION_KEYS_SHORT,
+                    copy::DIALOG_KEYS_TINY,
+                ]
+            });
+            (
+                copy::DIALOG_QUESTION_KEYS.into(),
+                copy::DIALOG_QUESTION_KEYS_SHORT.into(),
+                None,
+            )
+        }
     };
     let footer = if dialog.answered {
         let waiting = field_working.as_deref().unwrap_or(copy::DIALOG_WAITING);
         sheet_footer(waiting, copy::DIALOG_WAITING, None, w)
     } else if !ready {
         sheet_footer(copy::DIALOG_PREPARING, copy::DIALOG_PREPARING, None, w)
+    } else if let Some(candidates) = footer_candidates {
+        sheet_footer_from(candidates, position, w)
     } else {
         sheet_footer(&keys, &short, position, w)
     };
@@ -1697,10 +2179,11 @@ fn render_bar(app: &State, area: Rect, buf: &mut Buffer) {
     line(buf, area, Line::from(head));
 }
 
-/// The status line, the screen's last row: the session's state dot, the
-/// model, its thinking level, the context's gauge and count, the readings
-/// the user turned on, and the location, as [`status::line`] lays them out,
-/// left-aligned with the rows above it. Bake: it is quiet. The model is in
+/// The status line, the screen's last rows: the session's state dot, the
+/// model, its thinking level, and the location, then under them the
+/// context's reading and the readings the user turned on, as
+/// [`status::lines`] lays them out; on one row, as [`status::line`] does,
+/// when the screen gives it only one. Left-aligned with the rows above it. Bake: it is quiet. The model is in
 /// the terminal's foreground and the rest is dim, but for the palette's
 /// colours where they mean something: the dot's state, a filling context,
 /// the cache's share, a detached branch, and the thinking level.
@@ -1708,12 +2191,20 @@ fn render_status(app: &State, area: Rect, buf: &mut Buffer) {
     if area.is_empty() {
         return;
     }
-    let parts = status::line(&app.status, app.session_state(), usize::from(area.width));
-    let spans: Vec<Span> = parts
-        .into_iter()
-        .map(|part| Span::styled(part.text, tone_style(part.tone, app.tones)))
-        .collect();
-    line(buf, area, Line::from(spans));
+    let room = usize::from(area.width);
+    let state = app.session_state();
+    let rows = if area.height >= 2 {
+        status::lines(&app.status, state, room).to_vec()
+    } else {
+        vec![status::line(&app.status, state, room)]
+    };
+    for (y, parts) in (area.y..area.bottom()).zip(rows) {
+        let spans: Vec<Span> = parts
+            .into_iter()
+            .map(|part| Span::styled(part.text, tone_style(part.tone, app.tones)))
+            .collect();
+        line(buf, Rect::new(area.x, y, area.width, 1), Line::from(spans));
+    }
 }
 
 /// Rows the activity takes at the foot of a body `body` rows tall: a blank
@@ -1828,16 +2319,7 @@ fn fit_phase(phase: &str, room: usize) -> String {
 /// a tail that gives way: the tasks list's or one task's title and keys.
 fn bar_left(app: &State) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
     match app.focus {
-        Focus::Composer => (Vec::new(), Vec::new()),
-        // Bake: the tray's scopes name themselves and their keys on the
-        // bar's left; nothing shares its row.
-        Focus::Tasks => (
-            vec![Span::styled(
-                tasks::label(app.live),
-                Style::new().add_modifier(Modifier::BOLD),
-            )],
-            vec![Span::styled(format!("  {}", copy::TASKS_LIST_KEYS), dim())],
-        ),
+        Focus::Composer | Focus::Tasks => (Vec::new(), Vec::new()),
         // A breadcrumb, as a catalogue's: where it came from, then where it
         // is, by the name or id the list shows.
         Focus::Shell => breadcrumb(
@@ -1921,7 +2403,7 @@ fn menu_rows(app: &State) -> u16 {
     } else if let Some(menu) = app.file_menu() {
         (listed_rows(menu.entries.len()) + file_status(&menu).len()).max(1)
     } else if app.focus == Focus::Composer {
-        usize::from(completion::usage(app.draft.text(), app.catalog()).is_some())
+        usize::from(app.usage().is_some())
     } else {
         0
     };
@@ -2065,17 +2547,17 @@ fn render_menu(app: &State, area: Rect, buf: &mut Buffer) {
         return;
     }
     let Some(menu) = app.menu() else {
-        if let Some(command) = completion::usage(app.draft.text(), app.catalog()) {
+        if let Some(command) = app.usage() {
             let text = format!(
                 "/{} {}  {}",
                 command.name,
-                command.hint.unwrap_or_default(),
+                command.hint.as_deref().unwrap_or_default(),
                 command.description
             );
             line(
                 buf,
                 Rect::new(area.x, area.y, area.width, 1),
-                Line::styled(text, dim()),
+                Line::styled(fit(&text, usize::from(area.width)), dim()),
             );
         }
         return;
@@ -2085,6 +2567,8 @@ fn render_menu(app: &State, area: Rect, buf: &mut Buffer) {
         status_row(app, copy::NO_COMPLETIONS, false, row, buf);
         return;
     }
+    let width = usize::from(area.width);
+    let rem = width.saturating_sub(2);
     let rows = usize::from(area.height);
     let count = menu.entries.len();
     let shown = if count > rows {
@@ -2096,10 +2580,12 @@ fn render_menu(app: &State, area: Rect, buf: &mut Buffer) {
     let names = menu
         .entries
         .iter()
-        .map(|c| c.name.len() + 1)
+        .map(|c| c.name.width() + 1)
         .max()
         .unwrap_or(0);
-    let column = (names + 2).clamp(8, 40);
+    let column = (names + 2).clamp(8, 40).min(rem);
+    let name_max = if column > 2 { column - 2 } else { column };
+    let about_max = rem.saturating_sub(column);
     let marker = if app.frame == FrameStyle::Classic {
         ">"
     } else {
@@ -2107,12 +2593,14 @@ fn render_menu(app: &State, area: Rect, buf: &mut Buffer) {
     };
     for (i, command) in menu.entries.iter().enumerate().skip(first).take(shown) {
         let active = i == menu.selected;
-        let name = format!("/{}", command.name);
-        let about = match command.hint {
+        let raw_name = format!("/{}", command.name);
+        let name = fit(&raw_name, name_max);
+        let raw_about = match command.hint.as_deref() {
             Some(hint) => format!("{hint}  {}", command.description),
-            None => command.description.to_owned(),
+            None => command.description.to_string(),
         };
-        let pad = column.saturating_sub(name.len());
+        let about = fit(&raw_about, about_max);
+        let pad = column.saturating_sub(name.width());
         let content = Line::from(vec![
             Span::styled(
                 if active {
@@ -2142,7 +2630,10 @@ fn render_menu(app: &State, area: Rect, buf: &mut Buffer) {
                 buf,
                 Rect::new(area.x, y, area.width, 1),
                 Line::styled(
-                    format!("  +{} {}", count - shown, copy::MORE_MATCHES),
+                    fit(
+                        &format!("  +{} {}", count - shown, copy::MORE_MATCHES),
+                        width,
+                    ),
                     dim(),
                 ),
             );
@@ -2283,7 +2774,7 @@ fn render_crew(app: &State, area: Rect, buf: &mut Buffer) {
         usize::from(area.width),
         app.now,
         elapsed,
-        app.tones,
+        task_look(app),
     );
     for (row, line) in lines.into_iter().take(usize::from(area.height)).enumerate() {
         let y = area.y + u16::try_from(row).unwrap_or(u16::MAX);
@@ -2319,11 +2810,11 @@ fn render_standing(
         }
         (!counts.is_empty()).then(|| counts.join(copy::STATUS_SEP))
     };
-    // Bake: over one task's own view the counts are enough; naming the
+    // Bake: while the tray is open, the counts are enough; naming the
     // newest running task there would repeat or rival what the tray shows.
     let newest = match app.focus {
-        Focus::Inspect | Focus::Shell | Focus::Crew => None,
-        Focus::Composer | Focus::Tasks => app.newest_running(),
+        Focus::Composer => app.newest_running(),
+        Focus::Tasks | Focus::Inspect | Focus::Shell | Focus::Crew => None,
     };
     let (left, right) = tasks::standing(
         &app.tasks(),
@@ -2350,6 +2841,16 @@ fn tone_style(tone: Tone, tones: Tones) -> Style {
         Tone::Anchor => Style::new(),
         Tone::Plain | Tone::Dim => Token::Muted.style(tones),
         Tone::Ink(token) => token.style(tones),
+        // A callsign: bold in its hue, or bold alone without colour.
+        Tone::Hue(hue) => {
+            let (r, g, b) = status::hue_rgb(hue);
+            let bold = Style::new().add_modifier(Modifier::BOLD);
+            match tones {
+                Tones::TrueColor => bold.fg(Color::Rgb(r, g, b)),
+                Tones::Ansi => bold.fg(Color::Indexed(crate::svg::indexed(r, g, b))),
+                Tones::None => bold,
+            }
+        }
     }
 }
 
@@ -2551,12 +3052,22 @@ fn render_transcript(
 fn render_scroll_hint(app: &mut State, row: Rect, buf: &mut Buffer) {
     // Whether a selection was copied takes the row for a moment, at the
     // right, apart from the transcript's text.
-    if let Some((ok, _)) = app.copied {
-        // The green and red of a call's done and failed marks.
-        let (text, rgb, ansi) = if ok {
-            (copy::COPIED, (0x22, 0xc5, 0x5e), Color::Green)
-        } else {
-            (copy::COPY_FAILED, (0xef, 0x44, 0x44), Color::Red)
+    if let Some((outcome, _)) = app.copied {
+        // Green when a native tool confirmed the copy, cool blue when OSC 52
+        // was sent best-effort, and red when copying failed or was refused.
+        let (text, rgb, ansi) = match outcome {
+            crate::state::CopyOutcome::Copied => (copy::COPIED, (0x22, 0xc5, 0x5e), Color::Green),
+            crate::state::CopyOutcome::SentToTerminal => {
+                let label = if usize::from(row.width) >= copy::COPY_SENT.len() {
+                    copy::COPY_SENT
+                } else {
+                    copy::COPY_SENT_SHORT
+                };
+                (label, (0x38, 0xbd, 0xf8), Color::Cyan)
+            }
+            crate::state::CopyOutcome::Failed => {
+                (copy::COPY_FAILED, (0xef, 0x44, 0x44), Color::Red)
+            }
         };
         let cells = (text.len() as u16).min(row.width);
         let style = match app.tones {
@@ -2701,6 +3212,7 @@ fn render_tray(app: &mut State, area: Rect, buf: &mut Buffer) -> (usize, usize) 
         selected,
         most,
         counted,
+        footer,
         ..
     } = tray(app, usize::from(area.width), rows);
     if let Some(most) = most {
@@ -2712,22 +3224,31 @@ fn render_tray(app: &mut State, area: Rect, buf: &mut Buffer) -> (usize, usize) 
             app.shell_scroll = app.shell_scroll.min(most);
         }
     }
+    let footer = footer.filter(|_| rows >= 2);
+    let body_rows = rows - usize::from(footer.is_some());
     // The first rows, the subtitle among them, unless the selected entry
     // lies below them; then the window ends on it, or starts on it when it
     // is taller than the tray.
-    let skip = selected.map_or(0, |at| at.end.saturating_sub(rows).min(at.start));
+    let skip = selected.map_or(0, |at| at.end.saturating_sub(body_rows).min(at.start));
     let hidden = match counted {
         Some(at) => (
             at.iter().filter(|&&row| row < skip).count(),
-            at.iter().filter(|&&row| row >= skip + rows).count(),
+            at.iter().filter(|&&row| row >= skip + body_rows).count(),
         ),
-        None => (skip, lines.len().saturating_sub(skip + rows)),
+        None => (skip, lines.len().saturating_sub(skip + body_rows)),
     };
-    for (i, content) in lines.into_iter().skip(skip).take(rows).enumerate() {
+    for (i, content) in lines.into_iter().skip(skip).take(body_rows).enumerate() {
         line(
             buf,
             Rect::new(area.x, area.y + i as u16, area.width, 1),
             content,
+        );
+    }
+    if let Some(footer) = footer {
+        line(
+            buf,
+            Rect::new(area.x, area.y + (rows - 1) as u16, area.width, 1),
+            footer,
         );
     }
     hidden
@@ -3495,11 +4016,11 @@ mod tests {
         // The tasks row and the status line under it align with the box's
         // contents.
         assert_eq!(rows[prompt + 3], format!("  ◆ no model{}", " ".repeat(28)));
-        // Narrow, the row's label gives way before its counts and newest
-        // task.
+        // Narrow, the standing row switches from words to marks rather than
+        // dropping the label or counts.
         assert_eq!(
             rows[prompt + 2].trim_end(),
-            "  2 running · 1 failed  ● bash-2",
+            "  Sample tasks  ● 2  ✗ 1  ✓ 2",
             "{rows:#?}"
         );
         // Right-hand text ends where the box's contents do.
@@ -3531,14 +4052,15 @@ mod tests {
         // With nothing on the bar, the notice sits right over the box.
         assert_eq!(notice + 2, prompt);
         assert_eq!(cursor, Position::new(TEXT_X + 8, prompt as u16));
-        // Over an open tray, the bar's title comes between them.
+        // Over an opened task view, the breadcrumb bar comes between them.
         let mut app = tasked(State::default());
         app.draft.type_text("/keep me");
         ctrl_g(&mut app);
+        key(&mut app, Key::Enter);
         app.notice = Some(Notice::NoCommands);
         let (rows, _) = draw(&mut app, 80, 24);
         let notice = row_index(&rows, "Commands are not available");
-        let bar = row_index(&rows, "Sample tasks  ↑↓ select");
+        let bar = row_index(&rows, "Sample tasks / Explore auth");
         assert_eq!((notice + 1, bar + 2), (bar, row_index(&rows, "❯ /keep me")));
     }
 
@@ -3760,8 +4282,8 @@ mod tests {
     }
 
     // Bake: the tasks open as one list under the standing row, agents then
-    // shells, each group under its dim label, one pointer over both, and
-    // the selected task's detail under it.
+    // shells, each group under its dim counted label, one pointer over both,
+    // and the key hints at the bottom of the tray rather than above the box.
     #[test]
     fn the_tasks_list_merges_agents_and_shells_under_the_standing_row() {
         let mut app = tasked(State::live(FrameStyle::Round, Tones::None, Vec::new()));
@@ -3775,25 +4297,64 @@ mod tests {
         assert_eq!(
             tray,
             [
-                "  Tasks  2 running · 1 failed · 2 done  ● bash-2  bun run dev  1m 12s",
-                "  Agents",
-                "  ● Explore auth     faux/faux-2                               working",
-                "▸ ✗ Run the tests    saved · faux/faux-2                        failed",
-                "    The request failed.",
-                "  ✓ Review the diff  idle · faux/faux-2                           done",
-                "  Shells · they stop when Bake exits",
+                "  Tasks  2 running · 1 failed · 2 done",
+                "  Agents 3",
+                "  ● Explore auth     faux/faux-2                                       working",
+                "▸ ✗ Run the tests    The request failed.                                failed",
+                "  ✓ Review the diff  The change reads well.                               done",
+                "  Shells 2 · they stop when Bake exits",
                 "  ● bash-2           bun run dev                               running  1m 12s",
                 "  ✓ bash-1           cargo build                                exit 0     41s",
+                "",
+                "  ↑↓ select · Enter open · x stop · Esc close",
             ],
             "{rows:#?}"
         );
-        assert!(
-            rows.iter()
-                .any(|r| r.starts_with("  Tasks  ↑↓ select · Enter open · x stop · Esc back")),
-            "{rows:#?}"
-        );
+        // No redundant bar above the composer while the list tray is open.
+        let top = rows.iter().rposition(|r| r.starts_with('╭')).unwrap();
+        assert_eq!(rows[top - 1].trim(), "", "{rows:#?}");
         for row in &rows {
             assert_eq!(row.chars().count(), 80, "{row}");
+        }
+        // Wide (100) and narrow (60) exact tray output with sample tasks.
+        for (width, expected) in [
+            (
+                100u16,
+                vec![
+                    "  Sample tasks  2 running · 1 failed · 2 done",
+                    "  Agents 3 · samples, nothing runs",
+                    "▸ ● Explore auth     faux/faux-2                                                           working",
+                    "  ✗ Run the tests    The request failed.                                                    failed",
+                    "  ✓ Review the diff  The change reads well.                                                   done",
+                    "  Shells 2",
+                    "  ● bash-2           bun run dev                                                   running  1m 12s",
+                    "  ✓ bash-1           cargo build                                                    exit 0     41s",
+                    "",
+                    "  ↑↓ select · Enter open · x stop · Esc close",
+                ],
+            ),
+            (
+                60u16,
+                vec![
+                    "  Sample tasks  2 running · 1 failed · 2 done",
+                    "  Agents 3 · samples, nothing runs",
+                    "▸ ● Explore auth     faux/faux-2                   working",
+                    "  ✗ Run the tests    The request failed.            failed",
+                    "  ✓ Review the diff  The change reads well.           done",
+                    "  Shells 2",
+                    "  ● bash-2           bun run dev           running  1m 12s",
+                    "  ✓ bash-1           cargo build            exit 0     41s",
+                    "",
+                    "  ↑↓ select · Enter open · x stop · Esc close",
+                ],
+            ),
+        ] {
+            let mut sample = tasked(State::default());
+            ctrl_g(&mut sample);
+            let (rows, _) = draw(&mut sample, width, 24);
+            let edge = rows.iter().rposition(|r| r.starts_with('╰')).unwrap();
+            let got: Vec<&str> = rows[edge + 1..23].iter().map(|r| r.trim_end()).collect();
+            assert_eq!(got, expected, "width {width}: {rows:#?}");
         }
     }
 
@@ -3812,13 +4373,13 @@ mod tests {
             seen.push(rows[edge + 1].trim_end().to_owned());
         }
         assert!(
-            seen[0].starts_with("  Tasks  2 running · 1 failed · 2 done  "),
+            seen[0].starts_with("  Tasks  2 running · 1 failed · 2 done"),
             "{seen:?}"
         );
-        // Twelve rows leave the tray its three-row minimum: the agents'
-        // label and two of them.
+        // Twelve rows leave the tray four rows (label, two tasks, footer),
+        // leaving three tasks below.
         assert!(seen[0].ends_with("  +3 below"), "{seen:?}");
-        assert_eq!(seen[1], "  2 running · 1 failed        +3 below");
+        assert_eq!(seen[1], "  Tasks  ● 2  ✗ 1  ✓ 2        +3 below");
     }
 
     // The list reads at every width from 40 to 160 columns: rows never run
@@ -4057,10 +4618,8 @@ mod tests {
                             assert!(!rows.iter().any(|r| r.contains('\u{1b}')), "{case}");
                             let plan = layout::plan(height, needs(&app, width, height));
                             if plan.status > 0 && width >= 40 {
-                                assert!(
-                                    rows.last().unwrap().contains("deepseek"),
-                                    "{case}: {rows:#?}"
-                                );
+                                let status = &rows[rows.len() - usize::from(plan.status)];
+                                assert!(status.contains("deepseek"), "{case}: {rows:#?}");
                             }
                             draw_inline(&mut app, width, height.max(1));
                         }
@@ -4360,7 +4919,7 @@ mod tests {
         let copied = update(&mut app, mouse(MouseKind::Up, 60, y, 120));
         assert_eq!(
             copied,
-            [Effect::Copy("answer line 2\n\n  answer line 3".into())]
+            [Effect::Copy("answer line 2\n\nanswer line 3".into())]
         );
         let marked = reversed(&mut app, 80, 24);
         assert!(marked[usize::from(y)].is_empty());
@@ -4502,11 +5061,22 @@ mod tests {
         assert_eq!(idle[prompt - 2].trim(), "");
         assert!(idle[prompt - 3].contains("answer line 40"), "{idle:#?}");
         ctrl_g(&mut app);
+        let (list_open, _) = draw(&mut app, 80, 24);
+        let prompt = row_index(&list_open, "❯");
+        // The tasks list keeps its hints inside the tray, leaving no bar above
+        // the composer.
+        assert_eq!(list_open[prompt - 2].trim(), "");
+        assert!(
+            list_open
+                .iter()
+                .any(|r| r.starts_with("  ↑↓ select · Enter open · x stop · Esc close"))
+        );
+        // Opening a task brings the breadcrumb bar back above the composer.
+        key(&mut app, Key::Enter);
         let (open, _) = draw(&mut app, 80, 24);
         let prompt = row_index(&open, "❯");
-        assert!(
-            open[prompt - 2].starts_with("  Tasks  ↑↓ select · Enter open · x stop · Esc back")
-        );
+        assert!(open[prompt - 2].starts_with("  Tasks / Explore auth  Esc back"));
+        key(&mut app, Key::Esc);
         key(&mut app, Key::Esc);
         let (closed, _) = draw(&mut app, 80, 24);
         assert_eq!(closed, idle);
@@ -4549,7 +5119,14 @@ mod tests {
     #[test]
     fn the_status_line_is_the_last_row_and_holds_the_consolidated_status() {
         let mut app = tasked(statused(State::default()));
-        let last = |rows: &[String]| rows.last().unwrap().trim_end().to_owned();
+        // Its two rows, the second under the model.
+        let last = |rows: &[String]| {
+            rows[rows.len() - 2..]
+                .iter()
+                .map(|row| row.trim_end())
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
         let mut seen = Vec::new();
         for width in [40, 60, 80, 120] {
             let (rows, _) = draw(&mut app, width, 24);
@@ -4558,10 +5135,10 @@ mod tests {
         assert_eq!(
             seen,
             [
-                "  ○ deepseek-v4-flash high  ctx ~11%",
-                "  ○ deepseek-v4-flash high  ctx ~11%  …rojects/bake ⎇ main",
-                "  ○ deepseek-v4-flash high  ctx ~11% (15.2k/128k)  ~/projects/bake ⎇ main",
-                "  ○ deepseek-v4-flash high  ctx ~11% (15.2k/128k)  ~/projects/bake ⎇ main",
+                "  ○ deepseek-v4-flash high  ⎇ main\n    ctx ~11% (15.2k/128k)",
+                "  ○ deepseek-v4-flash high  ~/projects/bake ⎇ main\n    ctx ~11% (15.2k/128k)",
+                "  ○ deepseek-v4-flash high  ~/projects/bake ⎇ main\n    ctx ~11% (15.2k/128k)",
+                "  ○ deepseek-v4-flash high  ~/projects/bake ⎇ main\n    ctx ~11% (15.2k/128k)",
             ]
         );
         let (idle, _) = draw(&mut app, 80, 24);
@@ -4577,7 +5154,11 @@ mod tests {
         ctrl_g(&mut app);
         let (rows, _) = draw(&mut app, 80, 24);
         assert_eq!(last(&rows), working);
-        assert!(rows[21].contains("bash-1"), "{rows:#?}");
+        assert!(rows[19].contains("bash-1"), "{rows:#?}");
+        assert!(
+            rows[21].contains("↑↓ select · Enter open · x stop · Esc close"),
+            "{rows:#?}"
+        );
         // The model is the row's anchor, in the terminal's foreground; the
         // level keeps its tone; labels, values, and the directory are dim.
         app.tones = Tones::TrueColor;
@@ -4610,8 +5191,10 @@ mod tests {
         let mut terminal = Terminal::new(TestBackend::new(width, 24)).unwrap();
         terminal.draw(|f| render(app, f)).unwrap();
         let buffer = terminal.backend().buffer();
-        (0..width)
-            .map(|x| &buffer[(x, 23)])
+        let first = 24 - layout::plan(24, needs(app, width, 24)).status;
+        (first..24)
+            .flat_map(|y| (0..width).map(move |x| (x, y)))
+            .map(|at| &buffer[at])
             .filter(|cell| !cell.symbol().is_empty())
             .map(|cell| {
                 // A cell drawn without a colour holds the reset colour.
@@ -4681,6 +5264,8 @@ mod tests {
                     write: 0,
                     hit: Some(hit),
                 }),
+                auto_compact: None,
+                callsign: None,
                 name: None,
             })
         };
@@ -4908,33 +5493,118 @@ mod tests {
         let mut app = State::default();
         let (rows, _) = draw(&mut app, 80, 24);
         let (y, x) = find(&rows, "before splitting.");
-        // Dragged from the line above to the middle of this one: each line
-        // as drawn, cut to its cells and trimmed at its end.
+        // Dragged from the line above to the middle of this one: soft-wrapped
+        // prose rejoins without spurious newline or layout rail.
         // The scrollbar's column is not the transcript's, so it is not copied.
         let above: String = rows[usize::from(y) - 1].chars().take(79).collect();
-        let above = above.trim_end();
+        let above = above.trim();
         update(&mut app, mouse(MouseKind::Down, 0, y - 1, 0));
         update(&mut app, mouse(MouseKind::Drag, x + 5, y, 10));
         let copied = update(&mut app, mouse(MouseKind::Up, x + 5, y, 20));
-        let text = format!("{above}\n  rejects it before");
+        let text = format!("{above} rejects it before");
         assert_eq!(copied, [Effect::Copy(text)]);
         // A click copies nothing.
         update(&mut app, mouse(MouseKind::Down, x, y, 1000));
         assert!(update(&mut app, mouse(MouseKind::Up, x, y, 1010)).is_empty());
-        // The indicator says it was copied, at the right, then goes back.
-        update(&mut app, Msg::Copied(true));
+        // The indicator distinguishes confirmed copy, best-effort OSC 52, and
+        // failure, at the right, then goes back.
+        update(&mut app, Msg::Copied(crate::state::CopyOutcome::Copied));
         let (rows, _) = draw(&mut app, 80, 24);
         // The gap row right above the box.
         let gap = row_index(&rows, "❯") - 2;
         assert!(rows[gap].trim_end().ends_with("Copied"), "{:?}", rows[gap]);
         assert_eq!(app.next_change(), Some(COPIED));
         update(&mut app, Msg::Tick(COPIED));
-        update(&mut app, Msg::Copied(false));
+        update(
+            &mut app,
+            Msg::Copied(crate::state::CopyOutcome::SentToTerminal),
+        );
         let (rows, _) = draw(&mut app, 80, 24);
-        assert!(rows[gap].contains("Copy failed"));
+        assert!(
+            rows[gap].trim_end().ends_with("Sent to terminal"),
+            "{:?}",
+            rows[gap]
+        );
+        // Narrow width falls back to the short OSC 52 label without clipping.
+        let (narrow, _) = draw(&mut app, 14, 24);
+        let narrow_gap = row_index(&narrow, "❯") - 2;
+        assert!(
+            narrow[narrow_gap].trim_end().ends_with("Sent"),
+            "{:?}",
+            narrow[narrow_gap]
+        );
         update(&mut app, Msg::Tick(COPIED * 2));
+        update(&mut app, Msg::Copied(crate::state::CopyOutcome::Failed));
+        let (rows, _) = draw(&mut app, 80, 24);
+        assert!(
+            rows[gap].trim_end().ends_with("Copy failed"),
+            "{:?}",
+            rows[gap]
+        );
+        // Very narrow widths stay within bounds without panicking.
+        let _ = draw(&mut app, 6, 24);
+        update(&mut app, Msg::Tick(COPIED * 3));
         let (rows, _) = draw(&mut app, 80, 24);
         assert_eq!(rows[gap].trim(), "");
+    }
+
+    #[test]
+    fn copy_outcomes_distinguish_tones_and_fit_narrow_widths() {
+        use crate::state::CopyOutcome;
+
+        let draw_buf = |app: &mut State, width: u16, height: u16| {
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            terminal.draw(|f| render(app, f)).unwrap();
+            let buf = terminal.backend().buffer().clone();
+            let rows: Vec<String> = (0..height)
+                .map(|y| (0..width).map(|x| buf[(x, y)].symbol()).collect())
+                .collect();
+            (rows, buf)
+        };
+
+        for (outcome, expected_wide, expected_fg) in [
+            (CopyOutcome::Copied, "Copied", Color::Rgb(0x22, 0xc5, 0x5e)),
+            (
+                CopyOutcome::SentToTerminal,
+                "Sent to terminal",
+                Color::Rgb(0x38, 0xbd, 0xf8),
+            ),
+            (
+                CopyOutcome::Failed,
+                "Copy failed",
+                Color::Rgb(0xef, 0x44, 0x44),
+            ),
+        ] {
+            let mut app = State::new(FrameStyle::default(), Tones::TrueColor);
+            update(&mut app, Msg::Copied(outcome));
+            let (rows, buf) = draw_buf(&mut app, 60, 24);
+            let gap = row_index(&rows, "❯") - 2;
+            let trimmed = rows[gap].trim_end();
+            assert!(trimmed.ends_with(expected_wide), "{:?}", rows[gap]);
+            let col = trimmed.len().saturating_sub(1) as u16;
+            assert_eq!(buf[(col, gap as u16)].fg, expected_fg);
+        }
+
+        // ANSI and NO_COLOR modes map cleanly without panicking on narrow rows.
+        for tones in [Tones::Ansi, Tones::None] {
+            let mut app = State::new(FrameStyle::default(), tones);
+            update(&mut app, Msg::Copied(CopyOutcome::SentToTerminal));
+            let (rows, buf) = draw_buf(&mut app, 40, 24);
+            let gap = row_index(&rows, "❯") - 2;
+            let trimmed = rows[gap].trim_end();
+            assert!(trimmed.ends_with("Sent to terminal"), "{:?}", rows[gap]);
+            let col = trimmed.len().saturating_sub(1) as u16;
+            let expected = match tones {
+                Tones::Ansi => Color::Cyan,
+                Tones::None => Color::Reset,
+                Tones::TrueColor => unreachable!(),
+            };
+            assert_eq!(buf[(col, gap as u16)].fg, expected);
+            // Very narrow rows never panic or underflow.
+            for width in [1, 4, 10, 15] {
+                let _ = draw(&mut app, width, 24);
+            }
+        }
     }
 
     #[test]
@@ -5403,6 +6073,131 @@ mod tests {
     }
 
     #[test]
+    fn the_slash_menu_renders_skills_templates_and_stays_bounded_with_many_skills() {
+        use crate::runtime::{DynamicCommand, DynamicCommandKind, RuntimeUpdate};
+
+        let mut app = State::live(FrameStyle::default(), Tones::None, Vec::new());
+        update(
+            &mut app,
+            Msg::Runtime(RuntimeUpdate::Commands(vec![
+                DynamicCommand {
+                    name: "review".into(),
+                    hint: None,
+                    description: "Review code changes".into(),
+                    kind: DynamicCommandKind::Skill,
+                },
+                DynamicCommand {
+                    name: "release-notes".into(),
+                    hint: None,
+                    description: "Write release notes from commits".into(),
+                    kind: DynamicCommandKind::Skill,
+                },
+                DynamicCommand {
+                    name: "deploy".into(),
+                    hint: Some("<env>".into()),
+                    description: "Deploy a build".into(),
+                    kind: DynamicCommandKind::Template,
+                },
+            ])),
+        );
+
+        // Typing `/` shows built-ins first with the updated total count.
+        key(&mut app, Key::Char('/'));
+        let (rows, _) = draw(&mut app, 80, 30);
+        let bar = row_index(&rows, "❯") - 1;
+        let first = row_index(&rows, "/model");
+        assert_eq!(first + 9, bar);
+        assert_eq!(
+            rows[first].trim_end(),
+            "  ▸ /model                [search]  Choose the model"
+        );
+        assert_eq!(
+            rows[first + 1].trim_end(),
+            "    /resume               Resume a saved session from this directory"
+        );
+        assert_eq!(
+            rows[first + 8].trim_end(),
+            "    +15 more, keep typing to narrow"
+        );
+
+        // Typing `/skill:re` narrows to the matching skills with exact layout.
+        for c in "skill:re".chars() {
+            key(&mut app, Key::Char(c));
+        }
+        let (rows, _) = draw(&mut app, 80, 30);
+        let bar = row_index(&rows, "❯") - 1;
+        let first = row_index(&rows, "/skill:review");
+        assert_eq!(first + 2, bar);
+        assert_eq!(
+            rows[first].trim_end(),
+            "  ▸ /skill:review         Review code changes"
+        );
+        assert_eq!(
+            rows[first + 1].trim_end(),
+            "    /skill:release-notes  Write release notes from commits"
+        );
+
+        // 60 skills stay bounded to MENU_ROWS + 1 count row and wrap cleanly.
+        let sixty: Vec<DynamicCommand> = (1..=60)
+            .map(|n| DynamicCommand {
+                name: format!("skill-{n:02}"),
+                hint: None,
+                description: format!("Skill number {n}"),
+                kind: DynamicCommandKind::Skill,
+            })
+            .collect();
+        update(&mut app, Msg::Runtime(RuntimeUpdate::Commands(sixty)));
+        update(
+            &mut app,
+            Msg::Key(KeyInput::new(Key::Char('u'), Mods::CTRL)),
+        );
+        for c in "/skill:".chars() {
+            key(&mut app, Key::Char(c));
+        }
+        let (rows, _) = draw(&mut app, 80, 30);
+        let bar = row_index(&rows, "❯") - 1;
+        let first = row_index(&rows, "/skill:skill-01");
+        assert_eq!(first + 9, bar);
+        assert_eq!(
+            rows[first + 8].trim_end(),
+            "    +52 more, keep typing to narrow"
+        );
+        key(&mut app, Key::Up);
+        let (rows, _) = draw(&mut app, 80, 30);
+        assert!(rows[bar - 2].starts_with("  ▸ /skill:skill-60"));
+
+        // Untrusted wide chars, control chars, and long descriptions stay
+        // panic-free, control-free, and within width at narrow and wide sizes.
+        update(
+            &mut app,
+            Msg::Runtime(RuntimeUpdate::Commands(vec![DynamicCommand {
+                name: format!("日本語{}", "x".repeat(80)),
+                hint: None,
+                description: format!("\x1b[31mred\x07\nline2 {}", "漢字".repeat(80)),
+                kind: DynamicCommandKind::Skill,
+            }])),
+        );
+        update(
+            &mut app,
+            Msg::Key(KeyInput::new(Key::Char('u'), Mods::CTRL)),
+        );
+        for c in "/skill:".chars() {
+            key(&mut app, Key::Char(c));
+        }
+        for width in [20, 40, 80] {
+            let (rows, _) = draw(&mut app, width, 24);
+            for row in &rows {
+                assert!(!row.chars().any(char::is_control), "{width}: {row:?}");
+                assert!(
+                    row.width() <= usize::from(width),
+                    "{width}: {} > {width}: {row:?}",
+                    row.width()
+                );
+            }
+        }
+    }
+
+    #[test]
     fn an_armed_quit_asks_for_a_second_press_above_the_bar() {
         let mut app = State::default();
         app.notice = Some(Notice::NoCommands);
@@ -5518,11 +6313,10 @@ mod tests {
         }
     }
 
-    // Bake: a byte-order mark inside text, as in a log a tool printed, is
-    // invisible on screen and means nothing mid-text, so a copy leaves it
-    // out rather than paste a stray U+FEFF.
+    // Bake: an intentional byte-order mark (U+FEFF) present in source text is
+    // preserved when selected and copied, rather than silently stripped.
     #[test]
-    fn a_copy_leaves_out_byte_order_marks() {
+    fn a_copy_preserves_intentional_source_byte_order_marks() {
         let mut app = State::default();
         app.transcript.set_live(vec![transcript::Row::Answer(
             "\u{feff}copied \u{feff}words".into(),
@@ -5533,7 +6327,7 @@ mod tests {
         update(&mut app, mouse(MouseKind::Drag, x + 12, y, 10));
         assert_eq!(
             update(&mut app, mouse(MouseKind::Up, x + 12, y, 20)),
-            vec![Effect::Copy("copied words".into())]
+            vec![Effect::Copy("\u{feff}copied \u{feff}words".into())]
         );
     }
 
@@ -6145,7 +6939,7 @@ mod tests {
         let (rows, _) = draw(&mut app, 60, 12);
         let standing = &rows[rows.len() - 2];
         assert_eq!(
-            standing, "  Tasks  1 running  ● bash-1  bun run bui…  1m 12s  Ctrl+G  ",
+            standing, "  Tasks  1 running │ ● bash-1  bun run bu…  1m 12s  Ctrl+G  ",
             "{rows:#?}"
         );
         assert!(
@@ -6162,7 +6956,7 @@ mod tests {
         );
         assert!(
             rows.iter()
-                .any(|row| row.starts_with("  Shells · they stop when Bake exits")),
+                .any(|row| row.starts_with("  Shells 1 · they stop when Bake exits")),
             "{rows:#?}"
         );
         // The selected shell's newest line of output, dim, under it.
@@ -6333,7 +7127,7 @@ mod tests {
         let (rows, _) = draw(&mut app, 80, 14);
         assert_eq!(
             rows[rows.len() - 2].trim_end(),
-            key("  Tasks  1 running · 1 done  ● Child c1", 80),
+            key("  Tasks  1 running · 1 done │ ● Child c1", 80),
         );
         update(
             &mut app,
@@ -6354,14 +7148,14 @@ mod tests {
             (
                 160,
                 key(
-                    "  Tasks  2 running · 1 done  ● bash-1  bun run build --release --workspace  1m 12s",
+                    "  Tasks  2 running · 1 done │ ● bash-1  bun run build --release --workspace  1m 12s",
                     160,
                 ),
             ),
             (
                 120,
                 key(
-                    "  Tasks  2 running · 1 done  ● bash-1  bun run build --release --workspace  1m 12s",
+                    "  Tasks  2 running · 1 done │ ● bash-1  bun run build --release --workspace  1m 12s",
                     120,
                 ),
             ),
@@ -6369,29 +7163,29 @@ mod tests {
             (
                 80,
                 key(
-                    "  Tasks  2 running · 1 done  ● bash-1  bun run build --releas…  1m 12s",
+                    "  Tasks  2 running · 1 done │ ● bash-1  bun run build --relea…  1m 12s",
                     80,
                 ),
             ),
-            // ...to a few cells, then the dim counts go...
+            // ...down to FLEX_MIN, then drops whole while keeping all counts...
             (
                 64,
-                key("  Tasks  2 running  ● bash-1  bun run build -…  1m 12s", 64),
+                key("  Tasks  2 running · 1 done │ ● bash-1  1m 12s", 64),
             ),
             (
                 60,
-                key("  Tasks  2 running  ● bash-1  bun run bui…  1m 12s", 60),
+                key("  Tasks  2 running · 1 done │ ● bash-1  1m 12s", 60),
             ),
-            // ...and without the key, which needs 60 columns, one fits again.
+            // ...and without the key, which needs 60 columns, the command fits again.
             (
                 59,
-                "  Tasks  2 running · 1 done  ● bash-1  bun run b…  1m 12s".into(),
+                "  Tasks  2 running · 1 done │ ● bash-1  bun run…  1m 12s".into(),
             ),
-            (48, "  Tasks  2 running  ● bash-1  bun run…  1m 12s".into()),
-            // Then the command, the time, the label, and the newest task.
-            (40, "  Tasks  2 running  ● bash-1  1m 12s".into()),
-            (30, "  Tasks  2 running  ● bash-1".into()),
-            (20, "  2 running".into()),
+            // Then command drops, time drops, featured task drops, and words->marks.
+            (48, "  Tasks  2 running · 1 done │ ● bash-1  1m 12s".into()),
+            (40, "  Tasks  2 running · 1 done │ ● bash-1".into()),
+            (30, "  Tasks  2 running · 1 done".into()),
+            (20, "  Tasks  ● 2  ✓ 1".into()),
         ];
         assert_eq!(seen, expected);
     }
@@ -6405,8 +7199,7 @@ mod tests {
         terminal.draw(|f| render(&mut app, f)).unwrap();
         let (rows, _) = draw(&mut app, 48, 14);
         let row = &rows[rows.len() - 2];
-        assert!(row.contains("2 running · 1 failed"), "{row}");
-        assert!(!row.contains("done"), "{row}");
+        assert!(row.contains("2 running · 1 failed · 2 done"), "{row}");
         let y = (rows.len() - 2) as u16;
         let x = row
             .find("1 failed")
@@ -6418,6 +7211,9 @@ mod tests {
         app.tones = Tones::Ansi;
         terminal.draw(|f| render(&mut app, f)).unwrap();
         assert_eq!(terminal.backend().buffer()[(x, y)].fg, Color::Red);
+        // Even at a very narrow width where dim counts drop, the failed count stays.
+        let (narrow, _) = draw(&mut app, 14, 14);
+        assert_eq!(narrow[narrow.len() - 2].trim_end(), "  ● 2  ✗ 1");
     }
 
     // A live session's subagents list under Ctrl+G with the shells, and
@@ -6455,7 +7251,7 @@ mod tests {
         );
         assert!(
             rows.iter()
-                .any(|row| row.contains("idle · faux/faux-2") && row.trim_end().ends_with("done")),
+                .any(|row| row.contains("Counted 12 files.") && row.trim_end().ends_with("done")),
             "{rows:#?}"
         );
         update(&mut app, Msg::Key(KeyInput::plain(Key::Down)));
@@ -6620,5 +7416,372 @@ mod tests {
         // Where the title and the step do not both fit, the step goes.
         let (rows, _) = draw(&mut app, 26, 24);
         assert!(!rows.join("\n").contains("Step"), "{rows:#?}");
+    }
+
+    fn open_question(app: &mut State, q: crate::dialog::QuestionDialog) {
+        use crate::dialog::{DialogKind, DialogRequest};
+        use crate::runtime::RuntimeUpdate;
+        update(
+            app,
+            Msg::Runtime(RuntimeUpdate::Dialog(Some(DialogRequest {
+                id: 1,
+                kind: DialogKind::Question(Box::new(q)),
+            }))),
+        );
+    }
+
+    fn sheet_lines(rows: &[String]) -> Vec<String> {
+        let start = rows
+            .iter()
+            .position(|r| r.contains('╭') || r.contains('+'))
+            .expect("sheet top border");
+        let end = rows[start..]
+            .iter()
+            .position(|r| {
+                r.contains('╰')
+                    || (r.contains('+') && rows[start..].iter().position(|x| x == r) != Some(0))
+            })
+            .map(|i| start + i)
+            .expect("sheet bottom border");
+        rows[start..=end]
+            .iter()
+            .map(|r| r.trim_end().to_owned())
+            .collect()
+    }
+
+    #[test]
+    fn question_single_select_expected_output_wide_and_narrow() {
+        use crate::dialog::{QuestionChoice, QuestionDialog};
+        let opt = |label: &str, desc: &str| QuestionChoice {
+            value: label.into(),
+            label: label.into(),
+            description: (!desc.is_empty()).then(|| desc.into()),
+        };
+        let q = QuestionDialog {
+            header: "Auth method".into(),
+            from: None,
+            progress: None,
+            question: "Which authentication method should the service use for API clients?".into(),
+            options: vec![
+                opt("OAuth 2.0", "Browser login with refresh tokens and PKCE"),
+                opt("API key", "Static bearer token stored in ~/.bake/auth.json"),
+                opt(
+                    "mTLS certificate",
+                    "Client certificate pair signed by internal CA",
+                ),
+                opt("None", "Local unauthenticated development endpoint"),
+            ],
+            multi_select: false,
+            ticked: Vec::new(),
+            selected: None,
+        };
+
+        let mut app = State::live(FrameStyle::default(), Tones::None, Vec::new());
+        open_question(&mut app, q.clone());
+        arm(&mut app, 100, 30);
+        let (rows, _) = draw(&mut app, 100, 30);
+        assert_eq!(
+            sheet_lines(&rows),
+            vec![
+                "  ╭──────────────────────────────────────────────────────────────────────────────╮",
+                "  │ Auth method                                                                  │",
+                "  │ Which authentication method should the service use for API clients?          │",
+                "  │                                                                              │",
+                "  │ ▸ 1. OAuth 2.0 — Browser login with refresh tokens and PKCE                  │",
+                "  │   2. API key — Static bearer token stored in ~/.bake/auth.json               │",
+                "  │   3. mTLS certificate — Client certificate pair signed by internal CA        │",
+                "  │   4. None — Local unauthenticated development endpoint                       │",
+                "  │ ──────────────────────────────────────────────────────────────────────────── │",
+                "  │   Other: type an answer…                                                     │",
+                "  │ ↑↓ move · 1-9 choose · Enter select · Esc decline                            │",
+                "  ╰──────────────────────────────────────────────────────────────────────────────╯",
+            ]
+        );
+
+        let mut app = State::live(FrameStyle::default(), Tones::None, Vec::new());
+        open_question(&mut app, q);
+        arm(&mut app, 60, 24);
+        let (rows, _) = draw(&mut app, 60, 24);
+        assert_eq!(
+            sheet_lines(&rows),
+            vec![
+                "  ╭──────────────────────────────────────────────────────╮",
+                "  │ Auth method                                          │",
+                "  │ Which authentication method should the service use   │",
+                "  │ for API clients?                                     │",
+                "  │                                                      │",
+                "  │ ▸ 1. OAuth 2.0                                       │",
+                "  │      Browser login with refresh tokens and PKCE      │",
+                "  │   2. API key                                         │",
+                "  │      Static bearer token stored in ~/.bake/auth.json │",
+                "  │   3. mTLS certificate                                │",
+                "  │      Client certificate pair signed by internal CA   │",
+                "  │   4. None                                            │",
+                "  │      Local unauthenticated development endpoint      │",
+                "  │ ──────────────────────────────────────────────────── │",
+                "  │   Other: type an answer…                             │",
+                "  │ ↑↓ move · 1-9 choose · Enter select · Esc decline    │",
+                "  ╰──────────────────────────────────────────────────────╯",
+            ]
+        );
+    }
+
+    #[test]
+    fn question_multi_select_expected_output_wide_and_narrow() {
+        use crate::dialog::{QuestionChoice, QuestionDialog};
+        let opt = |label: &str, desc: &str| QuestionChoice {
+            value: label.into(),
+            label: label.into(),
+            description: (!desc.is_empty()).then(|| desc.into()),
+        };
+        let q = QuestionDialog {
+            header: "Checks".into(),
+            from: None,
+            progress: None,
+            question: "Which checks should run before tagging the release?".into(),
+            options: vec![
+                opt("Format", "Run cargo fmt --check across the workspace"),
+                opt("Clippy", "Deny all warnings on every target"),
+                opt("Tests", "Execute unit and integration test suites"),
+                opt("Fuzz", "Run short parser fuzz smoke pass"),
+            ],
+            multi_select: true,
+            ticked: vec![true, false, true, false],
+            selected: Some(2),
+        };
+
+        let mut app = State::live(FrameStyle::default(), Tones::None, Vec::new());
+        open_question(&mut app, q.clone());
+        arm(&mut app, 100, 30);
+        let (rows, _) = draw(&mut app, 100, 30);
+        assert_eq!(
+            sheet_lines(&rows),
+            vec![
+                "  ╭──────────────────────────────────────────────────────────────────────────────╮",
+                "  │ Checks                                                                       │",
+                "  │ Which checks should run before tagging the release?                          │",
+                "  │                                                                              │",
+                "  │   1. [x] Format — Run cargo fmt --check across the workspace                 │",
+                "  │   2. [ ] Clippy — Deny all warnings on every target                          │",
+                "  │ ▸ 3. [x] Tests — Execute unit and integration test suites                    │",
+                "  │   4. [ ] Fuzz — Run short parser fuzz smoke pass                             │",
+                "  │ ──────────────────────────────────────────────────────────────────────────── │",
+                "  │   Other: type an answer…                                                     │",
+                "  │   Done (2 chosen)                                                            │",
+                "  │ ↑↓ move · 1-9/Space toggle · Enter done · Esc decline                        │",
+                "  ╰──────────────────────────────────────────────────────────────────────────────╯",
+            ]
+        );
+
+        // Pressing '2' toggles Clippy on and updates the Done count live.
+        key(&mut app, Key::Char('2'));
+        let (rows, _) = draw(&mut app, 100, 30);
+        let screen = rows.join("\n");
+        assert!(screen.contains("▸ 2. [x] Clippy"), "{screen}");
+        assert!(screen.contains("Done (3 chosen)"), "{screen}");
+
+        let mut app = State::live(FrameStyle::default(), Tones::None, Vec::new());
+        open_question(&mut app, q);
+        arm(&mut app, 60, 24);
+        let (rows, _) = draw(&mut app, 60, 24);
+        assert_eq!(
+            sheet_lines(&rows),
+            vec![
+                "  ╭──────────────────────────────────────────────────────╮",
+                "  │ Checks                                               │",
+                "  │ Which checks should run before tagging the release?  │",
+                "  │                                                      │",
+                "  │   1. [x] Format                                      │",
+                "  │          Run cargo fmt --check across the workspace  │",
+                "  │   2. [ ] Clippy                                      │",
+                "  │          Deny all warnings on every target           │",
+                "  │ ▸ 3. [x] Tests                                       │",
+                "  │          Execute unit and integration test suites    │",
+                "  │   4. [ ] Fuzz                                        │",
+                "  │          Run short parser fuzz smoke pass            │",
+                "  │ ──────────────────────────────────────────────────── │",
+                "  │   Other: type an answer…                             │",
+                "  │   Done (2 chosen)                                    │",
+                "  │ ↑↓ · Space toggle · Enter done · Esc decline         │",
+                "  ╰──────────────────────────────────────────────────────╯",
+            ]
+        );
+    }
+
+    #[test]
+    fn question_multi_question_forwarded_and_field_form_expected_output() {
+        use crate::dialog::{
+            DialogKind, DialogRequest, FieldDialog, QuestionChoice, QuestionDialog,
+        };
+        use crate::runtime::RuntimeUpdate;
+        let opt = |label: &str, desc: &str| QuestionChoice {
+            value: label.into(),
+            label: label.into(),
+            description: (!desc.is_empty()).then(|| desc.into()),
+        };
+        let q = QuestionDialog {
+            header: "Migration".into(),
+            from: Some("alpha-1".into()),
+            progress: Some((2, 3)),
+            question: "The sessions table has 4.2M rows and an active foreign key from events. How should we roll out the column rename without dropping in-flight writes or blocking readers?".into(),
+            options: vec![
+                opt(
+                    "Online",
+                    "Dual-write to old and new tables, backfill in batches, then cut over",
+                ),
+                opt(
+                    "Maintenance window",
+                    "Take brief write lock and migrate in a single transaction",
+                ),
+                opt("Skip for now", "Keep legacy schema until the next release"),
+            ],
+            multi_select: false,
+            ticked: Vec::new(),
+            selected: None,
+        };
+
+        let mut app = State::live(FrameStyle::default(), Tones::None, Vec::new());
+        open_question(&mut app, q.clone());
+        arm(&mut app, 100, 30);
+        let (rows, _) = draw(&mut app, 100, 30);
+        assert_eq!(
+            sheet_lines(&rows),
+            vec![
+                "  ╭──────────────────────────────────────────────────────────────────────────────╮",
+                "  │ Migration · alpha-1 asks                                     Question 2 of 3 │",
+                "  │ The sessions table has 4.2M rows and an active foreign key from events. How  │",
+                "  │ should we roll out the column rename without dropping in-flight writes or    │",
+                "  │ blocking readers?                                                            │",
+                "  │                                                                              │",
+                "  │ ▸ 1. Online                                                                  │",
+                "  │      Dual-write to old and new tables, backfill in batches, then cut over    │",
+                "  │   2. Maintenance window                                                      │",
+                "  │      Take brief write lock and migrate in a single transaction               │",
+                "  │   3. Skip for now                                                            │",
+                "  │      Keep legacy schema until the next release                               │",
+                "  │ ──────────────────────────────────────────────────────────────────────────── │",
+                "  │   Other: type an answer…                                                     │",
+                "  │ ↑↓ move · 1-9 choose · Enter select · Esc decline                            │",
+                "  ╰──────────────────────────────────────────────────────────────────────────────╯",
+            ]
+        );
+
+        let mut app = State::live(FrameStyle::default(), Tones::None, Vec::new());
+        open_question(&mut app, q);
+        arm(&mut app, 60, 24);
+        let (rows, _) = draw(&mut app, 60, 24);
+        assert_eq!(
+            sheet_lines(&rows),
+            vec![
+                "  ╭──────────────────────────────────────────────────────╮",
+                "  │ Migration · alpha-1 asks             Question 2 of 3 │",
+                "  │ The sessions table has 4.2M rows and an active       │",
+                "  │ foreign key from events. How should we roll out the  │",
+                "  │ column rename without dropping in-flight writes or   │",
+                "  │ blocking readers?                                    │",
+                "  │                                                      │",
+                "  │ ▸ 1. Online                                          │",
+                "  │      Dual-write to old and new tables, backfill in   │",
+                "  │      batches, then cut over                          │",
+                "  │   2. Maintenance window                              │",
+                "  │      Take brief write lock and migrate in a single   │",
+                "  │      transaction                                     │",
+                "  │   3. Skip for now                                    │",
+                "  │      Keep legacy schema until the next release       │",
+                "  │ ──────────────────────────────────────────────────── │",
+                "  │   Other: type an answer…                             │",
+                "  │ ↑↓ move · 1-9 choose · Enter select · Esc decline    │",
+                "  ╰──────────────────────────────────────────────────────╯",
+            ]
+        );
+
+        // Field form for option-less questions or custom "Other" answers.
+        let mut app = State::live(FrameStyle::default(), Tones::None, Vec::new());
+        update(
+            &mut app,
+            Msg::Runtime(RuntimeUpdate::Dialog(Some(DialogRequest {
+                id: 2,
+                kind: DialogKind::Field(Box::new(FieldDialog {
+                    title: "Branch name".into(),
+                    prompt: "What should the new release branch be named?".into(),
+                    placeholder: Some("Type your answer…".into()),
+                    action: Some("answer".into()),
+                    ..FieldDialog::default()
+                })),
+            }))),
+        );
+        arm(&mut app, 60, 24);
+        let (rows, _) = draw(&mut app, 60, 24);
+        assert_eq!(
+            sheet_lines(&rows),
+            vec![
+                "  ╭──────────────────────────────────────────────────────╮",
+                "  │ Branch name                                          │",
+                "  │ What should the new release branch be named?         │",
+                "  │ >  Type your answer…                                 │",
+                "  │ Enter answer · ^U clear · Esc cancel                 │",
+                "  ╰──────────────────────────────────────────────────────╯",
+            ]
+        );
+    }
+
+    #[test]
+    fn question_dialog_fits_width_and_strips_controls_for_untrusted_text() {
+        use crate::dialog::{QuestionChoice, QuestionDialog};
+        let samples = [
+            QuestionDialog {
+                header: "\x1b[31mRed\x1b[0m\u{0007}標題".into(),
+                from: Some("\x1b]0;pwn\x07alpha-1".into()),
+                progress: Some((2, 4)),
+                question: "Line1\r\n\x1b[1;32m日本語の長い質問テキスト\x1b[0m\twith\u{007f}controls\u{009b}31m and emojis 🚀🎉🔥 repeated ".repeat(6),
+                options: vec![
+                    QuestionChoice {
+                        value: "v1".into(),
+                        label: "\x1b[33m超長いオプションラベル\x1b[0m_".repeat(5),
+                        description: Some("説明文\n二行目\x1b[31m危険\x1b[0m 🚀".repeat(4)),
+                    },
+                    QuestionChoice {
+                        value: "v2".into(),
+                        label: "\u{0000}\u{0001}plain".into(),
+                        description: None,
+                    },
+                ],
+                multi_select: true,
+                ticked: vec![true, false],
+                selected: Some(0),
+            },
+            QuestionDialog {
+                header: String::new(),
+                from: None,
+                progress: Some((1, 1)),
+                question: "Short?".into(),
+                options: Vec::new(),
+                multi_select: false,
+                ticked: Vec::new(),
+                selected: None,
+            },
+        ];
+
+        for style in [FrameStyle::default(), FrameStyle::Classic] {
+            for q in &samples {
+                for (w, h) in [(10, 8), (18, 12), (32, 16), (60, 24), (100, 30)] {
+                    let mut app = State::live(style, Tones::None, Vec::new());
+                    open_question(&mut app, q.clone());
+                    arm(&mut app, w, h);
+                    let (rows, _) = draw(&mut app, w, h);
+                    for (idx, row) in rows.iter().enumerate() {
+                        assert!(
+                            row.width() <= usize::from(w),
+                            "style={style:?} {w}x{h} row {idx} width {} > {w}: {row:?}",
+                            row.width()
+                        );
+                        assert!(
+                            !row.chars().any(char::is_control),
+                            "style={style:?} {w}x{h} row {idx} contained control char: {row:?}"
+                        );
+                    }
+                }
+            }
+        }
     }
 }

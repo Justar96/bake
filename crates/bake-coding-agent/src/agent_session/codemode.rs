@@ -111,24 +111,30 @@ pub(super) fn is_subagent_session(session: &crate::session::SessionManager) -> b
     })
 }
 
+/// The result of preparing the active `codemode` tool's loadout without
+/// mutating the session host.
+pub(super) struct PreparedCodemodeLoadout {
+    pub(super) tools: Vec<Arc<AgentTool>>,
+    pub(super) own_descriptions: HashMap<String, String>,
+    pub(super) hidden_declarations: Vec<String>,
+}
+
 /// The tools of one request with the active `codemode` tool's loadout
-/// applied: Pi's `_applyToolLoadout`. Without an active `codemode` tool the
-/// tools are returned unchanged and nothing is hidden, so requests are what
-/// they would be without code mode. The host keeps the descriptions the
-/// loadout replaces for the request's scripts.
-pub(super) fn apply_codemode_loadout(
+/// computed without mutating `host`: Pi's `_applyToolLoadout`, pure.
+/// Without an active `codemode` tool the tools are returned unchanged and
+/// nothing is hidden, so requests are what they would be without code mode.
+pub(super) fn preview_codemode_loadout(
     tools: Vec<Arc<AgentTool>>,
     settings: &Settings,
     mode: CodemodeMode,
     host: &SessionCodemodeHost,
-) -> (Vec<Arc<AgentTool>>, Vec<String>) {
-    let mut own_descriptions = host
-        .own_descriptions
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner);
-    own_descriptions.clear();
+) -> PreparedCodemodeLoadout {
     if !tools.iter().any(|tool| tool.name == CODEMODE_TOOL_NAME) {
-        return (tools, Vec::new());
+        return PreparedCodemodeLoadout {
+            tools,
+            own_descriptions: HashMap::new(),
+            hidden_declarations: Vec::new(),
+        };
     }
     let namespace = |name: &str| host.tool_namespace(name);
     let guidelines = |name: &str| host.tool_guidelines(name);
@@ -141,6 +147,7 @@ pub(super) fn apply_codemode_loadout(
         mode,
         settings.codemode_inline_budget,
     );
+    let mut own_descriptions = HashMap::new();
     let tools = tools
         .into_iter()
         .map(|tool| {
@@ -159,7 +166,24 @@ pub(super) fn apply_codemode_loadout(
             }
         })
         .collect();
-    (tools, changes.hidden_declarations)
+    PreparedCodemodeLoadout {
+        tools,
+        own_descriptions,
+        hidden_declarations: changes.hidden_declarations,
+    }
+}
+
+/// Records the tools' own descriptions replaced by the last request's
+/// loadout so scripts see them in `ALL_TOOLS`, `describeTool()`, and
+/// `searchTools()`.
+pub(super) fn commit_codemode_descriptions(
+    host: &SessionCodemodeHost,
+    descriptions: HashMap<String, String>,
+) {
+    *host
+        .own_descriptions
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner) = descriptions;
 }
 
 /// Pi's `_installHiddenDeclarationsProjection`: the transcript's tool

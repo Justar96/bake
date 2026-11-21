@@ -346,7 +346,6 @@ fn rejects_incomplete_and_unsupported_families() {
         "erDiagram; accDescr {; A model; }; CUSTOMER",
         "erDiagram; ACCDESCR {; A model; }; CUSTOMER",
         "erDiagram; A ||--|| B:::highlight : owns",
-        "%%{init: {}}%%\nclassDiagram; class A",
     ] {
         assert_eq!(
             render(source, /*max_width*/ 200),

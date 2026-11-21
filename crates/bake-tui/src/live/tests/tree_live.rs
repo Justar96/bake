@@ -40,6 +40,7 @@ fn title(dialog: &DialogRequest) -> &str {
         DialogKind::List(list) => &list.title,
         DialogKind::Field(field) => &field.title,
         DialogKind::Info(info) => &info.title,
+        DialogKind::Question(question) => &question.header,
     }
 }
 

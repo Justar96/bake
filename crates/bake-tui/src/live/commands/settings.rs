@@ -546,8 +546,10 @@ pub async fn settings(context: &mut Context) -> Outcome {
             .find(|item| item.value == value)
             .map_or_else(|| value.clone(), |item| item.label.clone());
         let result = apply(&session, &setting, &value).await?;
-        if setting.starts_with("status-") {
-            // The line under the sheet shows the change at once.
+        if setting.starts_with("status-") || matches!(setting.as_str(), "compaction" | "compact-at")
+        {
+            // The line under the sheet shows the change at once, the
+            // automatic-compaction point included.
             (context.send)(bake_tui_view::runtime::RuntimeUpdate::Status(
                 crate::live::publish::read_status(&session),
             ));

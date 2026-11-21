@@ -26,9 +26,17 @@ fn join(root: &Path, cwd: &Path, session: &str, parent: Option<&str>) -> Member 
             root: root.to_path_buf(),
             cwd: cwd.to_path_buf(),
             session_id: session.into(),
-            callsign: None,
+            // A top-level session named for a NATO word asks for it, so the
+            // cases below know who is who; the rest draw one.
+            // `s-bravo-next` is another session asking for `bravo`.
+            callsign: session
+                .strip_prefix("s-")
+                .and_then(|name| name.split('-').next())
+                .filter(|name| parent.is_none() && directory::NATO.contains(name))
+                .map(str::to_owned),
             parent: parent.map(str::to_owned),
             model: Some("faux/model".into()),
+            names: Vec::new(),
         },
         jobs.clone(),
         &work,
@@ -55,6 +63,66 @@ fn mail_texts(jobs: &JobRegistry) -> Vec<String> {
             UserContent::Text(text) => text,
         })
         .collect()
+}
+
+// A member that asks for no callsign draws one from the pool, a
+// configured pool replaces the built-in one, and two members never hold
+// the same.
+#[tokio::test]
+async fn members_draw_free_callsigns_from_the_pool() {
+    let (root, cwd) = (temp(), temp());
+    let first = join(&root, &cwd, "session-one", None);
+    let second = join(&root, &cwd, "session-two", None);
+    let pool = super::super::names::pool(&[]);
+    for member in [&first, &second] {
+        assert!(
+            pool.contains(&member.station.callsign()),
+            "{}",
+            member.station.callsign()
+        );
+    }
+    assert_ne!(first.station.callsign(), second.station.callsign());
+    let work = WorkGate::default();
+    let jobs = JobRegistry::new(work.clone(), JobLimits::default());
+    let named = Station::start(
+        StationOptions {
+            root: root.clone(),
+            cwd: cwd.clone(),
+            session_id: "session-three".into(),
+            callsign: None,
+            parent: None,
+            model: None,
+            names: vec!["Kite".into(), "bad name".into()],
+        },
+        jobs,
+        &work,
+    )
+    .unwrap();
+    assert_eq!(named.callsign(), "kite");
+    // Its only name is held: the numbered form comes next.
+    let work2 = WorkGate::default();
+    let jobs2 = JobRegistry::new(work2.clone(), JobLimits::default());
+    let again = Station::start(
+        StationOptions {
+            root: root.clone(),
+            cwd: cwd.clone(),
+            session_id: "session-four".into(),
+            callsign: None,
+            parent: None,
+            model: None,
+            names: vec!["kite".into()],
+        },
+        jobs2,
+        &work2,
+    )
+    .unwrap();
+    assert_eq!(again.callsign(), "kite2");
+    for member in [first, second] {
+        member.work.close().await;
+    }
+    work.close().await;
+    work2.close().await;
+    std::fs::remove_dir_all(root).unwrap();
 }
 
 #[tokio::test]
@@ -667,7 +735,7 @@ async fn a_peer_is_tracked_by_session_not_by_callsign() {
     // Bravo leaves and a new session takes its callsign: the ask's peer
     // is still gone.
     bravo.work.close().await;
-    let successor = join(&root, &cwd, "s-successor", None);
+    let successor = join(&root, &cwd, "s-bravo-next", None);
     assert_eq!(successor.station.callsign(), "bravo");
     let outcome = asking.await.unwrap().unwrap();
     assert!(
@@ -730,7 +798,7 @@ async fn send_names_each_member_once_and_batches_past_the_group_cap() {
     let (root, cwd) = (temp(), temp());
     let alpha = join(&root, &cwd, "s-alpha", None);
     let peers: Vec<Member> = (0..wire::GROUP_CAP + 1)
-        .map(|n| join(&root, &cwd, &format!("s-peer{n}"), None))
+        .map(|n| join(&root, &cwd, &format!("s-{}", directory::NATO[n + 1]), None))
         .collect();
     let names: Vec<String> = peers.iter().map(|peer| peer.station.callsign()).collect();
     let report = alpha

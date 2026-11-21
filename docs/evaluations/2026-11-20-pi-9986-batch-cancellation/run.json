@@ -1,0 +1,31 @@
+{
+  "name": "Pi #9986 tool-call batch cancellation settlement",
+  "date": "2026-11-20",
+  "base": {
+    "path": "/home/jtar-wsl/bake/.worktrees/base-4083bfae10/target/release/bake",
+    "version": "bake 0.4.10",
+    "bytes": 73274560
+  },
+  "candidate": {
+    "path": "/home/jtar-wsl/bake/.worktrees/cand-pi-9986/target/release/bake",
+    "version": "bake 0.4.10",
+    "bytes": 73273256
+  },
+  "same_executable": false,
+  "base_settings": {},
+  "candidate_settings": {},
+  "models": [
+    "cliproxyapi/gemini-4-hydrogen-xhigh:high"
+  ],
+  "tasks": [
+    [
+      "cascade-fix",
+      "Run `python3 verify.py` and fix the project until it prints OK. Do not edit verify.py."
+    ]
+  ],
+  "trials": 5,
+  "jobs": 2,
+  "max_model_calls": 60,
+  "run_timeout_ms": 900000,
+  "host": "linux/x86_64"
+}

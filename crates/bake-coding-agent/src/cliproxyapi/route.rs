@@ -198,15 +198,15 @@ impl From<&CliProxyModel> for RouteModel {
             context_window: model.context_window,
             max_tokens: model.max_tokens,
             input: model.input.clone(),
-            reasoning_efforts: model.reasoning_efforts.as_ref().map(|efforts| {
-                ReasoningEfforts::Levels(
-                    efforts
-                        .iter()
-                        .filter_map(|level| {
-                            thinking_level(level).map(|parsed| (parsed, Some(level.clone())))
+            reasoning_efforts: model.reasoning_efforts.as_ref().and_then(|efforts| {
+                let mapped: Vec<(ModelThinkingLevel, Option<String>)> =
+                    super::catalog::map_listed_efforts(efforts, model.api)
+                        .into_iter()
+                        .filter_map(|(level, wire)| {
+                            thinking_level(&level).map(|parsed| (parsed, wire))
                         })
-                        .collect(),
-                )
+                        .collect();
+                (!mapped.is_empty()).then_some(ReasoningEfforts::Levels(mapped))
             }),
             compat: model.force_adaptive_thinking.then(|| {
                 let mut compat = Map::new();
@@ -217,7 +217,7 @@ impl From<&CliProxyModel> for RouteModel {
     }
 }
 
-/// The `cliproxyapi` route of Bake's `llm-pi-ai` settings.
+/// The `cliproxyapi` route stored in Bake's `settings.json`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CliProxyRoute {
     /// `displayName`.
@@ -424,7 +424,7 @@ impl CliProxyRoute {
         }
     }
 
-    /// Read a saved route, the `llm-pi-ai.providers.cliproxyapi` value.
+    /// Read a saved route, the `cliproxyapi` setting in `settings.json`.
     /// A field of the wrong type is refused with its path; fields Pi has no
     /// counterpart for are ignored.
     pub fn from_settings(value: &Value) -> Result<Self, RouteError> {
@@ -718,7 +718,7 @@ fn needs_the_system_role(model: &RouteModel, route: &CliProxyRoute) -> bool {
     let states = |compat: Option<&Map<String, Value>>| {
         compat.is_some_and(|compat| compat.contains_key(SUPPORTS_DEVELOPER_ROLE))
     };
-    is_chat_completions_family(&model.id)
+    (is_chat_completions_family(&model.id) || model.api.as_deref() == Some("openai-completions"))
         && !states(model.compat.as_ref())
         && !states(route.compat.as_ref())
 }

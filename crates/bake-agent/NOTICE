@@ -15,6 +15,12 @@ Not ported: packages/agent/src/proxy.ts.
 Release v1.3.0, revision 71023aec1546d6d677a65669c5665c0927ce0dd0.
 Ported: packages/coding-agent/src/core/nested-tool-calls.ts with its test
 (test/nested-tool-calls.test.ts), hosted by the agent loop (src/nested.rs).
+
+Release v1.6.0, revision faac585884ae2c013a6b1400f3e9e77f10b34bac (partial, #9986).
+Ported: aborted tool-batch error results and pre-preparation abort checks in
+packages/agent/src/agent-loop.ts with their tests (test/agent-loop.test.ts).
+Not ported from v1.2.0-v1.6.0: AgentOptions.identity / ClientIdentity (v1.4.0)
+and packages/agent/src/proxy.ts updates.
 --------------------------------------------------------------------------------
 MIT License
 

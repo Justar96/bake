@@ -25,9 +25,9 @@ use crate::tools::path_utils::resolve_to_cwd;
 
 /// Pi's `writeToolSystemPromptContribution` snippet.
 pub const WRITE_PROMPT_SNIPPET: &str = "Create or overwrite files";
-/// Pi's `writeToolSystemPromptContribution` guidelines.
-pub const WRITE_PROMPT_GUIDELINES: &[&str] =
-    &["Use write only for new files or complete rewrites."];
+/// Bake's `write` contributes no prompt guidelines; the tool description
+/// already documents creating, overwriting, and parent directory creation.
+pub const WRITE_PROMPT_GUIDELINES: &[&str] = &[];
 
 fn parameters() -> Value {
     json!({
@@ -84,12 +84,7 @@ pub(crate) fn owned_write_tool_definition(
     ToolDefinition {
         tool,
         prompt_snippet: Some(WRITE_PROMPT_SNIPPET.into()),
-        prompt_guidelines: Some(
-            WRITE_PROMPT_GUIDELINES
-                .iter()
-                .map(|g| (*g).to_owned())
-                .collect(),
-        ),
+        prompt_guidelines: None,
     }
 }
 

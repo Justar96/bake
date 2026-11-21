@@ -3,7 +3,8 @@
 // License, Version 2.0; see this crate's NOTICE.
 // Changed by Bake contributors: the crate documentation below gathers the
 // upstream README's grammar, layout, and limits, the tests include Bake's
-// property tests, and `outline` is Bake's own.
+// property tests, `outline` is Bake's own, and sources are reduced by Bake's
+// `lenient` module before they are parsed.
 
 //! Bounded, terminal-native Mermaid diagrams as text: Bake's port of
 //! OpenAI Codex's `codex-mermaid`.
@@ -42,11 +43,20 @@
 //! quoted tokens, and class bodies. Flowchart node and edge labels may be
 //! enclosed in double quotes, and node labels support `<br>`, `<br/>`, and
 //! `<br />` as line breaks. These are explicit subsets, not complete Mermaid
-//! compatibility: compound states, flowchart subgraphs, other shapes,
-//! sequence activation and parallel fragments, styling, front matter,
-//! directives, other HTML, escapes, combining or zero-width characters, and
-//! ligatures with non-additive widths return errors. The library never
-//! returns a partial diagram.
+//! compatibility: other HTML, entities, Markdown strings, combining or
+//! zero-width characters, and ligatures with non-additive widths return
+//! errors.
+//!
+//! Bake reads more than it draws, so that a diagram written for a browser
+//! still shows: styling, front matter, directives, sequence activations,
+//! and notes it has no place for are left out, and subgraphs, composite
+//! states, and namespaces draw what they hold without their frame (see
+//! `lenient.rs`). Other flowchart node shapes draw as a box, or as a
+//! stadium when they are round; thick, long, and circle- or cross-tipped
+//! edges as the plain edge of the same direction; a sequence's `par`/`and`
+//! and `critical`/`option` as blocks with branches, `Note left of` and
+//! `Note right of` as a note over the participant, and `-)` and activation
+//! marks as the plain message.
 //!
 //! # Layout and notation
 //!
@@ -75,6 +85,7 @@
 //! and how large it draws when no width limits it.
 
 mod draw;
+mod lenient;
 mod output;
 mod parse;
 mod relations;
@@ -133,7 +144,8 @@ pub fn render_spans(source: &str, max_width: usize) -> Result<Vec<Vec<Span>>, Re
     if source.len() > MAX_SOURCE {
         return Err(RenderError::Limit);
     }
-    let statements = syntax::statements(source)?;
+    let source = lenient::reduce(source);
+    let statements = syntax::statements(&source)?;
     let (header, body) = statements.split_first().ok_or(RenderError::Unsupported)?;
     match *header {
         "sequenceDiagram" => sequence::render(body, max_width),
@@ -185,7 +197,8 @@ pub fn outline(source: &str) -> Result<Outline, RenderError> {
     if source.len() > MAX_SOURCE {
         return Err(RenderError::Limit);
     }
-    let statements = syntax::statements(source)?;
+    let source = lenient::reduce(source);
+    let statements = syntax::statements(&source)?;
     let (header, body) = statements.split_first().ok_or(RenderError::Unsupported)?;
     let (family, nodes, links, rows) = match *header {
         "sequenceDiagram" => {

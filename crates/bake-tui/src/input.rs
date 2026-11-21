@@ -371,4 +371,58 @@ mod tests {
             assert_eq!(decode(event(ignored, KeyModifiers::NONE), at), None);
         }
     }
+
+    #[test]
+    fn bracketed_paste_code_payload_survives_vt_parser_to_draft_expanded_without_effects() {
+        use bake_tui_view::activity::Tones;
+        use bake_tui_view::frame::FrameStyle;
+        use bake_tui_view::state::{State, update};
+
+        // Realistic code payload with UTF-8 BOM, CJK, combining mark, ZWJ emoji,
+        // tab indentation, CRLF + LF line endings, trailing spaces, blank line,
+        // and trailing newline.
+        let payload = "\u{feff}fn parse(s: &str) -> &str {\r\n\t// café 漢 \u{1F468}\u{200D}\u{1F469} e\u{301}\n\tlet keep = s;   \r\n\n}\n";
+        let expected = "\u{feff}fn parse(s: &str) -> &str {\n\t// café 漢 \u{1F468}\u{200D}\u{1F469} e\u{301}\n\tlet keep = s;   \n\n}\n";
+
+        let mut wire = Vec::new();
+        wire.extend_from_slice(b"\x1b[200~");
+        wire.extend_from_slice(payload.as_bytes());
+        wire.extend_from_slice(b"\x1b[201~");
+
+        for windows in [false, true] {
+            // Feed in small chunks that split across UTF-8 multibyte chars and
+            // the closing ESC[201~ marker.
+            let mut parser = crate::vt_parse::Parser::default();
+            let chunks: Vec<&[u8]> = wire.chunks(5).collect();
+            for (i, chunk) in chunks.iter().enumerate() {
+                parser.advance(chunk, i + 1 < chunks.len());
+            }
+
+            let mut events = Vec::new();
+            while let Some(ev) = parser.next_event() {
+                events.push(ev);
+            }
+            assert_eq!(events.len(), 1, "windows={windows}");
+
+            let mut decoder = Decoder::on(windows);
+            let msg = decoder
+                .decode(events.pop().unwrap(), Duration::ZERO)
+                .expect("bracketed paste decodes to Msg::Paste");
+            assert_eq!(msg, Msg::Paste(payload.to_owned()), "windows={windows}");
+
+            let mut state = State::new(FrameStyle::default(), Tones::None);
+            let effects = update(&mut state, msg);
+            assert!(
+                effects.is_empty(),
+                "pasted code must not submit or trigger side effects (windows={windows}): {effects:?}"
+            );
+            assert_eq!(state.notice, None, "windows={windows}");
+            assert_eq!(
+                state.draft.text(),
+                "[Pasted text #1 +5 lines]",
+                "windows={windows}"
+            );
+            assert_eq!(state.draft.expanded(), expected, "windows={windows}");
+        }
+    }
 }
