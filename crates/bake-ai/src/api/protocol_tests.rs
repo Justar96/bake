@@ -610,6 +610,56 @@ async fn responses_stream_over_http() {
     assert_eq!(request.header("session_id"), Some("session-1"));
     assert_eq!(request.body["prompt_cache_key"], json!("session-1"));
     assert_eq!(request.body["store"], json!(false));
+
+    // Explicit `sendSessionAffinityHeaders` on `cliproxyapi` adds
+    // `x-session-affinity`, and `false` suppresses the affinity headers.
+    let server2 = serve(vec![
+        Reply::sse(sse_events(&[(
+            "response.completed",
+            json!({ "type": "response.completed", "response": { "id": "resp_2", "status": "completed" } }),
+        )])),
+        Reply::sse(sse_events(&[(
+            "response.completed",
+            json!({ "type": "response.completed", "response": { "id": "resp_3", "status": "completed" } }),
+        )])),
+    ])
+    .await;
+    let mut sticky = model.clone();
+    sticky.base_url = format!("{}/v1", server2.base);
+    sticky.compat = Some(crate::types::ModelCompat {
+        send_session_affinity_headers: Some(true),
+        ..Default::default()
+    });
+    let mut base2 = options();
+    base2.session_id = Some("session-2".into());
+    let _ = run(openai_responses::stream(
+        &sticky,
+        &context(false),
+        openai_responses::OpenAIResponsesOptions {
+            base: base2.clone(),
+            ..Default::default()
+        },
+    ))
+    .await;
+    sticky.compat = Some(crate::types::ModelCompat {
+        send_session_affinity_headers: Some(false),
+        ..Default::default()
+    });
+    let _ = run(openai_responses::stream(
+        &sticky,
+        &context(false),
+        openai_responses::OpenAIResponsesOptions {
+            base: base2,
+            ..Default::default()
+        },
+    ))
+    .await;
+    let reqs = server2.requests();
+    assert_eq!(reqs[0].header("x-session-affinity"), Some("session-2"));
+    assert_eq!(reqs[0].header("session_id"), Some("session-2"));
+    assert_eq!(reqs[1].header("x-session-affinity"), None);
+    assert_eq!(reqs[1].header("session_id"), None);
+    assert_eq!(reqs[1].header("x-client-request-id"), None);
     assert_eq!(
         request.body["input"][0],
         json!({ "role": "system", "content": "Be brief." })

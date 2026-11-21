@@ -46,8 +46,9 @@ use crate::tools::truncate::{
 
 /// Pi's `readToolSystemPromptContribution` snippet.
 pub const READ_PROMPT_SNIPPET: &str = "Read file contents";
-/// Pi's `readToolSystemPromptContribution` guidelines.
-pub const READ_PROMPT_GUIDELINES: &[&str] = &["Use read to examine files instead of cat or sed."];
+/// Bake's `read` contributes no prompt guidelines; the tool description
+/// already documents text/image reading and `offset`/`limit` pagination.
+pub const READ_PROMPT_GUIDELINES: &[&str] = &[];
 
 /// The largest image file read.
 pub const MAX_IMAGE_FILE_BYTES: u64 = 64 * 1024 * 1024;
@@ -159,12 +160,7 @@ pub(crate) fn owned_read_tool_definition(
     ToolDefinition {
         tool,
         prompt_snippet: Some(READ_PROMPT_SNIPPET.into()),
-        prompt_guidelines: Some(
-            READ_PROMPT_GUIDELINES
-                .iter()
-                .map(|g| (*g).to_owned())
-                .collect(),
-        ),
+        prompt_guidelines: None,
     }
 }
 

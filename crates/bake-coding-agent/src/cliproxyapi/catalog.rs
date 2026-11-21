@@ -73,19 +73,41 @@ pub(super) fn is_chat_completions_family(id: &str) -> bool {
     matches_family(id, &CHAT_COMPLETIONS_FAMILIES)
 }
 
+/// Whether `owned_by` names a vendor whose models speak Chat Completions.
+fn is_chat_completions_owner(owned_by: Option<&str>) -> bool {
+    let Some(owner) = owned_by.map(js_trim).filter(|owner| !owner.is_empty()) else {
+        return false;
+    };
+    matches!(
+        owner.to_ascii_lowercase().as_str(),
+        "deepseek"
+            | "moonshot"
+            | "moonshotai"
+            | "kimi"
+            | "qwen"
+            | "alibaba"
+            | "zhipu"
+            | "zhipuai"
+            | "zai"
+            | "minimax"
+    )
+}
+
 /// `cliProxyApi`: the wire protocol one listed model is served over.
 ///
 /// Claude, by id wherever it is hosted or by an `anthropic` owner, goes over
 /// Anthropic Messages, whose `cache_control` breakpoints the proxy passes
-/// on; the Chat-Completions-only families go over Chat Completions; OpenAI,
-/// Gemini, and Grok stay on Responses.
+/// on; the Chat-Completions-only families (by owner or id) go over Chat
+/// Completions; OpenAI, Gemini, and Grok stay on Responses.
 pub fn cli_proxy_api(id: &str, owned_by: Option<&str>) -> CliProxyApi {
-    if owned_by.is_some_and(|owner| owner.to_lowercase() == "anthropic")
+    if owned_by
+        .map(js_trim)
+        .is_some_and(|owner| owner.eq_ignore_ascii_case("anthropic"))
         || matches_family(id, &["claude-"])
     {
         return CliProxyApi::AnthropicMessages;
     }
-    if is_chat_completions_family(id) {
+    if is_chat_completions_owner(owned_by) || is_chat_completions_family(id) {
         return CliProxyApi::OpenAiCompletions;
     }
     CliProxyApi::OpenAiResponses
@@ -110,16 +132,55 @@ impl Modality {
     }
 
     pub(crate) fn parse(value: &str) -> Option<Self> {
-        match value {
-            "text" => Some(Self::Text),
-            "image" => Some(Self::Image),
-            _ => None,
+        let trimmed = js_trim(value);
+        if trimmed.eq_ignore_ascii_case("text") {
+            Some(Self::Text)
+        } else if trimmed.eq_ignore_ascii_case("image") {
+            Some(Self::Image)
+        } else {
+            None
         }
     }
 }
 
-/// The reasoning levels a listing may offer (`supported_reasoning_levels`).
-const LISTED_EFFORTS: [&str; 6] = ["minimal", "low", "medium", "high", "xhigh", "max"];
+/// The reasoning levels a listing may offer (`supported_reasoning_levels`),
+/// matching CLIProxyAPI's `codexClientAllowedReasoningLevels` and
+/// `router-for-me/pi-cliproxyapi-provider`.
+const LISTED_EFFORTS: [&str; 8] = [
+    "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra",
+];
+
+/// Maps listed wire efforts into `(pi_level, wire_value)` entries for a
+/// model's `reasoningEfforts` object: `"none"` becomes `"off": null` on
+/// Anthropic Messages and `"off": "none"` on OpenAI protocols, and `"ultra"`
+/// maps to `"max": "ultra"` when `"max"` is not listed itself.
+pub(crate) fn map_listed_efforts(
+    efforts: &[String],
+    api: Option<CliProxyApi>,
+) -> Vec<(String, Option<String>)> {
+    let has_max = efforts.iter().any(|level| level == "max");
+    let mut mapped = Vec::with_capacity(efforts.len());
+    for level in efforts {
+        match level.as_str() {
+            "none" => {
+                let wire = (api != Some(CliProxyApi::AnthropicMessages)).then(|| "none".into());
+                if !mapped.iter().any(|(seen, _)| seen == "off") {
+                    mapped.push(("off".into(), wire));
+                }
+            }
+            "ultra" if !has_max && !mapped.iter().any(|(seen, _)| seen == "max") => {
+                mapped.push(("max".into(), Some("ultra".into())));
+            }
+            "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
+                if !mapped.iter().any(|(seen, _)| seen == level) =>
+            {
+                mapped.push((level.clone(), Some(level.clone())));
+            }
+            _ => {}
+        }
+    }
+    mapped
+}
 
 /// `CliProxyModel`: the fields a login saves for one discovered model.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -168,11 +229,13 @@ impl CliProxyModel {
             out.insert("input".into(), json!(input));
         }
         if let Some(efforts) = &self.reasoning_efforts {
-            let map: Map<String, Value> = efforts
-                .iter()
-                .map(|level| (level.clone(), json!(level)))
+            let map: Map<String, Value> = map_listed_efforts(efforts, self.api)
+                .into_iter()
+                .map(|(level, wire)| (level, json!(wire)))
                 .collect();
-            out.insert("reasoningEfforts".into(), Value::Object(map));
+            if !map.is_empty() {
+                out.insert("reasoningEfforts".into(), Value::Object(map));
+            }
         }
         if self.force_adaptive_thinking {
             out.insert("compat".into(), json!({ "forceAdaptiveThinking": true }));
@@ -269,45 +332,48 @@ pub fn cli_proxy_models(
             entry.get("max_output_tokens"),
             entry.get("max_completion_tokens"),
         ]);
-        let input: Vec<Modality> = match entry.get("input_modalities") {
+        let raw_input: Vec<Modality> = match entry.get("input_modalities") {
             Some(Value::Array(items)) => items
                 .iter()
                 .filter_map(|item| item.as_str().and_then(Modality::parse))
                 .collect(),
             _ => Vec::new(),
         };
-        let efforts: Vec<&str> = match entry.get("supported_reasoning_levels") {
-            Some(Value::Array(levels)) => levels
-                .iter()
-                .filter_map(|level| match level {
+        let mut distinct: Vec<String> = Vec::new();
+        if let Some(Value::Array(levels)) = entry.get("supported_reasoning_levels") {
+            for level in levels {
+                let raw = match level {
                     Value::String(level) => Some(level.as_str()),
                     Value::Object(level) => level.get("effort").and_then(Value::as_str),
                     _ => None,
-                })
-                .filter(|level| LISTED_EFFORTS.contains(level))
-                .collect(),
-            _ => Vec::new(),
-        };
-        let mut distinct: Vec<String> = Vec::new();
-        for level in &efforts {
-            if !distinct.iter().any(|seen| seen == level) {
-                distinct.push((*level).to_owned());
+                };
+                if let Some(normalized) = raw.map(js_trim).map(str::to_ascii_lowercase)
+                    && LISTED_EFFORTS.contains(&normalized.as_str())
+                    && !distinct.iter().any(|seen| seen == &normalized)
+                {
+                    distinct.push(normalized);
+                }
             }
         }
+        let has_reasoning = distinct.iter().any(|level| level != "none");
         let api = cli_proxy_api(id, string_field(entry, "owned_by"));
         // Adaptive thinking is what takes an effort level. The Claude models
-        // that list `xhigh` or `max` accept it; older ones answer it with
-        // HTTP 400 and keep budget thinking.
+        // that list `xhigh`, `max`, or `ultra` accept it; older ones answer it
+        // with HTTP 400 and keep budget thinking.
         let adaptive = api == CliProxyApi::AnthropicMessages
-            && efforts
+            && distinct
                 .iter()
-                .any(|level| matches!(*level, "xhigh" | "max"));
-        let input = if input.is_empty() {
+                .any(|level| matches!(level.as_str(), "xhigh" | "max" | "ultra"));
+        let input = if raw_input.is_empty() {
             None
-        } else if input.contains(&Modality::Text) {
-            Some(input)
         } else {
-            Some(std::iter::once(Modality::Text).chain(input).collect())
+            let mut deduped = vec![Modality::Text];
+            for modality in raw_input {
+                if !deduped.contains(&modality) {
+                    deduped.push(modality);
+                }
+            }
+            Some(deduped)
         };
         models.insert(
             id.to_owned(),
@@ -321,7 +387,7 @@ pub fn cli_proxy_models(
                 context_window,
                 max_tokens,
                 input,
-                reasoning_efforts: (!efforts.is_empty()).then_some(distinct),
+                reasoning_efforts: has_reasoning.then_some(distinct),
                 force_adaptive_thinking: adaptive,
             },
         );
@@ -416,6 +482,14 @@ mod tests {
             CliProxyApi::AnthropicMessages
         );
         assert_eq!(
+            cli_proxy_api("house-model", Some("DeepSeek")),
+            CliProxyApi::OpenAiCompletions
+        );
+        assert_eq!(
+            cli_proxy_api("house-model", Some(" moonshotai ")),
+            CliProxyApi::OpenAiCompletions
+        );
+        assert_eq!(
             cli_proxy_api("house-model", Some("openai")),
             CliProxyApi::OpenAiResponses
         );
@@ -458,16 +532,16 @@ mod tests {
             json!([
                 { "id": "claude-opus-5-5", "api": "anthropic-messages", "baseURL": "https://proxy.example",
                   "name": "claude-opus-5-5",
-                  "reasoningEfforts": { "low": "low", "high": "high", "xhigh": "xhigh", "max": "max" },
+                  "reasoningEfforts": { "off": null, "low": "low", "high": "high", "xhigh": "xhigh", "max": "max" },
                   "compat": { "forceAdaptiveThinking": true } },
                 { "id": "claude-sonnet-5-5", "api": "anthropic-messages", "baseURL": "https://proxy.example",
                   "name": "claude-sonnet-5-5",
-                  "reasoningEfforts": { "low": "low", "medium": "medium", "high": "high", "xhigh": "xhigh",
+                  "reasoningEfforts": { "off": null, "low": "low", "medium": "medium", "high": "high", "xhigh": "xhigh",
                                         "max": "max" },
                   "compat": { "forceAdaptiveThinking": true } },
                 { "id": "claude-opus-4-5-20251101", "api": "anthropic-messages",
                   "baseURL": "https://proxy.example", "name": "claude-opus-4-5-20251101",
-                  "reasoningEfforts": { "low": "low", "high": "high" } },
+                  "reasoningEfforts": { "off": null, "low": "low", "high": "high" } },
                 { "id": "gpt-6-sol", "name": "gpt-6-sol", "reasoningEfforts": { "low": "low", "high": "high" } },
             ])
         );
@@ -543,9 +617,10 @@ mod tests {
                     { "id": "h", "visibility": "HIDE" },
                     { "id": "limits", "context_window": 0, "max_context_window": 4096.0,
                       "max_tokens": 1.5, "max_output_tokens": -2, "max_completion_tokens": 77 },
-                    { "id": "dup-input", "input_modalities": ["image", "image", "audio", 1] },
-                    { "id": "efforts", "supported_reasoning_levels": ["high", { "effort": "high" }, ["low"],
-                      { "level": "low" }, "none", "minimal"] },
+                    { "id": "dup-input", "input_modalities": ["IMAGE", "image", "audio", 1] },
+                    { "id": "efforts", "supported_reasoning_levels": [" HIGH ", { "effort": "high" }, ["low"],
+                      { "level": "low" }, "none", "minimal", "ultra"] },
+                    { "id": "none-only", "supported_reasoning_levels": ["none"] },
                     { "id": "claude-x", "supported_reasoning_levels": ["high"] },
                     { "id": "spaced", "name": "Second" },
                     { "id": "" },
@@ -557,12 +632,60 @@ mod tests {
                 { "id": "spaced", "name": "Second" },
                 { "id": "n", "name": "Named" },
                 { "id": "limits", "name": "limits", "contextWindow": 4096, "maxTokens": 77 },
-                { "id": "dup-input", "name": "dup-input", "input": ["text", "image", "image"] },
+                { "id": "dup-input", "name": "dup-input", "input": ["text", "image"] },
                 { "id": "efforts", "name": "efforts",
-                  "reasoningEfforts": { "high": "high", "minimal": "minimal" } },
+                  "reasoningEfforts": { "high": "high", "off": "none", "minimal": "minimal", "max": "ultra" } },
+                { "id": "none-only", "name": "none-only" },
                 { "id": "claude-x", "api": "anthropic-messages", "baseURL": "https://r", "name": "claude-x",
                   "reasoningEfforts": { "high": "high" } },
             ])
         );
+    }
+
+    mod properties {
+        use proptest::prelude::*;
+
+        use super::*;
+        use crate::cliproxyapi::endpoints::cli_proxy_endpoints;
+        use crate::cliproxyapi::route::CliProxyRoute;
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(128))]
+
+            #[test]
+            fn discovered_models_always_compose_without_skips(
+                entries in prop::collection::vec(
+                    (
+                        "[a-zA-Z0-9_./:-]{0,24}",
+                        prop::option::of("[a-zA-Z ]{0,16}"),
+                        prop::collection::vec("[a-zA-Z ]{0,10}", 0..6),
+                        prop::collection::vec("[a-zA-Z ]{0,10}", 0..5),
+                    ),
+                    0..10,
+                )
+            ) {
+                let data: Vec<Value> = entries
+                    .into_iter()
+                    .map(|(id, owned_by, efforts, modalities)| {
+                        let mut obj = Map::new();
+                        obj.insert("id".into(), json!(id));
+                        if let Some(owner) = owned_by {
+                            obj.insert("owned_by".into(), json!(owner));
+                        }
+                        obj.insert("supported_reasoning_levels".into(), json!(efforts));
+                        obj.insert("input_modalities".into(), json!(modalities));
+                        Value::Object(obj)
+                    })
+                    .collect();
+                let endpoints = cli_proxy_endpoints("http://127.0.0.1:8317").expect("endpoints");
+                let models = cli_proxy_models(&json!({ "data": data }), Some(&endpoints.root))
+                    .expect("valid list");
+                let route = CliProxyRoute::from_login(&endpoints, &models);
+                let round_trip = CliProxyRoute::from_settings(&route.to_settings_json())
+                    .expect("round-trips through settings");
+                let provider = round_trip.to_pi_provider_config();
+                prop_assert!(provider.skipped.is_empty(), "{:?}", provider.skipped);
+            }
+        }
     }
 }

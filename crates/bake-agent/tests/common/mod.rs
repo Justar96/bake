@@ -240,6 +240,16 @@ pub fn tool_result_ids(events: &[AgentEvent]) -> Vec<String> {
         .collect()
 }
 
+pub fn tool_start_ids(events: &[AgentEvent]) -> Vec<String> {
+    events
+        .iter()
+        .filter_map(|event| match event {
+            AgentEvent::ToolExecutionStart { tool_call_id, .. } => Some(tool_call_id.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
 pub fn tool_end_ids(events: &[AgentEvent]) -> Vec<String> {
     events
         .iter()
@@ -250,9 +260,8 @@ pub fn tool_end_ids(events: &[AgentEvent]) -> Vec<String> {
         .collect()
 }
 
-pub fn result_text(result: &AgentToolResult) -> String {
-    result
-        .content
+pub fn blocks_text(blocks: &[bake_ai::UserContentBlock]) -> String {
+    blocks
         .iter()
         .filter_map(|block| match block {
             bake_ai::UserContentBlock::Text(text) => Some(text.text.as_str()),
@@ -260,4 +269,27 @@ pub fn result_text(result: &AgentToolResult) -> String {
         })
         .collect::<Vec<_>>()
         .join("")
+}
+
+pub fn assert_tool_results(messages: &[AgentMessage], expected: &[(&str, bool, &str)]) {
+    let actual: Vec<(String, bool, String)> = messages
+        .iter()
+        .filter_map(AgentMessage::as_tool_result)
+        .map(|result| {
+            (
+                result.tool_call_id.clone(),
+                result.is_error,
+                blocks_text(&result.content),
+            )
+        })
+        .collect();
+    let borrowed: Vec<(&str, bool, &str)> = actual
+        .iter()
+        .map(|(id, err, text)| (id.as_str(), *err, text.as_str()))
+        .collect();
+    assert_eq!(borrowed, expected);
+}
+
+pub fn result_text(result: &AgentToolResult) -> String {
+    blocks_text(&result.content)
 }

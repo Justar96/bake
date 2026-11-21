@@ -110,11 +110,11 @@ use std::sync::Arc;
 use bake_ai::{AbortController, AbortSignal, Model, ModelThinkingLevel};
 use bake_coding_agent::agent_session::{
     AgentSession, BRANCH_SUMMARY_CANCELLED, DefaultSave, ForkPosition, NAVIGATION_CANCELLED,
-    TreeNavigation, TreeNavigationOptions,
+    SessionContextReport, TreeNavigation, TreeNavigationOptions,
 };
 use bake_coding_agent::cli::{Replacement, SessionFactory, SessionTarget};
 use bake_coding_agent::cliproxyapi::account::{
-    AccountView, CliProxyAccount, RefreshOutcome, disabled_warning, refresh_account,
+    CliProxyAccount, RefreshOutcome, disabled_warning, refresh_account,
 };
 use bake_coding_agent::cliproxyapi::{
     CLIPROXYAPI_ID, ConfigureCliProxyError, LoginPrompt, LoginPromptKind, check_cli_proxy_login,
@@ -472,11 +472,18 @@ impl Context {
 /// the session commands take no argument.
 pub fn refuse_argument(name: &str, argument: &str) -> Option<String> {
     match name {
-        "login" | "logout" if !argument.is_empty() && argument != CLIPROXYAPI_ID => Some(format!(
-            "/{name} {argument} is not available in bake yet; providers other than CLIProxyAPI are planned for a later release, and your draft is kept."
-        )),
-        "refresh-models" | "settings" | "session" | "new" | "resume" | "tree" | "fork"
-        | "clone" | "changelog" | "share"
+        "login" | "logout"
+            if !argument.is_empty() && !argument.eq_ignore_ascii_case(CLIPROXYAPI_ID) =>
+        {
+            Some(format!(
+                "/{name} {argument} is not available in bake yet; providers other than CLIProxyAPI are planned for a later release, and your draft is kept."
+            ))
+        }
+        "session" if !argument.is_empty() && !argument.eq_ignore_ascii_case("context") => {
+            Some("Usage: /session [context]; your draft is kept.".into())
+        }
+        "refresh-models" | "settings" | "new" | "resume" | "tree" | "fork" | "clone"
+        | "changelog" | "share"
             if !argument.is_empty() =>
         {
             Some(format!("/{name} takes no argument; your draft is kept."))
@@ -498,7 +505,13 @@ pub async fn run(name: &str, argument: String, mut context: Context) -> Outcome 
         "login" => login(&mut context).await,
         "logout" => logout(&context).await,
         "refresh-models" => refresh(&context).await,
-        "session" => session_info(&mut context).await,
+        "session" => {
+            if argument.is_empty() {
+                session_info(&mut context).await
+            } else {
+                session_context(&mut context).await
+            }
+        }
         "name" => name_session(&mut context, &argument).await,
         "new" => new_session(&context).await,
         "resume" => resume(&mut context).await,
@@ -966,6 +979,110 @@ async fn session_info(context: &mut Context) -> Outcome {
         }))
         .await;
     Ok(Done::Quiet)
+}
+
+/// `/session context`: read-only sheet of local token estimates for the active
+/// system prompt (by section, without printing prompt contents) and directly
+/// declared tool schemas, plus distinct lists of active direct, codemode
+/// callable, and session-registered inactive tools. Sends nothing to a model
+/// and changes nothing.
+async fn session_context(context: &mut Context) -> Outcome {
+    let session = Arc::clone(&context.session);
+    let report = tokio::task::spawn_blocking(move || session.inspect_context())
+        .await
+        .map_err(|error| error.to_string())??;
+    context
+        .ask(DialogKind::Info(session_context_dialog(&report)))
+        .await;
+    Ok(Done::Quiet)
+}
+
+fn session_context_dialog(report: &SessionContextReport) -> InfoDialog {
+    let field = |label: &str, value: String| InfoLine::Field {
+        label: label.into(),
+        value,
+    };
+    let tok = |count: usize| format!("~{} tok", group_digits(count as u64));
+
+    let mut lines = Vec::new();
+    lines.push(InfoLine::Heading("System prompt (estimated)".into()));
+    let mut prompt_total: usize = 0;
+    if report.sections.is_empty() {
+        lines.push(field("Sections", "none".into()));
+    } else {
+        for (name, tokens) in &report.sections {
+            prompt_total = prompt_total.saturating_add(*tokens);
+            lines.push(field(&plain_safe_name(name), tok(*tokens)));
+        }
+    }
+    lines.push(field("Total", tok(prompt_total)));
+
+    lines.push(InfoLine::Blank);
+    lines.push(InfoLine::Heading("Direct tool schemas (estimated)".into()));
+    lines.push(field("Schemas", tok(report.tool_schema_tokens)));
+    lines.push(field(
+        "Note",
+        "Local estimates only, not exact provider billing.".into(),
+    ));
+
+    lines.push(InfoLine::Blank);
+    lines.push(InfoLine::Heading(format!(
+        "Active direct tools ({})",
+        report.direct_tools.len()
+    )));
+    lines.push(field("Tools", format_tool_list(&report.direct_tools)));
+
+    lines.push(InfoLine::Blank);
+    lines.push(InfoLine::Heading(format!(
+        "Codemode callable ({})",
+        report.codemode_tools.len()
+    )));
+    lines.push(field("Tools", format_tool_list(&report.codemode_tools)));
+    lines.push(field(
+        "Note",
+        "Callable from codemode; may overlap active direct tools.".into(),
+    ));
+
+    lines.push(InfoLine::Blank);
+    lines.push(InfoLine::Heading(format!(
+        "Registered inactive ({})",
+        report.inactive_tools.len()
+    )));
+    lines.push(field("Tools", format_tool_list(&report.inactive_tools)));
+    lines.push(field(
+        "Note",
+        "Registered on this session only, not all optional tools.".into(),
+    ));
+
+    InfoDialog {
+        title: "Session context".into(),
+        lines,
+    }
+}
+
+fn format_tool_list(tools: &[String]) -> String {
+    if tools.is_empty() {
+        return "none".to_owned();
+    }
+    tools
+        .iter()
+        .map(|name| plain_safe_name(name))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Renders an untrusted tool or section name as a single-line plain label:
+/// escapes control, bidi, and zero-width characters via [`super::visible`],
+/// collapses remaining whitespace (including tabs) to single spaces, and falls
+/// back to `(unnamed)` if empty.
+fn plain_safe_name(input: &str) -> String {
+    let visible = super::visible(input);
+    let collapsed = visible.split_whitespace().collect::<Vec<_>>().join(" ");
+    if collapsed.is_empty() {
+        "(unnamed)".to_owned()
+    } else {
+        collapsed
+    }
 }
 
 /// `1234567` as `1,234,567`, as Pi's `toLocaleString` writes it in English.
@@ -1603,26 +1720,16 @@ async fn build_fork(
     Ok((replacement, selected))
 }
 
-/// The base URL the signed-in account uses, to offer again.
-fn saved_base_url(account: &AccountView) -> Option<String> {
-    let AccountView::Bound(bound) = account else {
-        return None;
-    };
-    bound
-        .route
-        .get("baseURL")
-        .and_then(serde_json::Value::as_str)
-        .map(str::to_owned)
-}
+const LOGIN_KEEP_KEY_PLACEHOLDER: &str = "Enter to keep the key · or paste another";
 
 async fn login(context: &mut Context) -> Outcome {
     let account = context.account()?;
-    let (account, view, manual) = {
+    let (account, saved, manual) = {
         let account = account.clone();
         tokio::task::spawn_blocking(move || {
-            let view = account.read();
+            let saved = account.saved_base_url();
             let manual = account.manual_override();
-            (account, view, manual)
+            (account, saved, manual)
         })
         .await
         .map_err(|error| error.to_string())?
@@ -1633,7 +1740,6 @@ async fn login(context: &mut Context) -> Outcome {
                 .into(),
         );
     }
-    let saved = saved_base_url(&view);
     let signal = context.signal.clone();
     let asker = context.asker();
     let checked = {
@@ -1643,17 +1749,22 @@ async fn login(context: &mut Context) -> Outcome {
                 let secret = prompt.kind == LoginPromptKind::Secret;
                 let last = prompt.step.index == prompt.step.count;
                 // A secret is never sent back to the view: a retried key
-                // step starts empty. The address step starts with what was
-                // typed, for a retry to correct, and otherwise empty, with
-                // the address an empty answer uses as its placeholder, so
-                // typing another one needs nothing deleted first.
+                // step starts empty, and when a key is already held from
+                // before an address retry, Enter reuses it. The address
+                // step starts with what was typed, for a retry to correct,
+                // and otherwise empty, with the address an empty answer
+                // uses as its placeholder.
                 let initial = if secret {
                     String::new()
                 } else {
                     prompt.initial.clone().unwrap_or_default()
                 };
                 let placeholder = if secret {
-                    Some(copy::LOGIN_KEY_PLACEHOLDER.to_owned())
+                    Some(if prompt.initial.is_some() {
+                        LOGIN_KEEP_KEY_PLACEHOLDER.to_owned()
+                    } else {
+                        copy::LOGIN_KEY_PLACEHOLDER.to_owned()
+                    })
                 } else {
                     prompt
                         .fallback
@@ -1815,7 +1926,18 @@ fn in_use(current: Option<(&str, &str)>, settings: &Settings) -> Vec<String> {
         .default_provider
         .as_deref()
         .zip(settings.default_model.as_deref());
-    cli_proxy_models_in_use(current, default, None)
+    let mut ids = cli_proxy_models_in_use(current, default, None);
+    if let Some(search_model) = settings.web_search_model.as_deref().map(str::trim)
+        && !search_model.is_empty()
+    {
+        let id = search_model
+            .strip_prefix("cliproxyapi/")
+            .unwrap_or(search_model);
+        if !id.is_empty() && !id.contains('/') && !ids.iter().any(|known| known == id) {
+            ids.push(id.to_owned());
+        }
+    }
+    ids
 }
 
 async fn refresh(context: &Context) -> Outcome {
@@ -1943,7 +2065,9 @@ mod tests {
     #[test]
     fn only_cliproxyapi_is_signed_in_or_out() {
         assert_eq!(refuse_argument("login", ""), None);
+        assert_eq!(refuse_argument("login", "CLIProxyAPI"), None);
         assert_eq!(refuse_argument("logout", "cliproxyapi"), None);
+        assert_eq!(refuse_argument("logout", "CLIProxyAPI"), None);
         assert_eq!(
             refuse_argument("logout", "openai").as_deref(),
             Some(
@@ -1960,21 +2084,26 @@ mod tests {
         assert_eq!(refuse_argument("model", "faux/faux-1"), None);
     }
 
-    // cliproxyapi.test.ts "keeps the models in use": the current model and
-    // the new-session default, each once, CLIProxyAPI's only.
+    // cliproxyapi.test.ts "keeps the models in use": the current model, the
+    // new-session default, and `webSearch.model`, each once, CLIProxyAPI's only.
     #[test]
     fn a_refresh_keeps_the_current_and_default_models() {
         let mut settings = Settings {
             default_provider: Some(CLIPROXYAPI_ID.into()),
             default_model: Some("gpt-default".into()),
+            web_search_model: Some("cliproxyapi/claude-haiku-4-5".into()),
             ..Settings::default()
         };
         assert_eq!(
             in_use(Some((CLIPROXYAPI_ID, "gpt-a")), &settings),
-            ["gpt-a", "gpt-default"]
+            ["gpt-a", "gpt-default", "claude-haiku-4-5"]
         );
-        assert_eq!(in_use(Some(("faux", "gpt-a")), &settings), ["gpt-default"]);
+        assert_eq!(
+            in_use(Some(("faux", "gpt-a")), &settings),
+            ["gpt-default", "claude-haiku-4-5"]
+        );
         settings.default_provider = Some("faux".into());
+        settings.web_search_model = None;
         assert!(in_use(None, &settings).is_empty());
     }
 
@@ -2053,5 +2182,183 @@ mod tests {
             .find(|command| command.name == "bug")
             .expect("listed");
         assert!(!bake_tui_view::completion::requires_input(bug));
+    }
+
+    #[test]
+    fn session_command_accepts_only_empty_or_context() {
+        assert_eq!(refuse_argument("session", ""), None);
+        assert_eq!(refuse_argument("session", "context"), None);
+        assert_eq!(refuse_argument("session", "CONTEXT"), None);
+        assert_eq!(
+            refuse_argument("session", "other").as_deref(),
+            Some("Usage: /session [context]; your draft is kept.")
+        );
+        assert_eq!(
+            refuse_argument("session", "context extra").as_deref(),
+            Some("Usage: /session [context]; your draft is kept.")
+        );
+        assert_eq!(
+            parse("/session context"),
+            Some(("session", "context".into()))
+        );
+    }
+
+    #[test]
+    fn session_context_dialog_formats_sections_schemas_and_distinct_tool_lists() {
+        let report = SessionContextReport {
+            sections: vec![
+                ("base".into(), 1200),
+                ("\x1b[31mproject\u{202e}ctx\u{200b}".into(), 350),
+            ],
+            direct_tools: vec!["bash".into(), "codemode".into(), "read\t\tfile\n".into()],
+            codemode_tools: vec!["bash".into(), "read".into()],
+            inactive_tools: vec![],
+            tool_schema_tokens: 2400,
+        };
+        let dialog = session_context_dialog(&report);
+        assert_eq!(dialog.title, "Session context");
+        assert!(
+            dialog
+                .lines
+                .contains(&InfoLine::Heading("System prompt (estimated)".into()))
+        );
+        assert!(dialog.lines.contains(&InfoLine::Field {
+            label: "base".into(),
+            value: "~1,200 tok".into(),
+        }));
+        assert!(dialog.lines.contains(&InfoLine::Field {
+            label: "\\u{1b}[31mproject\\u{202e}ctx\\u{200b}".into(),
+            value: "~350 tok".into(),
+        }));
+        assert!(dialog.lines.contains(&InfoLine::Field {
+            label: "Total".into(),
+            value: "~1,550 tok".into(),
+        }));
+        assert!(
+            dialog
+                .lines
+                .contains(&InfoLine::Heading("Direct tool schemas (estimated)".into()))
+        );
+        assert!(dialog.lines.contains(&InfoLine::Field {
+            label: "Schemas".into(),
+            value: "~2,400 tok".into(),
+        }));
+        assert!(
+            dialog
+                .lines
+                .contains(&InfoLine::Heading("Active direct tools (3)".into()))
+        );
+        assert!(dialog.lines.contains(&InfoLine::Field {
+            label: "Tools".into(),
+            value: "bash, codemode, read file\\u{a}".into(),
+        }));
+        assert!(
+            dialog
+                .lines
+                .contains(&InfoLine::Heading("Codemode callable (2)".into()))
+        );
+        assert!(dialog.lines.contains(&InfoLine::Field {
+            label: "Tools".into(),
+            value: "bash, read".into(),
+        }));
+        assert!(
+            dialog
+                .lines
+                .contains(&InfoLine::Heading("Registered inactive (0)".into()))
+        );
+        assert!(dialog.lines.contains(&InfoLine::Field {
+            label: "Tools".into(),
+            value: "none".into(),
+        }));
+        assert!(dialog.lines.iter().any(|line| matches!(
+            line,
+            InfoLine::Field { value, .. } if value.contains("not exact provider billing")
+        )));
+        assert!(dialog.lines.iter().any(|line| matches!(
+            line,
+            InfoLine::Field { value, .. } if value.contains("not all optional tools")
+        )));
+        assert_eq!(plain_safe_name("   \t  "), "(unnamed)");
+    }
+
+    #[test]
+    fn session_context_dialog_renders_and_scrolls_on_narrow_screen_with_long_lists() {
+        use bake_tui_view::activity::Tones;
+        use bake_tui_view::frame::FrameStyle;
+        use bake_tui_view::keys::{Key, KeyInput};
+        use bake_tui_view::state::{Msg, State, update};
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let report = SessionContextReport {
+            sections: vec![("base".into(), 1000), ("tools".into(), 400)],
+            direct_tools: (0..30).map(|i| format!("mcp_tool_{i:02}")).collect(),
+            codemode_tools: (0..20).map(|i| format!("nested_tool_{i:02}")).collect(),
+            inactive_tools: (0..10).map(|i| format!("inactive_tool_{i:02}")).collect(),
+            tool_schema_tokens: 4500,
+        };
+        let mut state = State::live(FrameStyle::default(), Tones::None, Vec::new());
+        update(
+            &mut state,
+            Msg::Runtime(RuntimeUpdate::Dialog(Some(DialogRequest {
+                id: 1,
+                kind: DialogKind::Info(session_context_dialog(&report)),
+            }))),
+        );
+
+        let mut terminal = Terminal::new(TestBackend::new(40, 16)).expect("terminal");
+        terminal
+            .draw(|frame| bake_tui_view::render::render(&mut state, frame))
+            .expect("draw");
+        if let Some(token) = state.approval_drawn() {
+            update(&mut state, Msg::ApprovalArmed(token));
+        }
+        terminal
+            .draw(|frame| bake_tui_view::render::render(&mut state, frame))
+            .expect("draw armed");
+        let buffer = terminal.backend().buffer().clone();
+        let text: String = (0..buffer.area.height)
+            .map(|y| {
+                (0..buffer.area.width)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains("Session context"), "{text}");
+        assert!(text.contains("System prompt (estimated)"), "{text}");
+        assert!(text.contains("~1,400 tok"), "{text}");
+        assert!(
+            text.contains("1-"),
+            "long list on narrow screen should show scroll window:\n{text}"
+        );
+
+        let before = state.dialog.as_ref().expect("dialog").top;
+        update(&mut state, Msg::Key(KeyInput::plain(Key::Down)));
+        let after = state.dialog.as_ref().expect("dialog").top;
+        assert!(after > before, "Down should scroll the bounded InfoDialog");
+    }
+
+    proptest::proptest! {
+        #![proptest_config(proptest::prelude::ProptestConfig::with_cases(256))]
+
+        #[test]
+        fn plain_safe_name_escapes_controls_and_hidden_chars(raw in ".*") {
+            let safe = plain_safe_name(&raw);
+            let has_hidden = safe.chars().any(|c| {
+                matches!(
+                    c,
+                    '\u{200b}'..='\u{200f}'
+                        | '\u{202a}'..='\u{202e}'
+                        | '\u{2060}'..='\u{2069}'
+                        | '\u{feff}'
+                )
+            });
+            proptest::prop_assert!(!safe.is_empty());
+            proptest::prop_assert!(!safe.chars().any(char::is_control));
+            proptest::prop_assert!(!has_hidden);
+            proptest::prop_assert_eq!(safe.as_str(), safe.trim());
+            proptest::prop_assert!(!safe.contains("  "));
+        }
     }
 }

@@ -1034,3 +1034,79 @@ fn a_driver_panic_during_a_held_startup_refresh_aborts_its_fetch() {
     drop(runtime);
     proxy.stop(&proxy_runtime);
 }
+
+// Bake: `/login CLIProxyAPI` recovers a disabled account's saved proxy URL,
+// and pressing Enter on the empty secret field after fixing an unreachable
+// address re-checks the kept key without ever placing the secret in the view.
+#[test]
+fn login_recovers_disabled_saved_url_and_keeps_key_across_url_retry() {
+    let home = Home::new("login-recover");
+    let h = home_harness(&home, None);
+    let proxy = Proxy::start(&h.runtime, models(), None);
+
+    std::fs::write(
+        home.0.join("settings.json"),
+        serde_json::json!({
+            "cliproxyapi": {
+                "account": "stale-gen",
+                "baseURL": format!("{}/v1", proxy.url),
+                "api": "openai-responses",
+                "models": [{ "id": "gpt-live" }]
+            }
+        })
+        .to_string(),
+    )
+    .expect("settings");
+
+    h.submit_id(1, Submission::FollowUp("/login CLIProxyAPI".into()));
+    let url1 = h.dialog();
+    let DialogKind::Field(field1) = &url1.kind else {
+        panic!("{url1:?}");
+    };
+    assert!(
+        field1
+            .placeholder
+            .as_deref()
+            .is_some_and(|p| p.contains(&proxy.url)),
+        "{field1:?}"
+    );
+    // Enter an unreachable port first, then the valid key.
+    h.reply(url1.id, entered("http://127.0.0.1:9"));
+    let key1 = h.dialog();
+    h.reply(key1.id, entered(KEY));
+
+    // Unreachable URL brings Step 1 back with what was typed; fix it by
+    // clearing to empty so the saved `proxy.url` fallback applies.
+    let url2 = h.dialog();
+    let DialogKind::Field(field2) = &url2.kind else {
+        panic!("{url2:?}");
+    };
+    assert_eq!(field2.initial, "http://127.0.0.1:9");
+    h.reply(url2.id, entered(""));
+
+    // Step 2 returns with an empty secret field whose placeholder says Enter
+    // keeps the key; pressing Enter signs in without re-typing KEY.
+    let key2 = h.dialog();
+    let DialogKind::Field(secret2) = &key2.kind else {
+        panic!("{key2:?}");
+    };
+    assert!(secret2.secret && secret2.initial.is_empty());
+    assert!(
+        secret2
+            .placeholder
+            .as_deref()
+            .is_some_and(|p| p.contains("Enter to keep")),
+        "{secret2:?}"
+    );
+    h.reply(key2.id, entered(""));
+
+    let updates = h.command_end(1);
+    assert!(
+        matches!(updates.last(), Some(RuntimeUpdate::Admitted(1))),
+        "{updates:?}"
+    );
+    no_key_in(&updates);
+    assert_eq!(auth_key(&home.0).as_deref(), Some(KEY));
+    proxy.stop(&h.runtime);
+    h.stop();
+}

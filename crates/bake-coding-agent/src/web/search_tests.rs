@@ -527,3 +527,32 @@ async fn dropping_a_search_kills_its_key_command() {
         .expect("the key command is killed");
     assert!(!marker.exists(), "the key command did not finish");
 }
+
+// A `models.json` `cliproxyapi` route whose `baseUrl` already ends with `/v1`
+// still sends web search to `/v1/messages`, not `/v1/v1/messages`.
+#[tokio::test]
+async fn strips_a_trailing_v1_before_joining_v1_messages() {
+    let server = gateway(json_reply(200, RECORDED)).await;
+    let mut reg = ModelRegistry::new(ModelConfig::empty(), AuthStorage::empty());
+    reg.add_provider_config(
+        CLIPROXYAPI_ID,
+        json!({
+            "baseUrl": format!("{}/v1", server.base()),
+            "api": ANTHROPIC_MESSAGES,
+            "headers": { "User-Agent": "custom-ua/1.0" },
+            "models": [{ "id": "claude-haiku-4-5" }],
+        }),
+        Some("route-key".into()),
+    )
+    .expect("route");
+    let search = CliProxySearch::new(ModelRuntime::new(reg), None, None, None);
+    let (_, req) = search.search("rust", None).await.expect("search");
+    assert_eq!(req.endpoint, format!("{}/v1/messages", server.base()));
+    let head = server.head(0).to_ascii_lowercase();
+    assert!(head.starts_with("post /v1/messages http/1.1"), "{head}");
+    let uas: Vec<_> = head
+        .lines()
+        .filter(|line| line.starts_with("user-agent:"))
+        .collect();
+    assert_eq!(uas, ["user-agent: custom-ua/1.0"]);
+}

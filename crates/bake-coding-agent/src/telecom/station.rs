@@ -62,7 +62,7 @@ use std::time::Duration;
 use serde_json::json;
 use tokio::sync::{Notify, oneshot};
 
-use super::directory::{self, Membership, NATO, Team};
+use super::directory::{self, Membership, Team};
 use super::endpoint;
 use super::wire::{self, Activity, Body, Frame, Outcome, Presence, Sender, WIRE_VERSION};
 use crate::agent_session::SessionEvent;
@@ -106,6 +106,10 @@ pub struct StationOptions {
     pub parent: Option<String>,
     /// `provider/model`.
     pub model: Option<String>,
+    /// The `callsigns` setting: the pool a top-level member draws its
+    /// callsign from, the built-in one when it names none
+    /// ([`super::names::pool`]).
+    pub names: Vec<String>,
 }
 
 /// An ask this station owes an answer to.
@@ -249,21 +253,22 @@ fn short_id() -> String {
 }
 
 /// The callsigns a member tries, in order: the one asked for, then a
-/// spawned member's `<parent>-<n>`, else the NATO words and their
-/// numbered forms.
-fn candidates(wanted: Option<&str>, parent: Option<&str>) -> Vec<String> {
+/// spawned member's `<parent>-<n>`, else the pool `names` makes in the
+/// order its session `seed` draws, and its numbered forms
+/// ([`super::names::order`]).
+fn candidates(
+    wanted: Option<&str>,
+    parent: Option<&str>,
+    names: &[String],
+    seed: &str,
+) -> Vec<String> {
     let mut words: Vec<String> = wanted.into_iter().map(str::to_owned).collect();
     match parent {
         Some(parent) => {
             let stem: String = parent.chars().take(26).collect();
             words.extend((1..=99).map(|n| format!("{stem}-{n}")));
         }
-        None => {
-            words.extend(NATO.iter().map(|word| (*word).to_owned()));
-            for n in 2..=9 {
-                words.extend(NATO.iter().map(|word| format!("{word}{n}")));
-            }
-        }
+        None => words.extend(super::names::order(&super::names::pool(names), seed)),
     }
     words
 }
@@ -286,7 +291,12 @@ impl Station {
             let (common, checkout) = directory::locate(&options.cwd);
             let team = Team::open(&options.root, &directory::team_key(&common))
                 .map_err(|error| format!("telecom: {error}"))?;
-            let words = candidates(options.callsign.as_deref(), options.parent.as_deref());
+            let words = candidates(
+                options.callsign.as_deref(),
+                options.parent.as_deref(),
+                &options.names,
+                &options.session_id,
+            );
             let membership = team
                 .claim(words.iter().map(String::as_str))
                 .map_err(|error| format!("telecom: {error}"))?

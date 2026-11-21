@@ -921,6 +921,16 @@ impl ModelRegistry {
         self.refresh_configured();
     }
 
+    /// Whether [`Self::bind_provider_key`] bound a key to `provider`.
+    pub fn has_bound_key(&self, provider: &str) -> bool {
+        self.bound.contains_key(provider)
+    }
+
+    /// The `models.json` configuration of `id`, when `models.json` defines one.
+    pub fn models_json_provider(&self, id: &str) -> Option<&JsonObject> {
+        self.config.provider(id)
+    }
+
     /// Whether [`Self::add_provider_config`] added a provider of this id.
     pub fn has_added_provider(&self, id: &str) -> bool {
         self.added.iter().any(|added| added.id == id)

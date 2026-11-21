@@ -44,7 +44,7 @@ use bake_tui_view::frame;
 use bake_tui_view::paste::Image;
 use bake_tui_view::render::render;
 use bake_tui_view::runtime::RuntimeUpdate;
-use bake_tui_view::state::{Effect, ImageSource, Msg, State, update};
+use bake_tui_view::state::{CopyOutcome, Effect, ImageSource, Msg, State, update};
 use bake_tui_view::status;
 use bake_tui_view::wheel::{self, WheelSteps};
 use crossterm::cursor::{RestorePosition, Show};
@@ -90,8 +90,8 @@ impl Drop for Workers {
     }
 }
 
-/// What a worker finished: a copy, with whether a tool took the text, or
-/// an image read for the draft.
+/// What a worker finished: a copy, with whether a native tool took the text,
+/// or an image read for the draft.
 enum Done {
     Copy(String, bool),
     Image(ImageSource, Option<Image>),
@@ -99,14 +99,20 @@ enum Done {
 
 /// Clipboard work runs here, off the loop: copies go to the terminal's own
 /// clipboard at once over SSH or where no tool applies, and otherwise to
-/// the tools on a worker thread; images are read on one too. Each worker
-/// reports on `done`.
+/// native tools on a single in-flight worker thread so rapid selections
+/// cannot race or reorder; images are read off the loop too. Each worker
+/// reports on `done`. Any queued copy still waiting when the loop ends is
+/// discarded on drop so teardown waits for at most the one in-flight worker.
 struct Jobs {
     clipboard: Clipboard,
     home: Option<String>,
     done: Sender<Done>,
     results: Receiver<Done>,
     pending: usize,
+    /// Whether a native copy worker is currently running.
+    copy_in_flight: bool,
+    /// Latest selection waiting for the in-flight native copy to finish.
+    queued_copy: Option<String>,
     workers: Workers,
 }
 
@@ -119,6 +125,8 @@ impl Jobs {
             done,
             results,
             pending: 0,
+            copy_in_flight: false,
+            queued_copy: None,
             workers: Workers::default(),
         }
     }
@@ -132,22 +140,47 @@ impl Jobs {
         self.pending += 1;
     }
 
+    fn terminal_copy(
+        &self,
+        screen: &mut impl Screen,
+        state: &mut State,
+        text: &str,
+    ) -> io::Result<()> {
+        match self.clipboard.terminal_copy(text) {
+            Some(sequence) => {
+                screen.write(&sequence)?;
+                update(state, Msg::Copied(CopyOutcome::SentToTerminal));
+            }
+            None => {
+                update(state, Msg::Copied(CopyOutcome::Failed));
+            }
+        }
+        Ok(())
+    }
+
+    fn start_native_copy(&mut self, text: String) {
+        let tools = self.clipboard.tools();
+        self.copy_in_flight = true;
+        self.spawn(move || {
+            let ok = tools.into_iter().any(|tool| clipboard::feed(tool, &text));
+            Done::Copy(text, ok)
+        });
+    }
+
     fn copy(
         &mut self,
         screen: &mut impl Screen,
         state: &mut State,
         text: String,
     ) -> io::Result<()> {
-        let tools = self.clipboard.tools();
-        if self.clipboard.terminal_first() || tools.is_empty() {
-            screen.write(&clipboard::osc52(&text))?;
-            update(state, Msg::Copied(true));
+        if self.clipboard.terminal_first() {
+            return self.terminal_copy(screen, state, &text);
+        }
+        if self.copy_in_flight {
+            self.queued_copy = Some(text);
             return Ok(());
         }
-        self.spawn(move || {
-            let ok = tools.into_iter().any(|tool| clipboard::feed(tool, &text));
-            Done::Copy(text, ok)
-        });
+        self.start_native_copy(text);
         Ok(())
     }
 
@@ -163,18 +196,25 @@ impl Jobs {
         });
     }
 
-    /// Applies every finished job. When no tool took a copy, the
-    /// terminal's own clipboard is the last resort; a terminal that ignores
-    /// OSC 52 gives no sign, so it counts as copied.
+    /// Applies every finished job. When a newer selection arrived while a
+    /// native copy was running, the stale result is discarded and the latest
+    /// queued selection starts next. When no tool took the latest copy, the
+    /// terminal's own clipboard is the fallback if permitted.
     fn settle(&mut self, screen: &mut impl Screen, state: &mut State) -> io::Result<()> {
         while let Ok(done) = self.results.try_recv() {
             self.pending -= 1;
             match done {
                 Done::Copy(text, ok) => {
-                    if !ok {
-                        screen.write(&clipboard::osc52(&text))?;
+                    self.copy_in_flight = false;
+                    if let Some(next_text) = self.queued_copy.take() {
+                        self.start_native_copy(next_text);
+                        continue;
                     }
-                    update(state, Msg::Copied(true));
+                    if ok {
+                        update(state, Msg::Copied(CopyOutcome::Copied));
+                    } else {
+                        self.terminal_copy(screen, state, &text)?;
+                    }
                 }
                 Done::Image(source, image) => {
                     update(state, Msg::ImageRead { source, image });
@@ -699,18 +739,22 @@ fn run(mode: ScreenMode, runtime: Runtime) -> io::Result<PreviewExit> {
     // signals stay handled until the terminal is restored.
     let signals = signals::Forwarder::start(sender.clone())?;
     let mut session = TerminalSession::acquire_mode(mode)?;
-    // Sharp SVG images on a terminal that shows them. Sixel needs the
-    // cell's size in pixels: the window size reports it, or the terminal
-    // answers a query before the input reader starts.
-    if mode == ScreenMode::Fullscreen
-        && let Some(protocol) = crate::graphics::Protocol::detect(env)
-    {
+    // Sharp SVG images on a terminal that shows them: one the environment
+    // names, or one that says so when asked, before the input reader
+    // starts. The cell's size in pixels, which Sixel needs and the others
+    // draw sharper with, comes from the window size or the same answer.
+    if mode == ScreenMode::Fullscreen {
+        let mut protocol = crate::graphics::Protocol::detect(env);
         let mut cell = crate::graphics::reported_cell();
         #[cfg(unix)]
-        if cell.is_none() && protocol == crate::graphics::Protocol::Sixel {
-            cell = crate::graphics::query_cell(Duration::from_millis(150));
+        if (protocol.is_none() || cell.is_none()) && crate::graphics::Protocol::asks(env) {
+            let answer = crate::graphics::probe(Duration::from_millis(200));
+            protocol = protocol.or(answer.protocol);
+            cell = cell.or(answer.cell);
         }
-        if let Some(graphics) = crate::graphics::Graphics::new(protocol, cell) {
+        if let Some(graphics) =
+            protocol.and_then(|protocol| crate::graphics::Graphics::new(protocol, cell))
+        {
             session.show_images(graphics);
         }
     }
@@ -1490,28 +1534,182 @@ mod tests {
         }
     }
 
+    fn local_clipboard(vars: &[(&str, &str)]) -> Clipboard {
+        let vars: Vec<(String, String)> = vars
+            .iter()
+            .map(|&(k, v)| (k.to_owned(), v.to_owned()))
+            .collect();
+        Clipboard::new(Platform::Other, move |name| {
+            vars.iter().find(|(k, _)| k == name).map(|(_, v)| v.clone())
+        })
+    }
+
     #[test]
     fn over_ssh_a_copy_goes_to_the_terminal_at_once() {
         let mut jobs = Jobs::new(no_clipboard(), None);
         let (mut screen, mut state) = (Recorder::default(), State::default());
         jobs.copy(&mut screen, &mut state, "hi".into()).unwrap();
         assert_eq!(screen.0, ["\x1b]52;c;aGk=\x07"]);
-        assert_eq!(state.copied.map(|(ok, _)| ok), Some(true));
+        assert_eq!(
+            state.copied.map(|(outcome, _)| outcome),
+            Some(CopyOutcome::SentToTerminal)
+        );
         assert_eq!(jobs.pending, 0);
     }
 
     #[test]
-    fn a_copy_no_tool_took_falls_back_to_the_terminal() {
+    fn refused_terminal_copy_reports_failed_without_writing() {
+        let dumb_ssh = local_clipboard(&[("SSH_TTY", "/dev/pts/0"), ("TERM", "dumb")]);
+        let mut jobs = Jobs::new(dumb_ssh, None);
+        let (mut screen, mut state) = (Recorder::default(), State::default());
+        jobs.copy(&mut screen, &mut state, "hi".into()).unwrap();
+        assert!(screen.0.is_empty());
+        assert_eq!(
+            state.copied.map(|(outcome, _)| outcome),
+            Some(CopyOutcome::Failed)
+        );
+        assert_eq!(jobs.pending, 0);
+
+        // Oversized payload over SSH is also refused without writing.
         let mut jobs = Jobs::new(no_clipboard(), None);
         let (mut screen, mut state) = (Recorder::default(), State::default());
-        // As a worker reports: one copy a tool took, one none did.
-        jobs.pending = 2;
+        jobs.copy(&mut screen, &mut state, "a".repeat(70_000))
+            .unwrap();
+        assert!(screen.0.is_empty());
+        assert_eq!(
+            state.copied.map(|(outcome, _)| outcome),
+            Some(CopyOutcome::Failed)
+        );
+    }
+
+    #[test]
+    fn native_copy_settles_as_copied_or_falls_back_to_permitted_osc52() {
+        let mut jobs = Jobs::new(local_clipboard(&[]), None);
+        let (mut screen, mut state) = (Recorder::default(), State::default());
+        // Native helper succeeded: Copied, no OSC 52 written.
+        jobs.pending = 1;
+        jobs.copy_in_flight = true;
         jobs.done.send(Done::Copy("taken".into(), true)).unwrap();
+        jobs.settle(&mut screen, &mut state).unwrap();
+        assert!(screen.0.is_empty());
+        assert_eq!(
+            state.copied.map(|(outcome, _)| outcome),
+            Some(CopyOutcome::Copied)
+        );
+        assert!(!jobs.copy_in_flight);
+
+        // Native helper failed with OSC 52 permitted: falls back and reports SentToTerminal.
+        jobs.pending = 1;
+        jobs.copy_in_flight = true;
         jobs.done.send(Done::Copy("hi".into(), false)).unwrap();
         jobs.settle(&mut screen, &mut state).unwrap();
         assert_eq!(screen.0, ["\x1b]52;c;aGk=\x07"]);
+        assert_eq!(
+            state.copied.map(|(outcome, _)| outcome),
+            Some(CopyOutcome::SentToTerminal)
+        );
         assert_eq!(jobs.pending, 0);
-        assert_eq!(state.copied.map(|(ok, _)| ok), Some(true));
+
+        // Native helper failed with OSC 52 refused (oversized): Failed, nothing written.
+        screen.0.clear();
+        jobs.pending = 1;
+        jobs.copy_in_flight = true;
+        jobs.done
+            .send(Done::Copy("x".repeat(70_000), false))
+            .unwrap();
+        jobs.settle(&mut screen, &mut state).unwrap();
+        assert!(screen.0.is_empty());
+        assert_eq!(
+            state.copied.map(|(outcome, _)| outcome),
+            Some(CopyOutcome::Failed)
+        );
+
+        // Native helper failed with TERM=dumb: Failed, nothing written.
+        let mut jobs = Jobs::new(local_clipboard(&[("TERM", "dumb")]), None);
+        let (mut screen, mut state) = (Recorder::default(), State::default());
+        jobs.pending = 1;
+        jobs.copy_in_flight = true;
+        jobs.done.send(Done::Copy("hi".into(), false)).unwrap();
+        jobs.settle(&mut screen, &mut state).unwrap();
+        assert!(screen.0.is_empty());
+        assert_eq!(
+            state.copied.map(|(outcome, _)| outcome),
+            Some(CopyOutcome::Failed)
+        );
+    }
+
+    #[test]
+    fn osc52_write_error_propagates_without_claiming_sent() {
+        let mut jobs = Jobs::new(no_clipboard(), None);
+        let mut state = State::default();
+        let err = jobs
+            .copy(
+                &mut Lost(|| io::Error::from(io::ErrorKind::BrokenPipe)),
+                &mut state,
+                "hi".into(),
+            )
+            .unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::BrokenPipe);
+        assert_eq!(state.copied, None);
+
+        // Fallback OSC 52 write error in settle() also propagates.
+        let mut jobs = Jobs::new(local_clipboard(&[]), None);
+        let mut state = State::default();
+        jobs.pending = 1;
+        jobs.copy_in_flight = true;
+        jobs.done.send(Done::Copy("hi".into(), false)).unwrap();
+        let err = jobs
+            .settle(&mut Lost(|| io::Error::other("write failed")), &mut state)
+            .unwrap_err();
+        assert_eq!(err.to_string(), "write failed");
+        assert_eq!(state.copied, None);
+    }
+
+    #[test]
+    fn overlapping_copies_coalesce_to_latest_and_drop_stale_results() {
+        // While a native copy is in flight, newer copies replace the single
+        // queued slot without spawning extra workers.
+        let mut jobs = Jobs::new(local_clipboard(&[]), None);
+        let (mut screen, mut state) = (Recorder::default(), State::default());
+        jobs.pending = 1;
+        jobs.copy_in_flight = true;
+        jobs.copy(&mut screen, &mut state, "second".into()).unwrap();
+        jobs.copy(&mut screen, &mut state, "third".into()).unwrap();
+        assert_eq!(jobs.pending, 1);
+        assert!(jobs.workers.0.is_empty());
+        assert_eq!(jobs.queued_copy.as_deref(), Some("third"));
+        // Dropping Jobs discards the queued copy without starting it.
+        drop(jobs);
+
+        // When the in-flight copy finishes while a newer copy is queued, the
+        // stale result is discarded (no stale OSC 52 or state update) and the
+        // queued latest copy runs next (no_clipboard has empty tools, so the
+        // worker touches no external binary).
+        let mut jobs = Jobs::new(no_clipboard(), None);
+        let (mut screen, mut state) = (Recorder::default(), State::default());
+        jobs.pending = 1;
+        jobs.copy_in_flight = true;
+        jobs.queued_copy = Some("third".into());
+        jobs.done.send(Done::Copy("first".into(), false)).unwrap();
+        jobs.settle(&mut screen, &mut state).unwrap();
+        assert!(screen.0.is_empty());
+        assert_eq!(state.copied, None);
+        assert!(jobs.copy_in_flight);
+        assert_eq!(jobs.queued_copy, None);
+        assert_eq!(jobs.pending, 1);
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while jobs.pending > 0 {
+            assert!(Instant::now() < deadline, "queued copy did not settle");
+            jobs.settle(&mut screen, &mut state).unwrap();
+            thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(screen.0, ["\x1b]52;c;dGhpcmQ=\x07"]);
+        assert_eq!(
+            state.copied.map(|(outcome, _)| outcome),
+            Some(CopyOutcome::SentToTerminal)
+        );
+        assert!(!jobs.copy_in_flight);
     }
 
     #[test]

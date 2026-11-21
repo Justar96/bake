@@ -1103,3 +1103,151 @@ async fn an_unsynced_refresh_write_is_reported_apart() {
     assert!(refreshed.warnings.is_empty(), "{refreshed:?}");
     a.stop().await;
 }
+
+// `models.json` overriding `cliproxyapi` never receives the account's bound
+// key when `baseUrl` or `apiKey` changes, while non-routing overrides
+// (`modelOverrides` limits/headers) keep the bound key on the signed-in route.
+#[test]
+fn models_json_override_never_sends_bound_key_to_another_route_and_lets_its_key_win() {
+    let home = TempDir::new("account-models-override-key");
+    login(&home, URL_A, KEY_A);
+
+    // 1. Changing `baseUrl` in `models.json` without an `apiKey` WITHHOLDS
+    // the bound account key so KEY_A never leaves URL_A.
+    std::fs::write(
+        home.join("models.json"),
+        r#"{ "providers": { "cliproxyapi": { "baseUrl": "http://other.example/v1" } } }"#,
+    )
+    .expect("models.json");
+    assert_eq!(
+        startup_pair(home.path()),
+        Some(("http://other.example/v1".into(), None))
+    );
+
+    // 2. Setting `apiKey` in `models.json` wins over the bound account key.
+    std::fs::write(
+        home.join("models.json"),
+        r#"{ "providers": { "cliproxyapi": { "apiKey": "sk-from-models-json" } } }"#,
+    )
+    .expect("models.json");
+    assert_eq!(
+        startup_pair(home.path()),
+        Some((format!("{URL_A}/v1"), Some("sk-from-models-json".into())))
+    );
+
+    // 3. Changing a single model's `baseUrl` via `models` also withholds
+    // the bound account key.
+    std::fs::write(
+        home.join("models.json"),
+        r#"{ "providers": { "cliproxyapi": { "models": [{ "id": "gpt-a", "baseUrl": "http://other.example/v1" }] } } }"#,
+    )
+    .expect("models.json");
+    assert_eq!(
+        startup_pair(home.path()),
+        Some(("http://other.example/v1".into(), None))
+    );
+
+    // 4. Overriding model limits on the same signed-in route keeps the
+    // bound account key.
+    std::fs::write(
+        home.join("models.json"),
+        r#"{ "providers": { "cliproxyapi": { "modelOverrides": { "gpt-a": { "maxTokens": 4096 } } } } }"#,
+    )
+    .expect("models.json");
+    let registry = startup_registry(home.path());
+    assert_eq!(pair(&registry), pair_a());
+    assert_eq!(
+        registry
+            .model(CLIPROXYAPI_ID, "gpt-a")
+            .map(|m| m.max_tokens),
+        Some(4096)
+    );
+}
+
+// Legacy saved routes (missing `retryPolicy`, `sendSessionAffinityHeaders`,
+// or protocol splits) compose with upgrades at startup, unblock
+// `refresh_account` instead of freezing it, and `saved_base_url` recovers
+// the address even while disabled.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn legacy_saved_routes_upgrade_in_memory_and_refresh_and_disabled_keeps_saved_url() {
+    let home = TempDir::new("account-legacy-upgrade");
+    let server = proxy(json!({
+        "data": [
+            { "id": "claude-opus-5-5", "owned_by": "anthropic", "supported_reasoning_levels": ["none", "high", "max"] },
+            { "id": "gpt-new" }
+        ]
+    }))
+    .await;
+    login(&home, &server.url, KEY_A);
+
+    // Rewrite `settings.json` into a legacy pre-upgrade route shape with the
+    // same `account` generation tag.
+    let mut settings = read_json(&home.join("settings.json"));
+    let generation = settings["cliproxyapi"]["account"].clone();
+    settings["cliproxyapi"] = json!({
+        "account": generation,
+        "displayName": "CLIProxyAPI",
+        "apiKeyEnv": "CLIPROXYAPI_API_KEY",
+        "api": "openai-responses",
+        "baseURL": format!("{}/v1", server.url),
+        "models": [
+            { "id": "claude-opus-5-5", "name": "Claude", "reasoningEfforts": { "high": "high", "max": "max" } }
+        ]
+    });
+    std::fs::write(home.join("settings.json"), settings.to_string()).expect("legacy settings");
+
+    // Startup immediately composes the upgraded Claude protocol + root URL + adaptive thinking.
+    let registry = startup_registry(home.path());
+    let claude = registry
+        .model(CLIPROXYAPI_ID, "claude-opus-5-5")
+        .expect("claude");
+    assert_eq!(claude.api, "anthropic-messages");
+    assert_eq!(claude.base_url, server.url);
+    assert_eq!(
+        claude
+            .compat
+            .as_ref()
+            .and_then(|c| c.force_adaptive_thinking),
+        Some(true)
+    );
+    assert_eq!(
+        claude
+            .compat
+            .as_ref()
+            .and_then(|c| c.send_session_affinity_headers),
+        Some(true)
+    );
+
+    // `refresh_account` upgrades the saved route on disk AND fetches new models.
+    let account = CliProxyAccount::new(home.path());
+    let runtime = ModelRuntime::new(registry);
+    let refreshed = refresh_account(account.clone(), runtime.clone(), Vec::new(), None)
+        .await
+        .expect("refresh");
+    assert_eq!(refreshed.outcome, RefreshOutcome::Updated(2));
+    let saved = &read_json(&home.join("settings.json"))["cliproxyapi"];
+    assert_eq!(
+        saved["compat"]["sendSessionAffinityHeaders"],
+        Value::Bool(true)
+    );
+    assert!(saved.get("retryPolicy").is_some());
+
+    // Disable the account via a direct auth write: `saved_base_url` still
+    // recovers `server.url` for `/login`, and ignores invalid URLs.
+    AuthStorage::load(&auth_path(home.path()))
+        .set_api_key(CLIPROXYAPI_ID, "sk-other")
+        .expect("direct");
+    assert!(matches!(account.read(), AccountView::Disabled(_)));
+    assert_eq!(
+        account.saved_base_url().as_deref(),
+        Some(server.url.as_str())
+    );
+
+    std::fs::write(
+        home.join("settings.json"),
+        r#"{ "cliproxyapi": { "baseURL": "https://bad.example/?secret=1" } }"#,
+    )
+    .expect("bad url");
+    assert_eq!(account.saved_base_url(), None);
+    server.stop().await;
+}

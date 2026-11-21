@@ -855,9 +855,10 @@ mod tests {
                 root: dir.join("telecom"),
                 cwd: ws.clone(),
                 session_id: session.into(),
-                callsign: None,
+                callsign: session.strip_prefix("s-").map(str::to_owned),
                 parent: None,
                 model: None,
+                names: Vec::new(),
             };
             Station::start(options, jobs.clone(), work).expect("station")
         };

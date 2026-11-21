@@ -1,14 +1,16 @@
 //! The agent loop and stateful agent for Bake.
 //!
 //! `bake-agent` ports Pi's `agent` package (`packages/agent`, release
-//! v1.1.0, revision `abe508e1b89912adde45528136c3221eb69acdd7`, MIT; see the
-//! crate's `NOTICE`) onto `bake-ai`'s messages, providers, and event streams.
+//! v1.1.0, revision `abe508e1b89912adde45528136c3221eb69acdd7`, with the
+//! v1.6.0 `#9986` aborted tool-batch fix from revision
+//! `faac585884ae2c013a6b1400f3e9e77f10b34bac`, MIT; see the crate's `NOTICE`)
+//! onto `bake-ai`'s messages, providers, and event streams.
 //!
 //! | Module | Pi source |
 //! |---|---|
 //! | [`types`] | `packages/agent/src/types.ts` |
 //! | [`hook`] | constructors for the hook types of `types.ts` |
-//! | [`agent_loop`](mod@agent_loop) | `packages/agent/src/agent-loop.ts` |
+//! | [`agent_loop`](mod@agent_loop) | `packages/agent/src/agent-loop.ts` (v1.1.0 + v1.6.0 `#9986`) |
 //! | [`agent`] | `packages/agent/src/agent.ts` |
 //! | [`nested`] | `packages/coding-agent/src/core/nested-tool-calls.ts` (v1.3.0) |
 //! | [`stream_fn`] | `packages/agent/src/stream-fn.ts` |

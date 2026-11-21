@@ -51,6 +51,7 @@ pub(super) fn crew(host: &SpawnHost) -> Vec<CrewMember> {
                 SpawnedState::Exited(Some(reason)) => CrewState::Failed(reason),
                 SpawnedState::Exited(None) => CrewState::Exited(None),
             },
+            model: agent.model,
             tool: agent.tool,
             line: agent.last_line,
             task: agent.task,
@@ -188,8 +189,19 @@ pub(super) fn read_status(session: &AgentSession) -> SessionStatus {
         used: usage.tokens,
         window: usage.context_window,
     });
-    let line = session.settings().status_line;
+    let settings = session.settings();
+    let line = settings.status_line;
     let totals = line.any().then(|| session.usage_totals());
+    // Where automatic compaction starts for the model, as the session
+    // checks it; a reserve larger than the window starts it at once.
+    let auto_compact = context.and_then(|usage| {
+        let compaction = settings.compaction_settings_for(model.as_ref()).ok()?;
+        Some(if compaction.enabled {
+            AutoCompact::At(u64::try_from(compaction.threshold(usage.window).max(0)).unwrap_or(0))
+        } else {
+            AutoCompact::Off
+        })
+    });
     SessionStatus {
         thinking: model
             .as_ref()
@@ -207,6 +219,15 @@ pub(super) fn read_status(session: &AgentSession) -> SessionStatus {
             hit: totals
                 .latest_cache_hit
                 .map(|share| (share * 100.0).floor().clamp(0.0, 100.0) as u64),
+        }),
+        auto_compact,
+        callsign: session.telecom().and_then(Result::ok).map(|station| {
+            let name = station.callsign().to_owned();
+            let pool = bake_coding_agent::telecom::names::pool(&settings.callsigns);
+            Callsign {
+                hue: bake_coding_agent::telecom::names::hue(&name, &pool),
+                name,
+            }
         }),
         name: session.session_name(),
     }

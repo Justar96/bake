@@ -46,12 +46,10 @@ pub const MAX_EDIT_FILE_BYTES: u64 = 64 * 1024 * 1024;
 
 /// Pi's `editToolSystemPromptContribution` snippet.
 pub const EDIT_PROMPT_SNIPPET: &str = "Make precise file edits with exact text replacement, including multiple disjoint edits in one call";
-/// Bake's one guideline. Pi's four (`editToolSystemPromptContribution`)
-/// repeat what the description and the `edits` parameter already say about
-/// exact, unique, non-overlapping matches against the original file.
-pub const EDIT_PROMPT_GUIDELINES: &[&str] = &[
-    "Use edit for precise changes, with every change to one file in a single call as separate edits[] entries.",
-];
+/// Bake's `edit` contributes no prompt guidelines; the tool description and
+/// `edits` parameter already document exact, unique, non-overlapping
+/// replacements against the original file.
+pub const EDIT_PROMPT_GUIDELINES: &[&str] = &[];
 
 fn parameters() -> Value {
     json!({
@@ -169,12 +167,7 @@ pub(crate) fn owned_edit_tool_definition(
     ToolDefinition {
         tool,
         prompt_snippet: Some(EDIT_PROMPT_SNIPPET.into()),
-        prompt_guidelines: Some(
-            EDIT_PROMPT_GUIDELINES
-                .iter()
-                .map(|g| (*g).to_owned())
-                .collect(),
-        ),
+        prompt_guidelines: None,
     }
 }
 

@@ -12,6 +12,7 @@ use bake_agent::{
     AgentContext, AgentEvent, AgentLoopConfig, AgentTool, AgentToolResult, ToolEffect, agent_loop,
     hook,
 };
+use bake_ai::{AbortController, StopReason};
 use common::*;
 use serde_json::json;
 
@@ -275,4 +276,100 @@ fn tool_result_ids_of(events: &[String]) -> Vec<&str> {
         .iter()
         .filter_map(|event| event.strip_prefix("result:"))
         .collect()
+}
+
+/// When a `Write` barrier aborts mid-batch, later `Exec` and `Read` segments
+/// do not run or reach `before_tool_call`, and every remaining call is
+/// answered with `Operation aborted` (never the failed-write skip message),
+/// in assistant order.
+#[tokio::test]
+async fn aborted_mixed_write_then_exec_and_reads_answers_every_call_aborted() {
+    let log = Arc::new(Log::default());
+    let controller = AbortController::new();
+    let abort = controller.clone();
+    let write_log = Arc::clone(&log);
+    let mut aborting_write = AgentTool::new(
+        "write",
+        "write",
+        "write",
+        empty_schema(),
+        move |id, _, _, _, _ctx| {
+            let write_log = Arc::clone(&write_log);
+            let abort = abort.clone();
+            Box::pin(async move {
+                write_log.push(format!("enter:{id}"));
+                abort.abort();
+                Err("write interrupted".to_owned())
+            })
+        },
+    );
+    aborting_write.effect = Some(ToolEffect::Write);
+
+    let mut config = AgentLoopConfig::new(model(), identity_converter());
+    config.max_concurrent_read_tools = NonZeroUsize::new(2);
+    let seen = Arc::clone(&log);
+    config.before_tool_call = Some(hook::before_tool_call(move |call, _| {
+        seen.push(format!("prepare:{}", call.tool_call.id));
+        Box::pin(async { Ok(None) })
+    }));
+
+    let stream = agent_loop(
+        vec![user("go")],
+        AgentContext {
+            messages: Vec::new(),
+            tools: vec![
+                tool("read", Some(ToolEffect::Read), &log),
+                Arc::new(aborting_write),
+                tool("exec", Some(ToolEffect::Exec), &log),
+            ],
+        },
+        config,
+        Some(controller.signal()),
+        Some(scripted(|index, _, _| {
+            if index == 0 {
+                tool_use(vec![
+                    call("r1", "read", json!({})),
+                    call("w", "write", json!({})),
+                    call("x", "exec", json!({})),
+                    call("r2", "read", json!({})),
+                ])
+            } else {
+                failed(StopReason::Aborted)
+            }
+        })),
+    );
+
+    let events = drain(&stream).await;
+    let messages = stream.result().await.unwrap();
+    let entries = log.entries();
+    assert_eq!(
+        entries,
+        ["prepare:r1", "enter:r1", "leave:r1", "prepare:w", "enter:w"]
+    );
+    assert_eq!(
+        tool_events(&events),
+        [
+            "start:r1",
+            "end:r1",
+            "result:r1",
+            "start:w",
+            "end:w",
+            "result:w",
+            "start:x",
+            "end:x",
+            "result:x",
+            "start:r2",
+            "end:r2",
+            "result:r2",
+        ]
+    );
+    assert_tool_results(
+        &messages,
+        &[
+            ("r1", false, "r1"),
+            ("w", true, "write interrupted"),
+            ("x", true, "Operation aborted"),
+            ("r2", true, "Operation aborted"),
+        ],
+    );
 }

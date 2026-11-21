@@ -1192,3 +1192,148 @@ async fn process_crashes_preserve_recovery_boundaries_without_replaying_effects(
         }
     }
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn aborting_mid_tool_batch_persists_every_aborted_result_and_settles_cancelled() {
+    let dir = TempDir::new("run-abort-mid-batch");
+    let manager = file_session(&dir);
+    let path = manager.session_file().unwrap().to_path_buf();
+    let h = harness(200_000);
+    h.faux.set_responses(vec![
+        faux_assistant_blocks(
+            vec![
+                faux_tool_call("first", json!({}), Some("c1")),
+                faux_tool_call("second", json!({}), Some("c2")),
+            ],
+            StopReason::ToolUse,
+        )
+        .into(),
+        faux_assistant_message("after abort").into(),
+    ]);
+
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let reached = Arc::clone(&entered);
+    let mut first = AgentTool::new(
+        "first",
+        "first",
+        "Waits until aborted",
+        json!({"type":"object"}),
+        move |_, _, signal, _, _ctx| {
+            let reached = Arc::clone(&reached);
+            Box::pin(async move {
+                reached.notify_one();
+                if let Some(signal) = signal {
+                    signal.cancelled().await;
+                }
+                Err("Operation aborted".into())
+            })
+        },
+    );
+    first.effect = Some(bake_agent::ToolEffect::Exec);
+
+    let second_ran = Arc::new(AtomicUsize::new(0));
+    let second_hits = Arc::clone(&second_ran);
+    let mut second = AgentTool::new(
+        "second",
+        "second",
+        "Must not run after abort",
+        json!({"type":"object"}),
+        move |_, _, _, _, _ctx| {
+            let second_hits = Arc::clone(&second_hits);
+            Box::pin(async move {
+                second_hits.fetch_add(1, Ordering::SeqCst);
+                Ok(AgentToolResult::text("should not run"))
+            })
+        },
+    );
+    second.effect = Some(bake_agent::ToolEffect::Exec);
+
+    let session = Arc::new(
+        AgentSession::create(AgentSessionOptions {
+            tools: vec![Arc::new(first), Arc::new(second)],
+            active_tool_names: vec!["first".into(), "second".into()],
+            ..options(&h, manager, Settings::default())
+        })
+        .await
+        .unwrap(),
+    );
+
+    let owner = Arc::clone(&session);
+    let run = tokio::spawn(async move {
+        owner
+            .prompt_recoverable("run", Vec::new(), RunLimits::default())
+            .await
+    });
+    tokio::time::timeout(Duration::from_secs(10), entered.notified())
+        .await
+        .unwrap();
+    session.abort().await;
+
+    let result = tokio::time::timeout(Duration::from_secs(10), run)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert_eq!(result.outcome, RunOutcome::Cancelled);
+    assert_eq!(second_ran.load(Ordering::SeqCst), 0);
+    assert_eq!(h.faux.call_count(), 1);
+    assert_eq!(
+        session.inspect_run(&result.run_id).unwrap().disposition,
+        RunRecoveryDisposition::Completed {
+            outcome: RunOutcome::Cancelled
+        }
+    );
+    let resumed = session.resume_run(&result.run_id).await.unwrap();
+    assert_eq!(resumed.outcome, RunOutcome::Cancelled);
+    assert_eq!(h.faux.call_count(), 1);
+
+    // Subsequent prompt on the same session succeeds against the closed
+    // tool-call exchange, then shutdown releases the file lock so we can
+    // verify the persisted journal and tool results on disk.
+    session.prompt("continue", Vec::new()).await.unwrap();
+    assert_eq!(h.faux.call_count(), 2);
+    session.shutdown().await;
+
+    // Both calls have persisted aborted tool results on disk; only the
+    // started call was dispatched in the journal.
+    let reopened = SessionManager::open(&path, None, None).unwrap();
+    let mut dispatches = Vec::new();
+    let mut tool_results = Vec::new();
+    for entry in reopened.branch_entries(None) {
+        if entry.entry_type() == "custom"
+            && entry.get("customType").and_then(Value::as_str) == Some("bake.run.v1")
+            && let Some(event) = entry.get("data").and_then(|data| data.get("event"))
+            && event.get("kind").and_then(Value::as_str) == Some("dispatch")
+        {
+            dispatches.push(
+                event
+                    .get("tool_call_id")
+                    .and_then(Value::as_str)
+                    .unwrap()
+                    .to_owned(),
+            );
+        }
+        if let Some(message) = entry.message().map(|m| m.to_agent())
+            && let Some(tr) = message.as_tool_result()
+        {
+            let text = tr
+                .content
+                .iter()
+                .filter_map(|block| match block {
+                    UserContentBlock::Text(t) => Some(t.text.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("");
+            tool_results.push((tr.tool_call_id.clone(), tr.is_error, text));
+        }
+    }
+    assert_eq!(dispatches, vec!["c1"]);
+    assert_eq!(
+        tool_results,
+        vec![
+            ("c1".into(), true, "Operation aborted".into()),
+            ("c2".into(), true, "Operation aborted".into()),
+        ]
+    );
+}

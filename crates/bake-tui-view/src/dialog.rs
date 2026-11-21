@@ -321,12 +321,66 @@ pub fn branch_summary_instructions() -> FieldDialog {
     }
 }
 
+/// One offered answer in a [`QuestionDialog`].
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct QuestionChoice {
+    /// What an answer names (the option's label).
+    pub value: String,
+    /// What the option shows.
+    pub label: String,
+    /// Optional explanation shown dim beside or below the label.
+    pub description: Option<String>,
+}
+
+/// A model question (`ask_user`) with offered options, single- or
+/// multi-select, plus an "Other" row to type a custom answer.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct QuestionDialog {
+    /// Short header chip, such as `Auth method`. Empty falls back to `Question`.
+    pub header: String,
+    /// Spawned agent callsign when forwarded, such as `alpha-1`.
+    pub from: Option<String>,
+    /// Position in a multi-question request: `(index, count)` from 1, shown
+    /// when `count > 1`.
+    pub progress: Option<(usize, usize)>,
+    /// The full question text, wrapped and never truncated.
+    pub question: String,
+    /// The offered options (numbered `1.`–`9.`).
+    pub options: Vec<QuestionChoice>,
+    /// Whether several options can be toggled before submitting.
+    pub multi_select: bool,
+    /// Initially ticked options, aligned with `options` (used when returning
+    /// from the custom-answer field in multi-select).
+    pub ticked: Vec<bool>,
+    /// Initial selected row, clamped to the selectable rows.
+    pub selected: Option<usize>,
+}
+
+impl QuestionDialog {
+    /// Total selectable rows: each option, the `Other` row, and `Done` in
+    /// multi-select.
+    pub fn row_count(&self) -> usize {
+        self.options.len() + 1 + usize::from(self.multi_select)
+    }
+
+    /// The row index of the `Other` row.
+    pub fn other_row(&self) -> usize {
+        self.options.len()
+    }
+
+    /// The row index of the `Done` row in multi-select, if present.
+    pub fn done_row(&self) -> Option<usize> {
+        self.multi_select.then_some(self.options.len() + 1)
+    }
+}
+
 /// What a dialog asks.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DialogKind {
     List(ListDialog),
     Field(Box<FieldDialog>),
     Info(InfoDialog),
+    Question(Box<QuestionDialog>),
 }
 
 /// A dialog the runtime opens. A new `id` is a new dialog.
@@ -343,6 +397,10 @@ pub enum DialogAnswer {
     Chose { value: String, save_default: bool },
     /// A field's text.
     Entered(SecretText),
+    /// A question dialog's answer: chosen option values, or `other: true`
+    /// when the person chose to type their own answer (alongside any
+    /// already-ticked multi-select values).
+    Question { values: Vec<String>, other: bool },
     /// Esc, or an information sheet closed.
     Cancel,
 }
@@ -405,22 +463,35 @@ pub struct Dialog {
     pub total: usize,
     /// A session search's order, filter, and last result.
     pub search: Option<SearchView>,
+    /// Multi-select ticks for a [`DialogKind::Question`], aligned with its
+    /// options.
+    pub ticked: Vec<bool>,
 }
 
 impl Dialog {
     /// Opens `request`, its current item selected and its field holding
     /// its initial text.
     pub fn open(request: DialogRequest) -> Self {
-        let (selected, text) = match &request.kind {
+        let (selected, text, ticked) = match &request.kind {
             DialogKind::List(list) => (
                 list.selected
                     .or(list.current)
                     .unwrap_or(0)
                     .min(list.items.len().saturating_sub(1)),
                 String::new(),
+                Vec::new(),
             ),
-            DialogKind::Field(field) => (0, field.initial.clone()),
-            DialogKind::Info(_) => (0, String::new()),
+            DialogKind::Field(field) => (0, field.initial.clone(), Vec::new()),
+            DialogKind::Info(_) => (0, String::new(), Vec::new()),
+            DialogKind::Question(q) => {
+                let mut ticked = q.ticked.clone();
+                ticked.resize(q.options.len(), false);
+                (
+                    q.selected.unwrap_or(0).min(q.row_count().saturating_sub(1)),
+                    String::new(),
+                    ticked,
+                )
+            }
         };
         let mut dialog = Self {
             request,
@@ -434,6 +505,7 @@ impl Dialog {
             page: 1,
             total: 0,
             search: None,
+            ticked,
         };
         if let DialogKind::List(list) = &dialog.request.kind
             && list.search.is_some()
@@ -700,6 +772,81 @@ impl Dialog {
                 }
                 None
             }
+            DialogKind::Question(q) => {
+                let count = q.row_count();
+                if count > 0 {
+                    let last = count - 1;
+                    let moved = match input.key {
+                        Key::Up if plain => Some((self.selected + last) % count),
+                        Key::Down if plain => Some((self.selected + 1) % count),
+                        Key::PageUp if plain => Some(self.selected.saturating_sub(page)),
+                        Key::PageDown if plain => Some((self.selected + page).min(last)),
+                        Key::Home if plain => Some(0),
+                        Key::End if plain => Some(last),
+                        _ if ctrl('p') => Some((self.selected + last) % count),
+                        _ if ctrl('n') => Some((self.selected + 1) % count),
+                        _ => None,
+                    };
+                    if let Some(moved) = moved {
+                        self.selected = moved;
+                        return None;
+                    }
+                }
+                match input.key {
+                    Key::Char(c @ '1'..='9') if fresh && plain => {
+                        let idx = (c as usize) - ('1' as usize);
+                        if idx < q.options.len() {
+                            self.selected = idx;
+                            if q.multi_select {
+                                if let Some(slot) = self.ticked.get_mut(idx) {
+                                    *slot = !*slot;
+                                }
+                            } else {
+                                self.answered = true;
+                                return Some(DialogAnswer::Question {
+                                    values: vec![q.options[idx].value.clone()],
+                                    other: false,
+                                });
+                            }
+                        }
+                    }
+                    Key::Char(' ') if fresh && plain && q.multi_select => {
+                        if let Some(slot) = self.ticked.get_mut(self.selected) {
+                            *slot = !*slot;
+                        }
+                    }
+                    Key::Enter if fresh && plain => {
+                        if q.multi_select {
+                            let values: Vec<String> = q
+                                .options
+                                .iter()
+                                .zip(&self.ticked)
+                                .filter(|(_, tick)| **tick)
+                                .map(|(opt, _)| opt.value.clone())
+                                .collect();
+                            self.answered = true;
+                            return Some(DialogAnswer::Question {
+                                values,
+                                other: self.selected == q.other_row(),
+                            });
+                        } else if self.selected < q.options.len() {
+                            self.answered = true;
+                            return Some(DialogAnswer::Question {
+                                values: vec![q.options[self.selected].value.clone()],
+                                other: false,
+                            });
+                        } else {
+                            self.answered = true;
+                            return Some(DialogAnswer::Question {
+                                values: Vec::new(),
+                                other: true,
+                            });
+                        }
+                    }
+                    _ => {}
+                }
+                None
+            }
         }
     }
 
@@ -717,7 +864,7 @@ impl Dialog {
                 let filter: String = self.filter.chars().chain(clean).collect();
                 self.set_filter(filter);
             }
-            DialogKind::List(_) | DialogKind::Info(_) => {}
+            DialogKind::List(_) | DialogKind::Info(_) | DialogKind::Question(_) => {}
         }
     }
 
@@ -1302,5 +1449,96 @@ mod tests {
         assert_eq!(dialog.selected, 1);
         assert_eq!(dialog.key(ctrl('s'), true), None);
         assert!(dialog.search.is_none());
+    }
+
+    fn question_dialog(options: &[&str], multi_select: bool) -> Dialog {
+        Dialog::open(DialogRequest {
+            id: 10,
+            kind: DialogKind::Question(Box::new(QuestionDialog {
+                header: "Pick".into(),
+                from: None,
+                progress: None,
+                question: "Which one?".into(),
+                options: options
+                    .iter()
+                    .map(|label| QuestionChoice {
+                        value: (*label).into(),
+                        label: (*label).into(),
+                        description: None,
+                    })
+                    .collect(),
+                multi_select,
+                ticked: Vec::new(),
+                selected: None,
+            })),
+        })
+    }
+
+    #[test]
+    fn question_single_select_number_keys_and_other() {
+        let mut dialog = question_dialog(&["Alpha", "Beta", "Gamma"], false);
+        // Non-fresh digit does not answer.
+        assert_eq!(dialog.key(key(Key::Char('2')), false), None);
+        // Out-of-range digit does nothing.
+        assert_eq!(dialog.key(key(Key::Char('9')), true), None);
+        assert!(!dialog.answered);
+        // Fresh digit 2 answers immediately.
+        assert_eq!(
+            dialog.key(key(Key::Char('2')), true),
+            Some(DialogAnswer::Question {
+                values: vec!["Beta".into()],
+                other: false,
+            })
+        );
+        assert_eq!(dialog.selected, 1);
+
+        // Moving to Other and pressing Enter asks for a custom answer.
+        let mut dialog = question_dialog(&["Alpha", "Beta"], false);
+        dialog.key(key(Key::End), true);
+        assert_eq!(dialog.selected, 2);
+        assert_eq!(
+            dialog.key(key(Key::Enter), true),
+            Some(DialogAnswer::Question {
+                values: Vec::new(),
+                other: true,
+            })
+        );
+    }
+
+    #[test]
+    fn question_multi_select_toggles_and_submits() {
+        let mut dialog = question_dialog(&["Format", "Clippy", "Tests"], true);
+        // Number keys toggle in place without answering.
+        assert_eq!(dialog.key(key(Key::Char('3')), true), None);
+        assert_eq!(dialog.selected, 2);
+        assert_eq!(dialog.ticked, vec![false, false, true]);
+        // Space toggles the selected row.
+        dialog.key(key(Key::Home), true);
+        assert_eq!(dialog.key(key(Key::Char(' ')), true), None);
+        assert_eq!(dialog.ticked, vec![true, false, true]);
+        // Enter submits ticked options in order.
+        assert_eq!(
+            dialog.key(key(Key::Enter), true),
+            Some(DialogAnswer::Question {
+                values: vec!["Format".into(), "Tests".into()],
+                other: false,
+            })
+        );
+
+        // Enter on Other carries ticked values alongside other: true.
+        let mut dialog = question_dialog(&["Format", "Clippy"], true);
+        dialog.key(key(Key::Char('2')), true);
+        dialog.key(key(Key::Down), true);
+        assert_eq!(dialog.selected, 2);
+        assert_eq!(
+            dialog.key(key(Key::Enter), true),
+            Some(DialogAnswer::Question {
+                values: vec!["Clippy".into()],
+                other: true,
+            })
+        );
+        // Esc declines.
+        let mut dialog = question_dialog(&["Format", "Clippy"], true);
+        assert_eq!(dialog.key(key(Key::Esc), true), Some(DialogAnswer::Cancel));
     }
 }

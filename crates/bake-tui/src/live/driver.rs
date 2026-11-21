@@ -41,6 +41,7 @@ impl Driver {
     pub(super) async fn run(mut self, mut inbox: mpsc::UnboundedReceiver<Request>) {
         let mut running: Option<Running> = None;
         self.status();
+        self.publish_commands();
         self.publish_background();
         self.publish_mcp();
         // `--offline` stops the one startup network operation.
@@ -235,6 +236,16 @@ impl Driver {
             .collect()
     }
 
+    /// The names of the session's loaded skills, for bare `/<name>` shorthand
+    /// rewriting ([`rewrite_skill_shorthand`]).
+    pub(super) fn skill_names(&self) -> Vec<String> {
+        self.session
+            .skills()
+            .iter()
+            .map(|skill| skill.name.clone())
+            .collect()
+    }
+
     /// Makes the command line's prompts waiting prompts, in order, but for
     /// those [`command_line_refusal`] refuses, checked against the session
     /// in use now, after any startup `/resume`. The refused ones never
@@ -243,9 +254,13 @@ impl Driver {
     /// runs each initial message after one that fails.
     pub(super) fn release_held(&mut self) {
         let templates = self.template_names();
+        let skills = self.skill_names();
         let mut declined = Vec::new();
         let mut reason = None;
-        for prompt in std::mem::take(&mut self.held) {
+        for mut prompt in std::mem::take(&mut self.held) {
+            if let Some(rewritten) = rewrite_skill_shorthand(&prompt.text, &templates, &skills) {
+                prompt.text = rewritten;
+            }
             match command_line_refusal(&prompt.text, &templates) {
                 Some(why) => {
                     reason.get_or_insert(why);
@@ -403,6 +418,60 @@ impl Driver {
             self.publish_pending();
         }
     }
+
+    /// Sends the session's skills and prompt templates when they changed,
+    /// sanitized to single-line, control-free, bounded text for the slash
+    /// menu.
+    pub(super) fn publish_commands(&mut self) {
+        let commands = dynamic_commands(&self.session);
+        if commands != self.commands {
+            self.commands = commands.clone();
+            self.send(RuntimeUpdate::Commands(commands));
+        }
+    }
+}
+
+/// Builds the session's sanitized dynamic slash-menu entries: skills first,
+/// then prompt templates, in the session's loaded order.
+pub(super) fn dynamic_commands(
+    session: &AgentSession,
+) -> Vec<bake_tui_view::runtime::DynamicCommand> {
+    use bake_tui_view::completion::{
+        MAX_DYNAMIC_DESCRIPTION, MAX_DYNAMIC_HINT, MAX_DYNAMIC_NAME, sanitize_inline, sanitize_name,
+    };
+    use bake_tui_view::runtime::{DynamicCommand, DynamicCommandKind};
+
+    let mut out = Vec::with_capacity(session.skills().len() + session.prompt_templates().len());
+    for skill in session.skills() {
+        let name = sanitize_name(&skill.name, MAX_DYNAMIC_NAME);
+        if name.is_empty() {
+            continue;
+        }
+        out.push(DynamicCommand {
+            name,
+            hint: None,
+            description: sanitize_inline(&skill.description, MAX_DYNAMIC_DESCRIPTION),
+            kind: DynamicCommandKind::Skill,
+        });
+    }
+    for template in session.prompt_templates() {
+        let name = sanitize_name(&template.name, MAX_DYNAMIC_NAME);
+        if name.is_empty() {
+            continue;
+        }
+        let hint = template
+            .argument_hint
+            .as_deref()
+            .map(|h| sanitize_inline(h, MAX_DYNAMIC_HINT))
+            .filter(|h| !h.is_empty());
+        out.push(DynamicCommand {
+            name,
+            hint,
+            description: sanitize_inline(&template.description, MAX_DYNAMIC_DESCRIPTION),
+            kind: DynamicCommandKind::Template,
+        });
+    }
+    out
 }
 
 /// How a command that ran as the session's work ended, for the bar. Only
@@ -419,6 +488,30 @@ pub(super) fn work_outcome(outcome: &commands::Outcome) -> Outcome {
 /// Why a prompt a cancel stopped before the agent took it came back.
 pub(super) const INTERRUPTED_PROMPT: &str =
     "Stopped before it was sent; your prompt is back in the draft.";
+
+/// Rewrites a bare `/<name> ...` prompt to `/skill:<name> ...` when `<name>`
+/// is neither a built-in command nor a prompt template and matches exactly
+/// one loaded skill's name. Built-in commands and prompt templates win;
+/// everything else returns `None`.
+pub(super) fn rewrite_skill_shorthand(
+    text: &str,
+    templates: &[String],
+    skills: &[String],
+) -> Option<String> {
+    if commands::parse(text).is_some() {
+        return None;
+    }
+    let rest = text.trim_start().strip_prefix('/')?;
+    let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
+    let word = &rest[..end];
+    if word.is_empty() || word.starts_with("skill:") || templates.iter().any(|name| name == word) {
+        return None;
+    }
+    if skills.iter().filter(|name| name.as_str() == word).count() != 1 {
+        return None;
+    }
+    Some(format!("/skill:{word}{}", &rest[end..]))
+}
 
 /// Why a composer slash prompt that names none of [`commands::COMMANDS`]
 /// is refused: it names a command-like word that is neither `/skill:name`

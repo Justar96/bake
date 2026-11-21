@@ -494,6 +494,7 @@ pub(super) async fn build_session(args: &Args, build: Build) -> Result<Built, St
                     model
                         .as_ref()
                         .map(|model| format!("{}/{}", model.provider, model.id)),
+                    settings.callsigns.clone(),
                 )
                 .ok_or_else(|| "telecom: no Bake home to place the team in".to_owned())?;
             crate::telecom::Station::start(options, jobs.clone(), &work)

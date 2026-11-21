@@ -270,8 +270,10 @@ fn maps_a_login_route_onto_a_pi_provider() {
         "http://127.0.0.1:8317",
         json!({ "data": [
             { "id": "gpt-test", "context_window": 128_000, "supported_reasoning_levels": ["low", "high"] },
+            { "id": "gpt-off", "supported_reasoning_levels": ["none", "low", "ultra"] },
             { "id": "claude-test", "owned_by": "anthropic", "input_modalities": ["image"],
-              "supported_reasoning_levels": ["high", "max"] },
+              "supported_reasoning_levels": ["none", "high", "max"] },
+            { "id": "house-chat", "owned_by": "deepseek" },
         ] }),
     );
     assert_eq!(
@@ -284,12 +286,19 @@ fn maps_a_login_route_onto_a_pi_provider() {
                   "thinkingLevelMap": { "off": null, "minimal": null, "low": "low", "medium": null,
                                         "high": "high", "xhigh": null, "max": null },
                   "input": ["text"], "contextWindow": 128_000, "maxTokens": 32_768 },
+                { "id": "gpt-off", "name": "gpt-off", "reasoning": true,
+                  "thinkingLevelMap": { "off": "none", "minimal": null, "low": "low", "medium": null,
+                                        "high": null, "xhigh": null, "max": "ultra" },
+                  "input": ["text"], "contextWindow": 262_144, "maxTokens": 32_768 },
                 { "id": "claude-test", "name": "claude-test", "api": "anthropic-messages",
                   "baseUrl": "http://127.0.0.1:8317", "reasoning": true,
-                  "thinkingLevelMap": { "off": null, "minimal": null, "low": null, "medium": null,
+                  "thinkingLevelMap": { "minimal": null, "low": null, "medium": null,
                                         "high": "high", "xhigh": null, "max": "max" },
                   "input": ["text", "image"], "contextWindow": 262_144, "maxTokens": 32_768,
                   "compat": { "forceAdaptiveThinking": true } },
+                { "id": "house-chat", "name": "house-chat", "api": "openai-completions", "reasoning": false,
+                  "input": ["text"], "contextWindow": 262_144, "maxTokens": 32_768,
+                  "compat": { "supportsDeveloperRole": false } },
             ],
         })
     );

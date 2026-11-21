@@ -26,6 +26,9 @@ pub struct Needs {
     pub bar: bool,
     /// Whether the status line is drawn under everything else.
     pub status: bool,
+    /// Whether the status line has readings for a second row
+    /// ([`crate::status::lines`]).
+    pub readings: bool,
     /// Whether the tasks' standing row is present: while any subagent or
     /// background shell is reported, or the tray is open.
     pub standing: bool,
@@ -131,6 +134,13 @@ pub fn plan(height: u16, needs: Needs) -> Rows {
     let more = take(extra.min(left_after_body(height, chrome + tray + status + gap)));
     let notice = take(needs.notice);
     let menu = take(needs.menu);
+    // The readings' row gives way before the body's minimum, and before the
+    // crew panel; without it they join the status line's one row.
+    let readings = take(u16::from(status > 0 && needs.readings).min(left_after_body(
+        height,
+        chrome + tray + status + gap + more + notice + menu,
+    )));
+    let status = status + readings;
     // The crew panel gives way before the body's minimum, like the draft.
     let crew = take(needs.crew.min(left_after_body(
         height,
@@ -174,6 +184,7 @@ mod tests {
             draft_rows,
             bar: false,
             status: true,
+            readings: false,
             standing: true,
             notice: 1,
             pending: 0,
@@ -351,6 +362,40 @@ mod tests {
         }
     }
 
+    // The readings' row comes under the status line's while the body
+    // keeps its minimum, and gives way before it.
+    #[test]
+    fn the_readings_take_a_second_status_row_while_the_body_has_room() {
+        let with = |height| {
+            plan(
+                height,
+                Needs {
+                    readings: true,
+                    ..needs(1)
+                },
+            )
+        };
+        let roomy = with(30);
+        assert_eq!(roomy.status, 2);
+        assert_eq!(roomy.total(), 30);
+        assert_eq!(roomy.body, plan(30, needs(1)).body - 1);
+        // Short of the body's minimum, the readings share the one row.
+        for height in 0..12 {
+            let rows = with(height);
+            assert_eq!(rows.total(), height);
+            assert!(rows.status <= 1 || rows.body >= MIN_BODY_ROWS, "{height}");
+        }
+        let hidden = plan(
+            30,
+            Needs {
+                status: false,
+                readings: true,
+                ..needs(1)
+            },
+        );
+        assert_eq!(hidden.status, 0);
+    }
+
     #[test]
     fn without_a_standing_row_its_row_goes_to_the_others() {
         let rows = plan(
@@ -359,6 +404,7 @@ mod tests {
                 draft_rows: 1,
                 bar: false,
                 status: true,
+                readings: false,
                 standing: false,
                 notice: 0,
                 pending: 0,

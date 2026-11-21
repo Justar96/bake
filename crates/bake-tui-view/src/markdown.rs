@@ -22,8 +22,9 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::editor;
 use crate::mermaid::{self, Drawing};
+use crate::selection::{CellSpan, CopyLine, SourceLine};
 use crate::syntax::{Carry, Lang};
-use crate::transcript::{self, Look, RAIL};
+use crate::transcript::{self, CopySource, Look, RAIL};
 
 /// Nested emphasis deeper than this reads as text.
 const MAX_DEPTH: usize = 8;
@@ -33,8 +34,29 @@ const MAX_INDENT: usize = 12;
 /// The lines `text` draws as Markdown in `width` cells, each opening with
 /// the transcript's rail.
 pub fn present(text: &str, width: usize, look: Look) -> Vec<Line<'static>> {
+    present_with_copy(text, width, look, None)
+}
+
+fn push_visual(copy: &mut Option<&mut Vec<CopyLine>>, lines: &[Line<'static>]) {
+    if let Some(copy) = copy.as_deref_mut() {
+        copy.extend(lines.iter().map(|line| CopyLine::visual(line.to_string())));
+    }
+}
+
+/// [`present`] that also records per-line [`CopyLine`] source metadata when
+/// `copy` is `Some`, sharing the exact same layout and wrapping path.
+pub(crate) fn present_with_copy(
+    text: &str,
+    width: usize,
+    look: Look,
+    mut copy: Option<&mut Vec<CopyLine>>,
+) -> Vec<Line<'static>> {
     let clean = editor::sanitize(text);
-    let lines: Vec<String> = clean.split('\n').map(transcript::expand_tabs).collect();
+    let raw_lines: Vec<&str> = clean.split('\n').collect();
+    let lines: Vec<String> = raw_lines
+        .iter()
+        .map(|line| transcript::expand_tabs(line))
+        .collect();
     let mut out: Vec<Line<'static>> = Vec::new();
     let mut gap = false;
     let mut i = 0;
@@ -46,7 +68,9 @@ pub fn present(text: &str, width: usize, look: Look) -> Vec<Line<'static>> {
             continue;
         }
         if gap {
-            out.push(Line::default());
+            let blank = Line::default();
+            push_visual(&mut copy, std::slice::from_ref(&blank));
+            out.push(blank);
             gap = false;
         }
         if let Some((fence, info)) = fence_open(line) {
@@ -56,25 +80,61 @@ pub fn present(text: &str, width: usize, look: Look) -> Vec<Line<'static>> {
                 end += 1;
             }
             let body = &lines[start..end];
+            let raw_body = &raw_lines[start..end];
             if mermaid::is_mermaid(info) {
                 let drawing = mermaid::draw(body, end < lines.len(), width, look);
-                out.extend(mermaid_fence(drawing, body, info, width, RAIL, look));
+                out.extend(mermaid_fence_with_copy(
+                    drawing,
+                    (raw_body, body),
+                    info,
+                    (width, RAIL),
+                    look,
+                    copy.as_deref_mut(),
+                ));
             } else {
-                out.extend(code_block(body, info, width, RAIL, look));
+                out.extend(code_block_with_copy(
+                    (raw_body, body),
+                    info,
+                    (width, RAIL),
+                    look,
+                    copy.as_deref_mut(),
+                ));
             }
             i = (end + 1).min(lines.len());
             continue;
         }
         if let Some(rows) = table_rows(&lines[i..]) {
-            out.extend(table(&lines[i..i + rows], width, look));
+            let block = table(&lines[i..i + rows], width, look);
+            push_visual(&mut copy, &block);
+            out.extend(block);
             i += rows;
             continue;
         }
-        out.extend(block_line(line, width, look));
+        out.extend(block_line_with_copy(
+            raw_lines[i],
+            line,
+            width,
+            look,
+            copy.as_deref_mut(),
+        ));
         i += 1;
     }
     if out.is_empty() {
-        out.push(Line::from(vec![transcript::pad(RAIL)]));
+        let empty = Line::from(vec![transcript::pad(RAIL)]);
+        if let Some(copy) = copy {
+            copy.push(CopyLine {
+                visual: empty.to_string(),
+                source: Some(SourceLine {
+                    gutter_cells: RAIL,
+                    content_col: RAIL,
+                    text: String::new(),
+                    spans: Vec::new(),
+                    wrapped_from_prev: false,
+                    wrapped_to_next: false,
+                }),
+            });
+        }
+        out.push(empty);
     }
     out
 }
@@ -150,13 +210,19 @@ fn glyphs(look: Look) -> Glyphs {
 
 /// One line outside a fence or table: a heading, rule, quote, list item,
 /// or paragraph line.
-fn block_line(line: &str, width: usize, look: Look) -> Vec<Line<'static>> {
+fn block_line_with_copy(
+    raw_line: &str,
+    line: &str,
+    width: usize,
+    look: Look,
+    mut copy: Option<&mut Vec<CopyLine>>,
+) -> Vec<Line<'static>> {
     let colours = palette(look);
     let marks = glyphs(look);
     let rail = || vec![transcript::pad(RAIL)];
-    let indent = leading(line);
+    let raw_indent = leading(line);
     let trimmed = line.trim_start();
-    if indent < 4 {
+    if raw_indent < 4 {
         if let Some((level, title)) = heading(trimmed) {
             let style = if level <= 1 {
                 colours.heading
@@ -165,14 +231,24 @@ fn block_line(line: &str, width: usize, look: Look) -> Vec<Line<'static>> {
             } else {
                 Style::new().add_modifier(Modifier::BOLD)
             };
-            return hang_inline(title, style, width, RAIL, rail(), rail(), look);
+            return hang_inline_with_copy(
+                (title, 0),
+                style,
+                (width, RAIL),
+                (rail(), rail()),
+                (RAIL, RAIL),
+                look,
+                copy,
+            );
         }
         if is_rule(trimmed) {
             let cells = width.saturating_sub(2 * RAIL).max(1);
-            return vec![Line::from(vec![
+            let ruled = Line::from(vec![
                 transcript::pad(RAIL),
                 Span::styled(marks.rule.repeat(cells), colours.border),
-            ])];
+            ]);
+            push_visual(&mut copy, std::slice::from_ref(&ruled));
+            return vec![ruled];
         }
     }
     if trimmed.starts_with('>') {
@@ -183,10 +259,18 @@ fn block_line(line: &str, width: usize, look: Look) -> Vec<Line<'static>> {
         }
         let cells = RAIL + depth * marks.bar.width();
         let style = Style::new().add_modifier(Modifier::ITALIC);
-        return hang_inline(rest, style, width, cells, lead.clone(), lead, look);
+        return hang_inline_with_copy(
+            (rest, 0),
+            style,
+            (width, cells),
+            (lead.clone(), lead),
+            (RAIL, cells),
+            look,
+            copy,
+        );
     }
     // Indentation never takes more than a quarter of the row.
-    let indent = indent.min(MAX_INDENT).min(width / 4);
+    let indent = raw_indent.min(MAX_INDENT).min(width / 4);
     if let Some((marker, rest)) = list_marker(trimmed) {
         let (mark, mark_style, rest) = match (marker, task(rest)) {
             (_, Some((true, rest))) => (marks.checked.to_owned(), colours.done, rest),
@@ -204,33 +288,118 @@ fn block_line(line: &str, width: usize, look: Look) -> Vec<Line<'static>> {
         first.push(transcript::pad(1));
         let cells = RAIL + indent + mark.width() + 1;
         let rest_lead = vec![transcript::pad(cells)];
-        return hang_inline(rest, Style::new(), width, cells, first, rest_lead, look);
+        return hang_inline_with_copy(
+            (rest, 0),
+            Style::new(),
+            (width, cells),
+            (first, rest_lead),
+            (RAIL, cells),
+            look,
+            copy,
+        );
     }
     let lead = vec![transcript::pad(RAIL + indent)];
-    hang_inline(
-        trimmed,
+    let raw_trimmed = raw_line.trim_start_matches([' ', '\t']);
+    let raw_lead = &raw_line[..raw_line.len() - raw_trimmed.len()];
+    let first_copy_idx = copy.as_ref().map(|c| c.len());
+    let out = hang_inline_with_copy(
+        (raw_trimmed, raw_indent),
         Style::new(),
-        width,
-        RAIL + indent,
-        lead.clone(),
-        lead,
+        (width, RAIL + indent),
+        (lead.clone(), lead),
+        (RAIL, RAIL + indent),
         look,
-    )
+        copy.as_deref_mut(),
+    );
+    // When leading whitespace contained tabs and was not clamped, attach the
+    // original leading whitespace spans to the first visual row so leading
+    // tabs in plain paragraphs round-trip cleanly too.
+    if raw_indent == indent
+        && raw_lead.contains('\t')
+        && let (Some(copy), Some(idx)) = (copy, first_copy_idx)
+        && let Some(CopyLine {
+            source: Some(src), ..
+        }) = copy.get_mut(idx)
+    {
+        let mut lead_spans = Vec::new();
+        let mut col = 0usize;
+        for (byte_start, ch) in raw_lead.char_indices() {
+            let byte_end = byte_start + ch.len_utf8();
+            let cells = if ch == '\t' {
+                editor::TAB_WIDTH - col % editor::TAB_WIDTH
+            } else {
+                1
+            };
+            let from = RAIL + col;
+            col += cells;
+            lead_spans.push(CellSpan {
+                byte_start,
+                byte_end,
+                from,
+                to: RAIL + col,
+            });
+        }
+        let shift = raw_lead.len();
+        for span in &mut src.spans {
+            span.byte_start += shift;
+            span.byte_end += shift;
+        }
+        lead_spans.append(&mut src.spans);
+        src.spans = lead_spans;
+        src.text.insert_str(0, raw_lead);
+        src.content_col = RAIL;
+    }
+    out
 }
 
 /// `text`'s inline markup drawn over `base` and wrapped at `width` less
 /// `indent`, the first row opening with `first` and the rest with `rest`.
-fn hang_inline(
-    text: &str,
+fn hang_inline_with_copy(
+    source: (&str, usize),
     base: Style,
-    width: usize,
-    indent: usize,
-    first: Vec<Span<'static>>,
-    rest: Vec<Span<'static>>,
+    bounds: (usize, usize),
+    leads: (Vec<Span<'static>>, Vec<Span<'static>>),
+    gutters: (usize, usize),
     look: Look,
+    copy: Option<&mut Vec<CopyLine>>,
 ) -> Vec<Line<'static>> {
-    let (shown, runs) = inline(text, base, look);
-    transcript::hang_runs(&shown, &runs, Style::new(), width, indent, first, rest)
+    let (text, tab_col) = source;
+    let (width, indent) = bounds;
+    let (first_gutter, rest_gutter) = gutters;
+    let (raw_shown, raw_runs) = inline(text, base, look);
+    if !raw_shown.contains('\t') {
+        return transcript::hang_runs_with_copy(
+            &raw_shown,
+            &raw_runs,
+            Style::new(),
+            width,
+            indent,
+            leads,
+            copy.map(|out| CopySource {
+                raw: &raw_shown,
+                tab_col,
+                first_gutter,
+                rest_gutter,
+                out,
+            }),
+        );
+    }
+    let (expanded, runs) = transcript::expand_tabs_with_runs(&raw_shown, &raw_runs, tab_col);
+    transcript::hang_runs_with_copy(
+        &expanded,
+        &runs,
+        Style::new(),
+        width,
+        indent,
+        leads,
+        copy.map(|out| CopySource {
+            raw: &raw_shown,
+            tab_col,
+            first_gutter,
+            rest_gutter,
+            out,
+        }),
+    )
 }
 
 /// Cells of leading spaces.
@@ -378,19 +547,36 @@ pub(crate) fn mermaid_fence(
     rail: usize,
     look: Look,
 ) -> Vec<Line<'static>> {
+    let raw_body: Vec<&str> = body.iter().map(String::as_str).collect();
+    mermaid_fence_with_copy(drawing, (&raw_body, body), info, (width, rail), look, None)
+}
+
+fn mermaid_fence_with_copy(
+    drawing: Drawing,
+    bodies: (&[&str], &[String]),
+    info: &str,
+    bounds: (usize, usize),
+    look: Look,
+    mut copy: Option<&mut Vec<CopyLine>>,
+) -> Vec<Line<'static>> {
+    let (width, rail) = bounds;
     match drawing {
-        Drawing::Diagram(diagram) => diagram,
+        Drawing::Diagram(diagram) => {
+            push_visual(&mut copy, &diagram);
+            diagram
+        }
         Drawing::Source(reason) => {
-            let mut out = code_block(body, info, width, rail, look);
+            let mut out = code_block_with_copy(bodies, info, bounds, look, copy.as_deref_mut());
             if let Some(reason) = reason {
                 let lead = vec![transcript::pad(rail)];
-                out.extend(transcript::hang(
+                out.extend(transcript::hang_with_copy(
                     &reason,
                     width,
                     rail,
-                    lead.clone(),
-                    lead,
+                    (lead.clone(), lead),
                     transcript::dim(),
+                    (rail, rail),
+                    copy,
                 ));
             }
             out
@@ -401,13 +587,15 @@ pub(crate) fn mermaid_fence(
 /// A fenced block: a top edge naming its language, the code under a bar,
 /// coloured where its language is known, and a bottom edge, each line
 /// opening with `rail` cells.
-fn code_block(
-    code: &[String],
+fn code_block_with_copy(
+    bodies: (&[&str], &[String]),
     info: &str,
-    width: usize,
-    rail: usize,
+    bounds: (usize, usize),
     look: Look,
+    mut copy: Option<&mut Vec<CopyLine>>,
 ) -> Vec<Line<'static>> {
+    let (raw_code, code) = bodies;
+    let (width, rail) = bounds;
     let colours = palette(look);
     let marks = glyphs(look);
     let label = info.split_whitespace().next().unwrap_or("");
@@ -421,7 +609,9 @@ fn code_block(
             colours.border.add_modifier(Modifier::ITALIC),
         ));
     }
-    let mut lines = vec![Line::from(top)];
+    let top_line = Line::from(top);
+    push_visual(&mut copy, std::slice::from_ref(&top_line));
+    let mut lines = vec![top_line];
     let lang = fence_lang(info);
     let mut carry = Carry::default();
     let lead = vec![
@@ -429,22 +619,30 @@ fn code_block(
         Span::styled(marks.bar, colours.border),
     ];
     let indent = rail + marks.bar.width();
-    for line in code {
+    for (raw_line, line) in raw_code.iter().zip(code) {
         let runs = transcript::code_runs(line, lang, &mut carry, look.tones);
-        lines.extend(transcript::hang_runs(
+        lines.extend(transcript::hang_runs_with_copy(
             line,
             &runs,
             Style::new(),
             width,
             indent,
-            lead.clone(),
-            lead.clone(),
+            (lead.clone(), lead.clone()),
+            copy.as_deref_mut().map(|out| CopySource {
+                raw: raw_line,
+                tab_col: 0,
+                first_gutter: indent,
+                rest_gutter: indent,
+                out,
+            }),
         ));
     }
-    lines.push(Line::from(vec![
+    let bottom_line = Line::from(vec![
         transcript::pad(rail),
         Span::styled(marks.code_bottom, colours.border),
-    ]));
+    ]);
+    push_visual(&mut copy, std::slice::from_ref(&bottom_line));
+    lines.push(bottom_line);
     lines
 }
 

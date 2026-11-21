@@ -1,0 +1,35 @@
+{
+  "name": "Lean model-neutral default prompt",
+  "date": "2026-11-20",
+  "base": {
+    "path": "/tmp/bake-eval-alpha11-base-4083bfae10/target/release/bake",
+    "version": "bake 0.4.10",
+    "bytes": 73274648
+  },
+  "candidate": {
+    "path": "/tmp/bake-eval-alpha11-cand-lean-prompt/target/release/bake",
+    "version": "bake 0.4.10",
+    "bytes": 73280856
+  },
+  "same_executable": false,
+  "base_settings": {},
+  "candidate_settings": {},
+  "models": [
+    "cliproxyapi/gemini-4-hydrogen-xhigh:high"
+  ],
+  "tasks": [
+    [
+      "cascade-fix",
+      "Run `python3 verify.py` and fix the project until it prints OK. Do not edit verify.py."
+    ],
+    [
+      "trace-question",
+      "In this codebase, which function applies the bulk (volume) discount to an order line, which file is it in, and how many units of one item must a line hold to get it? Answer in one or two sentences. Do not change any file."
+    ]
+  ],
+  "trials": 5,
+  "jobs": 2,
+  "max_model_calls": 60,
+  "run_timeout_ms": 900000,
+  "host": "linux/x86_64"
+}

@@ -47,6 +47,7 @@ use crate::editor;
 use crate::json;
 use crate::markdown;
 use crate::mermaid::Mermaid;
+use crate::selection::{CellSpan, CopyLine, SourceLine};
 use crate::shell_output::{self, Family, Styled};
 use crate::syntax::{self, Carry, Lang};
 use crate::visual::{self, Visual};
@@ -953,6 +954,16 @@ pub const BODY: usize = 4;
 /// after the left one.
 pub const BOX_PAD: usize = 4 + BODY;
 
+/// Optional source-mapping context passed to [`hang_runs_with_copy`] when
+/// collecting [`CopyLine`] metadata during selection copy.
+pub(crate) struct CopySource<'a> {
+    pub(crate) raw: &'a str,
+    pub(crate) tab_col: usize,
+    pub(crate) first_gutter: usize,
+    pub(crate) rest_gutter: usize,
+    pub(crate) out: &'a mut Vec<CopyLine>,
+}
+
 /// `text` wrapped at `width` less `indent`; each row after the first opens
 /// with `rest`, the first with `first`.
 pub(crate) fn hang(
@@ -963,14 +974,81 @@ pub(crate) fn hang(
     rest: Vec<Span<'static>>,
     style: Style,
 ) -> Vec<Line<'static>> {
+    hang_with_copy(
+        text,
+        width,
+        indent,
+        (first, rest),
+        style,
+        (indent, indent),
+        None,
+    )
+}
+
+/// [`hang`] that also records per-line [`CopyLine`] source metadata when `copy`
+/// is `Some`, using the exact same [`editor::layout`] wrap points.
+pub(crate) fn hang_with_copy(
+    text: &str,
+    width: usize,
+    indent: usize,
+    leads: (Vec<Span<'static>>, Vec<Span<'static>>),
+    style: Style,
+    gutters: (usize, usize),
+    mut copy: Option<&mut Vec<CopyLine>>,
+) -> Vec<Line<'static>> {
+    let (first, rest) = leads;
+    let (first_gutter, rest_gutter) = gutters;
     let room = width.saturating_sub(indent).max(1);
-    wrap(text, room)
-        .into_iter()
+    let layout = editor::layout(text, 0, room + 1);
+    layout
+        .rows
+        .iter()
         .enumerate()
         .map(|(i, row)| {
+            let raw_row = &text[row.start..row.end];
+            let shown = editor::display(raw_row, room).trim_end().to_owned();
             let mut spans = if i == 0 { first.clone() } else { rest.clone() };
-            spans.push(Span::styled(row, style));
-            Line::from(spans)
+            spans.push(Span::styled(shown, style));
+            let line = Line::from(spans);
+            if let Some(copy) = copy.as_deref_mut() {
+                let wrapped_from_prev = i > 0 && layout.rows[i - 1].end == row.start;
+                let wrapped_to_next =
+                    i + 1 < layout.rows.len() && row.end == layout.rows[i + 1].start;
+                let gutter_cells = if i == 0 { first_gutter } else { rest_gutter };
+                copy.push(CopyLine {
+                    visual: line.to_string(),
+                    source: Some(SourceLine {
+                        gutter_cells,
+                        content_col: indent,
+                        text: raw_row.to_owned(),
+                        spans: source_spans_raw(raw_row, indent, room),
+                        wrapped_from_prev,
+                        wrapped_to_next,
+                    }),
+                });
+            }
+            line
+        })
+        .collect()
+}
+
+/// Builds per-grapheme [`CellSpan`]s for a raw wrapped row using the same
+/// column advance rule as [`editor::layout`] and [`editor::display`].
+pub(crate) fn source_spans_raw(row_text: &str, content_col: usize, limit: usize) -> Vec<CellSpan> {
+    let mut col = 0;
+    row_text
+        .grapheme_indices(true)
+        .map(|(byte_start, grapheme)| {
+            let byte_end = byte_start + grapheme.len();
+            let cells = editor::advance(grapheme, col, limit);
+            let from = content_col + col;
+            col += cells;
+            CellSpan {
+                byte_start,
+                byte_end,
+                from,
+                to: content_col + col,
+            }
         })
         .collect()
 }
@@ -982,25 +1060,89 @@ pub(crate) fn hang_rows(text: &str, width: usize, indent: usize) -> usize {
     editor::layout(text, 0, room + 1).rows.len()
 }
 
+/// Single shared tab expansion walking grapheme clusters with
+/// [`editor::cell_width`], so display text, remapped style runs, and copy
+/// source offsets can never disagree on ZWJ emoji or combining sequences.
+fn expand_tabs_core(
+    raw: &str,
+    initial_col: usize,
+    mut on_unit: impl FnMut(usize, usize, usize, usize),
+) -> String {
+    let mut out = String::with_capacity(raw.len() + editor::TAB_WIDTH);
+    let mut column = initial_col;
+    for (raw_start, grapheme) in raw.grapheme_indices(true) {
+        let raw_end = raw_start + grapheme.len();
+        let exp_start = out.len();
+        if grapheme == "\t" {
+            let spaces = editor::TAB_WIDTH - column % editor::TAB_WIDTH;
+            out.extend(std::iter::repeat_n(' ', spaces));
+            column += spaces;
+        } else {
+            out.push_str(grapheme);
+            column += editor::cell_width(grapheme);
+        }
+        on_unit(raw_start, raw_end, exp_start, out.len());
+    }
+    out
+}
+
 /// `text` with each tab turned into the spaces to its next stop, so the
 /// lexer's byte ranges and the drawn cells agree.
 pub(crate) fn expand_tabs(text: &str) -> String {
     if !text.contains('\t') {
         return text.to_owned();
     }
-    let mut out = String::with_capacity(text.len() + editor::TAB_WIDTH);
-    let mut column = 0;
-    for c in text.chars() {
-        if c == '\t' {
-            let spaces = editor::TAB_WIDTH - column % editor::TAB_WIDTH;
-            out.extend(std::iter::repeat_n(' ', spaces));
-            column += spaces;
-        } else {
-            out.push(c);
-            column += c.to_string().width();
-        }
+    expand_tabs_core(text, 0, |_, _, _, _| {})
+}
+
+/// Expands tabs in `raw` starting at display column `initial_col`, returning
+/// the expanded string and remapped style `runs` whose byte offsets track the
+/// expanded string.
+pub(crate) fn expand_tabs_with_runs(
+    raw: &str,
+    runs: &[(Range<usize>, Style)],
+    initial_col: usize,
+) -> (String, Vec<(Range<usize>, Style)>) {
+    if !raw.contains('\t') {
+        return (raw.to_owned(), runs.to_vec());
     }
-    out
+    let mut byte_map = vec![0usize; raw.len() + 1];
+    let expanded = expand_tabs_core(
+        raw,
+        initial_col,
+        |raw_start, raw_end, exp_start, exp_end| {
+            byte_map[raw_start] = exp_start;
+            // Fill interior bytes of multi-byte graphemes monotonically in case a
+            // style run boundary ever lands inside a grapheme.
+            for (i, slot) in byte_map[raw_start + 1..raw_end].iter_mut().enumerate() {
+                *slot = exp_start + (i + 1).min(exp_end - exp_start);
+            }
+        },
+    );
+    byte_map[raw.len()] = expanded.len();
+    let mapped_runs = runs
+        .iter()
+        .map(|(range, style)| {
+            let start = byte_map.get(range.start).copied().unwrap_or(expanded.len());
+            let end = byte_map.get(range.end).copied().unwrap_or(expanded.len());
+            (start..end, *style)
+        })
+        .collect();
+    (expanded, mapped_runs)
+}
+
+/// Maps each grapheme of `raw` to its byte range in `expanded` using the exact
+/// same [`expand_tabs_core`] pass.
+fn mapped_graphemes(raw: &str, initial_col: usize) -> Vec<(usize, usize, usize, usize)> {
+    let mut units = Vec::new();
+    let _ = expand_tabs_core(
+        raw,
+        initial_col,
+        |raw_start, raw_end, exp_start, exp_end| {
+            units.push((raw_start, raw_end, exp_start, exp_end));
+        },
+    );
+    units
 }
 
 /// The styled runs of one line of code in `lang`, or none for plain text.
@@ -1032,15 +1174,34 @@ pub(crate) fn hang_runs(
     first: Vec<Span<'static>>,
     rest: Vec<Span<'static>>,
 ) -> Vec<Line<'static>> {
+    hang_runs_with_copy(text, runs, base, width, indent, (first, rest), None)
+}
+
+/// [`hang_runs`] that also records per-line [`CopyLine`] source metadata when
+/// `copy` is `Some`, advancing linearly over grapheme offsets in O(N).
+pub(crate) fn hang_runs_with_copy(
+    expanded: &str,
+    runs: &[(Range<usize>, Style)],
+    base: Style,
+    width: usize,
+    indent: usize,
+    leads: (Vec<Span<'static>>, Vec<Span<'static>>),
+    mut copy: Option<CopySource<'_>>,
+) -> Vec<Line<'static>> {
+    let (first, rest) = leads;
     let room = width.saturating_sub(indent).max(1);
-    let layout = editor::layout(text, 0, room + 1);
+    let layout = editor::layout(expanded, 0, room + 1);
+    let units = copy
+        .as_ref()
+        .map(|src| mapped_graphemes(src.raw, src.tab_col));
+    let mut unit_cursor = 0usize;
     layout
         .rows
         .iter()
         .enumerate()
         .map(|(i, row)| {
             let mut spans = if i == 0 { first.clone() } else { rest.clone() };
-            let end = row.start + text[row.start..row.end].trim_end().len();
+            let end = row.start + expanded[row.start..row.end].trim_end().len();
             let mut at = row.start;
             for (range, style) in runs {
                 let (from, to) = (range.start.max(at), range.end.min(end));
@@ -1048,15 +1209,106 @@ pub(crate) fn hang_runs(
                     continue;
                 }
                 if at < from {
-                    spans.push(Span::styled(text[at..from].to_owned(), base));
+                    spans.push(Span::styled(expanded[at..from].to_owned(), base));
                 }
-                spans.push(Span::styled(text[from..to].to_owned(), base.patch(*style)));
+                spans.push(Span::styled(
+                    expanded[from..to].to_owned(),
+                    base.patch(*style),
+                ));
                 at = to;
             }
             if at < end {
-                spans.push(Span::styled(text[at..end].to_owned(), base));
+                spans.push(Span::styled(expanded[at..end].to_owned(), base));
             }
-            clip_line(Line::from(spans), width)
+            let line = clip_line(Line::from(spans), width);
+            if let (Some(src), Some(units)) = (copy.as_mut(), units.as_deref()) {
+                let wrapped_from_prev = i > 0 && layout.rows[i - 1].end == row.start;
+                let wrapped_to_next =
+                    i + 1 < layout.rows.len() && row.end == layout.rows[i + 1].start;
+                let is_last_of_line = !wrapped_to_next;
+                while unit_cursor < units.len() {
+                    let (_, _, exp_start, exp_end) = units[unit_cursor];
+                    let before_row = if exp_start == exp_end {
+                        exp_start < row.start
+                    } else {
+                        exp_end <= row.start
+                    };
+                    if before_row {
+                        unit_cursor += 1;
+                    } else {
+                        break;
+                    }
+                }
+                let mut end_cursor = unit_cursor;
+                while end_cursor < units.len() {
+                    let (_, _, exp_start, exp_end) = units[end_cursor];
+                    let in_row = if exp_start == exp_end {
+                        exp_start < row.end || (is_last_of_line && exp_start == row.end)
+                    } else {
+                        exp_start < row.end
+                    };
+                    if in_row {
+                        end_cursor += 1;
+                    } else {
+                        break;
+                    }
+                }
+                let row_units = &units[unit_cursor..end_cursor];
+                // Advance cursor past units wholly contained in this row.
+                while unit_cursor < end_cursor && units[unit_cursor].3 <= row.end {
+                    unit_cursor += 1;
+                }
+                let (src_text, cell_spans) =
+                    if let (Some(first_u), Some(last_u)) = (row_units.first(), row_units.last()) {
+                        let base_byte = first_u.0;
+                        let src_text = src.raw[base_byte..last_u.1].to_owned();
+                        let mut col = 0usize;
+                        let cell_spans = row_units
+                            .iter()
+                            .map(|&(raw_start, raw_end, exp_start, exp_end)| {
+                                let grapheme = &src.raw[raw_start..raw_end];
+                                let cells = if grapheme == "\t" {
+                                    let overlap = exp_end
+                                        .min(row.end)
+                                        .saturating_sub(exp_start.max(row.start));
+                                    overlap.min(room.saturating_sub(col))
+                                } else if grapheme == " " {
+                                    usize::from(col < room)
+                                } else {
+                                    editor::cell_width(grapheme)
+                                };
+                                let from = indent + col;
+                                col += cells;
+                                CellSpan {
+                                    byte_start: raw_start - base_byte,
+                                    byte_end: raw_end - base_byte,
+                                    from,
+                                    to: indent + col,
+                                }
+                            })
+                            .collect();
+                        (src_text, cell_spans)
+                    } else {
+                        (String::new(), Vec::new())
+                    };
+                let gutter_cells = if i == 0 {
+                    src.first_gutter
+                } else {
+                    src.rest_gutter
+                };
+                src.out.push(CopyLine {
+                    visual: line.to_string(),
+                    source: Some(SourceLine {
+                        gutter_cells,
+                        content_col: indent,
+                        text: src_text,
+                        spans: cell_spans,
+                        wrapped_from_prev,
+                        wrapped_to_next,
+                    }),
+                });
+            }
+            line
         })
         .collect()
 }
@@ -1145,16 +1397,31 @@ fn present_row(
     detail: Detail,
     hinted: bool,
 ) -> (Vec<Line<'static>>, bool) {
+    present_row_with_copy(rows, index, width, look, detail, hinted, None)
+}
+
+fn push_visual_copy(copy: &mut Option<&mut Vec<CopyLine>>, lines: &[Line<'static>]) {
+    if let Some(copy) = copy.as_deref_mut() {
+        copy.extend(lines.iter().map(|line| CopyLine::visual(line.to_string())));
+    }
+}
+
+fn present_row_with_copy(
+    rows: &[Row],
+    index: usize,
+    width: usize,
+    look: Look,
+    detail: Detail,
+    hinted: bool,
+    mut copy: Option<&mut Vec<CopyLine>>,
+) -> (Vec<Line<'static>>, bool) {
     let row = &rows[index];
     let marks = look.marks();
     let mut counted = false;
     let mut lines = Vec::new();
-    lines.extend(opening(
-        index.checked_sub(1).map(|i| &rows[i]),
-        row,
-        width,
-        look,
-    ));
+    let open = opening(index.checked_sub(1).map(|i| &rows[i]), row, width, look);
+    push_visual_copy(&mut copy, &open);
+    lines.extend(open);
     let rail = || vec![pad(RAIL)];
     // Inside a box, a call's text keeps clear of the box's right edge.
     let inner = if boxes(look) {
@@ -1178,56 +1445,93 @@ fn present_row(
                 title.push(pad(2));
                 title.extend(strip);
             }
-            lines.push(Line::from(title));
+            let title_line = Line::from(title);
+            push_visual_copy(&mut copy, std::slice::from_ref(&title_line));
+            lines.push(title_line);
             for paragraph in copy::INTRO.iter().filter(|p| !p.is_empty()) {
-                lines.extend(hang(paragraph, prose, RAIL, rail(), rail(), dim()));
+                lines.extend(hang_with_copy(
+                    paragraph,
+                    prose,
+                    RAIL,
+                    (rail(), rail()),
+                    dim(),
+                    (RAIL, RAIL),
+                    copy.as_deref_mut(),
+                ));
             }
         }
-        Row::Banner(banner) => lines.extend(present_banner(banner, prose, look)),
+        Row::Banner(banner) => {
+            let block = present_banner(banner, prose, look);
+            push_visual_copy(&mut copy, &block);
+            lines.extend(block);
+        }
         Row::Notice(notice) => {
             let label = tag(&notice.tag, TagTone::Yellow, look.tones);
             let indent = RAIL + label.width() + 1;
-            lines.extend(hang(
+            lines.extend(hang_with_copy(
                 &notice.text,
                 prose,
                 indent,
-                vec![pad(RAIL), label, pad(1)],
-                vec![pad(indent)],
+                (vec![pad(RAIL), label, pad(1)], vec![pad(indent)]),
                 Style::new(),
+                (RAIL, indent),
+                copy.as_deref_mut(),
             ));
         }
         // A prompt mark opens the user's words, as they were typed; the
         // rows a long prompt wraps to hang under the text, not the mark.
         Row::User(text) => {
             let mark = vec![Span::styled(format!("{} ", marks.user), accent(look.tones))];
-            lines.extend(hang(
+            lines.extend(hang_with_copy(
                 text,
                 prose,
                 RAIL,
-                mark,
-                rail(),
+                (mark, rail()),
                 Style::new().add_modifier(Modifier::BOLD),
+                (RAIL, RAIL),
+                copy.as_deref_mut(),
             ));
         }
-        Row::Reasoning(text) => lines.extend(hang(
+        Row::Reasoning(text) => lines.extend(hang_with_copy(
             text,
             prose,
             RAIL,
-            rail(),
-            rail(),
+            (rail(), rail()),
             dim().add_modifier(Modifier::ITALIC),
+            (RAIL, RAIL),
+            copy.as_deref_mut(),
         )),
-        Row::Answer(text) => lines.extend(markdown::present(text, prose, look)),
-        Row::Error(text) => lines.extend(hang(
+        Row::Answer(text) => {
+            lines.extend(markdown::present_with_copy(
+                text,
+                prose,
+                look,
+                copy.as_deref_mut(),
+            ));
+        }
+        Row::Error(text) => lines.extend(hang_with_copy(
             text,
             prose,
             RAIL,
-            rail(),
-            rail(),
+            (rail(), rail()),
             colour(look.tones, (0xef, 0x44, 0x44), Color::Red),
+            (RAIL, RAIL),
+            copy.as_deref_mut(),
         )),
-        Row::Info(text) => lines.extend(hang(text, prose, RAIL, rail(), rail(), dim())),
-        Row::Compacted(mark) => lines.extend(present_compacted(mark, prose, look)),
+        Row::Info(text) => lines.extend(hang_with_copy(
+            text,
+            prose,
+            RAIL,
+            (rail(), rail()),
+            dim(),
+            (RAIL, RAIL),
+            copy.as_deref_mut(),
+        )),
+        Row::Compacted(mark) => {
+            let block = present_compacted(mark, prose, look);
+            push_visual_copy(&mut copy, &block);
+            lines.extend(block);
+        }
         Row::Call {
             tool,
             argument,
@@ -1257,6 +1561,7 @@ fn present_row(
             if let Some(edge) = edge_colour(*state, look.tones) {
                 frame(&mut block, width, edge);
             }
+            push_visual_copy(&mut copy, &block);
             lines.extend(block);
         }
         Row::Codemode(script) => {
@@ -1265,6 +1570,7 @@ fn present_row(
             if let Some(edge) = edge_colour(script.state, look.tones) {
                 frame(&mut block, width, edge);
             }
+            push_visual_copy(&mut copy, &block);
             lines.extend(block);
         }
         Row::Visual(shown) => {
@@ -1273,6 +1579,7 @@ fn present_row(
             if let Some(edge) = edge_colour(shown.state, look.tones) {
                 frame(&mut block, width, edge);
             }
+            push_visual_copy(&mut copy, &block);
             lines.extend(block);
         }
     }
@@ -2775,6 +3082,23 @@ impl Transcript {
         present_row(&self.rows, index, width, look, self.detail, hinted).0
     }
 
+    fn copy_lines(&self, index: usize) -> Vec<CopyLine> {
+        let hinted = self.hint == Hint::Offered && self.hint_row == Some(index);
+        let (width, look) = (self.width, self.look);
+        let mut copy = Vec::new();
+        let (lines, _) = present_row_with_copy(
+            &self.rows,
+            index,
+            width,
+            look,
+            self.detail,
+            hinted,
+            Some(&mut copy),
+        );
+        debug_assert_eq!(lines.len(), copy.len());
+        copy
+    }
+
     /// Starts over with `rows`, as [`Transcript::new`] does, for another
     /// session or a compacted one; Ctrl+O's hint, once used, stays gone.
     pub fn replace(&mut self, rows: Vec<Row>) {
@@ -3030,8 +3354,7 @@ impl Transcript {
             .unwrap_or_default()
     }
 
-    /// Every line from `start` to `end`, both included, as drawn: the text a
-    /// selection copies.
+    /// Every line from `start` to `end`, both included, as drawn.
     pub fn between(&self, start: Anchor, end: Anchor) -> Vec<(Anchor, String)> {
         let mut out = Vec::new();
         let mut skip = start.line;
@@ -3042,6 +3365,24 @@ impl Transcript {
                     return out;
                 }
                 out.push((at, content.to_string()));
+            }
+            skip = 0;
+        }
+        out
+    }
+
+    /// Every line from `start` to `end`, both included, paired with
+    /// [`CopyLine`] source metadata for faithful selection copying.
+    pub(crate) fn copy_between(&self, start: Anchor, end: Anchor) -> Vec<(Anchor, CopyLine)> {
+        let mut out = Vec::new();
+        let mut skip = start.line;
+        for row in start.row..=end.row.min(self.rows.len().saturating_sub(1)) {
+            for (line, copy_line) in self.copy_lines(row).into_iter().enumerate().skip(skip) {
+                let at = Anchor { row, line };
+                if (row, line) > (end.row, end.line) {
+                    return out;
+                }
+                out.push((at, copy_line));
             }
             skip = 0;
         }

@@ -811,86 +811,34 @@ impl PromptExecution {
         }
     }
 
-    /// The profile of the session's model now ([`crate::settings::Settings::model_profile`]);
-    /// empty without a model.
-    fn model_profile(&self) -> crate::settings::ModelProfile {
-        super::model_profile(&self.settings, self.model().as_ref())
-    }
-
     /// The system message patching the sections the transcript replays,
     /// Pi's `_preparePromptAndToolLoadout`; it also activates the tools.
     /// The model's profile chooses here, so a model switch reaches the
     /// model at the next prompt as this tool change and section patch.
     fn prepare_prompt_and_tools(&self) -> Result<Option<SystemMessage>, String> {
-        let profile = self.model_profile();
-        let active_names =
-            super::profile_tool_names(&profile, &self.active_tool_names, &self.tools);
-        let mut active: Vec<Arc<AgentTool>> = active_names
-            .iter()
-            .filter_map(|name| self.tools.iter().find(|tool| &tool.name == name))
-            .cloned()
-            .collect();
-        // The escalation offer the permission makes now, which a switch
-        // since the tools were built may have changed.
-        if let Some(permission) = &self.permission {
-            let targets = permission.escalation_targets();
-            active = active
-                .into_iter()
-                .map(|tool| crate::permissions::refresh_escalation_offer(tool, targets))
-                .collect();
-        }
-        // The MCP tools published now, one generation per server; the run
-        // keeps these for its whole length.
-        if let Some(mcp) = self.mcp.get() {
-            active.extend(mcp.tools());
-        }
-        // The active `codemode` tool's descriptions and hidden declarations;
-        // without it, the tools as they are.
-        let (active, hidden) = {
-            let settings = read_settings(&self.settings);
-            let mode = profile.codemode_mode.unwrap_or(settings.codemode_mode);
-            super::codemode::apply_codemode_loadout(active, &settings, mode, &self.codemode)
-        };
-        self.agent.set_tools(active);
+        let model = self.model();
+        let prepared = super::context_inspect::assemble_prompt_and_tools(
+            super::context_inspect::PromptAndToolsInputs {
+                model: model.as_ref(),
+                settings: &self.settings,
+                tools: &self.tools,
+                active_tool_names: &self.active_tool_names,
+                permission: self.permission.as_ref(),
+                mcp: &self.mcp,
+                codemode: &self.codemode,
+                prompt_options: &self.prompt_options,
+                nested_section: self.core.nested.section(),
+            },
+        )?;
+        super::codemode::commit_codemode_descriptions(
+            &self.codemode,
+            prepared.codemode_own_descriptions,
+        );
+        self.agent.set_tools(prepared.active_tools);
         *self
             .hidden_declarations
             .lock()
-            .unwrap_or_else(PoisonError::into_inner) = hidden.clone();
-        let mut options = self.prompt_options.clone();
-        options.selected_tools = active_names;
-        // The profile's notes follow `environment`, the last of Bake's own
-        // sections, so everything before them stays the same across models.
-        if let Some(prompt) = profile.prompt.filter(|prompt| !prompt.is_empty()) {
-            options
-                .sections
-                .insert(0, (crate::settings::MODEL_NOTES_SECTION.to_owned(), prompt));
-        }
-        if let Some(permission) = &self.permission {
-            options.permissions = permission.prompt_text();
-        }
-        // The rules match the declarations the request carries, which
-        // leave out the caller's hidden tools too.
-        options.hidden_tools.extend(hidden);
-        // The `mcp_servers` section lists the servers connected now, as
-        // Pi's `before_agent_start` handler does; a session without one
-        // adds no section and its requests are unchanged.
-        if let Some(section) = self
-            .mcp
-            .get()
-            .and_then(crate::mcp::McpServers::servers_prompt_section)
-        {
-            options
-                .sections
-                .push((crate::mcp::MCP_SERVERS_SECTION.to_owned(), section));
-        }
-        // The context files found while working, last: a section a patch
-        // adds is replayed after the others.
-        if let Some(section) = self.core.nested.section() {
-            options
-                .sections
-                .push((super::nested_context::SECTION.to_owned(), section));
-        }
-        let sections = build_system_prompt_sections(&options).map_err(|error| error.to_string())?;
+            .unwrap_or_else(PoisonError::into_inner) = prepared.hidden_declarations;
         let systems: Vec<Message> = self
             .agent
             .messages()
@@ -901,12 +849,14 @@ impl PromptExecution {
             .and_then(|system| system.sections)
             .unwrap_or_default();
         Ok(
-            diff_system_prompt_sections(&previous, &sections).map(|sections| SystemMessage {
-                content: SystemContent::Text(String::new()),
-                sections: Some(sections),
-                tools_added: None,
-                tools_removed: None,
-                timestamp: bake_ai::now_ms(),
+            diff_system_prompt_sections(&previous, &prepared.sections).map(|sections| {
+                SystemMessage {
+                    content: SystemContent::Text(String::new()),
+                    sections: Some(sections),
+                    tools_added: None,
+                    tools_removed: None,
+                    timestamp: bake_ai::now_ms(),
+                }
             }),
         )
     }

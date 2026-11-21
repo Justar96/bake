@@ -34,8 +34,9 @@ use super::wire::{self, Presence};
 /// The variable that places the telecom root.
 pub const DIR_ENV: &str = "BAKE_TELECOM_DIR";
 
-/// The callsigns a top-level member takes, in order.
-pub const NATO: [&str; 26] = [
+/// Callsigns for the cases below, taken in order.
+#[cfg(test)]
+pub(crate) const NATO: [&str; 26] = [
     "alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel", "india", "juliet",
     "kilo", "lima", "mike", "november", "oscar", "papa", "quebec", "romeo", "sierra", "tango",
     "uniform", "victor", "whiskey", "xray", "yankee", "zulu",

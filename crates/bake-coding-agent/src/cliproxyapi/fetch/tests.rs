@@ -176,6 +176,7 @@ async fn reads_the_catalog_with_the_bearer_key() {
         KEY.to_ascii_lowercase()
     )));
     assert!(head.contains("accept: application/json\r\n"));
+    assert!(head.contains("user-agent: bake/"), "{head}");
 }
 
 // `fetchCliProxyModels` decodes the body with `new TextDecoder().decode`,

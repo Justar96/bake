@@ -1,0 +1,41 @@
+{
+  "name": "Tool-aware round-trip batch rule (read,grep)",
+  "date": "2026-11-20",
+  "base": {
+    "path": "/home/jtar-wsl/bake/.worktrees/alpha8-base-4083bfae10/target/release/bake",
+    "version": "bake 0.4.10",
+    "bytes": 73274248
+  },
+  "candidate": {
+    "path": "/home/jtar-wsl/bake/.worktrees/alpha8-cand-prompt-batch-rule/target/release/bake",
+    "version": "bake 0.4.10",
+    "bytes": 73283440
+  },
+  "same_executable": false,
+  "base_settings": {
+    "defaultTools": [
+      "read",
+      "grep"
+    ]
+  },
+  "candidate_settings": {
+    "defaultTools": [
+      "read",
+      "grep"
+    ]
+  },
+  "models": [
+    "cliproxyapi/gemini-4-hydrogen-xhigh:high"
+  ],
+  "tasks": [
+    [
+      "trace-question",
+      "In this codebase, which function applies the bulk (volume) discount to an order line, which file is it in, and how many units of one item must a line hold to get it? Answer in one or two sentences. Do not change any file."
+    ]
+  ],
+  "trials": 5,
+  "jobs": 2,
+  "max_model_calls": 60,
+  "run_timeout_ms": 900000,
+  "host": "linux/x86_64"
+}

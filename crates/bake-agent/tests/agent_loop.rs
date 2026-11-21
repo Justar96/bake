@@ -2039,9 +2039,10 @@ async fn run_tool_call_after_hook_replaces_or_drops_structured_content() {
     );
 }
 
-/// Bake: an abort while a tool runs. The tool honors the signal, the batch
-/// ends, and the next request comes back aborted, so the run ends with
-/// `aborted` and makes no further request. Uses `bake-ai`'s faux provider.
+/// Pi #9986 + Bake: an abort while a sequential tool runs (via faux provider).
+/// The in-flight call's own error is preserved, later calls never reach
+/// `before_tool_call` or `execute`, and every call in the batch gets start,
+/// end, and result messages before the next request ends `aborted`.
 #[tokio::test]
 async fn abort_during_a_tool_ends_the_run_aborted() {
     let registry = Arc::new(ApiRegistry::new());
@@ -2052,6 +2053,7 @@ async fn abort_during_a_tool_ends_the_run_aborted() {
             vec![
                 faux_tool_call("wait", json!({}), Some("call-1")),
                 faux_tool_call("wait", json!({}), Some("call-2")),
+                faux_tool_call("wait", json!({}), Some("call-3")),
             ],
             StopReason::ToolUse,
         )),
@@ -2062,26 +2064,36 @@ async fn abort_during_a_tool_ends_the_run_aborted() {
     ]);
     let started = Arc::new(Notify::new());
     let s = Arc::clone(&started);
+    let ran = executed();
+    let r = Arc::clone(&ran);
     let tool = AgentTool::new(
         "wait",
         "Wait",
         "Waits for abort",
         empty_schema(),
-        move |_, _, signal, _, _ctx| {
+        move |id, _, signal, _, _ctx| {
             let s = Arc::clone(&s);
+            let r = Arc::clone(&r);
             Box::pin(async move {
+                r.lock().unwrap().push(id);
                 s.notify_one();
                 match signal {
                     Some(signal) => signal.cancelled().await,
                     None => std::future::pending().await,
                 }
-                Err("Operation aborted".to_owned())
+                Err("interrupted".to_owned())
             })
         },
     );
     let controller = AbortController::new();
+    let hook_calls = executed();
+    let hooks = Arc::clone(&hook_calls);
     let mut config = AgentLoopConfig::new(faux.model().clone(), identity_converter());
     config.tool_execution = ToolExecutionMode::Sequential;
+    config.before_tool_call = Some(hook::before_tool_call(move |ctx, _| {
+        hooks.lock().unwrap().push(ctx.tool_call.id.clone());
+        Box::pin(async { Ok(None) })
+    }));
     let stream = agent_loop(
         vec![user("wait")],
         context(vec![tool]),
@@ -2093,18 +2105,17 @@ async fn abort_during_a_tool_ends_the_run_aborted() {
     controller.abort();
     let events = drain(&stream).await;
     let messages = stream.result().await.unwrap();
-    // The sequential batch stops after the aborted call; the second never runs.
-    assert_eq!(tool_end_ids(&events), ["call-1"]);
-    let result = messages
-        .iter()
-        .find_map(AgentMessage::as_tool_result)
-        .unwrap();
-    assert!(result.is_error);
-    assert_eq!(
-        result.content,
-        [UserContentBlock::Text(TextContent::new(
-            "Operation aborted"
-        ))]
+    assert_eq!(*ran.lock().unwrap(), ["call-1"]);
+    assert_eq!(*hook_calls.lock().unwrap(), ["call-1"]);
+    assert_eq!(tool_start_ids(&events), ["call-1", "call-2", "call-3"]);
+    assert_eq!(tool_end_ids(&events), ["call-1", "call-2", "call-3"]);
+    assert_tool_results(
+        &messages,
+        &[
+            ("call-1", true, "interrupted"),
+            ("call-2", true, "Operation aborted"),
+            ("call-3", true, "Operation aborted"),
+        ],
     );
     let last = messages
         .last()
@@ -2115,20 +2126,27 @@ async fn abort_during_a_tool_ends_the_run_aborted() {
     assert_eq!(events.last().map(AgentEvent::kind), Some("agent_end"));
 }
 
-/// Bake: in parallel mode, calls not yet started when the run aborts end as
-/// `Operation aborted` without running.
+/// Pi #9986: in parallel mode, aborting while preparing `tool-2` leaves
+/// already-prepared `tool-1` unexecuted, skips `before_tool_call` for `tool-3`,
+/// and answers all three calls with `Operation aborted` in assistant order.
 #[tokio::test]
 async fn parallel_calls_after_an_abort_do_not_run() {
     let controller = AbortController::new();
     let ran = executed();
+    let hook_calls = executed();
     let mut config = config();
     let abort = controller.clone();
-    config.before_tool_call = Some(hook::before_tool_call(move |_, _| {
-        abort.abort();
+    let hooks = Arc::clone(&hook_calls);
+    config.before_tool_call = Some(hook::before_tool_call(move |ctx, _| {
+        let id = ctx.tool_call.id.clone();
+        hooks.lock().unwrap().push(id.clone());
+        if id == "tool-2" {
+            abort.abort();
+        }
         Box::pin(async { Ok(None) })
     }));
     let stream = agent_loop(
-        vec![user("go")],
+        vec![user("run three")],
         context(vec![echo_tool(Arc::clone(&ran))]),
         config,
         Some(controller.signal()),
@@ -2143,15 +2161,151 @@ async fn parallel_calls_after_an_abort_do_not_run() {
             }
             assert_eq!(index, 0);
             tool_use(vec![
-                call("tool-1", "echo", json!({ "value": "a" })),
-                call("tool-2", "echo", json!({ "value": "b" })),
+                call("tool-1", "echo", json!({ "value": "first" })),
+                call("tool-2", "echo", json!({ "value": "second" })),
+                call("tool-3", "echo", json!({ "value": "third" })),
             ])
         })),
     );
     let events = drain(&stream).await;
+    let messages = stream.result().await.unwrap();
     assert!(ran.lock().unwrap().is_empty());
-    // Preparation stops at the first aborted call.
-    assert_eq!(tool_end_ids(&events), ["tool-1"]);
+    assert_eq!(*hook_calls.lock().unwrap(), ["tool-1", "tool-2"]);
+    assert_eq!(tool_start_ids(&events), ["tool-1", "tool-2", "tool-3"]);
+    let mut ended = tool_end_ids(&events);
+    ended.sort();
+    assert_eq!(ended, ["tool-1", "tool-2", "tool-3"]);
+    assert_tool_results(
+        &messages,
+        &[
+            ("tool-1", true, "Operation aborted"),
+            ("tool-2", true, "Operation aborted"),
+            ("tool-3", true, "Operation aborted"),
+        ],
+    );
+}
+
+/// Pi #9986: an already-aborted signal returns `Operation aborted` before
+/// tool lookup, `prepare_arguments`, validation, or hooks run.
+#[tokio::test]
+async fn run_tool_call_with_aborted_signal_skips_lookup_preparation_validation_and_hooks() {
+    let controller = AbortController::new();
+    controller.abort();
+
+    let called = executed();
+    let prep = Arc::clone(&called);
+    let exec = Arc::clone(&called);
+    let mut tool = AgentTool::new(
+        "echo",
+        "Echo",
+        "Echo",
+        value_schema(),
+        move |_, _, _, _, _ctx| {
+            exec.lock().unwrap().push("execute".to_owned());
+            Box::pin(async { Ok(AgentToolResult::text("ok")) })
+        },
+    );
+    tool.prepare_arguments = Some(Arc::new(move |value| {
+        prep.lock().unwrap().push("prepare".to_owned());
+        Ok(value)
+    }));
+
+    let tools = vec![Arc::new(tool)];
+    let assistant = assistant(Vec::new(), StopReason::Stop);
+    let context = AgentContext::default();
+    let before_log = Arc::clone(&called);
+    let after_log = Arc::clone(&called);
+    let options = RunToolCallOptions {
+        tools: &tools,
+        assistant_message: &assistant,
+        context: &context,
+        before_tool_call: Some(hook::before_tool_call(move |_, _| {
+            before_log.lock().unwrap().push("before".to_owned());
+            Box::pin(async { Ok(None) })
+        })),
+        after_tool_call: Some(hook::after_tool_call(move |_, _| {
+            after_log.lock().unwrap().push("after".to_owned());
+            Box::pin(async { Ok(None) })
+        })),
+        signal: Some(controller.signal()),
+        on_update: None,
+        parent_tool_call_id: None,
+    };
+
+    for (id, name, args) in [
+        ("u", "missing", json!({})),
+        ("bad", "echo", json!({ "value": 123 })),
+        ("ok", "echo", json!({ "value": "hi" })),
+    ] {
+        let outcome = run_tool_call(&tool_call(id, name, args), options.clone()).await;
+        assert!(outcome.is_error, "{id}");
+        assert_eq!(result_text(&outcome.result), "Operation aborted", "{id}");
+        assert_eq!(outcome.duration_ms, None, "{id}");
+    }
+    assert!(called.lock().unwrap().is_empty());
+}
+
+/// If `prepare_arguments` aborts the signal synchronously, `run_tool_call`
+/// must neither invoke `before_tool_call` nor execute the tool (with or
+/// without a `before_tool_call` hook).
+#[tokio::test]
+async fn run_tool_call_aborted_during_prepare_arguments_skips_hooks_and_execute() {
+    for with_before_hook in [false, true] {
+        let controller = AbortController::new();
+        let abort = controller.clone();
+        let called = executed();
+        let exec = Arc::clone(&called);
+        let mut tool = AgentTool::new(
+            "echo",
+            "Echo",
+            "Echo",
+            value_schema(),
+            move |_, _, _, _, _ctx| {
+                exec.lock().unwrap().push("execute".to_owned());
+                Box::pin(async { Ok(AgentToolResult::text("ok")) })
+            },
+        );
+        tool.prepare_arguments = Some(Arc::new(move |value| {
+            abort.abort();
+            Ok(value)
+        }));
+
+        let tools = vec![Arc::new(tool)];
+        let assistant = assistant(Vec::new(), StopReason::Stop);
+        let context = AgentContext::default();
+        let before_log = Arc::clone(&called);
+        let outcome = run_tool_call(
+            &tool_call("p", "echo", json!({ "value": "hi" })),
+            RunToolCallOptions {
+                tools: &tools,
+                assistant_message: &assistant,
+                context: &context,
+                before_tool_call: with_before_hook.then(|| {
+                    hook::before_tool_call(move |_, _| {
+                        before_log.lock().unwrap().push("before".to_owned());
+                        Box::pin(async { Ok(None) })
+                    })
+                }),
+                after_tool_call: None,
+                signal: Some(controller.signal()),
+                on_update: None,
+                parent_tool_call_id: None,
+            },
+        )
+        .await;
+        assert!(outcome.is_error, "with_before_hook={with_before_hook}");
+        assert_eq!(
+            result_text(&outcome.result),
+            "Operation aborted",
+            "with_before_hook={with_before_hook}"
+        );
+        assert_eq!(outcome.duration_ms, None);
+        assert!(
+            called.lock().unwrap().is_empty(),
+            "with_before_hook={with_before_hook}: {:?}",
+            called.lock().unwrap()
+        );
+    }
 }
 
 /// Bake: streamed deltas from the faux provider become `message_update`

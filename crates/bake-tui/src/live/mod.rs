@@ -84,7 +84,7 @@ use bake_tui_view::dialog::DialogAnswer;
 use bake_tui_view::paste::Image;
 use bake_tui_view::runtime::{RuntimeUpdate, SessionStatus};
 use bake_tui_view::state::Outcome;
-use bake_tui_view::status::{CacheReading, ContextUsage, TokenTotals};
+use bake_tui_view::status::{AutoCompact, CacheReading, Callsign, ContextUsage, TokenTotals};
 use bake_tui_view::transcript::{Banner, Notice, Pill, Row, TagTone};
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -418,6 +418,7 @@ impl LivePort {
             orphans: Arc::default(),
             shells: Vec::new(),
             agents: Vec::new(),
+            commands: Vec::new(),
             crew_version: None,
             crew_watch: None,
             status_due,
@@ -679,6 +680,8 @@ struct Driver {
     shells: Vec<bake_tui_view::jobs::BackgroundJob>,
     /// The subagents last sent to the view.
     agents: Vec<bake_tui_view::agents::Agent>,
+    /// The session's skills and prompt templates last sent to the view.
+    commands: Vec<bake_tui_view::runtime::DynamicCommand>,
     /// The spawn host's version the crew panel last showed; `None` for a
     /// session that spawns no agents.
     crew_version: Option<u64>,

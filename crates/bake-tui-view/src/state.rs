@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use crate::activity::{self, Tones};
 use crate::agents::{Agent, AgentState};
-use crate::completion::{self, Command};
+use crate::completion::{self, Command, Entry};
 use crate::composer::ComposerWindow;
 use crate::dialog::{Dialog, DialogAnswer};
 use crate::editor::Draft;
@@ -18,7 +18,9 @@ use crate::mention::{self, Candidate, Choice};
 use crate::mermaid::Mermaid;
 use crate::mode::Mode;
 use crate::paste::{self, Image};
-use crate::runtime::{Approval, ApprovalAnswer, Pending, Prompt, RuntimeUpdate, Submission};
+use crate::runtime::{
+    Approval, ApprovalAnswer, DynamicCommand, Pending, Prompt, RuntimeUpdate, Submission,
+};
 use crate::selection::{self, Granularity, Point, Range};
 use crate::status::{SessionState, StatusInput};
 use crate::tasks::{self, Group, Phase, Task, TaskId};
@@ -60,8 +62,8 @@ pub enum Msg {
     /// from when it started.
     Tick(Duration),
     Mouse(Mouse),
-    /// Whether the text of the last [`Effect::Copy`] reached a clipboard.
-    Copied(bool),
+    /// The result of the last [`Effect::Copy`].
+    Copied(CopyOutcome),
     /// The image an [`Effect::ReadImage`] read, or `None` when there was none
     /// or it could not be read.
     ImageRead {
@@ -233,7 +235,7 @@ pub const QUIT_WINDOW: Duration = Duration::from_millis(2000);
 /// The slash menu as drawn: the matching commands and the selected one.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Menu {
-    pub entries: Vec<Command>,
+    pub entries: Vec<Entry>,
     pub selected: usize,
 }
 
@@ -263,6 +265,17 @@ pub struct Files {
     pub query: Option<String>,
     /// `None` while discovery is looking.
     pub found: Option<Result<Vec<Candidate>, String>>,
+}
+
+/// How an [`Effect::Copy`] ended.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CopyOutcome {
+    /// A native clipboard tool accepted the text and exited cleanly.
+    Copied,
+    /// The terminal was asked via OSC 52; terminals do not confirm receipt.
+    SentToTerminal,
+    /// Neither a native clipboard tool nor terminal OSC 52 could carry the text.
+    Failed,
 }
 
 /// How long the scroll indicator says whether a selection was copied.
@@ -523,8 +536,8 @@ pub struct State {
     /// The terminal's columns at the last resize; a change drops the
     /// selection, whose lines wrap anew.
     columns: u16,
-    /// Whether the last selection was copied, said until the time given.
-    pub copied: Option<(bool, Duration)>,
+    /// Outcome of the last selection copy, shown until the time given.
+    pub copied: Option<(CopyOutcome, Duration)>,
     /// The banner's tips while they rotate ([`State::start_tips`]).
     tips: Option<Tips>,
     /// Images staged with the draft, by id, in the order they were pasted.
@@ -536,6 +549,10 @@ pub struct State {
     /// The menu's selection and whether Esc closed it, for the draft and
     /// caret they were made at. Any edit or move starts the menu over.
     menu: MenuMemory,
+    /// Session-defined skills and prompt templates reported by a live runtime
+    /// ([`RuntimeUpdate::Commands`]), listed in the slash menu after the
+    /// built-in commands.
+    dynamic_commands: Vec<DynamicCommand>,
     /// Path discovery for the file menu.
     pub files: Files,
     /// Whether a press on the scrollbar is being dragged.
@@ -680,6 +697,7 @@ impl State {
             attachments: Vec::new(),
             images: 0,
             menu: MenuMemory::default(),
+            dynamic_commands: Vec::new(),
             files: Files::default(),
             dragging: false,
             quit_until: None,
@@ -777,11 +795,12 @@ impl State {
     /// The slash menu, while the draft up to the caret is a leading slash
     /// token and Esc has not closed it there.
     pub fn menu(&self) -> Option<Menu> {
-        // A live session lists the commands it runs; the preview, its
-        // sample catalog.
+        // A live session lists the commands it runs plus its skills and
+        // prompt templates; the preview, its sample catalog only.
         let (draft, caret) = self.menu_here()?;
-        let entries = completion::matches(draft, caret, self.catalog())?;
-        let selected = self.remembered(entries.iter().map(|c| c.name));
+        let entries =
+            completion::matches_with(draft, caret, self.catalog(), self.dynamic_commands())?;
+        let selected = self.remembered(entries.iter().map(|c| c.name.as_ref()));
         Some(Menu { entries, selected })
     }
 
@@ -794,12 +813,29 @@ impl State {
         }
     }
 
+    /// The session-defined skills and prompt templates the slash menu lists
+    /// after [`Self::catalog`]; always empty in the preview.
+    pub fn dynamic_commands(&self) -> &[DynamicCommand] {
+        if self.live {
+            &self.dynamic_commands
+        } else {
+            &[]
+        }
+    }
+
+    /// The command or template whose arguments are being typed once the slash
+    /// menu has closed, when it has a hint.
+    pub fn usage(&self) -> Option<Entry> {
+        completion::usage_with(self.draft.text(), self.catalog(), self.dynamic_commands())
+    }
+
     /// The `@` token the file menu completes, with where it ends, while the
     /// caret is inside one, no slash menu is open, and Esc has not closed
     /// the menu there.
     fn file_token(&self) -> Option<(mention::AtToken, usize)> {
         let (draft, caret) = self.menu_here()?;
-        if completion::matches(draft, caret, self.catalog()).is_some() {
+        if completion::matches_with(draft, caret, self.catalog(), self.dynamic_commands()).is_some()
+        {
             return None;
         }
         let token = mention::active_at_token(draft, caret)?;
@@ -1262,7 +1298,7 @@ fn apply(state: &mut State, msg: Msg) -> Vec<Effect> {
             if !state.approvals.is_empty()
                 && !matches!(mouse.kind, MouseKind::WheelUp | MouseKind::WheelDown) => {}
         Msg::Mouse(mouse) => return pointer(state, mouse),
-        Msg::Copied(ok) => state.copied = Some((ok, state.now + COPIED)),
+        Msg::Copied(outcome) => state.copied = Some((outcome, state.now + COPIED)),
         Msg::ImageRead { source, image } => staged(state, source, image),
         Msg::Runtime(update) => runtime(state, update),
         Msg::FilesFound { query, found } => {
@@ -1318,6 +1354,7 @@ fn runtime(state: &mut State, update: RuntimeUpdate) {
                 state.crew_log = Some(rows);
             }
         }
+        RuntimeUpdate::Commands(commands) => state.dynamic_commands = commands,
         RuntimeUpdate::Jobs(list) => {
             state.jobs = list;
             state.jobs_at = state.now;
@@ -1390,6 +1427,8 @@ fn runtime(state: &mut State, update: RuntimeUpdate) {
             state.status.context = status.context;
             state.status.tokens = status.tokens;
             state.status.cache = status.cache;
+            state.status.auto_compact = status.auto_compact;
+            state.status.callsign = status.callsign;
         }
         RuntimeUpdate::Approvals(approvals) => {
             let front = approvals.first().map(|a| a.generation);
@@ -1568,31 +1607,18 @@ fn pointer(state: &mut State, mouse: Mouse) -> Vec<Effect> {
     }
 }
 
-/// The text a finished selection copies: each line as drawn, cut to the
-/// cells it covers and trimmed at its end; `None` when nothing but spaces is
-/// selected, or the press is still going.
+/// The text a finished selection copies: uses source/span metadata where
+/// available to preserve tabs, trailing whitespace, hard blank lines,
+/// intentional Unicode (including U+FEFF), and soft-wrapped continuations
+/// without layout gutters, falling back to visual cells elsewhere; `None` when
+/// nothing is selected or the press is still going.
 fn copy_selection(state: &mut State) -> Option<String> {
     if !std::mem::take(&mut state.selecting.finished) {
         return None;
     }
     let range = state.selecting.range()?;
-    let text = state
-        .transcript
-        .between(range.start.at, range.end.at)
-        .into_iter()
-        .map(|(at, line)| {
-            selection::line_columns(range, at, &line).map_or(String::new(), |(from, to)| {
-                selection::slice_cells(&line, from, to)
-                    .trim_end()
-                    .to_owned()
-            })
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-        // A byte-order mark is invisible on screen and means nothing inside
-        // text, such as a log a tool printed; pasted, it is a stray U+FEFF.
-        .replace('\u{feff}', "");
-    (!text.trim().is_empty()).then_some(text)
+    let lines = state.transcript.copy_between(range.start.at, range.end.at);
+    selection::extract(range, &lines)
 }
 
 fn pointer_at(state: &mut State, mouse: Mouse) {
@@ -2143,7 +2169,7 @@ fn menu_key(state: &mut State, bound: Option<Action>) -> bool {
     let Some(menu) = state.menu() else {
         return false;
     };
-    let choice = menu.entries.get(menu.selected).copied();
+    let choice = menu.entries.get(menu.selected).cloned();
     match bound {
         Some(Action::CaretUp | Action::CaretDown) => {
             let count = menu.entries.len();
@@ -2153,7 +2179,7 @@ fn menu_key(state: &mut State, bound: Option<Action>) -> bool {
                 } else {
                     1
                 };
-                let next = menu.entries[(menu.selected + step) % count].name;
+                let next = menu.entries[(menu.selected + step) % count].name.as_ref();
                 state.menu = MenuMemory {
                     at: Some((state.draft.text().to_owned(), state.draft.caret())),
                     selected: Some(next.to_owned()),
@@ -2164,19 +2190,20 @@ fn menu_key(state: &mut State, bound: Option<Action>) -> bool {
         }
         Some(Action::Complete) => {
             if let Some(choice) = choice {
-                let (text, caret) = completion::complete(state.draft.text(), &choice);
+                let (text, caret) = completion::complete_entry(state.draft.text(), &choice);
                 state.draft.replace(&text, caret);
             }
             true
         }
-        // Enter takes the selected command: one that needs an argument is
-        // filled in to type it, and any other is submitted as its name.
+        // Enter takes the selected command: one that needs an argument (or a
+        // skill) is filled in to type it, and any other is submitted as its
+        // name.
         Some(Action::Submit) => {
             let Some(choice) = choice else {
                 return state.draft.text() == "/";
             };
-            let (text, caret) = completion::complete(state.draft.text(), &choice);
-            if completion::requires_input(&choice) {
+            let (text, caret) = completion::complete_entry(state.draft.text(), &choice);
+            if choice.takes_arguments {
                 state.draft.replace(&text, caret);
                 return true;
             }
@@ -3138,6 +3165,7 @@ mod tests {
             id,
             name: name.into(),
             state,
+            model: None,
             tool: None,
             line: None,
             task: "a task".into(),
@@ -3809,12 +3837,18 @@ mod tests {
                     output: 3_400,
                 }),
                 cache: None,
+                auto_compact: Some(crate::status::AutoCompact::Off),
+                callsign: None,
                 name: None,
             }),
         );
         assert_eq!(state.status.model.as_deref(), Some("p/m"));
         assert_eq!(state.status.tokens.map(|t| t.output), Some(3_400));
         assert_eq!(state.status.thinking.as_deref(), Some("high"));
+        assert_eq!(
+            state.status.auto_compact,
+            Some(crate::status::AutoCompact::Off)
+        );
         runtime(&mut state, RuntimeUpdate::TurnStarted { seed: "s".into() });
         runtime(&mut state, RuntimeUpdate::TurnEnded(Outcome::Failed));
         assert_eq!(state.summary.map(|s| s.outcome), Some(Outcome::Failed));
@@ -4277,6 +4311,42 @@ mod tests {
     }
 
     #[test]
+    fn non_path_image_suffix_pastes_go_directly_into_draft_without_effects() {
+        for text in [
+            "shot.png",
+            "see /tmp/shot.png",
+            "https://example.com/avatar.png",
+            "/tmp/shot.png\n",
+            "file://server/share/shot.png",
+        ] {
+            let mut state = State::default();
+            let effects = update(&mut state, Msg::Paste(text.into()));
+            assert!(
+                effects.is_empty(),
+                "ordinary text must not trigger ReadImage: {text:?} -> {effects:?}"
+            );
+            assert_eq!(state.draft.expanded(), text);
+            assert_eq!(state.notice, None);
+        }
+
+        for (pasted, expected) in [
+            ("assets/shot.png", "assets/shot.png"),
+            ("./shot.png", "./shot.png"),
+            ("file:///tmp/my%20shot.webp", "/tmp/my shot.webp"),
+            ("C:\\Users\\me\\shot.gif", "C:\\Users\\me\\shot.gif"),
+        ] {
+            let mut state = State::default();
+            assert_eq!(
+                update(&mut state, Msg::Paste(pasted.into())),
+                [Effect::ReadImage(ImageSource::File {
+                    path: expected.into(),
+                    pasted: pasted.into(),
+                })]
+            );
+        }
+    }
+
+    #[test]
     fn images_stage_with_a_placeholder_and_unstage_when_it_is_erased() {
         let mut state = State::default();
         // Ctrl+V and an empty paste read the clipboard; a lone image path its file.
@@ -4355,10 +4425,10 @@ mod tests {
         assert!(!state.draft.text().contains("[Image"));
     }
 
-    fn menu_names(state: &State) -> Option<(Vec<&'static str>, &'static str)> {
+    fn menu_names(state: &State) -> Option<(Vec<String>, String)> {
         state.menu().map(|menu| {
-            let names: Vec<_> = menu.entries.iter().map(|c| c.name).collect();
-            let selected = names[menu.selected];
+            let names: Vec<_> = menu.entries.iter().map(|c| c.name.to_string()).collect();
+            let selected = names[menu.selected].clone();
             (names, selected)
         })
     }
@@ -4367,7 +4437,10 @@ mod tests {
     fn the_slash_menu_selects_completes_and_closes() {
         let mut state = State::default();
         type_str(&mut state, "/lo");
-        assert_eq!(menu_names(&state), Some((vec!["login", "logout"], "login")));
+        assert_eq!(
+            menu_names(&state),
+            Some((vec!["login".into(), "logout".into()], "login".into()))
+        );
         // Down and Up cycle the selection instead of moving the caret.
         press(&mut state, Key::Down);
         assert_eq!(menu_names(&state).unwrap().1, "logout");
@@ -4391,7 +4464,94 @@ mod tests {
         press(&mut state, Key::Esc);
         assert!(state.menu().is_none());
         type_str(&mut state, "g");
-        assert_eq!(menu_names(&state), Some((vec!["login", "logout"], "login")));
+        assert_eq!(
+            menu_names(&state),
+            Some((vec!["login".into(), "logout".into()], "login".into()))
+        );
+    }
+
+    #[test]
+    fn live_slash_menu_lists_filters_and_completes_skills_and_templates() {
+        use crate::runtime::{DynamicCommand, DynamicCommandKind};
+
+        let commands = vec![
+            DynamicCommand {
+                name: "review".into(),
+                hint: None,
+                description: "Review code changes".into(),
+                kind: DynamicCommandKind::Skill,
+            },
+            DynamicCommand {
+                name: "release-notes".into(),
+                hint: None,
+                description: "Write release notes".into(),
+                kind: DynamicCommandKind::Skill,
+            },
+            DynamicCommand {
+                name: "deploy".into(),
+                hint: Some("<env>".into()),
+                description: "Deploy a release".into(),
+                kind: DynamicCommandKind::Template,
+            },
+        ];
+
+        // Preview ignores RuntimeUpdate::Commands and keeps its static catalog.
+        let mut preview = State::default();
+        runtime(&mut preview, RuntimeUpdate::Commands(commands.clone()));
+        type_str(&mut preview, "/skill:");
+        assert_eq!(preview.menu().unwrap().entries.len(), 0);
+
+        // Live session lists skills and templates after built-in commands.
+        let mut state = State::live(FrameStyle::default(), Tones::None, Vec::new());
+        runtime(&mut state, RuntimeUpdate::Commands(commands));
+        type_str(&mut state, "/rvw");
+        assert_eq!(
+            menu_names(&state),
+            Some((vec!["skill:review".into()], "skill:review".into()))
+        );
+        // Enter on a skill fills `/skill:review ` ready for arguments instead
+        // of submitting immediately.
+        let effects = press(&mut state, Key::Enter);
+        assert!(submitted(effects).is_empty());
+        assert_eq!(
+            (state.draft.text(), state.draft.caret()),
+            ("/skill:review ", 14)
+        );
+        assert!(state.menu().is_none());
+
+        // Tab on `/skill:re` completes `/skill:review ` too.
+        chord(&mut state, Key::Char('u'), Mods::CTRL);
+        type_str(&mut state, "/skill:re");
+        assert_eq!(
+            menu_names(&state),
+            Some((
+                vec!["skill:review".into(), "skill:release-notes".into()],
+                "skill:review".into()
+            ))
+        );
+        press(&mut state, Key::Down);
+        press(&mut state, Key::Tab);
+        assert_eq!(
+            (state.draft.text(), state.draft.caret()),
+            ("/skill:release-notes ", 21)
+        );
+
+        // Mid-draft `/skill:` does not open the slash menu.
+        chord(&mut state, Key::Char('u'), Mods::CTRL);
+        type_str(&mut state, "check /skill:rev");
+        assert!(state.menu().is_none());
+
+        // Template with required `<env>` hint fills `/deploy ` on Enter and
+        // shows its usage hint.
+        chord(&mut state, Key::Char('u'), Mods::CTRL);
+        type_str(&mut state, "/dep");
+        let effects = press(&mut state, Key::Enter);
+        assert!(submitted(effects).is_empty());
+        assert_eq!((state.draft.text(), state.draft.caret()), ("/deploy ", 8));
+        assert_eq!(
+            state.usage().map(|e| e.name.into_owned()),
+            Some("deploy".into())
+        );
     }
 
     #[test]

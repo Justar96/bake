@@ -47,4 +47,6 @@ A prompt that starts with `/skill:<name>` sends that skill's instructions, witho
 bake -p "/skill:release-notes for v0.4.0"
 ```
 
+In an interactive session, the slash menu lists every loaded skill as `/skill:<name>` after the built-in commands, with its description. You can filter by `/skill:<name>` or fuzzy-match by the skill's bare name (for example `/rev`, `/rvw`, or `/review` finds `/skill:review`); choosing a skill with Enter or Tab fills `/skill:<name> ` in the draft ready for arguments. Submitting `/<name> [args]` directly also runs the skill as `/skill:<name> [args]` when `<name>` matches a loaded skill and is not a built-in command or prompt template.
+
 A name that matches no loaded skill sends the prompt as written.

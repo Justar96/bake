@@ -34,7 +34,7 @@ use crate::utils::event_stream::{AssistantMessageEventSender, AssistantMessageEv
 use crate::utils::tool_argument_guard::DEFAULT_MAX_TOOL_ARGUMENT_WHITESPACE;
 use crate::utils::transcript::{get_current_tools, resolve_transcript};
 
-const OPENAI_TOOL_CALL_PROVIDERS: [&str; 3] = ["openai", "openai-codex", "opencode"];
+const OPENAI_TOOL_CALL_PROVIDERS: [&str; 4] = ["openai", "openai-codex", "opencode", "cliproxyapi"];
 /// OpenAI Responses rejects `max_output_tokens` below 16.
 const MIN_OUTPUT_TOKENS: u64 = 16;
 const CHATGPT_USAGE_URL: &str = "https://chatgpt.com/settings/usage";
@@ -61,6 +61,7 @@ pub struct OpenAIResponsesOptions {
 pub struct ResolvedResponsesCompat {
     pub supports_developer_role: bool,
     pub supports_mid_convo_system_messages: bool,
+    pub send_session_affinity_headers: bool,
     pub session_affinity_format: SessionAffinityFormat,
     pub supports_long_cache_retention: bool,
     pub supports_strict_mode: bool,
@@ -82,6 +83,7 @@ pub fn get_compat(model: &Model) -> ResolvedResponsesCompat {
         supports_mid_convo_system_messages: compat
             .supports_mid_convo_system_messages
             .unwrap_or(false),
+        send_session_affinity_headers: compat.send_session_affinity_headers.unwrap_or(true),
         session_affinity_format: compat.session_affinity_format.unwrap_or(detected_affinity),
         supports_long_cache_retention: compat.supports_long_cache_retention.unwrap_or(true),
         supports_strict_mode: compat.supports_strict_mode.unwrap_or(false),
@@ -335,7 +337,7 @@ async fn run_inner(
         .base
         .session_id
         .as_deref()
-        .filter(|_| retention != CacheRetention::None)
+        .filter(|_| retention != CacheRetention::None && compat.send_session_affinity_headers)
     {
         if compat.session_affinity_format == SessionAffinityFormat::Openrouter {
             affinity.push(("x-session-id".into(), Some(session_id.to_owned())));
@@ -344,6 +346,14 @@ async fn run_inner(
                 affinity.push(("session_id".into(), Some(session_id.to_owned())));
             }
             affinity.push(("x-client-request-id".into(), Some(session_id.to_owned())));
+            if model
+                .compat
+                .as_ref()
+                .and_then(|c| c.send_session_affinity_headers)
+                == Some(true)
+            {
+                affinity.push(("x-session-affinity".into(), Some(session_id.to_owned())));
+            }
         }
     }
     let mut params = build_params(model, context, options, compat).map_err(ProviderError::other)?;

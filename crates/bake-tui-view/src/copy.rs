@@ -58,6 +58,23 @@ pub const DIALOG_LIST_KEYS_SHORT: &str = "↑↓ · Enter · Esc";
 pub const DIALOG_LIST_SAVE_KEYS_SHORT: &str = "↑↓ · Enter · ^S save · Esc";
 /// The keys a sheet too narrow for the others still names.
 pub const DIALOG_KEYS_TINY: &str = "↵ · Esc";
+/// A question dialog's chrome and keys.
+pub const DIALOG_QUESTION_TITLE: &str = "Question";
+pub const DIALOG_QUESTION_PROGRESS: &str = "Question {index} of {count}";
+pub const DIALOG_QUESTION_PROGRESS_SHORT: &str = "{index} of {count}";
+pub const DIALOG_QUESTION_FROM: &str = "{from} asks";
+pub const DIALOG_QUESTION_OTHER: &str = "Other:";
+pub const DIALOG_QUESTION_OTHER_HINT: &str = "type an answer…";
+pub const DIALOG_QUESTION_DONE: &str = "Done";
+pub const DIALOG_QUESTION_CHOSEN: &str = "{count} chosen";
+pub const DIALOG_QUESTION_KEYS: &str = "↑↓ move · 1-9 choose · Enter select · Esc decline";
+pub const DIALOG_QUESTION_KEYS_MED: &str = "↑↓ · 1-9 · Enter select · Esc decline";
+pub const DIALOG_QUESTION_KEYS_SHORT: &str = "↑↓ · Enter · Esc decline";
+pub const DIALOG_QUESTION_MULTI_KEYS: &str =
+    "↑↓ move · 1-9/Space toggle · Enter done · Esc decline";
+pub const DIALOG_QUESTION_MULTI_KEYS_MED: &str = "↑↓ · Space toggle · Enter done · Esc decline";
+pub const DIALOG_QUESTION_MULTI_KEYS_SHORT: &str = "Space toggle · Enter done · Esc decline";
+pub const DIALOG_QUESTION_MULTI_KEYS_NARROW: &str = "Space · Enter · Esc decline";
 /// What an empty filter row says.
 pub const DIALOG_FILTER: &str = "Type to filter";
 pub const DIALOG_NO_MATCH: &str = "No matching choices";
@@ -304,8 +321,10 @@ pub const NO_PENDING: &str = "No queued input";
 /// Ctrl+V, or an empty paste, found no image on the clipboard.
 pub const NO_CLIPBOARD_IMAGE: &str = "No image on the clipboard";
 /// Said in the scroll indicator's row once a selection reaches the clipboard,
-/// or does not.
+/// is handed to the terminal over OSC 52, or fails.
 pub const COPIED: &str = "Copied";
+pub const COPY_SENT: &str = "Sent to terminal";
+pub const COPY_SENT_SHORT: &str = "Sent";
 pub const COPY_FAILED: &str = "Copy failed";
 /// The reading indicator's words: what arrived below, and the key back.
 pub const NEW_OUTPUT: &str = "New output";
@@ -363,7 +382,8 @@ pub const TASKS_AGENTS: &str = "Agents";
 pub const TASKS_SHELLS: &str = "Shells";
 pub const TASKS_SHELLS_NOTE: &str = "they stop when Bake exits";
 pub const TASKS_SAMPLES_NOTE: &str = "samples, nothing runs";
-pub const TASKS_LIST_KEYS: &str = "↑↓ select · Enter open · x stop · Esc back";
+pub const TASKS_LIST_KEYS: &str = "↑↓ select · Enter open · x stop · Esc close";
+pub const TASKS_LIST_KEYS_SHORT: &str = "↑↓ · Enter · x · Esc";
 pub const TASKS_SHELL_KEYS: &str = "↑↓ PgUp/PgDn scroll · x stop · Esc back";
 pub const TASKS_LEDGER_KEYS: &str = "Esc back";
 /// One spawned agent's transcript ([`crate::crew::transcript`]): the bar's
@@ -409,6 +429,12 @@ pub const NO_MODEL_FIELD: &str = "no model";
 pub const CONTEXT: &str = "ctx";
 /// The dim label before the status line's prompt-cache reading.
 pub const CACHE: &str = "cache";
+/// The dim label before the status line's automatic-compaction point, and
+/// its shorter form for a narrow row.
+pub const AUTO_COMPACT: &str = "auto-compact";
+pub const AUTO_COMPACT_SHORT: &str = "compact";
+/// The automatic-compaction reading while it is turned off.
+pub const AUTO_COMPACT_OFF: &str = "off";
 /// The activity's word for a turn that ran to its end, and for one Esc stopped.
 pub const COMPLETED: &str = "Completed";
 /// The activity's word after a compaction that was the work itself, as `/compact` is.

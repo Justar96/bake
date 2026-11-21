@@ -335,16 +335,14 @@ pub fn codemode_details(
     details
 }
 
-/// Pi's `codemodeToolSystemPromptContribution`. Its guideline stays as Pi
-/// wrote it: a model that sends one tool call a response batches through a
-/// script, and a narrower guideline cost GPT-6.1 Terra 31% more requests.
+/// Pi's `codemodeToolSystemPromptContribution` snippet; Bake's `codemode`
+/// contributes no prompt guidelines because the tool description already
+/// documents script execution, tool calls, and globals.
 pub fn codemode_tool_prompt() -> ToolPrompt {
     ToolPrompt {
         name: CODEMODE_TOOL_NAME.to_owned(),
         snippet: Some("Run JavaScript that calls other tools".to_owned()),
-        guidelines: vec![
-            "Use codemode to batch independent tool calls (Promise.allSettled), chain them, or filter large output, instead of many separate calls.".to_owned(),
-        ],
+        guidelines: Vec::new(),
     }
 }
 

@@ -1,9 +1,11 @@
 //! A `visualize` call's SVG image as cells, drawn by [`bake_svg`].
 //!
-//! Each cell holds two pixels, one above the other, in an upper half block
-//! (`▀`) with the top pixel as its foreground and the bottom as its
-//! background, so pixels are about square. Truecolor terminals get the
-//! pixels' colours; [`Tones::Ansi`] terminals the nearest of the 256-colour
+//! Each cell holds four pixels, two across and two down, in a quadrant
+//! block (`▘▝▀▖▌▞▛▗▚▐▜▄▙▟`): the cell's pixels are split into two groups
+//! by their colour, one drawn as the glyph's foreground and the other as
+//! its background, each in its group's mean colour, so an edge that crosses
+//! a cell stays an edge instead of a blend. Truecolor terminals get the
+//! colours; [`Tones::Ansi`] terminals the nearest of the 256-colour
 //! palette. A pixel less than half covered is the terminal's own
 //! background. The classic frame draws one pixel per cell, as a coloured
 //! space, so it stays ASCII; `NO_COLOR` draws a shade per cell by how far
@@ -148,15 +150,16 @@ fn fresh(spec: &Spec, width: usize, look: Look, fonts: &bake_svg::Fonts, key: u6
     let outline = svg.outline();
     let (most_columns, most_rows) = bake_svg::cells(spec.large);
     let columns = (width.max(1) as u32).min(most_columns);
-    let half_blocks = !look.classic && look.tones != Tones::None;
-    // Pixels per cell, down then across.
-    let (down, aspect) = if half_blocks { (2, 1.0) } else { (1, 2.0) };
+    let quadrants = !look.classic && look.tones != Tones::None;
+    // Pixels per cell, across and down. A cell is twice as tall as wide,
+    // so either way a pixel is too.
+    let per = if quadrants { 2 } else { 1 };
     let (w, h) = bake_svg::fit(
         outline.width,
         outline.height,
-        columns,
-        most_rows * down,
-        aspect,
+        columns * per,
+        most_rows * per,
+        2.0,
     );
     let Ok(raster) = svg.render(w, h) else {
         return Drawing {
@@ -164,8 +167,8 @@ fn fresh(spec: &Spec, width: usize, look: Look, fonts: &bake_svg::Fonts, key: u6
             ..Drawing::default()
         };
     };
-    let lines = if half_blocks {
-        halves(&raster, look.tones)
+    let lines = if quadrants {
+        quarters(&raster, look.tones)
     } else if look.tones == Tones::None {
         shades(&raster, look.classic)
     } else {
@@ -175,7 +178,7 @@ fn fresh(spec: &Spec, width: usize, look: Look, fonts: &bake_svg::Fonts, key: u6
     Drawing {
         image: Some(Image {
             key,
-            columns: w as u16,
+            columns: w.div_ceil(per) as u16,
             rows,
             svg: Arc::new(svg),
         }),
@@ -233,24 +236,84 @@ fn shown(pixel: [u8; 4]) -> bool {
     pixel[3] >= COVERED
 }
 
-/// Two pixels a cell.
-fn halves(raster: &bake_svg::Raster, tones: Tones) -> Vec<Line<'static>> {
+/// The quadrant block whose lit quarters are `mask`'s bits: top left 1,
+/// top right 2, bottom left 4, bottom right 8.
+const QUADRANTS: [&str; 16] = [
+    " ", "▘", "▝", "▀", "▖", "▌", "▞", "▛", "▗", "▚", "▐", "▜", "▄", "▙", "▟", "█",
+];
+/// Pixels of a cell whose colours differ by less than this, on the channel
+/// they differ most on, are drawn as one colour.
+const SAME: u8 = 12;
+
+/// The mean colour of the `pixels` whose bit is set in `mask`.
+fn mean(pixels: &[[u8; 4]; 4], mask: usize) -> [u8; 4] {
+    let mut sum = [0u32; 3];
+    let mut count = 0;
+    for (index, pixel) in pixels.iter().enumerate() {
+        if mask & (1 << index) != 0 {
+            for (total, value) in sum.iter_mut().zip(pixel) {
+                *total += u32::from(*value);
+            }
+            count += 1;
+        }
+    }
+    let count = count.max(1);
+    let channel = |index: usize| ((sum[index] + count / 2) / count) as u8;
+    [channel(0), channel(1), channel(2), 255]
+}
+
+/// Four pixels a cell.
+fn quarters(raster: &bake_svg::Raster, tones: Tones) -> Vec<Line<'static>> {
     (0..raster.height.div_ceil(2))
         .map(|row| {
             let mut spans = Vec::new();
-            for x in 0..raster.width {
-                let top = raster.pixel(x, row * 2);
-                let bottom = raster.pixel(x, row * 2 + 1);
-                let (glyph, style) = match (shown(top), shown(bottom)) {
-                    (false, false) => (" ", Style::new()),
-                    (true, false) => ("▀", Style::new().fg(colour(top, tones))),
-                    (false, true) => ("▄", Style::new().fg(colour(bottom, tones))),
-                    (true, true) => (
-                        "▀",
-                        Style::new()
-                            .fg(colour(top, tones))
-                            .bg(colour(bottom, tones)),
-                    ),
+            for column in 0..raster.width.div_ceil(2) {
+                let (x, y) = (column * 2, row * 2);
+                let pixels = [
+                    raster.pixel(x, y),
+                    raster.pixel(x + 1, y),
+                    raster.pixel(x, y + 1),
+                    raster.pixel(x + 1, y + 1),
+                ];
+                let covered = (0..4)
+                    .filter(|index| shown(pixels[*index]))
+                    .fold(0, |mask, index| mask | 1 << index);
+                let (glyph, style) = if covered == 0 {
+                    (" ", Style::new())
+                } else if covered != 15 {
+                    // The terminal's background shows through the rest.
+                    (
+                        QUADRANTS[covered],
+                        Style::new().fg(colour(mean(&pixels, covered), tones)),
+                    )
+                } else {
+                    // Split on the channel the pixels differ most on, at
+                    // the middle of its range.
+                    let range = |channel: usize| {
+                        let values = pixels.map(|pixel| pixel[channel]);
+                        let low = values.into_iter().min().unwrap_or(0);
+                        let high = values.into_iter().max().unwrap_or(0);
+                        (high - low, low, channel)
+                    };
+                    let (spread, low, channel) = [range(0), range(1), range(2)]
+                        .into_iter()
+                        .max()
+                        .unwrap_or((0, 0, 0));
+                    if spread < SAME {
+                        let all = colour(mean(&pixels, 15), tones);
+                        ("▀", Style::new().fg(all).bg(all))
+                    } else {
+                        let middle = low + spread / 2;
+                        let lit = (0..4)
+                            .filter(|index| pixels[*index][channel] > middle)
+                            .fold(0, |mask, index| mask | 1 << index);
+                        (
+                            QUADRANTS[lit],
+                            Style::new()
+                                .fg(colour(mean(&pixels, lit), tones))
+                                .bg(colour(mean(&pixels, 15 ^ lit), tones)),
+                        )
+                    }
                 };
                 push(&mut spans, glyph, style);
             }
@@ -339,14 +402,38 @@ mod tests {
             .collect()
     }
 
-    // A 4:2 image, red over blue, as two rows of half blocks: the red top
+    // A 4:2 image, red over blue, as two rows of cells: the red top
     // row of pixels is each cell's foreground, the blue its background.
     const FLAG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 4 2"><rect width="4" height="1" fill="#ff0000"/><rect y="1" width="4" height="1" fill="#0000ff"/></svg>"##;
 
+    // An edge that crosses a cell is drawn in that cell, in both colours.
     #[test]
-    fn half_blocks_carry_two_pixels_a_cell() {
+    fn quadrants_carry_four_pixels_a_cell() {
+        let split = r##"<svg xmlns="http://www.w3.org/2000/svg" width="2" height="2" viewBox="0 0 4 2" preserveAspectRatio="none"><rect width="4" height="2" fill="#0000ff"/><rect width="1" height="2" fill="#ff0000"/><rect x="3" y="1" width="1" height="1" fill="#ff0000"/></svg>"##;
+        let drawing = draw(&spec(split, false), 2, LOOK);
+        // Red left of blue, then blue but for a red quarter: the blue
+        // quarters are each glyph's foreground.
+        assert_eq!(text(&drawing.lines), ["▐▛"]);
+        let style = Style::new()
+            .fg(Color::Rgb(0, 0, 255))
+            .bg(Color::Rgb(255, 0, 0));
+        assert_eq!(drawing.lines[0].spans[0].style, style);
+        let image = drawing.image.as_ref().expect("an image");
+        assert_eq!((image.columns, image.rows), (2, 1));
+        // A cell partly outside the image shows the terminal there.
+        let corner = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2 2"><rect x="1" y="1" width="1" height="1" fill="#00ff00"/></svg>"##;
+        let drawing = draw(&spec(corner, false), 2, LOOK);
+        assert_eq!(text(&drawing.lines), [" ▄"]);
+        assert_eq!(
+            drawing.lines[0].spans[1].style,
+            Style::new().fg(Color::Rgb(0, 255, 0))
+        );
+    }
+
+    #[test]
+    fn a_cell_of_one_colour_is_drawn_whole() {
         let drawing = draw(&spec(FLAG, false), 8, LOOK);
-        // 8 cells wide; a 2:1 image of square pixels is 4 pixel rows, 2 cells.
+        // 8 cells wide; a 2:1 image is 16 by 4 pixels, 2 rows of cells.
         assert_eq!(text(&drawing.lines), ["▀▀▀▀▀▀▀▀", "▀▀▀▀▀▀▀▀"]);
         assert_eq!(
             drawing.lines[0].spans[0].style,

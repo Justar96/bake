@@ -284,6 +284,9 @@ fn a_prompt_streams_its_answer_commits_it_once_and_reports_the_status() {
                 used: Some(0),
                 window: 1000,
             }),
+            // The default reserve is larger than the faux model's window,
+            // so automatic compaction starts at once.
+            auto_compact: Some(AutoCompact::At(0)),
             name: None,
             ..SessionStatus::default()
         })]
@@ -347,6 +350,7 @@ fn the_status_line_reads_the_context_again_while_a_turn_runs() {
             used: usage.tokens,
             window: 1000,
         }),
+        auto_compact: Some(AutoCompact::At(0)),
         name: None,
         ..SessionStatus::default()
     });
@@ -1574,6 +1578,173 @@ fn the_session_summary_reads_in_plain_words() {
     );
     assert_eq!(ago(i64::MIN), "just now");
     assert_eq!(ago(i64::MAX), format!("{}d ago", i64::MAX / 60_000 / 1440));
+}
+
+#[test]
+fn live_port_publishes_skills_and_templates_and_rewrites_bare_skill_shorthand() {
+    use bake_coding_agent::prompt_templates::PromptTemplate;
+    use bake_coding_agent::skills::Skill;
+    use bake_tui_view::runtime::{DynamicCommand, DynamicCommandKind};
+
+    let dir = std::env::temp_dir().join(format!("bake-tui-skill-test-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("mkdir");
+    struct CleanDir(std::path::PathBuf);
+    impl Drop for CleanDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+    let _cleanup = CleanDir(dir.clone());
+    let skill_path = dir.join("SKILL.md");
+    std::fs::write(
+        &skill_path,
+        "---\nname: review\ndescription: Review code\n---\nCheck every invariant.",
+    )
+    .expect("write skill");
+    let skill = Skill {
+        name: "review".into(),
+        description: "Review\n\x1b[31mcode\x07 changes".into(),
+        file_path: skill_path.to_string_lossy().into_owned(),
+        base_dir: dir.to_string_lossy().into_owned(),
+        source: "path".into(),
+        disable_model_invocation: false,
+    };
+
+    let runtime = test_runtime();
+    let faux = faux(Some("test-key"));
+    let manager = SessionManager::in_memory(Some("/tmp"), NewSessionOptions::default(), Vec::new())
+        .expect("session");
+    let mut system_prompt = SystemPromptOptions::new("/tmp");
+    system_prompt.skills = vec![skill];
+    let mut session = runtime
+        .block_on(AgentSession::create(AgentSessionOptions {
+            session: manager,
+            model: faux.registry.model("faux", "faux-1"),
+            registry: Arc::clone(&faux.registry).into(),
+            settings_store: None,
+            selection: None,
+            apis: Arc::clone(&faux.apis),
+            settings: Settings::default(),
+            thinking_level: None,
+            tools: Vec::new(),
+            active_tool_names: Vec::new(),
+            tool_prompts: Vec::new(),
+            system_prompt,
+            docs_command: "bake docs".into(),
+            plugins: bake_coding_agent::plugins::PluginRegistry::default(),
+            work: None,
+            jobs: None,
+        }))
+        .expect("agent session");
+    session.set_prompt_templates(vec![PromptTemplate {
+        name: "deploy".into(),
+        description: "Deploy\tnow".into(),
+        argument_hint: Some("<env>".into()),
+        content: "Deploy to $1.".into(),
+        source: "path".into(),
+        file_path: "/tmp/deploy.md".into(),
+    }]);
+
+    let live = LiveSession {
+        session,
+        runtime: runtime.handle().clone(),
+        prompts: Vec::new(),
+        banner: None,
+        notes: Vec::new(),
+        update_check: None,
+        approvals: None,
+        home: None,
+        factory: None,
+        resume: false,
+        offline: false,
+        commit_gate: None,
+        gh: None,
+    };
+    let (sender, updates) = std_mpsc::channel();
+    let mut port = LivePort::start(live, move |update| sender.send(update).is_ok());
+    port.begin();
+    let h = Harness {
+        runtime,
+        faux: faux.provider,
+        port: Some(port),
+        updates,
+    };
+
+    // Startup publishes sanitized skills and templates.
+    let seen = h.until(|u| matches!(u, RuntimeUpdate::Commands(_)));
+    let commands = seen.iter().find_map(|u| match u {
+        RuntimeUpdate::Commands(list) => Some(list),
+        _ => None,
+    });
+    assert_eq!(
+        commands,
+        Some(&vec![
+            DynamicCommand {
+                name: "review".into(),
+                hint: None,
+                description: "Review [31mcode changes".into(),
+                kind: DynamicCommandKind::Skill,
+            },
+            DynamicCommand {
+                name: "deploy".into(),
+                hint: Some("<env>".into()),
+                description: "Deploy now".into(),
+                kind: DynamicCommandKind::Template,
+            },
+        ])
+    );
+
+    // Submitting bare `/review src/lib.rs` rewrites to `/skill:review src/lib.rs`
+    // and reaches the session, which expands the skill file.
+    h.faux
+        .set_responses(vec![faux_assistant_message("Looks good.").into()]);
+    h.submit(Submission::FollowUp("/review src/lib.rs".into()));
+    let updates = h.until_turn_end();
+    assert_eq!(h.faux.call_count(), 1);
+    assert!(
+        committed(&updates).iter().any(|row| matches!(
+            row,
+            Row::User(text) if text.contains("<skill name=\"review\"") && text.contains("Check every invariant.") && text.contains("src/lib.rs")
+        )),
+        "{updates:#?}"
+    );
+    h.stop();
+}
+
+#[test]
+fn bare_skill_shorthand_respects_builtin_and_template_precedence() {
+    let templates = vec!["review".to_owned()];
+    let skills = vec!["model".to_owned(), "review".to_owned(), "audit".to_owned()];
+    // Built-in command wins over a skill with the same name.
+    assert_eq!(
+        driver::rewrite_skill_shorthand("/model foo", &templates, &skills),
+        None
+    );
+    // Prompt template wins over a skill with the same name.
+    assert_eq!(
+        driver::rewrite_skill_shorthand("/review src", &templates, &skills),
+        None
+    );
+    // Unique bare skill name rewrites to `/skill:<name>` preserving args.
+    assert_eq!(
+        driver::rewrite_skill_shorthand("/audit src/main.rs", &templates, &skills),
+        Some("/skill:audit src/main.rs".into())
+    );
+    assert_eq!(
+        driver::rewrite_skill_shorthand("/audit", &templates, &skills),
+        Some("/skill:audit".into())
+    );
+    // Explicit `/skill:` is left alone.
+    assert_eq!(
+        driver::rewrite_skill_shorthand("/skill:audit src", &templates, &skills),
+        None
+    );
+    // Ambiguous (duplicate) skill name is not rewritten.
+    let dup = vec!["audit".to_owned(), "audit".to_owned()];
+    assert_eq!(
+        driver::rewrite_skill_shorthand("/audit src", &[], &dup),
+        None
+    );
 }
 
 mod agents_live;

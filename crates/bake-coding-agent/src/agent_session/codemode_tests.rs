@@ -315,6 +315,8 @@ fn declared(context: &TranscriptContext) -> Vec<bake_ai::Tool> {
     get_current_tools(context.messages())
 }
 
+const SUPPLIED_READ_GUIDELINE: &str = "Follow supplied read guideline.";
+
 /// Without `codemode` active, the session sends what it sent before code
 /// mode: the active tools' own declarations and no codemode rule, although
 /// the session registers the tool.
@@ -322,12 +324,14 @@ fn declared(context: &TranscriptContext) -> Vec<bake_ai::Tool> {
 async fn requests_without_active_codemode_are_unchanged() {
     let fx = Fixture::new("inactive");
     let read = read_definition(&fx.ws());
+    let mut read_prompt = read.prompt();
+    read_prompt.guidelines = vec![SUPPLIED_READ_GUIDELINE.to_owned()];
     let tools = vec![Arc::new(read.tool.clone()), Arc::new(echo())];
     let expected: Vec<bake_ai::Tool> = tools.iter().map(|tool| tool.declaration()).collect();
     let session = fx
         .session_with(
             tools,
-            vec![read.prompt()],
+            vec![read_prompt],
             &["read", "echo"],
             Settings::default(),
         )
@@ -342,7 +346,7 @@ async fn requests_without_active_codemode_are_unchanged() {
     let prompt = get_current_system_prompt(requests[0].messages());
     assert!(!prompt.contains("Use codemode"), "{prompt}");
     assert!(!prompt.contains("Codemode:"), "{prompt}");
-    assert!(prompt.contains("Use read to examine files instead of cat or sed."));
+    assert!(prompt.contains(SUPPLIED_READ_GUIDELINE));
 }
 
 /// The loadout's hidden tools add to the ones the caller's prompt options
@@ -352,6 +356,8 @@ async fn the_loadout_keeps_the_callers_hidden_tools() {
     for active in [&["read", "echo"][..], &["read", "echo", "codemode"]] {
         let fx = Fixture::new("codemode-hidden-tools");
         let read = read_definition(&fx.ws());
+        let mut read_prompt = read.prompt();
+        read_prompt.guidelines = vec![SUPPLIED_READ_GUIDELINE.to_owned()];
         let store = SessionManager::create(
             &fx.ws().to_string_lossy(),
             Some(&fx.dir.join("sessions")),
@@ -360,7 +366,7 @@ async fn the_loadout_keeps_the_callers_hidden_tools() {
         .expect("store");
         let mut options = options(&fx.h, store, &fx.ws().to_string_lossy());
         options.tools = vec![Arc::new(read.tool.clone()), Arc::new(echo())];
-        options.tool_prompts = vec![read.prompt()];
+        options.tool_prompts = vec![read_prompt];
         options.active_tool_names = active.iter().map(|name| (*name).to_owned()).collect();
         options.system_prompt.hidden_tools = vec!["read".to_owned()];
         let session = AgentSession::create(options).await.expect("session");
@@ -371,7 +377,7 @@ async fn the_loadout_keeps_the_callers_hidden_tools() {
         session.shutdown().await;
         let system = get_current_system_prompt(requests[0].messages());
         assert!(
-            !system.contains("Use read to examine files"),
+            !system.contains(SUPPLIED_READ_GUIDELINE),
             "{active:?}: {system}"
         );
     }
@@ -386,6 +392,8 @@ async fn presents_callable_tools_per_codemode_mode() {
     for mode in [CodemodeMode::On, CodemodeMode::Only] {
         let fx = Fixture::new("codemode-mode");
         let read = read_definition(&fx.ws());
+        let mut read_prompt = read.prompt();
+        read_prompt.guidelines = vec![SUPPLIED_READ_GUIDELINE.to_owned()];
         let settings = Settings {
             codemode_mode: mode,
             ..Settings::default()
@@ -393,7 +401,7 @@ async fn presents_callable_tools_per_codemode_mode() {
         let session = fx
             .session_with(
                 vec![Arc::new(read.tool.clone()), Arc::new(echo())],
-                vec![read.prompt()],
+                vec![read_prompt],
                 &["read", "echo", "codemode"],
                 settings,
             )
@@ -457,8 +465,8 @@ async fn presents_callable_tools_per_codemode_mode() {
                         .contains("Codemode: `tools.read(args)` resolves to")
                 );
                 assert!(!description("codemode").unwrap().contains("Nested tools:"));
-                assert!(system.contains("Use read to examine files"));
-                assert!(system.contains("Use codemode to batch independent tool calls"));
+                assert!(system.contains(SUPPLIED_READ_GUIDELINE));
+                assert!(!system.contains("Use codemode"));
             }
             CodemodeMode::Only => {
                 let names: Vec<&str> = tools.iter().map(|tool| tool.name.as_str()).collect();
@@ -466,10 +474,10 @@ async fn presents_callable_tools_per_codemode_mode() {
                 let codemode = description("codemode").unwrap();
                 assert!(codemode.contains("### `echo`"));
                 assert!(codemode.contains("### `read`"));
-                assert!(codemode.contains("- Use read to examine files instead of cat or sed."));
+                assert!(codemode.contains(&format!("- {SUPPLIED_READ_GUIDELINE}")));
                 // Hidden tools' guidelines move to their codemode sections.
-                assert!(!system.contains("Use read to examine files"));
-                assert!(system.contains("Use codemode to batch independent tool calls"));
+                assert!(!system.contains(SUPPLIED_READ_GUIDELINE));
+                assert!(!system.contains("Use codemode"));
             }
         }
     }

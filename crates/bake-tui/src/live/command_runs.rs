@@ -253,6 +253,7 @@ impl Driver {
         self.turns = 0;
         let notes = replacement_notes(note, &session, warnings);
         self.send(RuntimeUpdate::Replaced(opening_rows(&notes, &session)));
+        self.publish_commands();
         self.publish_background();
         self.publish_mcp();
         self.publish_pending();

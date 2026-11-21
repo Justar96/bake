@@ -13,7 +13,7 @@ use crate::dialog::DialogRequest;
 use crate::jobs::BackgroundJob;
 use crate::paste::Image;
 use crate::state::Outcome;
-use crate::status::{CacheReading, ContextUsage, TokenTotals};
+use crate::status::{AutoCompact, CacheReading, Callsign, ContextUsage, TokenTotals};
 use crate::transcript::Row;
 
 /// A prompt the user sent, and how it reaches the agent: chosen from the
@@ -69,6 +69,10 @@ pub struct SessionStatus {
     pub context: Option<ContextUsage>,
     pub tokens: Option<TokenTotals>,
     pub cache: Option<CacheReading>,
+    /// Where automatic compaction starts; `None` while unknown.
+    pub auto_compact: Option<AutoCompact>,
+    /// The session's telecom callsign while it is in a team.
+    pub callsign: Option<Callsign>,
     pub name: Option<String>,
 }
 
@@ -140,6 +144,29 @@ pub enum ApprovalAnswer {
     RejectWithNote(String),
     /// The request is withdrawn without a decision, which also refuses it.
     Cancel,
+}
+
+/// What kind of session-defined command a [`DynamicCommand`] is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DynamicCommandKind {
+    /// A loaded skill, listed in the slash menu as `/skill:<name>`.
+    Skill,
+    /// A loaded prompt template, listed in the slash menu as `/<name>`.
+    Template,
+}
+
+/// One session-defined command (a skill or prompt template) that the slash
+/// menu lists after the built-in commands.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DynamicCommand {
+    /// The skill or template name without the leading `/` (for a skill, just
+    /// `<name>`; the view prefixes `skill:`).
+    pub name: String,
+    /// Optional argument placeholder, such as a template's `argument-hint`.
+    pub hint: Option<String>,
+    /// One-line description shown in the slash menu.
+    pub description: String,
+    pub kind: DynamicCommandKind,
 }
 
 /// One change the runtime reports.
@@ -229,6 +256,10 @@ pub enum RuntimeUpdate {
         id: u64,
         rows: Vec<crate::transcript::Row>,
     },
+    /// The session's skills and prompt templates, listed in the slash menu
+    /// after the built-in commands. Sent at startup and whenever the session
+    /// is replaced.
+    Commands(Vec<DynamicCommand>),
 }
 
 /// The refusal of a prompt sent while `/tree` navigates, its draft kept.

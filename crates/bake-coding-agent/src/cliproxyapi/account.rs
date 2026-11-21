@@ -385,6 +385,22 @@ impl CliProxyAccount {
         read_account(&self.home)
     }
 
+    /// The proxy root of the saved route in `settings.json`, even when the
+    /// account is [`AccountView::Disabled`], so `/login` offers the saved
+    /// address again during recovery without failing on an unreadable or
+    /// invalid address. Blocks.
+    pub fn saved_base_url(&self) -> Option<String> {
+        let settings = read_object(&self.home.join("settings.json"), MAX_SETTINGS_BYTES).ok()?;
+        let url = settings
+            .get(CLIPROXYAPI_MEMBER)?
+            .as_object()?
+            .get("baseURL")?
+            .as_str()?;
+        super::endpoints::cli_proxy_endpoints(url)
+            .ok()
+            .map(|endpoints| endpoints.root)
+    }
+
     /// Whether `models.json` configures `cliproxyapi` itself. Blocks.
     pub fn manual_override(&self) -> bool {
         ModelConfig::load(&models_path(&self.home))
@@ -508,18 +524,28 @@ impl CliProxyAccount {
         })
     }
 
-    /// Replaces the route's `models`, keeping its generation, only while
-    /// the route is still `fetched_for`. Returns whether it wrote. Blocks.
+    /// Replaces the route's `models` (and applies any in-place route
+    /// upgrade), keeping its generation, only while the route is still
+    /// `fetched_for`. Returns whether it wrote. Blocks.
     pub fn commit_refresh(
         &self,
         fetched_for: &Value,
         models: Value,
         warnings: &mut Vec<String>,
     ) -> Result<bool, AccountError> {
-        let mut next = fetched_for.clone();
+        let mut next = upgraded_route_preserving_account(fetched_for);
         if let Some(route) = next.as_object_mut() {
             route.insert("models".into(), models);
         }
+        self.commit_route_if_unchanged(fetched_for, next, warnings)
+    }
+
+    fn commit_route_if_unchanged(
+        &self,
+        fetched_for: &Value,
+        next: Value,
+        warnings: &mut Vec<String>,
+    ) -> Result<bool, AccountError> {
         route_provider_config(&next).map_err(AccountError::Unchanged)?;
         let _lock = self.lock()?;
         let mut ours = false;
@@ -542,13 +568,49 @@ impl CliProxyAccount {
     }
 }
 
+/// Whether `models.json`'s `cliproxyapi` entry supplies its own credential
+/// or redirects requests to another `baseUrl`, in which case the account's
+/// bound key is withheld so `models.json`'s key wins and the account's key
+/// never leaves its own route.
+fn models_json_replaces_route_or_key(override_cfg: Option<&Map<String, Value>>) -> bool {
+    let Some(cfg) = override_cfg else {
+        return false;
+    };
+    if cfg.contains_key("apiKey") || cfg.contains_key("oauth") || cfg.contains_key("baseUrl") {
+        return true;
+    }
+    let models_redirect = cfg
+        .get("models")
+        .and_then(Value::as_array)
+        .is_some_and(|models| {
+            models.iter().any(|model| {
+                model
+                    .as_object()
+                    .is_some_and(|obj| obj.contains_key("baseUrl"))
+            })
+        });
+    let overrides_redirect = cfg
+        .get("modelOverrides")
+        .and_then(Value::as_object)
+        .is_some_and(|overrides| {
+            overrides.values().any(|entry| {
+                entry
+                    .as_object()
+                    .is_some_and(|obj| obj.contains_key("baseUrl"))
+            })
+        });
+    models_redirect || overrides_redirect
+}
+
 /// [`CliProxyAccount::apply_to`] for a view already read.
 fn apply_view(registry: &mut ModelRegistry, view: AccountView) -> Result<Option<String>, String> {
     match view {
         AccountView::Bound(account) => {
             let config = account.provider_config()?;
             registry.add_provider_config(CLIPROXYAPI_ID, config, None)?;
-            registry.bind_provider_key(CLIPROXYAPI_ID, Some(account.key));
+            let bind_key =
+                !models_json_replaces_route_or_key(registry.models_json_provider(CLIPROXYAPI_ID));
+            registry.bind_provider_key(CLIPROXYAPI_ID, bind_key.then_some(account.key));
             Ok(None)
         }
         AccountView::SignedOut => {
@@ -595,12 +657,33 @@ fn new_generation() -> Result<String, String> {
     Ok(random.iter().map(|byte| format!("{byte:02x}")).collect())
 }
 
+/// Returns `route` with any legacy route upgrade applied while preserving
+/// its `account` binding tag.
+fn upgraded_route_preserving_account(route: &Value) -> Value {
+    let account_tag = route.get(ACCOUNT).cloned();
+    let mut stripped = route.clone();
+    if let Some(object) = stripped.as_object_mut() {
+        object.remove(ACCOUNT);
+    }
+    if let Some(plan) = super::route::plan_cli_proxy_route_upgrade(&stripped) {
+        plan.apply_to_route(&mut stripped);
+    }
+    if let (Some(tag), Some(object)) = (account_tag, stripped.as_object_mut()) {
+        object.insert(ACCOUNT.into(), tag);
+    }
+    stripped
+}
+
 /// The provider config a saved route gives the registry, in Pi's
-/// `models.json` shape, with no key of its own.
+/// `models.json` shape, with no key of its own. Legacy routes are upgraded
+/// in memory before composing.
 pub fn route_provider_config(route: &Value) -> Result<Value, String> {
     let mut route = route.clone();
     if let Some(object) = route.as_object_mut() {
         object.remove(ACCOUNT);
+    }
+    if let Some(plan) = super::route::plan_cli_proxy_route_upgrade(&route) {
+        plan.apply_to_route(&mut route);
     }
     let route = CliProxyRoute::from_settings(&route)
         .map_err(|error| format!("The saved CLIProxyAPI route is invalid: {error}"))?;
@@ -645,6 +728,10 @@ pub async fn refresh_account(
     if let Some(object) = fetched_route.as_object_mut() {
         object.remove(ACCOUNT);
     }
+    let upgraded = super::route::plan_cli_proxy_route_upgrade(&fetched_route).is_some();
+    if let Some(plan) = super::route::plan_cli_proxy_route_upgrade(&fetched_route) {
+        plan.apply_to_route(&mut fetched_route);
+    }
     // The runtime key is the person's explicit choice for this process and
     // goes to whichever route is current, as requests send it; no other key
     // is taken from the runtime, which may be older than the files.
@@ -669,33 +756,51 @@ pub async fn refresh_account(
         RefreshCliProxyModelsError::Fetch(error) => error.to_string(),
         RefreshCliProxyModelsError::SettingsWrite(error) => error,
     })?;
-    let write = fetched
-        .filter(|_| changed)
-        .map(|models| (bound.route, models));
+    let write = if let Some(models) = fetched.filter(|_| changed) {
+        Some(RefreshWrite::Models(bound.route, models))
+    } else if upgraded {
+        Some(RefreshWrite::UpgradeOnly(bound.route))
+    } else {
+        None
+    };
     sync(account, runtime, write, RefreshOutcome::Unchanged).await
 }
 
+enum RefreshWrite {
+    Models(Value, Value),
+    UpgradeOnly(Value),
+}
+
 /// The owned end of a refresh: writes `write` (the route fetched for and
-/// its new models) when given, then brings the runtime to the files.
-/// Returns `Updated` when the write landed, else `otherwise`.
+/// its new models or upgrade) when given, then brings the runtime to the
+/// files. Returns `Updated` when new models landed, else `otherwise`.
 async fn sync(
     account: CliProxyAccount,
     runtime: ModelRuntime,
-    write: Option<(Value, Value)>,
+    write: Option<RefreshWrite>,
     otherwise: RefreshOutcome,
 ) -> Result<Refreshed, String> {
     tokio::task::spawn_blocking(move || {
         let mut unsynced = Vec::new();
         let mut warnings = Vec::new();
         let mut outcome = otherwise;
-        if let Some((fetched_for, models)) = write {
-            let count = models.as_array().map_or(0, Vec::len);
-            if account
-                .commit_refresh(&fetched_for, models, &mut unsynced)
-                .map_err(|error| error.to_string())?
-            {
-                outcome = RefreshOutcome::Updated(count);
+        match write {
+            Some(RefreshWrite::Models(fetched_for, models)) => {
+                let count = models.as_array().map_or(0, Vec::len);
+                if account
+                    .commit_refresh(&fetched_for, models, &mut unsynced)
+                    .map_err(|error| error.to_string())?
+                {
+                    outcome = RefreshOutcome::Updated(count);
+                }
             }
+            Some(RefreshWrite::UpgradeOnly(fetched_for)) => {
+                let next = upgraded_route_preserving_account(&fetched_for);
+                account
+                    .commit_route_if_unchanged(&fetched_for, next, &mut unsynced)
+                    .map_err(|error| error.to_string())?;
+            }
+            None => {}
         }
         if let Some(warning) = runtime.try_update(|registry| account.apply_to(registry))? {
             warnings.push(warning);

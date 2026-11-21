@@ -5,6 +5,7 @@
 //! the terminal (title, progress, and notifications).
 
 mod clipboard;
+mod clipboard_feed;
 mod files;
 mod fixture;
 mod git;

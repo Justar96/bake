@@ -1,7 +1,9 @@
 // Adapted from OpenAI Codex codex-rs/mermaid/src/parse.rs, tag rust-v0.167.2
 // (ce21072c90d32c40af7a55b60b2fb35c84a43a6a), under the Apache License,
 // Version 2.0; see this crate's NOTICE.
-// Bake copies it unchanged but for this notice.
+// Changed by Bake contributors: other node shapes draw as a box or a stadium,
+// and thick, long, and circle- or cross-tipped edges as the plain edge of the
+// same direction, where upstream refuses them.
 //! Strict parser for a small flowchart grammar; every non-comment byte must be consumed.
 //! Node groups expand into explicit edges within the graph edge cap.
 
@@ -33,23 +35,9 @@ pub(super) fn parse(header: &str, body: &[&str]) -> Result<Graph, RenderError> {
         while !rest.trim_start().is_empty() {
             rest = rest.trim_start();
             let mut label = String::new();
-            let (source_tip, target_tip, dashed) = if let Some((after, source, target, dashed)) = [
-                ("<-.->", '◄', '◄', true),
-                ("<-->", '◄', '◄', false),
-                ("-.->", '─', '◄', true),
-                ("-.-", '─', '─', true),
-                ("-->", '─', '◄', false),
-                ("---", '─', '─', false),
-            ]
-            .into_iter()
-            .find_map(|(token, source, target, dashed)| {
-                rest.strip_prefix(token)
-                    .map(|after| (after, source, target, dashed))
-            }) {
-                // Circle/cross tips are unsupported; without a space they are not node IDs.
-                if target == '─' && after.starts_with(['o', 'x']) {
-                    return Err(RenderError::Unsupported);
-                }
+            let (source_tip, target_tip, dashed) = if let Some((after, source, target, dashed)) =
+                link(rest)
+            {
                 rest = after.trim_start();
                 if let Some(after) = rest.strip_prefix('|') {
                     let (text, remaining) = delimited_label(after, "|")?;
@@ -61,6 +49,8 @@ pub(super) fn parse(header: &str, body: &[&str]) -> Result<Graph, RenderError> {
             } else {
                 let (after, stem, dashed) = if let Some(after) = rest.strip_prefix("--") {
                     (after, "--", false)
+                } else if let Some(after) = rest.strip_prefix("==") {
+                    (after, "==", false)
                 } else if let Some(after) = rest.strip_prefix("-.") {
                     (after, ".-", true)
                 } else {
@@ -72,12 +62,21 @@ pub(super) fn parse(header: &str, body: &[&str]) -> Result<Graph, RenderError> {
                 if !text.starts_with(char::is_whitespace) || !text.ends_with(char::is_whitespace) {
                     return Err(RenderError::Unsupported);
                 }
-                rest = remaining
-                    .strip_prefix('>')
-                    .ok_or(RenderError::Unsupported)?;
+                // A longer closing stem is the same edge; without a tip it is a line.
+                let remaining = remaining.trim_start_matches(['-', '=']);
+                let target_tip = match remaining.strip_prefix(['>', 'o', 'x']) {
+                    Some(after) => {
+                        rest = after;
+                        '◄'
+                    }
+                    None => {
+                        rest = remaining;
+                        '─'
+                    }
+                };
                 label = flowchart_label(text.trim())?.to_owned();
                 check_label(&label)?;
-                ('─', '◄', dashed)
+                ('─', target_tip, dashed)
             };
             let to = nodes(&mut rest, &mut graph)?;
             // Check the Cartesian expansion before allocating edges, including repeated IDs.
@@ -127,19 +126,26 @@ fn node(rest: &mut &str, graph: &mut Graph) -> Result<usize, RenderError> {
     ) {
         return Err(RenderError::Unsupported);
     }
-    // Longer shape delimiters must not become punctuation inside a simpler node.
-    if ["[(", "[[", "[/", "[\\", "{{"]
-        .iter()
-        .any(|open| rest.starts_with(open))
-    {
-        return Err(RenderError::Unsupported);
-    }
-    let declaration = match rest.chars().next() {
-        Some('[') => Some(("[", "]", Shape::Rectangle)),
-        Some('{') => Some(("{", "}", Shape::Decision)),
-        Some('(') if rest.starts_with("([") => Some(("([", "])", Shape::Stadium)),
-        _ => None,
-    };
+    // Longer shape delimiters come first, so they never become punctuation inside a
+    // simpler node. Shapes the terminal has no glyphs for draw as the nearest it has.
+    let declaration = [
+        ("(((", ")))", Shape::Stadium),
+        ("((", "))", Shape::Stadium),
+        ("([", "])", Shape::Stadium),
+        ("[(", ")]", Shape::Rectangle),
+        ("[[", "]]", Shape::Rectangle),
+        ("[/", "/]", Shape::Rectangle),
+        ("[/", "\\]", Shape::Rectangle),
+        ("[\\", "\\]", Shape::Rectangle),
+        ("[\\", "/]", Shape::Rectangle),
+        ("{{", "}}", Shape::Rectangle),
+        ("(", ")", Shape::Stadium),
+        (">", "]", Shape::Rectangle),
+        ("[", "]", Shape::Rectangle),
+        ("{", "}", Shape::Decision),
+    ]
+    .into_iter()
+    .find(|(open, _, _)| rest.starts_with(open));
     let index = graph.node(id)?;
     if let Some((open, close, shape)) = declaration {
         let (label, remaining) = delimited_label(&rest[open.len()..], close)?;
@@ -163,6 +169,42 @@ fn node(rest: &mut &str, graph: &mut Graph) -> Result<usize, RenderError> {
         node.declared = true;
     }
     Ok(index)
+}
+
+/// The edge `rest` opens with: what follows it, its source and target tips, and whether it is
+/// dashed. Thick (`==>`) and longer (`--->`) edges are the plain edge of the same direction,
+/// and circle and cross tips are arrows. `--`, `==`, and `-.` alone open a spaced label and
+/// are left to the caller.
+fn link(rest: &str) -> Option<(&str, char, char, bool)> {
+    let (source, body) = match rest.strip_prefix('<') {
+        Some(body) => ('◄', body),
+        None => ('─', rest),
+    };
+    let stem = body.chars().next().filter(|ch| matches!(ch, '-' | '='))?;
+    let mut after = body.trim_start_matches(stem);
+    let mut length = body.len() - after.len();
+    let mut dashed = false;
+    if stem == '-' && length == 1 {
+        let dots = after.trim_start_matches('.');
+        if dots.len() == after.len() {
+            return None;
+        }
+        after = dots.strip_prefix('-')?;
+        dashed = true;
+        length = 3;
+    }
+    if length < 2 {
+        return None;
+    }
+    let (target, after) = match after.strip_prefix(['>', 'o', 'x']) {
+        Some(after) => ('◄', after),
+        None => ('─', after),
+    };
+    // `--` with no tip opens a spaced label; `<--` with none is no edge.
+    if target == '─' && (length < 3 || source == '◄') {
+        return None;
+    }
+    Some((after, source, target, dashed))
 }
 
 fn flowchart_label(label: &str) -> Result<&str, RenderError> {

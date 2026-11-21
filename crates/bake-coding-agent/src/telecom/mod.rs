@@ -20,6 +20,9 @@
 //!   frame, `v: 1`, a tagged body, and validation of every member before
 //!   it reaches a model.
 //!
+//! A top-level session takes a short callsign drawn at random from a pool
+//! ([`names`]), the built-in one or the `callsigns` setting's.
+//!
 //! Sessions spawned by another ([`crate::spawned`]) are told their
 //! parent's callsign and take `<parent>-<n>`, so a parent and its children
 //! talk through the same tool.
@@ -29,6 +32,7 @@
 
 pub mod directory;
 pub mod endpoint;
+pub mod names;
 pub mod station;
 pub mod tool;
 pub mod wire;
@@ -125,6 +129,7 @@ impl TelecomEnv {
         cwd: &std::path::Path,
         session_id: &str,
         model: Option<String>,
+        names: Vec<String>,
     ) -> Option<StationOptions> {
         let root = self
             .dir
@@ -143,6 +148,7 @@ impl TelecomEnv {
             callsign: callsign(&self.callsign),
             parent: callsign(&self.parent),
             model,
+            names,
         })
     }
 }
